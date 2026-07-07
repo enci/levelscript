@@ -137,9 +137,16 @@ enum class strategy { one, some, all };
 // are handled. Orthogonal to the count.
 enum class exec_policy { snapshot, incremental, stabilize };
 
-struct op_arg {                 // step 1: integer arguments only
-    source_loc loc;
-    long long  int_val{0};
+// One operation-call argument (spec §6.0). Positional when `name` is empty;
+// the value is an integer, a bare identifier (grid, tag value, enum word), or
+// a parenthesized expression.
+struct op_arg {
+    source_loc  loc;
+    std::string name;   // "" = positional
+    enum class kind { int_, ident, expr } what{kind::int_};
+    long long   int_val{0};
+    std::string ident;
+    expr_ptr    value;
 };
 
 struct program_stmt {

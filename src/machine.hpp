@@ -70,6 +70,7 @@ private:
     struct match { int pair; int row, col; };
 
     void exec_op(compiled_op const& op);
+    void run_path(compiled_op const& op);   // §6.6
     // Evaluate an arena expression at position (x, y). Total (§5.8): /0 = 0,
     // wrap at 32 bits, empty number cells read as 0. `random` draws — which is
     // why the whole matching path is non-const.

@@ -748,19 +748,308 @@ struct analyzer {
 
     // ── program (operation table, §6.0) ──────────────────────────────────────
 
-    struct op_spec {
+    // ── the operation table (§6.0): a closed set resolved by name, exactly
+    //    like expression built-ins. Adding an operation = a row here + an
+    //    executor in the machine; no grammar or keyword change. ──────────────
+
+    enum class arg_kind { int_, grid, pred, value, expr, enum_ };
+
+    struct op_param {
         char const* name;
-        op_kind     kind;
-        int         arg_count;   // step 1: fixed positional int arguments
+        arg_kind    kind;
+        bool        positional;   // false = named-only
+        bool        required;
+    };
+    struct op_spec {
+        char const*            name;
+        op_kind                 kind;
+        std::vector<op_param>   params;
     };
 
-    static op_spec const* find_op(std::string const& name) {
-        static const op_spec table[] = {
-            {"resize", op_kind::resize, 2},
+    static std::vector<op_spec> const& op_table() {
+        static const std::vector<op_spec> table = {
+            {"resize",  op_kind::resize,  {{"w", arg_kind::int_, true, true},
+                                           {"h", arg_kind::int_, true, true}}},
+            {"upscale", op_kind::upscale, {{"n", arg_kind::int_, true, true},
+                                           {"m", arg_kind::int_, true, true}}},
+            {"trim",    op_kind::trim,    {}},
+            {"mirror",  op_kind::mirror,  {{"axis", arg_kind::enum_, true, true}}},
+            {"pad",     op_kind::pad,     {{"n", arg_kind::int_, true, true}}},
+            {"path",    op_kind::path,    {{"from",         arg_kind::pred,  false, true},
+                                           {"to",           arg_kind::pred,  false, true},
+                                           {"into",         arg_kind::grid,  false, true},
+                                           {"write",        arg_kind::value, false, true},
+                                           {"over",         arg_kind::grid,  false, false},
+                                           {"passable",     arg_kind::pred,  false, false},
+                                           {"connectivity", arg_kind::enum_, false, false},
+                                           {"cost",         arg_kind::expr,  false, false}}},
         };
-        for (auto const& s : table)
-            if (name == s.name) return &s;
-        return nullptr;
+        return table;
+    }
+
+    static std::string arg_render(op_arg const& a) {
+        switch (a.what) {
+        case op_arg::kind::int_:  return std::to_string(a.int_val);
+        case op_arg::kind::ident: return a.ident;
+        case op_arg::kind::expr:  return "(expr)";
+        }
+        return "?";
+    }
+
+    // ── per-kind argument compilers ──────────────────────────────────────────
+
+    bool op_int(op_arg const& a, char const* op, char const* pn, int& v) {
+        if (a.what != op_arg::kind::int_) {
+            error(a.loc, "argument '" + std::string(pn) + "' of '" + op +
+                  "' must be an integer, got '" + arg_render(a) + "'");
+            return false;
+        }
+        v = (int)a.int_val;
+        return true;
+    }
+
+    int op_grid(op_arg const& a, char const* op, char const* pn) {
+        if (a.what != op_arg::kind::ident) {
+            error(a.loc, "'" + std::string(pn) + "=' of '" + op +
+                  "' expects a grid name, got '" + arg_render(a) + "'");
+            return -1;
+        }
+        int id = out.layer_id(a.ident);
+        if (id < 0)
+            error(a.loc, "'" + std::string(pn) + "=' of '" + op + "': '" +
+                  a.ident + "' is not a declared grid");
+        return id;
+    }
+
+    // A bare tag must belong to exactly ONE tag layer's tagset; ambiguity
+    // needs the expression form naming the grid.
+    compiled_pred op_pred(op_arg const& a, char const* op, char const* pn) {
+        compiled_pred p;
+        p.given = true;
+        if (a.what == op_arg::kind::ident) {
+            int found_layer = -1, matches = 0;
+            int64_t mask = 0;
+            for (int li = 0; li < (int)out.layers.size(); ++li) {
+                int tid = out.layers[li].tag_id;
+                if (tid < 0) continue;
+                int64_t m = out.mask_of(tid, a.ident);
+                if (m != 0) { ++matches; found_layer = li; mask = m; }
+            }
+            if (matches == 0)
+                error(a.loc, "unknown tag value '" + a.ident + "' in '" +
+                      std::string(pn) + "=' of '" + op +
+                      "' (no layer's tagset declares it)");
+            else if (matches > 1)
+                error(a.loc, "predicate '" + a.ident + "' in '" + std::string(pn) +
+                      "=' of '" + op + "' is ambiguous (several layers could hold "
+                      "it); use an expression naming the grid, e.g. " + pn +
+                      "=((grid == " + a.ident + "))");
+            else {
+                p.grid_id = found_layer;
+                p.mask = mask;
+            }
+            return p;
+        }
+        if (a.what == op_arg::kind::expr) {
+            p.is_expr = true;
+            val_type t;
+            p.expr = compile_expr(*a.value, -1, t);
+            if (t != val_type::boolean)
+                error(a.loc, "'" + std::string(pn) + "=' of '" + op +
+                      "' must be a boolean expression");
+            return p;
+        }
+        error(a.loc, "'" + std::string(pn) + "=' of '" + op +
+              "' expects a tag value or a (boolean expression)");
+        return p;
+    }
+
+    compiled_value op_value(op_arg const& a, char const* op, char const* pn,
+                            int into_grid) {
+        compiled_value v;
+        int tid = into_grid >= 0 ? out.layers[into_grid].tag_id : -1;
+        bool is_number = tid < 0;
+        if (a.what == op_arg::kind::int_) {
+            if (!is_number)
+                error(a.loc, "'" + std::string(pn) + "=' of '" + op +
+                      "' writes into a tag grid; expected a tag value");
+            v.const_val = a.int_val;
+            return v;
+        }
+        if (a.what == op_arg::kind::ident) {
+            if (is_number) {
+                error(a.loc, "'" + std::string(pn) + "=' of '" + op +
+                      "' writes into a number grid; expected an integer");
+                return v;
+            }
+            int64_t m = out.mask_of(tid, a.ident);
+            if (m == 0)
+                error(a.loc, "unknown tag value '" + a.ident +
+                      "' for the target grid in '" + std::string(pn) + "=' of '" +
+                      op + "'");
+            v.const_val = m;
+            return v;
+        }
+        v.is_expr = true;
+        val_type t;
+        v.expr = compile_expr(*a.value, tid, t,
+                              (int)(is_number ? val_type::num : val_type::mask));
+        if (is_number && t != val_type::num)
+            error(a.loc, "'" + std::string(pn) + "=' of '" + op +
+                  "' must be a number (the target grid is a number grid)");
+        if (!is_number && t != val_type::mask)
+            error(a.loc, "'" + std::string(pn) + "=' of '" + op +
+                  "' must be a tag value (the target grid is a tag grid)");
+        return v;
+    }
+
+    int op_expr(op_arg const& a, char const* op, char const* pn) {
+        if (a.what == op_arg::kind::int_)
+            return num_lit(a.int_val);
+        if (a.what != op_arg::kind::expr) {
+            error(a.loc, "'" + std::string(pn) + "=' of '" + op +
+                  "' expects an integer or a (numeric expression)");
+            return -1;
+        }
+        val_type t;
+        int e = compile_expr(*a.value, -1, t, (int)val_type::num);
+        if (t != val_type::num)
+            error(a.loc, "'" + std::string(pn) + "=' of '" + op +
+                  "' must be a numeric expression");
+        return e;
+    }
+
+    // ── argument binding + per-op compilation (§7.3 #32–36) ─────────────────
+
+    bool compile_op_call(program_stmt const& s, compiled_op& op) {
+        op_spec const* spec = nullptr;
+        for (auto const& t : op_table())
+            if (s.op_name == t.name) { spec = &t; break; }
+        if (!spec) {
+            error(s.loc, "unknown operation '" + s.op_name + "'");
+            return false;
+        }
+
+        int n_positional = 0;
+        for (auto const& p : spec->params)
+            if (p.positional) ++n_positional;
+
+        std::vector<op_arg const*> bound(spec->params.size(), nullptr);
+        int  next_pos = 0;
+        bool seen_named = false, ok = true;
+
+        for (auto const& a : s.op_args) {
+            if (a.name.empty()) {
+                if (seen_named) {
+                    error(a.loc, "positional argument after a named argument in '" +
+                          s.op_name + "(...)'");
+                    ok = false;
+                    continue;
+                }
+                if (next_pos >= n_positional) {
+                    if (spec->params.empty())
+                        error(a.loc, "operation '" + s.op_name + "' takes no arguments");
+                    else if (n_positional == 0) {
+                        std::string names;
+                        for (auto const& p : spec->params)
+                            names += (names.empty() ? "" : ", ") + std::string(p.name) + "=";
+                        error(a.loc, "the parameters of '" + s.op_name +
+                              "' are named-only (" + names + ")");
+                    } else {
+                        error(a.loc, "too many positional arguments for '" + s.op_name +
+                              "' (takes " + std::to_string(n_positional) + ")");
+                    }
+                    ok = false;
+                    continue;
+                }
+                bound[next_pos++] = &a;
+            } else {
+                seen_named = true;
+                int idx = -1;
+                for (int i = 0; i < (int)spec->params.size(); ++i)
+                    if (a.name == spec->params[i].name) { idx = i; break; }
+                if (idx < 0) {
+                    error(a.loc, "unknown parameter '" + a.name + "' of operation '" +
+                          s.op_name + "'");
+                    ok = false;
+                    continue;
+                }
+                if (bound[idx]) {
+                    error(a.loc, "parameter '" + a.name + "' of '" + s.op_name +
+                          "' supplied twice");
+                    ok = false;
+                    continue;
+                }
+                bound[idx] = &a;
+            }
+        }
+        for (int i = 0; i < (int)spec->params.size(); ++i)
+            if (spec->params[i].required && !bound[i]) {
+                error(s.loc, "operation '" + s.op_name + "' requires argument '" +
+                      std::string(spec->params[i].name) +
+                      (spec->params[i].positional ? "'" : "='"));
+                ok = false;
+            }
+        if (!ok) return false;
+
+        op.kind = spec->kind;
+        switch (spec->kind) {
+        case op_kind::resize:
+        case op_kind::upscale: {
+            bool k = op_int(*bound[0], spec->name, spec->params[0].name, op.w)
+                   & op_int(*bound[1], spec->name, spec->params[1].name, op.h);
+            if (!k) return false;
+            if (op.w <= 0 || op.h <= 0) {
+                error(s.loc, std::string("'") + spec->name +
+                      "' dimensions must be positive; got " +
+                      std::to_string(op.w) + "x" + std::to_string(op.h));
+                return false;
+            }
+            break;
+        }
+        case op_kind::trim:
+            break;
+        case op_kind::mirror: {
+            std::string axis = arg_render(*bound[0]);
+            if (axis != "horizontal" && axis != "vertical") {
+                error(bound[0]->loc, "invalid mirror axis '" + axis +
+                      "'; expected horizontal or vertical");
+                return false;
+            }
+            op.w = axis == "horizontal" ? 1 : 0;
+            break;
+        }
+        case op_kind::pad:
+            if (!op_int(*bound[0], spec->name, spec->params[0].name, op.w))
+                return false;
+            if (op.w < 0) {
+                error(s.loc, "invalid pad argument; margin must be non-negative, got " +
+                      std::to_string(op.w));
+                return false;
+            }
+            break;
+        case op_kind::path: {
+            op.into_grid = op_grid(*bound[2], spec->name, "into");
+            op.from      = op_pred(*bound[0], spec->name, "from");
+            op.to        = op_pred(*bound[1], spec->name, "to");
+            if (op.into_grid >= 0)
+                op.write = op_value(*bound[3], spec->name, "write", op.into_grid);
+            if (bound[4]) op.over_grid = op_grid(*bound[4], spec->name, "over");
+            if (bound[5]) op.passable  = op_pred(*bound[5], spec->name, "passable");
+            if (bound[6]) {
+                auto const& a = *bound[6];
+                long long cv = a.what == op_arg::kind::int_ ? a.int_val : -1;
+                if (cv != 4 && cv != 8)
+                    error(a.loc, "invalid connectivity '" + arg_render(a) +
+                          "'; expected 4 or 8");
+                else
+                    op.connectivity = (int)cv;
+            }
+            if (bound[7]) op.cost = op_expr(*bound[7], spec->name, "cost");
+            break;
+        }
+        }
+        return true;
     }
 
     void compile_program() {
@@ -768,27 +1057,7 @@ struct analyzer {
             compiled_stmt cs;
             if (s.what == program_stmt::kind::op_call) {
                 cs.what = compiled_stmt::kind::op_call;
-                op_spec const* spec = find_op(s.op_name);
-                if (!spec) {
-                    error(s.loc, "unknown operation '" + s.op_name + "'");
-                    continue;
-                }
-                if ((int)s.op_args.size() != spec->arg_count) {
-                    error(s.loc, "'" + s.op_name + "' takes " +
-                          std::to_string(spec->arg_count) + " argument(s), got " +
-                          std::to_string(s.op_args.size()));
-                    continue;
-                }
-                cs.op.kind = spec->kind;
-                if (spec->kind == op_kind::resize) {
-                    cs.op.w = (int)s.op_args[0].int_val;
-                    cs.op.h = (int)s.op_args[1].int_val;
-                    if (cs.op.w <= 0 || cs.op.h <= 0) {
-                        error(s.loc, "'resize' dimensions must be positive; got " +
-                              std::to_string(cs.op.w) + "x" + std::to_string(cs.op.h));
-                        continue;
-                    }
-                }
+                if (!compile_op_call(s, cs.op)) continue;
             } else {
                 cs.what = compiled_stmt::kind::apply;
                 cs.strat = s.strat;

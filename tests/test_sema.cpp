@@ -75,7 +75,7 @@ program { }
 
 TEST_CASE("sema: operation table") {
     CHECK(compile_result(prelude + "program { warp(3, 3) }").has_error("unknown operation"));
-    CHECK(compile_result(prelude + "program { resize(3) }").has_error("takes 2 argument(s)"));
+    CHECK(compile_result(prelude + "program { resize(3) }").has_error("requires argument 'h'"));
     CHECK(compile_result(prelude + "program { resize(0, 5) }").has_error("must be positive"));
 }
 
@@ -381,6 +381,81 @@ program { }
           .has_error("not a value or earlier union"));   // forward reference
     CHECK(compile_result("tag geo { wall, wall = wall }\n" + rprog)
           .has_error("redeclares"));
+}
+
+// -- step 5: operation table binding, kinds, path --
+
+static const std::string path_pre = R"(
+tag algo { door, exit, road }
+layers {
+    algo:  grid of algo
+    tiles: grid of number
+}
+)";
+
+TEST_CASE("sema: operation argument binding") {
+    // positional may also be supplied by name; named-only rejects positional
+    compile_result named_ok(prelude + "program { resize(w=4, h=3) }");
+    INFO(named_ok.diags.format_all());
+    CHECK(named_ok.ok);
+    CHECK(compile_result(prelude + "program { resize(4, w=3) }")
+          .has_error("supplied twice"));
+    CHECK(compile_result(prelude + "program { resize(w=4, 3) }")
+          .has_error("positional argument after a named argument"));
+    CHECK(compile_result(prelude + "program { resize(4, 3, 2) }")
+          .has_error("too many positional arguments"));
+    CHECK(compile_result(prelude + "program { resize(4, depth=3) }")
+          .has_error("unknown parameter 'depth'"));
+    CHECK(compile_result(prelude + "program { trim(3) }")
+          .has_error("takes no arguments"));
+    CHECK(compile_result(path_pre + "program { path(door, exit) }")
+          .has_error("named-only"));
+    CHECK(compile_result(path_pre + "program { path(from=door, to=exit, into=algo) }")
+          .has_error("requires argument 'write='"));
+}
+
+TEST_CASE("sema: operation argument kinds and constraints") {
+    CHECK(compile_result(prelude + "program { mirror(diagonal) }")
+          .has_error("invalid mirror axis"));
+    CHECK(compile_result(prelude + "program { mirror(3) }")
+          .has_error("invalid mirror axis '3'"));
+    CHECK(compile_result(prelude + "program { pad(-1) }")
+          .has_error("must be non-negative"));
+    CHECK(compile_result(prelude + "program { upscale(0, 2) }")
+          .has_error("must be positive"));
+    CHECK(compile_result(path_pre +
+          "program { path(from=door, to=exit, into=nope, write=road) }")
+          .has_error("not a declared grid"));
+    CHECK(compile_result(path_pre +
+          "program { path(from=lava, to=exit, into=algo, write=road) }")
+          .has_error("unknown tag value 'lava'"));
+    CHECK(compile_result(path_pre +
+          "program { path(from=door, to=exit, into=algo, write=road, connectivity=5) }")
+          .has_error("invalid connectivity"));
+    CHECK(compile_result(path_pre +
+          "program { path(from=door, to=exit, into=tiles, write=road) }")
+          .has_error("expected an integer"));   // number grid wants a number write
+    compile_result ok(path_pre + R"(
+program {
+    resize(8, 8)
+    path(from=door, to=exit, into=algo, write=road,
+         passable=((tiles > 0)), connectivity=8, cost=(1 + tiles))
+}
+)");
+    INFO(ok.diags.format_all());
+    CHECK(ok.ok);
+}
+
+TEST_CASE("sema: ambiguous bare predicate needs the expression form") {
+    CHECK(compile_result(R"(
+tag a { door }
+tag b { door, road }
+layers {
+    g1: grid of a
+    g2: grid of b
+}
+program { path(from=door, to=road, into=g2, write=road) }
+)").has_error("ambiguous"));
 }
 
 TEST_CASE("sema: tagset over the 30-value cap") {

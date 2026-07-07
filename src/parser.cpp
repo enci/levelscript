@@ -588,18 +588,56 @@ struct parser {
             s.rule_name = toks[pos - 1].text;
     }
 
+    // One op-call argument value: INTEGER (a leading '-' is accepted so value
+    // constraints stay semantic checks), IDENT, or '(' expr ')'.
+    bool parse_op_arg_value(op_arg& a) {
+        if (accept(token_type::minus)) {
+            if (!expect(token_type::integer, "an integer")) return false;
+            a.int_val = -toks[pos - 1].int_val;
+            return true;
+        }
+        if (at(token_type::integer)) {
+            a.int_val = eat().int_val;
+            return true;
+        }
+        if (at(token_type::lparen)) {
+            eat();
+            a.what = op_arg::kind::expr;
+            a.value = parse_expr();
+            return expect(token_type::rparen, "')'");
+        }
+        // bare identifier — a grid name, tag value, or enum word; the mirror
+        // axis words lex as keywords, so they are accepted explicitly
+        if (at(token_type::ident) || at(token_type::kw_horizontal) ||
+            at(token_type::kw_vertical)) {
+            a.what = op_arg::kind::ident;
+            a.ident = eat().text;
+            return true;
+        }
+        error_at(peek(), "expected an argument (an integer, a name, or a "
+                 "parenthesized expression)");
+        return false;
+    }
+
     void parse_op_call(program_stmt& s) {
         s.what = program_stmt::kind::op_call;
         s.op_name = eat().text;   // IDENT
         if (!expect(token_type::lparen, "'('")) return;
+        skip_newlines();   // long calls (path) may spread over lines
         while (!at(token_type::rparen) && !at_end()) {
             op_arg a;
             a.loc = loc();
-            if (!expect(token_type::integer, "an integer argument")) { eat_bad(); continue; }
-            a.int_val = toks[pos - 1].int_val;
-            s.op_args.push_back(a);
+            // named argument: IDENT '=' value
+            if (at(token_type::ident) && peek(1).is(token_type::equals)) {
+                a.name = eat().text;
+                eat();   // '='
+            }
+            if (!parse_op_arg_value(a)) { eat_bad(); skip_newlines(); continue; }
+            s.op_args.push_back(std::move(a));
             if (!accept(token_type::comma)) break;
+            skip_newlines();
         }
+        skip_newlines();
         expect(token_type::rparen, "')'");
     }
 

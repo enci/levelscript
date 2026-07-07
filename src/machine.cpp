@@ -1,5 +1,9 @@
 #include "machine.hpp"
 #include <algorithm>
+#include <iostream>
+#include <limits>
+#include <queue>
+#include <tuple>
 
 namespace ls::internal {
 
@@ -274,21 +278,232 @@ void machine::record_highlights(compiled_pair const& pair, match const& m) {
     }
 }
 
-// resize(W, H): content-preserving, top-left anchored (spec §6.1), all layers.
+// Rebuild one grid to nr x nc, each new cell from src(r, c) — the shared
+// skeleton of every geometric operation. Ops read like their spec sections:
+// a rebuild is just a coordinate mapping.
+template <class F>
+static void rebuild(grid_state& g, int nr, int nc, F&& src) {
+    std::vector<int64_t> nf((size_t)nr * nc, g.empty_raw());
+    for (int r = 0; r < nr; ++r)
+        for (int c = 0; c < nc; ++c)
+            nf[r * nc + c] = src(r, c);
+    g.rows = nr;
+    g.cols = nc;
+    g.front = std::move(nf);
+    g.back.assign((size_t)nr * nc, g.empty_raw());
+}
+
 void machine::exec_op(compiled_op const& op) {
-    int nr = op.h, nc = op.w;
-    for (auto& g : grids_) {
-        std::vector<int64_t> nf((size_t)nr * nc, g.empty_raw());
-        int cr = g.rows < nr ? g.rows : nr;
-        int cc = g.cols < nc ? g.cols : nc;
-        for (int r = 0; r < cr; ++r)
-            for (int c = 0; c < cc; ++c)
-                nf[r * nc + c] = g.get(r, c);
-        g.rows = nr;
-        g.cols = nc;
-        g.front = std::move(nf);
-        g.back.assign((size_t)nr * nc, g.empty_raw());
+    switch (op.kind) {
+
+    case op_kind::resize:   // content-preserving, top-left anchored (§6.1)
+        for (auto& g : grids_)
+            rebuild(g, op.h, op.w, [&g](int r, int c) {
+                return r < g.rows && c < g.cols ? g.get(r, c) : g.empty_raw();
+            });
+        return;
+
+    case op_kind::upscale:  // duplicate every cell into an n x m block (§6.2)
+        for (auto& g : grids_)
+            rebuild(g, g.rows * op.h, g.cols * op.w, [&g, &op](int r, int c) {
+                return g.get(r / op.h, c / op.w);
+            });
+        return;
+
+    case op_kind::pad: {    // uniform empty border on all sides (§6.5)
+        int n = op.w;
+        if (n <= 0) return;
+        for (auto& g : grids_)
+            rebuild(g, g.rows + 2 * n, g.cols + 2 * n, [&g, n](int r, int c) {
+                return r >= n && r < g.rows + n && c >= n && c < g.cols + n
+                     ? g.get(r - n, c - n) : g.empty_raw();
+            });
+        return;
     }
+
+    case op_kind::trim: {   // crop all layers to the union content box (§6.3)
+        bool found = false;
+        int min_r = 0, min_c = 0, max_r = 0, max_c = 0;
+        for (auto const& g : grids_)
+            for (int r = 0; r < g.rows; ++r)
+                for (int c = 0; c < g.cols; ++c) {
+                    if (g.get(r, c) == g.empty_raw()) continue;
+                    if (!found) { min_r = max_r = r; min_c = max_c = c; found = true; }
+                    else {
+                        min_r = std::min(min_r, r); max_r = std::max(max_r, r);
+                        min_c = std::min(min_c, c); max_c = std::max(max_c, c);
+                    }
+                }
+        if (!found) {
+            std::cerr << "warning: trim() on an entirely empty stack; "
+                         "leaving grids unchanged\n";
+            return;
+        }
+        for (auto& g : grids_)
+            rebuild(g, max_r - min_r + 1, max_c - min_c + 1,
+                    [&g, min_r, min_c](int r, int c) {
+                        return g.get(min_r + r, min_c + c);
+                    });
+        return;
+    }
+
+    case op_kind::mirror:   // fold the origin-side half onto the far side (§6.4)
+        for (auto& g : grids_) {
+            if (op.w == 1) {   // horizontal: left half onto the right, reflected
+                for (int r = 0; r < g.rows; ++r)
+                    for (int c = 0; c < g.cols / 2; ++c)
+                        g.front[r * g.cols + (g.cols - 1 - c)] = g.get(r, c);
+            } else {           // vertical: top half onto the bottom
+                for (int r = 0; r < g.rows / 2; ++r)
+                    for (int c = 0; c < g.cols; ++c)
+                        g.front[(g.rows - 1 - r) * g.cols + c] = g.get(r, c);
+            }
+            g.back = g.front;
+        }
+        return;
+
+    case op_kind::path:
+        run_path(op);
+        return;
+    }
+}
+
+// Stateless per-cell mixer (splitmix64) for path tie keys.
+static uint64_t mix64(uint64_t v) {
+    v += 0x9e3779b97f4a7c15ull;
+    v = (v ^ (v >> 30)) * 0xbf58476d1ce4e5b9ull;
+    v = (v ^ (v >> 27)) * 0x94d049bb133111ebull;
+    return v ^ (v >> 31);
+}
+
+// path(...) (§6.6): stamp a minimum-cost route from any `from` cell to the
+// nearest `to` cell over the traversable cells, endpoints included.
+//
+// Draw contract (the algorithm-unobservable design): predicate passes and
+// per-cell costs evaluate row-major over fixed extents; tie-breaking uses ONE
+// stream draw hashed per cell (never per discovery); the route is derived
+// from the distance field alone — walk from the goal through the min-key
+// optimal predecessor — so any correct shortest-path search yields the same
+// output, and a future A* is a pure optimization.
+void machine::run_path(compiled_op const& op) {
+    if (grids_.empty() || grids_[0].rows <= 0 || op.into_grid < 0) {
+        std::cerr << "warning: path() before any resize; leaving grids unchanged\n";
+        return;
+    }
+    int W = grids_[0].cols, H = grids_[0].rows;
+    size_t n = (size_t)W * H;
+
+    auto pred_at = [&](compiled_pred const& p, int x, int y) -> bool {
+        if (p.is_expr) return p.expr >= 0 && eval(p.expr, x, y) != 0;
+        if (p.grid_id < 0) return false;
+        return (grids_[p.grid_id].get(y, x) & p.mask) != 0;
+    };
+    auto default_passable = [&](int x, int y) -> bool {
+        for (auto const& g : grids_)   // non-empty in at least one layer (§6.3)
+            if (g.get(y, x) != g.empty_raw()) return true;
+        return false;
+    };
+
+    // predicate sets: one row-major pass each, in from / to / passable order
+    std::vector<char> is_from(n), is_to(n), pass(n);
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x)
+            is_from[y * W + x] = pred_at(op.from, x, y);
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x)
+            is_to[y * W + x] = pred_at(op.to, x, y);
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x) {
+            size_t i = (size_t)y * W + x;
+            bool p = op.passable.given ? pred_at(op.passable, x, y)
+                                       : default_passable(x, y);
+            pass[i] = p || is_from[i] || is_to[i];   // endpoints always traversable
+        }
+
+    // per-cell entry cost: row-major over traversable cells, clamped >= 1
+    std::vector<long long> costv(n, 1);
+    if (op.cost >= 0)
+        for (int y = 0; y < H; ++y)
+            for (int x = 0; x < W; ++x) {
+                size_t i = (size_t)y * W + x;
+                if (!pass[i]) continue;
+                long long cv = eval(op.cost, x, y);
+                costv[i] = cv < 1 ? 1 : cv;
+            }
+
+    // ONE stream draw; every tie key is a stateless hash of it and the cell
+    uint64_t tie_seed = rng_();
+    auto key = [tie_seed](int i) { return mix64(tie_seed ^ (uint64_t)i); };
+
+    // multi-source Dijkstra → the distance field (unique; the search is a
+    // black box, nothing downstream observes its expansion order)
+    const long long inf = std::numeric_limits<long long>::max();
+    std::vector<long long> dist(n, inf);
+    using entry = std::pair<long long, int>;
+    std::priority_queue<entry, std::vector<entry>, std::greater<entry>> pq;
+    for (size_t i = 0; i < n; ++i)
+        if (is_from[i]) { dist[i] = 0; pq.push({0, (int)i}); }
+
+    static const int dx[] = {1, -1, 0, 0, 1, 1, -1, -1};
+    static const int dy[] = {0, 0, 1, -1, 1, -1, 1, -1};
+    int ndirs = op.connectivity == 8 ? 8 : 4;
+
+    while (!pq.empty()) {
+        auto [d, i] = pq.top();
+        pq.pop();
+        if (d != dist[i]) continue;   // stale
+        int x = i % W, y = i / W;
+        for (int k = 0; k < ndirs; ++k) {
+            int nx = x + dx[k], ny = y + dy[k];
+            if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
+            int j = ny * W + nx;
+            if (!pass[j]) continue;
+            long long nd = d + costv[j];
+            if (nd < dist[j]) { dist[j] = nd; pq.push({nd, j}); }
+        }
+    }
+
+    // nearest reachable goal: min (dist, key)
+    int goal = -1;
+    for (size_t i = 0; i < n; ++i) {
+        if (!is_to[i] || dist[i] == inf) continue;
+        if (goal < 0 || dist[i] < dist[goal] ||
+            (dist[i] == dist[goal] && key((int)i) < key(goal)))
+            goal = (int)i;
+    }
+    if (goal < 0) {
+        std::cerr << "warning: path() found no route from 'from' to 'to'; "
+                     "leaving grids unchanged\n";
+        return;
+    }
+
+    // route: walk goal -> start via the min-key optimal predecessor — a pure
+    // function of the distance field and the keys
+    std::vector<int> route{goal};
+    int c = goal;
+    while (!is_from[c] || dist[c] != 0) {
+        int x = c % W, y = c / W, best = -1;
+        for (int k = 0; k < ndirs; ++k) {
+            int nx = x + dx[k], ny = y + dy[k];
+            if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
+            int j = ny * W + nx;
+            if (!pass[j] || dist[j] == inf) continue;
+            if (dist[j] + costv[c] != dist[c]) continue;   // not an optimal predecessor
+            if (best < 0 || key(j) < key(best)) best = j;
+        }
+        if (best < 0) break;   // unreachable in a well-formed field
+        route.push_back(best);
+        c = best;
+    }
+    std::reverse(route.begin(), route.end());   // stamp start -> goal
+
+    grid_state& g = grids_[op.into_grid];
+    for (int i : route) {
+        long long v = op.write.is_expr ? eval(op.write.expr, i % W, i / W)
+                                       : op.write.const_val;
+        g.front[i] = v;
+    }
+    g.back = g.front;
 }
 
 std::vector<machine::match> machine::collect(compiled_rule const& rule) {

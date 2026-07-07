@@ -663,6 +663,192 @@ program {
     CHECK(count_val(lv, "level", gen.tag("geo.floor")) == 36);
 }
 
+// -- step 5: geometry operations + path --
+
+TEST_CASE("api: upscale, pad, mirror, trim") {
+    auto gen = make(R"(
+tag geo { wall, floor }
+layers { level: grid of geo }
+rule seed_corner {
+    { all
+      level[.]
+      where[ (x == 0 && y == 0) ]
+    }
+    =>
+    level[wall]
+}
+program {
+    resize(2, 2)
+    all seed_corner
+    upscale(2, 2)
+    pad(1)
+    mirror(horizontal)
+}
+)");
+    INFO(gen.error());
+    REQUIRE(static_cast<bool>(gen));
+    ls::level lv = gen.generate(1);
+    // 2x2 -> upscale(2,2) -> 4x4 -> pad(1) -> 6x6
+    CHECK(lv.width() == 6);
+    CHECK(lv.height() == 6);
+    int wall = gen.tag("geo.wall");
+    ls::grid g = lv["level"];
+    // the corner wall became a 2x2 block at (1,1) after pad; mirror(horizontal)
+    // copies the left half reflected onto the right
+    CHECK(g.at(1, 1) == wall);
+    CHECK(g.at(2, 2) == wall);
+    CHECK(g.at(4, 1) == wall);   // mirrored image of x=1 (width 6: 5-1=4)
+    CHECK(g.at(3, 2) == wall);   // mirrored image of x=2
+    CHECK(count_val(lv, "level", wall) == 8);
+}
+
+TEST_CASE("api: trim crops to the union content box") {
+    auto gen = make(R"(
+tag geo { wall }
+layers { level: grid of geo }
+rule mark {
+    { all
+      level[.]
+      where[ (x >= 2 && x <= 4 && y >= 1 && y <= 3) ]
+    }
+    =>
+    level[wall]
+}
+program {
+    resize(8, 6)
+    all mark
+    trim()
+}
+)");
+    INFO(gen.error());
+    REQUIRE(static_cast<bool>(gen));
+    ls::level lv = gen.generate(1);
+    CHECK(lv.width() == 3);
+    CHECK(lv.height() == 3);
+    CHECK(count_val(lv, "level", gen.tag("geo.wall")) == 9);
+}
+
+static const std::string corridor_src = R"(
+tag algo { start, goal, road }
+layers { algo: grid of algo }
+rule place_start {
+    { all
+      algo[.]
+      where[ (x == 0 && y == 0) ]
+    }
+    =>
+    algo[start]
+}
+rule place_goal {
+    { all
+      algo[.]
+      where[ (x == width - 1 && y == height - 1) ]
+    }
+    =>
+    algo[goal]
+}
+program {
+    resize(7, 5)
+    all place_start
+    all place_goal
+    path(from=start, to=goal, into=algo, write=road,
+         passable=((0 == 0)))
+}
+)";
+
+TEST_CASE("api: path carves a connected shortest route") {
+    auto gen = make(corridor_src);
+    INFO(gen.error());
+    REQUIRE(static_cast<bool>(gen));
+    ls::level lv = gen.generate(11);
+    int road = gen.tag("algo.road");
+
+    // endpoints included/overwritten: (0,0) and (6,4) are road now
+    CHECK(lv["algo"].at(0, 0) == road);
+    CHECK(lv["algo"].at(6, 4) == road);
+    // 4-connected shortest route length = manhattan + 1
+    CHECK(count_val(lv, "algo", road) == 6 + 4 + 1);
+
+    // deterministic per seed; different seeds may carve different routes
+    CHECK(dump(gen.generate(11), "algo") == dump(lv, "algo"));
+}
+
+TEST_CASE("api: path over weighted cost prefers the cheap terrain") {
+    auto gen = make(R"(
+tag algo { start, goal, road }
+layers {
+    algo:  grid of algo
+    swamp: grid of number
+}
+rule mark_swamp {
+    { all
+      swamp[.]
+      where[ (y == 0 && x > 0 && x < width - 1) ]
+    }
+    =>
+    swamp[9]
+}
+rule place_start {
+    { all algo[.] where[ (x == 0 && y == 0) ] }
+    =>
+    algo[start]
+}
+rule place_goal {
+    { all algo[.] where[ (x == width - 1 && y == 0) ] }
+    =>
+    algo[goal]
+}
+program {
+    resize(5, 3)
+    all mark_swamp
+    all place_start
+    all place_goal
+    path(from=start, to=goal, into=algo, write=road,
+         passable=((0 == 0)), cost=(1 + swamp))
+}
+)");
+    INFO(gen.error());
+    REQUIRE(static_cast<bool>(gen));
+    ls::level lv = gen.generate(3);
+    int road = gen.tag("algo.road");
+    // the straight top row costs 1+10+10+10+1; the detour around costs 7 —
+    // the route must dip below the swamp row
+    CHECK(lv["algo"].at(1, 0) != road);
+    CHECK(lv["algo"].at(2, 0) != road);
+    CHECK(lv["algo"].at(3, 0) != road);
+    CHECK(count_val(lv, "algo", road) == 7);
+}
+
+TEST_CASE("api: path with no route warns and leaves grids unchanged") {
+    auto gen = make(R"(
+tag algo { start, goal, road }
+layers { algo: grid of algo }
+rule place_start {
+    { all algo[.] where[ (x == 0 && y == 0) ] }
+    =>
+    algo[start]
+}
+rule place_goal {
+    { all algo[.] where[ (x == 4 && y == 4) ] }
+    =>
+    algo[goal]
+}
+program {
+    resize(5, 5)
+    all place_start
+    all place_goal
+    path(from=start, to=goal, into=algo, write=road,
+         passable=((algo == road)))
+}
+)");
+    INFO(gen.error());
+    REQUIRE(static_cast<bool>(gen));
+    ls::level lv = gen.generate(1);   // start/goal isolated: nothing passable between
+    CHECK(count_val(lv, "algo", gen.tag("algo.road")) == 0);
+    CHECK(lv["algo"].at(0, 0) == gen.tag("algo.start"));
+    CHECK(lv["algo"].at(4, 4) == gen.tag("algo.goal"));
+}
+
 TEST_CASE("api: snapshot mid-run sees committed statements only") {
     auto gen = make(scatter_src);
     auto g = gen.begin(7, ls::step_mode::statement);

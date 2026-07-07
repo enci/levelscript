@@ -108,11 +108,37 @@ struct compiled_rule {
 
 // ── operations (spec §6.0) ────────────────────────────────────────────────────
 
-enum class op_kind { resize };
+enum class op_kind { resize, upscale, trim, mirror, pad, path };
+
+// A compiled per-cell predicate (§6.0 `pred`): a bare tag reads its unique
+// layer with mask-overlap semantics; an expression is a boolean per cell.
+struct compiled_pred {
+    bool    given{false};
+    bool    is_expr{false};
+    int     grid_id{-1};   // tag form
+    int64_t mask{0};
+    int     expr{-1};      // expr form (arena index)
+};
+
+// A `value` argument, typed by the target grid.
+struct compiled_value {
+    bool    is_expr{false};
+    int64_t const_val{0};
+    int     expr{-1};
+};
 
 struct compiled_op {
-    op_kind kind{op_kind::resize};
+    op_kind kind{op_kind::trim};
+    // resize/upscale dims; pad margin (w); mirror axis (w: 1 = horizontal)
     int w{0}, h{0};
+    // path (§6.6)
+    compiled_pred  from, to;
+    compiled_pred  passable;        // !given → default: non-empty in any layer
+    int            into_grid{-1};
+    compiled_value write;
+    int            over_grid{-1};   // the graph seam: validated, no effect yet
+    int            connectivity{4};
+    int            cost{-1};        // expr arena index; -1 → constant 1 (BFS)
 };
 
 // ── program ───────────────────────────────────────────────────────────────────
