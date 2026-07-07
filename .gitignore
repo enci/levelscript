@@ -1,0 +1,6 @@
+build/
+.vs/
+.vscode/
+__pycache__/
+*.user
+CLAUDE.md
