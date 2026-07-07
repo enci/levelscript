@@ -12,6 +12,12 @@ static ast_file parse_ok(std::string const& src) {
     return *ast;
 }
 
+static bool parse_fails(std::string const& src) {
+    diagnostics diags;
+    parse(src, "test", diags);
+    return diags.has_errors();
+}
+
 static const std::string skeleton = R"(
 tag geo { wall, floor }
 
@@ -66,16 +72,18 @@ rule r {
 }
 )");
     REQUIRE(ast.rules.size() == 1);
-    CHECK(ast.rules[0].lhs.rows == 3);
-    CHECK(ast.rules[0].lhs.cols == 3);
-    CHECK(ast.rules[0].lhs.cells[1][1].kind == cell_kind::tag);
-    CHECK(ast.rules[0].lhs.cells[1][1].tag == "wall");
-    CHECK(ast.rules[0].lhs.cells[0][0].kind == cell_kind::any);
+    REQUIRE(ast.rules[0].pairs.size() == 1);
+    auto const& lhs = ast.rules[0].pairs[0].lhs[0];
+    CHECK(lhs.rows == 3);
+    CHECK(lhs.cols == 3);
+    CHECK(lhs.cells[1][1].kind == cell_kind::tag);
+    CHECK(lhs.cells[1][1].tag == "wall");
+    CHECK(lhs.cells[0][0].kind == cell_kind::any);
 }
 
 TEST_CASE("parser: cell kinds") {
     auto ast = parse_ok("rule r { t[* . 3 wall] => t[* . 3 wall] }");
-    auto const& row = ast.rules[0].lhs.cells[0];
+    auto const& row = ast.rules[0].pairs[0].lhs[0].cells[0];
     REQUIRE(row.size() == 4);
     CHECK(row[0].kind == cell_kind::any);
     CHECK(row[1].kind == cell_kind::empty);
@@ -85,13 +93,124 @@ TEST_CASE("parser: cell kinds") {
 }
 
 TEST_CASE("parser: missing arrow is an error") {
-    diagnostics diags;
-    parse("rule r { g[.] g[floor] }", "test", diags);
-    CHECK(diags.has_errors());
+    CHECK(parse_fails("rule r { g[.] g[floor] }"));
 }
 
 TEST_CASE("parser: two program blocks is an error") {
-    diagnostics diags;
-    parse("program { }\nprogram { }", "test", diags);
-    CHECK(diags.has_errors());
+    CHECK(parse_fails("program { }\nprogram { }"));
+}
+
+// ── step 2: match blocks, write trees, attributes, body combinators ──────────
+
+TEST_CASE("parser: { all } match side") {
+    auto ast = parse_ok(R"(
+rule place {
+    { all
+      algo[F]
+      enemies[.]
+    }
+    =>
+    enemies[goblin]
+}
+)");
+    auto const& pair = ast.rules[0].pairs[0];
+    REQUIRE(pair.lhs.size() == 2);
+    CHECK(pair.lhs[0].grid == "algo");
+    CHECK(pair.lhs[1].grid == "enemies");
+    CHECK(pair.rhs.what == write_term::kind::leaf);
+}
+
+TEST_CASE("parser: { any } write side with weights") {
+    auto ast = parse_ok(R"(
+rule reward {
+    algo[S]
+    =>
+    { any
+      (weight=8) items[.]
+      items[chest]
+    }
+}
+)");
+    auto const& rhs = ast.rules[0].pairs[0].rhs;
+    REQUIRE(rhs.what == write_term::kind::any);
+    REQUIRE(rhs.items.size() == 2);
+    CHECK(rhs.items[0].weight == 8);
+    CHECK(rhs.items[1].weight == 1);   // default
+}
+
+TEST_CASE("parser: nested all-of-any write tree") {
+    auto ast = parse_ok(R"(
+rule decorate {
+    algo[F]
+    =>
+    { all
+      level[floor]
+      { any
+        (weight=3) items[.]
+        items[chest]
+      }
+    }
+}
+)");
+    auto const& rhs = ast.rules[0].pairs[0].rhs;
+    REQUIRE(rhs.what == write_term::kind::all);
+    REQUIRE(rhs.items.size() == 2);
+    CHECK(rhs.items[0].what == write_term::kind::leaf);
+    CHECK(rhs.items[1].what == write_term::kind::any);
+    CHECK(rhs.items[1].items.size() == 2);
+}
+
+TEST_CASE("parser: weight inside { all } is an error") {
+    CHECK(parse_fails(R"(
+rule r {
+    g[.]
+    =>
+    { all
+      (weight=2) g[a]
+      h[b]
+    }
+}
+)"));
+}
+
+TEST_CASE("parser: { any } on the match side is an error") {
+    CHECK(parse_fails("rule r { { any g[a] h[b] } => g[c] }"));
+}
+
+TEST_CASE("parser: single-item combinator block is an error") {
+    CHECK(parse_fails("rule r { g[.] => { any g[a] } }"));
+    CHECK(parse_fails("rule r { { all g[a] } => g[b] }"));
+}
+
+TEST_CASE("parser: rule attributes") {
+    auto ast = parse_ok(R"(
+rule a(symmetry=horizontal) { g[.] => g[x] }
+rule b(rotation=all) { g[.] => g[x] }
+rule c(symmetry=all, rotation=180) { g[.] => g[x] }
+rule d(rotation={90, 270}) { g[.] => g[x] }
+)");
+    REQUIRE(ast.rules.size() == 4);
+    CHECK(ast.rules[0].symmetry == "horizontal");
+    CHECK(ast.rules[1].rotation_angles == std::vector<long long>{90, 180, 270});
+    CHECK(ast.rules[2].symmetry == "all");
+    CHECK(ast.rules[2].rotation_angles == std::vector<long long>{180});
+    CHECK(ast.rules[3].rotation_angles == std::vector<long long>{90, 270});
+}
+
+TEST_CASE("parser: body-level combinator with sub-rules") {
+    auto ast = parse_ok(R"(
+rule fill_geo { all
+    algo[W] => level[wall]
+    algo[F] => level[floor]
+    algo[S] => level[floor]
+}
+)");
+    REQUIRE(ast.rules.size() == 1);
+    CHECK(ast.rules[0].body == body_combinator::all);
+    REQUIRE(ast.rules[0].pairs.size() == 3);
+    CHECK(ast.rules[0].pairs[2].lhs[0].cells[0][0].tag == "S");
+}
+
+TEST_CASE("parser: single sub-rule under a body combinator is an error") {
+    CHECK(parse_fails("rule r { all\n g[.] => g[x]\n}"));
 }

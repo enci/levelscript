@@ -115,20 +115,186 @@ struct parser {
         return true;
     }
 
+    // ── rule attributes: (symmetry=…, rotation=…) ────────────────────────────
+
+    void parse_rotation_value(rule_decl& r) {
+        if (accept(token_type::kw_none)) return;
+        if (accept(token_type::kw_all)) {
+            r.rotation_angles = {90, 180, 270};
+            return;
+        }
+        if (at(token_type::integer)) {
+            r.rotation_angles.push_back(eat().int_val);
+            return;
+        }
+        if (accept(token_type::lbrace)) {   // rotation={a, b, …} — the §3 set brackets
+            bool got = false;
+            while (at(token_type::integer)) {
+                r.rotation_angles.push_back(eat().int_val);
+                got = true;
+                if (!accept(token_type::comma)) break;
+            }
+            if (!got) error_at(peek(), "empty rotation set");
+            expect(token_type::rbrace, "'}'");
+            return;
+        }
+        error_at(peek(), "invalid rotation value; expected none, all, an angle, or {angles}");
+        eat_bad();
+    }
+
+    void parse_rule_attrs(rule_decl& r) {
+        do {
+            if (accept(token_type::kw_symmetry)) {
+                if (!expect(token_type::equals, "'='")) return;
+                // value text captured raw; validated in sema
+                if (at(token_type::kw_none) || at(token_type::kw_horizontal) ||
+                    at(token_type::kw_vertical) || at(token_type::kw_all) ||
+                    at(token_type::ident))
+                    r.symmetry = eat().text;
+                else {
+                    error_at(peek(), "invalid symmetry value");
+                    eat_bad();
+                }
+            } else if (accept(token_type::kw_rotation)) {
+                if (!expect(token_type::equals, "'='")) return;
+                parse_rotation_value(r);
+            } else {
+                error_at(peek(), "unknown rule attribute '" + peek().text +
+                         "' (expected symmetry or rotation)");
+                eat_bad();
+            }
+        } while (accept(token_type::comma));
+        expect(token_type::rparen, "')'");
+    }
+
+    // ── match side: a pattern, or { all p1 p2 … } ────────────────────────────
+
+    bool parse_match_side(std::vector<pattern>& lhs) {
+        if (at(token_type::lbrace)) {
+            source_loc bl = loc();
+            eat();   // '{'
+            if (accept(token_type::kw_any)) {
+                error_at(toks[pos - 1], "'{ any }' is not supported on the match side");
+                recover_to(token_type::rbrace);
+                return false;
+            }
+            if (!expect(token_type::kw_all, "'all'")) {
+                recover_to(token_type::rbrace);
+                return false;
+            }
+            skip_seps();
+            while (!at(token_type::rbrace) && !at_end()) {
+                pattern p;
+                if (!parse_pattern(p)) { eat_bad(); skip_seps(); continue; }
+                lhs.push_back(std::move(p));
+                skip_seps();
+            }
+            expect(token_type::rbrace, "'}'");
+            if (lhs.size() < 2)
+                diags.error(file, bl.line, bl.col,
+                            "a combinator block requires two or more items");
+            return !lhs.empty();
+        }
+        pattern p;
+        if (!parse_pattern(p)) return false;
+        lhs.push_back(std::move(p));
+        return true;
+    }
+
+    // ── write side: a recursive write term (spec §5.2) ───────────────────────
+
+    bool parse_write_term(write_term& t, bool weight_allowed) {
+        t.loc = loc();
+
+        // optional (weight=N) prefix — legal only as an { any } item
+        if (at(token_type::lparen) && peek(1).is(token_type::kw_weight)) {
+            source_loc wl = loc();
+            eat(); eat();   // '(' 'weight'
+            if (!expect(token_type::equals, "'='")) return false;
+            if (!expect(token_type::integer, "a weight")) return false;
+            t.weight = (int)toks[pos - 1].int_val;
+            if (!expect(token_type::rparen, "')'")) return false;
+            if (!weight_allowed)
+                diags.error(file, wl.line, wl.col,
+                            "(weight=N) is only allowed on '{ any }' items");
+        }
+
+        if (!at(token_type::lbrace)) {   // leaf
+            t.what = write_term::kind::leaf;
+            return parse_pattern(t.pat);
+        }
+
+        source_loc bl = loc();
+        eat();   // '{'
+        bool is_any;
+        if (accept(token_type::kw_all))      is_any = false;
+        else if (accept(token_type::kw_any)) is_any = true;
+        else {
+            error_at(peek(), "expected 'all' or 'any' after '{' on the write side");
+            recover_to(token_type::rbrace);
+            return false;
+        }
+        t.what = is_any ? write_term::kind::any : write_term::kind::all;
+        skip_seps();
+        while (!at(token_type::rbrace) && !at_end()) {
+            write_term item;
+            if (!parse_write_term(item, /*weight_allowed=*/is_any)) {
+                eat_bad();
+                skip_seps();
+                continue;
+            }
+            t.items.push_back(std::move(item));
+            skip_seps();
+        }
+        expect(token_type::rbrace, "'}'");
+        if (t.items.size() < 2)
+            diags.error(file, bl.line, bl.col,
+                        "a combinator block requires two or more items");
+        return !t.items.empty();
+    }
+
+    bool parse_pair(rule_pair& pr) {
+        pr.loc = loc();
+        if (!parse_match_side(pr.lhs)) return false;
+        skip_newlines();
+        if (!expect(token_type::arrow, "'=>'")) return false;
+        skip_newlines();
+        return parse_write_term(pr.rhs, /*weight_allowed=*/false);
+    }
+
     void parse_rule(ast_file& out) {
         rule_decl r;
         r.loc = loc();
         eat();   // 'rule'
         if (!expect(token_type::ident, "a rule name")) return;
         r.name = toks[pos - 1].text;
+        if (accept(token_type::lparen)) parse_rule_attrs(r);
         if (!expect(token_type::lbrace, "'{'")) return;
         skip_newlines();
-        if (!parse_pattern(r.lhs)) { recover_to(token_type::rbrace); return; }
-        skip_newlines();
-        if (!expect(token_type::arrow, "'=>'")) { recover_to(token_type::rbrace); return; }
-        skip_newlines();
-        if (!parse_pattern(r.rhs)) { recover_to(token_type::rbrace); return; }
-        skip_newlines();
+
+        // Body-level combinator: `rule r { all pair pair … }` — multiple
+        // independent sub-rules. A single-pair body has no combinator.
+        if (at(token_type::kw_all) || at(token_type::kw_any)) {
+            r.body = at(token_type::kw_all) ? body_combinator::all
+                                            : body_combinator::any;
+            source_loc bl = loc();
+            eat();
+            skip_newlines();
+            while (!at(token_type::rbrace) && !at_end()) {
+                rule_pair pr;
+                if (!parse_pair(pr)) { recover_to(token_type::rbrace); break; }
+                r.pairs.push_back(std::move(pr));
+                skip_newlines();
+            }
+            if (r.pairs.size() < 2)
+                diags.error(file, bl.line, bl.col,
+                            "a body combinator requires two or more sub-rules");
+        } else {
+            rule_pair pr;
+            if (!parse_pair(pr)) { recover_to(token_type::rbrace); return; }
+            r.pairs.push_back(std::move(pr));
+            skip_newlines();
+        }
         expect(token_type::rbrace, "'}'");
         out.rules.push_back(std::move(r));
     }

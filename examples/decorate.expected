@@ -1,0 +1,24 @@
+=== algo ===
+. F F S F . . . .
+F S F F . . . . .
+F F . . . . . . .
+S F . . . . F . .
+F . . . . F S F .
+. . . . . . F . .
+
+=== level ===
+w f f f f w w w w
+f f f f w w w w w
+f f w w w w w w w
+f f w w w w f w w
+f w w w w f f f w
+w w w w w w f w w
+
+=== loot ===
+. . h . h . . . .
+c . c . . . . . .
+. . . . . . . . .
+c h . . . . . . .
+. . . . . . . . .
+. . . . . . . . .
+

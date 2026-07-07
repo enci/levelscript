@@ -85,6 +85,133 @@ TEST_CASE("sema: some(max=0) is rejected") {
         .has_error("some(max=0)"));
 }
 
+// ── step 2: write trees, attributes, variant expansion ────────────────────────
+
+TEST_CASE("sema: same-grid simultaneous write in { all } is rejected") {
+    CHECK(compile_result(prelude + R"(
+rule r {
+    level[.]
+    =>
+    { all
+      level[wall]
+      level[floor]
+    }
+}
+program { }
+)").has_error("written twice at the same cell"));
+}
+
+TEST_CASE("sema: different grids at one cell in { all } are fine") {
+    compile_result r(prelude + R"(
+rule r {
+    level[.]
+    =>
+    { all
+      level[wall]
+      tiles[1]
+    }
+}
+program { }
+)");
+    INFO(r.diags.format_all());
+    CHECK(r.ok);
+}
+
+TEST_CASE("sema: nested write leaf shape mismatch is rejected") {
+    CHECK(compile_result(prelude + R"(
+rule r {
+    level[. .]
+    =>
+    { any
+      level[wall wall]
+      level[floor]
+    }
+}
+program { }
+)").has_error("dimension mismatch"));
+}
+
+TEST_CASE("sema: invalid attribute values") {
+    CHECK(compile_result(prelude +
+        "rule r(symmetry=diagonal) { level[.] => level[wall] }\nprogram { }")
+        .has_error("invalid value 'diagonal'"));
+    CHECK(compile_result(prelude +
+        "rule r(rotation=45) { level[.] => level[wall] }\nprogram { }")
+        .has_error("invalid rotation angle"));
+}
+
+static const std::string quad = R"(
+tag t4 { a, b, c, d }
+layers { q: grid of t4 }
+)";
+
+TEST_CASE("sema: variant expansion counts") {
+    SECTION("rotation=all on an asymmetric 1x2 gives 4 variants") {
+        compile_result r(prelude +
+            "rule r(rotation=all) { level[wall floor] => level[floor wall] }\nprogram { }");
+        REQUIRE(r.ok);
+        CHECK(r.prog.rules[0].pairs.size() == 4);
+    }
+    SECTION("symmetry=all on a 1x2 gives 2 (vertical flip is identity)") {
+        compile_result r(prelude +
+            "rule r(symmetry=all) { level[wall floor] => level[floor wall] }\nprogram { }");
+        REQUIRE(r.ok);
+        CHECK(r.prog.rules[0].pairs.size() == 2);
+    }
+    SECTION("symmetry=all + rotation=180 dedups the both-axis/180 coincidence") {
+        compile_result r(quad + R"(
+rule r(symmetry=all, rotation=180) {
+    q[
+        a b
+        c d ]
+    =>
+    q[
+        d c
+        b a ]
+}
+program { }
+)");
+        REQUIRE(r.ok);
+        CHECK(r.prog.rules[0].pairs.size() == 4);
+    }
+    SECTION("symmetry=all + rotation=all is the 8-variant D4") {
+        compile_result r(quad + R"(
+rule r(symmetry=all, rotation=all) {
+    q[
+        a b
+        c d ]
+    =>
+    q[
+        d c
+        b a ]
+}
+program { }
+)");
+        REQUIRE(r.ok);
+        CHECK(r.prog.rules[0].pairs.size() == 8);
+    }
+    SECTION("a symmetric pattern collapses to 1 variant") {
+        compile_result r(prelude +
+            "rule r(symmetry=all, rotation=all) { level[wall] => level[floor] }\nprogram { }");
+        REQUIRE(r.ok);
+        CHECK(r.prog.rules[0].pairs.size() == 1);
+    }
+}
+
+TEST_CASE("sema: sub-rule indices survive expansion") {
+    compile_result r(prelude + R"(
+rule fill_geo { all
+    level[wall]  => tiles[2]
+    level[floor] => tiles[1]
+}
+program { }
+)");
+    REQUIRE(r.ok);
+    REQUIRE(r.prog.rules[0].pairs.size() == 2);
+    CHECK(r.prog.rules[0].pairs[0].sub_rule_idx == 0);
+    CHECK(r.prog.rules[0].pairs[1].sub_rule_idx == 1);
+}
+
 TEST_CASE("sema: tagset over the 30-value cap") {
     std::string big = "tag t { ";
     for (int i = 0; i < 31; ++i) big += "v" + std::to_string(i) + ", ";

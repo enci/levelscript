@@ -44,11 +44,34 @@ struct pattern {
     std::vector<std::vector<cell>> cells;   // [row][col]; row widths checked in sema
 };
 
+// A recursive write-side term (spec §5.2): a leaf pattern, an `{ all }` block
+// (write every item simultaneously), or an `{ any }` block (pick one weighted
+// item). Items nest to any depth.
+struct write_term {
+    enum class kind { leaf, all, any } what{kind::leaf};
+    source_loc              loc;
+    int                     weight{1};   // meaningful only as an `{ any }` item
+    pattern                 pat;         // leaf
+    std::vector<write_term> items;       // all / any
+};
+
+// One match-write sub-rule: LHS patterns (conjoined across grids at one
+// anchor, `{ all … }` when more than one) => a write tree.
+struct rule_pair {
+    source_loc           loc;
+    std::vector<pattern> lhs;
+    write_term           rhs;
+};
+
+enum class body_combinator { none, all, any };
+
 struct rule_decl {
-    source_loc  loc;
-    std::string name;
-    pattern     lhs;
-    pattern     rhs;
+    source_loc             loc;
+    std::string            name;
+    std::string            symmetry{"none"};   // validated in sema
+    std::vector<long long> rotation_angles;    // besides identity; validated in sema
+    body_combinator        body{body_combinator::none};
+    std::vector<rule_pair> pairs;
 };
 
 // ── program ──────────────────────────────────────────────────────────────────

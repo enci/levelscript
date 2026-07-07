@@ -1,8 +1,77 @@
 #include "sema.hpp"
+#include <unordered_set>
 
 namespace ls {
 
 namespace {
+
+// ── pattern transforms (spec §5.6, §10.3) ────────────────────────────────────
+//
+// Applied at compile time to expand symmetry/rotation variants. The both-axis
+// flip IS the 180° rotation, so flip_both doubles as rot180; the per-sub-rule
+// dedup below collapses the coincidence (v0.6.2 semantics).
+
+enum class transform { identity, flip_h, flip_v, flip_both, rot90, rot270 };
+
+compiled_pattern transform_pattern(transform k, compiled_pattern const& p) {
+    compiled_pattern out = p;
+    bool swaps = (k == transform::rot90 || k == transform::rot270);
+    out.rows = swaps ? p.cols : p.rows;
+    out.cols = swaps ? p.rows : p.cols;
+    for (int r = 0; r < out.rows; ++r)
+        for (int c = 0; c < out.cols; ++c) {
+            int sr = r, sc = c;
+            switch (k) {
+            case transform::identity:                                     break;
+            case transform::flip_h:    sc = p.cols - 1 - c;               break;
+            case transform::flip_v:    sr = p.rows - 1 - r;               break;
+            case transform::flip_both: sr = p.rows - 1 - r;
+                                       sc = p.cols - 1 - c;               break;
+            case transform::rot90:     sr = p.rows - 1 - c; sc = r;       break;   // cw
+            case transform::rot270:    sr = c; sc = p.cols - 1 - r;       break;   // ccw
+            }
+            out.cells[r * out.cols + c] = p.cells[sr * p.cols + sc];
+        }
+    return out;
+}
+
+compiled_write_term transform_write_term(transform k, compiled_write_term const& t) {
+    compiled_write_term out;
+    out.what   = t.what;
+    out.weight = t.weight;
+    if (t.what == compiled_write_term::kind::leaf)
+        out.pattern = transform_pattern(k, t.pattern);
+    else
+        for (auto const& it : t.items)
+            out.items.push_back(transform_write_term(k, it));
+    return out;
+}
+
+compiled_pair transform_pair(transform k, compiled_pair const& pair) {
+    compiled_pair out;
+    out.sub_rule_idx = pair.sub_rule_idx;
+    for (auto const& pat : pair.lhs)
+        out.lhs.push_back(transform_pattern(k, pat));
+    out.rhs = transform_write_term(k, pair.rhs);
+    return out;
+}
+
+bool patterns_equal(compiled_pattern const& a, compiled_pattern const& b) {
+    if (a.grid_id != b.grid_id || a.rows != b.rows || a.cols != b.cols) return false;
+    for (int i = 0; i < (int)a.cells.size(); ++i)
+        if (a.cells[i].what != b.cells[i].what || a.cells[i].val != b.cells[i].val)
+            return false;
+    return true;
+}
+
+// Variant dedup key: two variants are duplicates when every LHS pattern is
+// cell-identical (they would produce the same candidates).
+bool pair_lhs_equal(compiled_pair const& a, compiled_pair const& b) {
+    if (a.lhs.size() != b.lhs.size()) return false;
+    for (int i = 0; i < (int)a.lhs.size(); ++i)
+        if (!patterns_equal(a.lhs[i], b.lhs[i])) return false;
+    return true;
+}
 
 struct analyzer {
     ast_file const&  ast;
@@ -56,13 +125,19 @@ struct analyzer {
 
     // ── rules ────────────────────────────────────────────────────────────────
 
-    compiled_pattern compile_pattern(pattern const& p) {
+    // Compile one pattern; `exp_rows/exp_cols` enforce the shape constraint
+    // (spec §5.4, recursive over the write tree) — 0 means "sets the reference".
+    compiled_pattern compile_pattern(pattern const& p, int exp_rows, int exp_cols) {
         compiled_pattern cp;
         cp.grid_id = out.layer_id(p.grid);
         if (cp.grid_id < 0) {
             error(p.loc, "undeclared grid '" + p.grid + "'");
             return cp;
         }
+        if (exp_rows > 0 && (p.rows != exp_rows || p.cols != exp_cols))
+            error(p.loc, "pattern dimension mismatch: expected " +
+                  std::to_string(exp_rows) + "x" + std::to_string(exp_cols) +
+                  ", got " + std::to_string(p.rows) + "x" + std::to_string(p.cols));
         int tag = out.layers[cp.grid_id].tag_id;
         cp.is_number = tag < 0;
 
@@ -115,27 +190,116 @@ struct analyzer {
         return cp;
     }
 
+    compiled_write_term compile_write_term(write_term const& t,
+                                           int exp_rows, int exp_cols) {
+        compiled_write_term ct;
+        ct.weight = t.weight;
+        if (t.what == write_term::kind::leaf) {
+            ct.what    = compiled_write_term::kind::leaf;
+            ct.pattern = compile_pattern(t.pat, exp_rows, exp_cols);
+            return ct;
+        }
+        ct.what = t.what == write_term::kind::all ? compiled_write_term::kind::all
+                                                  : compiled_write_term::kind::any;
+        for (auto const& it : t.items)
+            ct.items.push_back(compile_write_term(it, exp_rows, exp_cols));
+        if (ct.what == compiled_write_term::kind::all)
+            check_all_no_overlap(ct, t.loc);
+        return ct;
+    }
+
+    // Within one { all } write block, two items may not write the same grid at
+    // the same cell — a write-write ambiguity (spec §7.3 #31).
+    void check_all_no_overlap(compiled_write_term const& all_node, source_loc loc) {
+        auto key = [](int g, int r, int c) {
+            return ((int64_t)g << 40) | ((int64_t)r << 20) | (int64_t)c;
+        };
+        std::unordered_set<int64_t> seen;
+        for (auto const& item : all_node.items) {
+            std::vector<compiled_pattern const*> leaves;
+            collect_write_leaves(item, leaves);
+            std::vector<int64_t> mine;
+            for (auto const* p : leaves) {
+                if (p->grid_id < 0) continue;
+                for (int r = 0; r < p->rows; ++r)
+                    for (int c = 0; c < p->cols; ++c) {
+                        if (p->at(r, c).what == compiled_cell::kind::wildcard) continue;
+                        int64_t k = key(p->grid_id, r, c);
+                        if (seen.count(k)) {
+                            error(loc, "same-grid simultaneous write in '{ all }': grid '" +
+                                  out.layers[p->grid_id].name +
+                                  "' is written twice at the same cell");
+                            return;
+                        }
+                        mine.push_back(k);
+                    }
+            }
+            for (int64_t k : mine) seen.insert(k);
+        }
+    }
+
+    compiled_pair compile_base_pair(rule_pair const& pr) {
+        compiled_pair cp;
+        int rows = 0, cols = 0;
+        for (auto const& p : pr.lhs) {
+            cp.lhs.push_back(compile_pattern(p, rows, cols));
+            if (rows == 0) { rows = cp.lhs.back().rows; cols = cp.lhs.back().cols; }
+        }
+        cp.rhs = compile_write_term(pr.rhs, rows, cols);
+        return cp;
+    }
+
     void compile_rules() {
         for (auto const& r : ast.rules) {
             for (auto const& seen : out.rules)
                 if (seen.name == r.name)
                     error(r.loc, "duplicate rule '" + r.name + "'");
 
-            compiled_pair pair;
-            pair.lhs.push_back(compile_pattern(r.lhs));
-            pair.writes.push_back(compile_pattern(r.rhs));
+            // attribute validation (spec §7.3 #7/#18)
+            if (r.symmetry != "none" && r.symmetry != "horizontal" &&
+                r.symmetry != "vertical" && r.symmetry != "all")
+                error(r.loc, "invalid value '" + r.symmetry +
+                      "' for attribute 'symmetry'; allowed: none, horizontal, vertical, all");
+            for (long long a : r.rotation_angles)
+                if (a != 90 && a != 180 && a != 270)
+                    error(r.loc, "invalid rotation angle '" + std::to_string(a) +
+                          "'; allowed angles are 90, 180, 270");
 
-            auto const& l = pair.lhs[0];
-            auto const& w = pair.writes[0];
-            if (l.rows > 0 && w.rows > 0 && (l.rows != w.rows || l.cols != w.cols))
-                error(r.loc, "pattern dimension mismatch: match is " +
-                      std::to_string(l.rows) + "x" + std::to_string(l.cols) +
-                      " but write is " +
-                      std::to_string(w.rows) + "x" + std::to_string(w.cols));
+            // symmetry=all is four variants: identity + H + V + both-axis; the
+            // both-axis/180° coincidence dedups below (spec §5.6.1, v0.6.2).
+            std::vector<transform> syms = {transform::identity};
+            if (r.symmetry == "horizontal") syms.push_back(transform::flip_h);
+            else if (r.symmetry == "vertical") syms.push_back(transform::flip_v);
+            else if (r.symmetry == "all")
+                syms = {transform::identity, transform::flip_h,
+                        transform::flip_v, transform::flip_both};
+
+            std::vector<transform> rots = {transform::identity};
+            for (long long a : r.rotation_angles) {
+                if (a == 90)       rots.push_back(transform::rot90);
+                else if (a == 180) rots.push_back(transform::flip_both);   // rot180
+                else if (a == 270) rots.push_back(transform::rot270);
+            }
 
             compiled_rule cr;
             cr.name = r.name;
-            cr.pairs.push_back(std::move(pair));
+            // Expand each sub-rule into its variants; dedup by LHS equality,
+            // scoped per sub-rule so same-LHS sub-rules both survive (§10.3).
+            for (int bi = 0; bi < (int)r.pairs.size(); ++bi) {
+                compiled_pair base = compile_base_pair(r.pairs[bi]);
+                base.sub_rule_idx = bi;
+                std::vector<compiled_pair> variants;
+                for (auto rk : rots)
+                    for (auto sk : syms) {
+                        compiled_pair cand = transform_pair(sk, transform_pair(rk, base));
+                        cand.sub_rule_idx = bi;
+                        bool dup = false;
+                        for (auto const& v : variants)
+                            if (pair_lhs_equal(v, cand)) { dup = true; break; }
+                        if (!dup) variants.push_back(std::move(cand));
+                    }
+                for (auto& v : variants) cr.pairs.push_back(std::move(v));
+            }
             out.rules.push_back(std::move(cr));
         }
     }

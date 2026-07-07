@@ -168,6 +168,134 @@ TEST_CASE("api: stepping matches batch generation") {
     CHECK(dump(via_steps, "algo") == dump(via_batch, "algo"));
 }
 
+// ── step 2: cross-grid rules, weighted writes, rotation ───────────────────────
+
+TEST_CASE("api: cross-grid match and body sub-rules") {
+    auto gen = make(R"(
+tag algo { S, F }
+tag geo  { wall, floor }
+layers {
+    algo:  grid of algo
+    level: grid of geo
+}
+rule plant { algo[.] => algo[S] }
+rule fill_geo { all
+    algo[S] => level[floor]
+    algo[.] => level[wall]
+}
+program {
+    resize(6, 4)
+    some(max=4) plant
+    all fill_geo
+}
+)");
+    REQUIRE(static_cast<bool>(gen));
+    ls::level lv = gen.generate(11);
+    ls::grid algo = lv["algo"], geo = lv["level"];
+    int s = gen.tag("algo.S"), floor = gen.tag("geo.floor"), wall = gen.tag("geo.wall");
+    for (int y = 0; y < lv.height(); ++y)
+        for (int x = 0; x < lv.width(); ++x)
+            CHECK(geo.at(x, y) == (algo.at(x, y) == s ? floor : wall));
+    (void)wall;
+}
+
+TEST_CASE("api: weighted any writes are deterministic per seed") {
+    auto gen = make(R"(
+tag geo { wall, floor }
+layers { level: grid of geo }
+rule mix {
+    level[.]
+    =>
+    { any
+      (weight=3) level[floor]
+      (weight=1) level[wall]
+    }
+}
+program {
+    resize(12, 8)
+    all mix
+}
+)");
+    REQUIRE(static_cast<bool>(gen));
+    ls::level a = gen.generate(5);
+    ls::level b = gen.generate(5);
+    CHECK(dump(a, "level") == dump(b, "level"));
+
+    int walls = 0, floors = 0;
+    for (int v : dump(a, "level")) {
+        if (v == gen.tag("geo.wall")) ++walls;
+        else if (v == gen.tag("geo.floor")) ++floors;
+    }
+    CHECK(walls + floors == 12 * 8);   // every cell decided
+    CHECK(floors > walls);             // 3:1 bias over 96 cells
+}
+
+TEST_CASE("api: rotation variants match reshaped patterns") {
+    // The grid is 1 wide, so the written 1x2 [S .] pattern can never fit —
+    // only its rotated 2x1 variant can. If rotation expansion works, the rule
+    // fires and writes W below the S.
+    auto gen = make(R"(
+tag algo { S, W }
+layers { algo: grid of algo }
+rule seed_top { algo[.] => algo[S] }
+rule mark(rotation=all) {
+    algo[S .]
+    =>
+    algo[S W]
+}
+program {
+    resize(1, 2)
+    one seed_top
+    one mark
+}
+)");
+    REQUIRE(static_cast<bool>(gen));
+    ls::level lv = gen.generate(3);
+    int s = gen.tag("algo.S"), w = gen.tag("algo.W");
+    // exactly one S and one W, vertically adjacent
+    int count_s = 0, count_w = 0;
+    for (int v : dump(lv, "algo")) {
+        if (v == s) ++count_s;
+        if (v == w) ++count_w;
+    }
+    CHECK(count_s == 1);
+    CHECK(count_w == 1);
+}
+
+TEST_CASE("api: all-of-any writes both layers at once") {
+    auto gen = make(R"(
+tag algo  { F }
+tag items { chest, heart }
+layers {
+    algo:  grid of algo
+    loot:  grid of items
+}
+rule pave { algo[.] => algo[F] }
+rule decorate {
+    algo[F]
+    =>
+    { all
+      algo[F]
+      { any
+        loot[chest]
+        loot[heart]
+      }
+    }
+}
+program {
+    resize(4, 4)
+    all pave
+    all decorate
+}
+)");
+    REQUIRE(static_cast<bool>(gen));
+    ls::level lv = gen.generate(9);
+    ls::grid loot = lv["loot"];
+    for (int y = 0; y < 4; ++y)
+        for (int x = 0; x < 4; ++x)
+            CHECK(loot.at(x, y) >= 0);   // every cell got chest or heart
+}
+
 TEST_CASE("api: snapshot mid-run sees committed statements only") {
     auto gen = make(scatter_src);
     auto g = gen.begin(7, ls::step_mode::statement);

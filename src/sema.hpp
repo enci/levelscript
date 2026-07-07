@@ -37,17 +37,37 @@ struct compiled_pattern {
     compiled_cell const& at(int r, int c) const { return cells[r * cols + c]; }
 };
 
-// One match-write pair. Step 1: one LHS pattern, one write leaf; the vectors
-// are the shape later steps grow into ({all} match sides, resolved write
-// leaves of a write tree).
+// Compiled recursive write term (spec §5.2). The runtime resolves a tree to
+// its applied leaves per application ({ all } = every item, { any } = one
+// weighted draw per node); footprints/conflicts use every leaf, conservative
+// across { any } branches.
+struct compiled_write_term {
+    enum class kind { leaf, all, any } what{kind::leaf};
+    int                              weight{1};
+    compiled_pattern                 pattern;   // leaf
+    std::vector<compiled_write_term> items;     // all / any
+};
+
+// Collect every leaf pattern anywhere in a write tree (the conservative write
+// footprint used by the conflict mask).
+inline void collect_write_leaves(compiled_write_term const& t,
+                                 std::vector<compiled_pattern const*>& out) {
+    if (t.what == compiled_write_term::kind::leaf) { out.push_back(&t.pattern); return; }
+    for (auto const& it : t.items) collect_write_leaves(it, out);
+}
+
+// One match-write pair, post-expansion: LHS patterns conjoined at one anchor,
+// a write tree, and the declaring sub-rule's index (the `ordered` priority
+// key, step 3).
 struct compiled_pair {
     std::vector<compiled_pattern> lhs;
-    std::vector<compiled_pattern> writes;
+    compiled_write_term           rhs;
+    int                           sub_rule_idx{0};
 };
 
 struct compiled_rule {
     std::string                name;
-    std::vector<compiled_pair> pairs;   // symmetry/rotation variants from step 2
+    std::vector<compiled_pair> pairs;   // all symmetry/rotation variants, deduped
 };
 
 // ── operations (spec §6.0) ────────────────────────────────────────────────────

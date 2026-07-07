@@ -102,12 +102,16 @@ bool machine::match_at(compiled_pair const& pair, int row, int col) const {
     return true;
 }
 
-// The write footprint is every non-wildcard write cell (spec §5.7); the mask
-// is (grid, cell)-keyed and write-only (§6.8).
+// The write footprint is every non-wildcard cell of every write-tree leaf —
+// conservative across { any } branches (spec §5.7); the mask is (grid,
+// cell)-keyed and write-only (§6.8).
 bool machine::conflicts(compiled_pair const& pair, match const& m,
                         std::unordered_set<uint64_t> const& written) const {
     if (written.empty()) return false;
-    for (auto const& pat : pair.writes) {
+    std::vector<compiled_pattern const*> leaves;
+    collect_write_leaves(pair.rhs, leaves);
+    for (auto const* pp : leaves) {
+        auto const& pat = *pp;
         if (pat.grid_id < 0) continue;
         int cols = grids_[pat.grid_id].cols;
         for (int r = 0; r < pat.rows; ++r)
@@ -120,9 +124,40 @@ bool machine::conflicts(compiled_pair const& pair, match const& m,
     return false;
 }
 
+void machine::resolve_write(compiled_write_term const& t,
+                            std::vector<compiled_pattern const*>& out) {
+    switch (t.what) {
+    case compiled_write_term::kind::leaf:
+        out.push_back(&t.pattern);
+        return;
+    case compiled_write_term::kind::all:
+        for (auto const& it : t.items) resolve_write(it, out);
+        return;
+    case compiled_write_term::kind::any: {
+        if (t.items.empty()) return;
+        int total = 0;
+        for (auto const& it : t.items) total += it.weight;
+        int chosen = 0;
+        if (total > 0) {
+            int roll = (int)std::uniform_int_distribution<int>(0, total - 1)(rng_);
+            int acc = 0;   // the node's one draw, before recursing (outer-first)
+            for (int i = 0; i < (int)t.items.size(); ++i) {
+                acc += t.items[i].weight;
+                if (roll < acc) { chosen = i; break; }
+            }
+        }
+        resolve_write(t.items[chosen], out);
+        return;
+    }
+    }
+}
+
 void machine::apply(compiled_pair const& pair, match const& m,
                     std::unordered_set<uint64_t>& written) {
-    for (auto const& pat : pair.writes) {
+    std::vector<compiled_pattern const*> writes;
+    resolve_write(pair.rhs, writes);
+    for (auto const* pp : writes) {
+        auto const& pat = *pp;
         if (pat.grid_id < 0) continue;
         grid_state& g = grids_[pat.grid_id];
         for (int r = 0; r < pat.rows; ++r)

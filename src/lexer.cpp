@@ -19,6 +19,13 @@ static token_type keyword_or_ident(std::string_view text) {
         {"program", token_type::kw_program},
         {"one", token_type::kw_one},       {"all", token_type::kw_all},
         {"some", token_type::kw_some},     {"max", token_type::kw_max},
+        {"any", token_type::kw_any},
+        {"symmetry", token_type::kw_symmetry},
+        {"rotation", token_type::kw_rotation},
+        {"weight", token_type::kw_weight},
+        {"horizontal", token_type::kw_horizontal},
+        {"vertical", token_type::kw_vertical},
+        {"none", token_type::kw_none},
     };
     auto it = keywords.find(text);
     return it == keywords.end() ? token_type::ident : it->second;

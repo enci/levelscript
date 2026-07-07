@@ -60,6 +60,11 @@ private:
                    std::unordered_set<uint64_t> const& written) const;
     void apply(compiled_pair const& pair, match const& m,
                std::unordered_set<uint64_t>& written);
+    // Resolve a write tree to its applied leaves: { all } every item, { any }
+    // one weighted draw per node, pre-order (outer before inner) so the PRNG
+    // sequence is pinned per seed (spec §10.7).
+    void resolve_write(compiled_write_term const& t,
+                       std::vector<compiled_pattern const*>& out);
 
     static uint64_t mask_key(int grid_id, int flat) {
         return ((uint64_t)grid_id << 40) | (uint64_t)flat;
