@@ -1,0 +1,7 @@
+add_executable(lsc main.cpp)
+target_link_libraries(lsc PRIVATE ls_lib)
+if(MSVC)
+    target_compile_options(lsc PRIVATE /W4)
+else()
+    target_compile_options(lsc PRIVATE -Wall -Wextra)
+endif()

@@ -1,0 +1,73 @@
+#include "ls.hpp"
+#include <chrono>
+#include <fstream>
+#include <iostream>
+#include <optional>
+#include <sstream>
+#include <string>
+
+// lsc — the LevelScript CLI. A thin client of the public API: everything it
+// does (compile, generate, read cells) a game can do the same way.
+
+static void usage(char const* argv0) {
+    std::cerr << "Usage: " << argv0 << " [--seed N] <file.ls>\n";
+}
+
+static void print_level(ls::level const& lv, std::ostream& out) {
+    for (int i = 0; i < lv.layer_count(); ++i) {
+        out << "=== " << lv.layer_name(i) << " ===\n";
+        ls::grid g = lv.layer(i);
+        for (int y = 0; y < lv.height(); ++y) {
+            for (int x = 0; x < lv.width(); ++x) {
+                int v = g.at(x, y);
+                if (v < 0)               out << '.';
+                else if (g.is_number())  out << v;
+                else                     out << g.name(v)[0];
+                if (x + 1 < lv.width()) out << ' ';
+            }
+            out << '\n';
+        }
+        out << '\n';
+    }
+}
+
+int main(int argc, char* argv[]) {
+    std::optional<uint64_t> seed;
+    std::string path;
+
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--seed" && i + 1 < argc) {
+            seed = (uint64_t)std::stoull(argv[++i]);
+        } else if (arg == "--help" || arg == "-h") {
+            usage(argv[0]);
+            return 0;
+        } else if (!arg.empty() && arg[0] != '-') {
+            path = arg;
+        } else {
+            std::cerr << "Unknown option: " << arg << '\n';
+            usage(argv[0]);
+            return 1;
+        }
+    }
+    if (path.empty()) { usage(argv[0]); return 1; }
+
+    std::ifstream ifs(path);
+    if (!ifs) {
+        std::cerr << "Error: cannot open '" << path << "'\n";
+        return 1;
+    }
+    std::ostringstream buf;
+    buf << ifs.rdbuf();
+
+    auto gen = ls::generator::compile(buf.str(), path);
+    if (!gen) {
+        std::cerr << gen.error();
+        return 1;
+    }
+
+    uint64_t s = seed.value_or((uint64_t)
+        std::chrono::high_resolution_clock::now().time_since_epoch().count());
+    print_level(gen.generate(s), std::cout);
+    return 0;
+}
