@@ -283,6 +283,7 @@ struct analyzer {
 
             compiled_rule cr;
             cr.name = r.name;
+            cr.body = r.body;
             // Expand each sub-rule into its variants; dedup by LHS equality,
             // scoped per sub-rule so same-LHS sub-rules both survive (§10.3).
             for (int bi = 0; bi < (int)r.pairs.size(); ++bi) {
@@ -301,6 +302,53 @@ struct analyzer {
                 for (auto& v : variants) cr.pairs.push_back(std::move(v));
             }
             out.rules.push_back(std::move(cr));
+        }
+    }
+
+    // ── reductivity check (LevelScript addition; MGSL §6.9 left this to the
+    //    author). A sub-rule *definitely* sustains the fixpoint when no write
+    //    that happens on every resolution ({ any } branches don't count)
+    //    overwrites one of its own LHS-constrained cells with a value that no
+    //    longer matches — the applied anchor then re-matches forever, and
+    //    `all(policy=incremental)` never terminates. Conservative: warns only
+    //    on the guaranteed case. ─────────────────────────────────────────────
+
+    static void collect_unconditional_leaves(compiled_write_term const& t,
+                                             std::vector<compiled_pattern const*>& out) {
+        if (t.what == compiled_write_term::kind::leaf) { out.push_back(&t.pattern); return; }
+        if (t.what == compiled_write_term::kind::any) return;   // may not happen
+        for (auto const& it : t.items) collect_unconditional_leaves(it, out);
+    }
+
+    void check_reductive(compiled_rule const& rule, source_loc loc) {
+        for (auto const& pair : rule.pairs) {
+            std::vector<compiled_pattern const*> writes;
+            collect_unconditional_leaves(pair.rhs, writes);
+
+            bool invalidates = false;
+            for (auto const& lp : pair.lhs) {
+                if (lp.grid_id < 0 || invalidates) continue;
+                for (int r = 0; r < lp.rows && !invalidates; ++r)
+                    for (int c = 0; c < lp.cols && !invalidates; ++c) {
+                        auto const& req = lp.at(r, c);
+                        if (req.what == compiled_cell::kind::wildcard) continue;
+                        for (auto const* wp : writes) {
+                            if (wp->grid_id != lp.grid_id) continue;
+                            auto const& w = wp->at(r, c);
+                            if (w.what == compiled_cell::kind::wildcard) continue;
+                            bool still = lp.is_number ? (w.val == req.val)
+                                                      : ((w.val & req.val) != 0);
+                            if (!still) { invalidates = true; break; }
+                        }
+                    }
+            }
+            if (!invalidates) {
+                diags.warning(file, loc.line, loc.col,
+                    "'all(policy=incremental)' over rule '" + rule.name +
+                    "' may never terminate: a sub-rule's write leaves its own "
+                    "match intact, so the fixpoint is unreachable");
+                return;
+            }
         }
     }
 
@@ -350,15 +398,34 @@ struct analyzer {
             } else {
                 cs.what = compiled_stmt::kind::apply;
                 cs.strat = s.strat;
+                cs.pol = s.pol;
+                cs.is_percent = s.is_percent;
                 cs.max_count = s.max_count;
+                cs.percent = s.percent;
                 for (int i = 0; i < (int)out.rules.size(); ++i)
                     if (out.rules[i].name == s.rule_name) { cs.rule_id = i; break; }
                 if (cs.rule_id < 0) {
                     error(s.loc, "undeclared rule '" + s.rule_name + "'");
                     continue;
                 }
-                if (s.strat == strategy::some && s.max_count == 0)
+                if (s.strat == strategy::some && !s.is_percent && s.max_count == 0)
                     error(s.loc, "'some(max=0)' applies no matches; did you mean a different strategy?");
+                // §7.3 #30: unknown policy value.
+                if (s.bad_policy)
+                    error(s.loc, "unknown policy '" + s.policy_raw +
+                          "'; expected snapshot, incremental, or stabilize");
+                // §7.3 #28: invalid count/policy combination.
+                if (s.is_percent && s.pol != exec_policy::snapshot)
+                    error(s.loc, "'percent' requires the default 'snapshot' policy");
+                if (s.strat == strategy::one && s.pol == exec_policy::stabilize)
+                    error(s.loc, "'one' with 'policy=stabilize' is contradictory "
+                          "(a single application cannot reach a sweep fixpoint)");
+                // Reductivity warning (§6.9 — LevelScript addition): an
+                // `all(policy=incremental)` fixpoint over a rule whose write
+                // never invalidates its own match cannot terminate.
+                if (s.strat == strategy::all && s.pol == exec_policy::incremental &&
+                    cs.rule_id >= 0)
+                    check_reductive(out.rules[cs.rule_id], s.loc);
             }
             out.stmts.push_back(cs);
         }

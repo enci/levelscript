@@ -86,9 +86,13 @@ struct run_state {
     sequence<step_event> seq;
     step_mode            mode;
     bool                 done{false};
+    int                  last_stmt{-1};
 
-    run_state(std::shared_ptr<compiled const> prog, uint64_t seed, step_mode md)
-        : m(std::move(prog), seed), seq(m.run()), mode(md) {}
+    run_state(std::shared_ptr<compiled const> prog, uint64_t seed, step_mode md,
+              observe obs)
+        : m(std::move(prog), seed), seq(m.run()), mode(md) {
+        m.set_observe(obs == observe::on);
+    }
 };
 }  // namespace internal
 
@@ -102,12 +106,27 @@ bool generation::step() {
     if (!s_ || s_->done) return false;
     while (s_->seq.next()) {
         auto const& e = s_->seq.value();
+        s_->last_stmt = e.stmt;
         if (s_->mode == step_mode::application ||
             e.what == step_event::kind::statement)
             return true;
     }
     s_->done = true;
     return false;
+}
+
+int generation::stmt_index() const {
+    return s_ ? s_->last_stmt : -1;
+}
+
+std::vector<cell_highlight> generation::highlights() const {
+    std::vector<cell_highlight> out;
+    if (!s_) return out;
+    for (auto const& h : s_->m.highlights())
+        out.push_back({h.grid, h.col, h.row,
+                       h.is_write ? cell_highlight::kind::write
+                                  : cell_highlight::kind::match});
+    return out;
 }
 
 level generation::snapshot() const {
@@ -137,6 +156,7 @@ generator generator::compile(const std::string& source, const std::string& name)
         }
     }
     if (!g.prog_) g.error_ = diags.format_all();
+    else if (!diags.all.empty()) g.warnings_ = diags.format_all();
     return g;
 }
 
@@ -156,9 +176,13 @@ level generator::generate(uint64_t seed) const {
     return level{m.snapshot()};
 }
 
-generation generator::begin(uint64_t seed, step_mode mode) const {
+generation generator::begin(uint64_t seed, step_mode mode, observe obs) const {
     if (!prog_) return generation{};
-    return generation{std::make_unique<internal::run_state>(prog_, seed, mode)};
+    return generation{std::make_unique<internal::run_state>(prog_, seed, mode, obs)};
+}
+
+int generator::statement_count() const {
+    return prog_ ? (int)prog_->stmts.size() : 0;
 }
 
 }  // namespace ls

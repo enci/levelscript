@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 // LevelScript embedding API — what a game sees.
 //
@@ -74,6 +75,16 @@ private:
 // ── generation — one in-flight progressive run ──────────────────────────────
 
 enum class step_mode { statement, application };
+enum class observe   { off, on };
+
+/// One highlighted cell of the observe channel: which layer/cell the last
+/// application matched (kind::match) or wrote (kind::write).
+struct cell_highlight {
+    enum class kind { match, write };
+    int  layer;
+    int  x, y;
+    kind what;
+};
 
 class generation {
 public:
@@ -84,10 +95,17 @@ public:
 
     /// Advance by the granularity fixed at begin(); false when done.
     bool step();
-    /// Copy of the current state (between-statements view during a batch).
+    /// Copy of the current state — mid-batch, committed statements plus this
+    /// batch's applications so far.
     level snapshot() const;
     /// Drain whatever remains and return the finished level ("skip" path).
     level finish();
+
+    // ── observe channel (populated only when begun with observe::on) ──
+    /// Index of the statement the last step worked on (-1 before first step).
+    int stmt_index() const;
+    /// Matched/written cells of the last application.
+    std::vector<cell_highlight> highlights() const;
 
 private:
     friend class generator;
@@ -110,6 +128,9 @@ public:
     explicit operator bool() const { return prog_ != nullptr; }
     /// Formatted diagnostics when compile failed; "" when it succeeded.
     std::string error() const { return error_; }
+    /// Formatted warnings of a successful compile (e.g. a fixpoint statement
+    /// over a rule that can never terminate); "" when there are none.
+    std::string warnings() const { return warnings_; }
 
     /// Tag value id, qualified by tagset: tag("geo.wall"). Ids are per
     /// tagset, valid for every layer of that tagset. -1 if unknown.
@@ -119,11 +140,16 @@ public:
     level generate(uint64_t seed) const;
 
     /// Start a progressive run; pull it with generation::step().
-    generation begin(uint64_t seed, step_mode mode = step_mode::statement) const;
+    generation begin(uint64_t seed, step_mode mode = step_mode::statement,
+                     observe obs = observe::off) const;
+
+    /// Number of program statements (progress denominators).
+    int statement_count() const;
 
 private:
     std::shared_ptr<compiled const> prog_;
     std::string                     error_;
+    std::string                     warnings_;
 };
 
 }  // namespace ls

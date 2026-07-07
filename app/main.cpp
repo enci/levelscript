@@ -65,6 +65,7 @@ int main(int argc, char* argv[]) {
         std::cerr << gen.error();
         return 1;
     }
+    if (!gen.warnings().empty()) std::cerr << gen.warnings();
 
     uint64_t s = seed.value_or((uint64_t)
         std::chrono::high_resolution_clock::now().time_since_epoch().count());

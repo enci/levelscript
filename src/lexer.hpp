@@ -10,9 +10,10 @@ enum class token_type {
     ident, integer, newline, end, bad,
     // keywords
     kw_tag, kw_layers, kw_grid, kw_of, kw_number, kw_rule, kw_program,
-    kw_one, kw_all, kw_some, kw_max, kw_any,
+    kw_one, kw_all, kw_some, kw_max, kw_any, kw_ordered,
     kw_symmetry, kw_rotation, kw_weight,
     kw_horizontal, kw_vertical, kw_none,
+    kw_policy, kw_snapshot, kw_incremental, kw_stabilize, kw_percent,
     // punctuation
     lbrace, rbrace, lbracket, rbracket, lparen, rparen,
     comma, colon, equals, arrow, star, dot,

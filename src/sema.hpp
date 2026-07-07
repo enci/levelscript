@@ -67,6 +67,7 @@ struct compiled_pair {
 
 struct compiled_rule {
     std::string                name;
+    body_combinator            body{body_combinator::none};   // `ordered` matters at runtime
     std::vector<compiled_pair> pairs;   // all symmetry/rotation variants, deduped
 };
 
@@ -84,8 +85,11 @@ struct compiled_op {
 struct compiled_stmt {
     enum class kind { op_call, apply } what{kind::apply};
     compiled_op op;                       // op_call
-    strategy    strat{strategy::all};     // apply (snapshot policy, step 1)
+    strategy    strat{strategy::all};     // apply — count × policy (§6.7)
+    exec_policy pol{exec_policy::snapshot};
+    bool        is_percent{false};
     int         max_count{0};
+    int         percent{0};
     int         rule_id{-1};
 };
 

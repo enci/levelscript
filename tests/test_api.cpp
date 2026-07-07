@@ -296,6 +296,217 @@ program {
             CHECK(loot.at(x, y) >= 0);   // every cell got chest or heart
 }
 
+// ── step 3: policies, percent, ordered, observe ───────────────────────────────
+
+static int count_val(ls::level const& lv, char const* layer, int val) {
+    int n = 0;
+    for (int v : dump(lv, layer))
+        if (v == val) ++n;
+    return n;
+}
+
+static const std::string grow_src = R"(
+tag algo { S }
+layers { algo: grid of algo }
+rule plant { algo[.] => algo[S] }
+rule grow(rotation=all) {
+    algo[S .]
+    =>
+    algo[* S]
+}
+program {
+    resize(9, 9)
+    one plant
+    some(max=20, policy=incremental) grow
+}
+)";
+
+TEST_CASE("api: incremental sees prior writes; snapshot does not") {
+    // From one seed, 20 incremental growth steps add exactly 20 cells —
+    // each step re-collects, so growth feeds on its own writes.
+    auto inc = make(grow_src);
+    REQUIRE(static_cast<bool>(inc));
+    ls::level lv = inc.generate(4);
+    CHECK(count_val(lv, "algo", inc.tag("algo.S")) == 21);
+
+    // The same rule under (default) snapshot can only fill the frozen
+    // snapshot's neighbourhood: at most the seed's 4 neighbours.
+    std::string snap_src = grow_src;
+    auto pos = snap_src.find(", policy=incremental");
+    snap_src.erase(pos, std::string(", policy=incremental").size());
+    auto snap = make(snap_src);
+    REQUIRE(static_cast<bool>(snap));
+    ls::level sv = snap.generate(4);
+    CHECK(count_val(sv, "algo", snap.tag("algo.S")) <= 5);
+}
+
+TEST_CASE("api: all(policy=incremental) runs to the fixpoint") {
+    auto gen = make(R"(
+tag geo { floor }
+layers { level: grid of geo }
+rule fill { level[.] => level[floor] }
+program {
+    resize(6, 5)
+    all(policy=incremental) fill
+}
+)");
+    REQUIRE(static_cast<bool>(gen));
+    ls::level lv = gen.generate(2);
+    CHECK(count_val(lv, "level", gen.tag("geo.floor")) == 30);
+}
+
+TEST_CASE("api: stabilize sweeps to a fixpoint") {
+    // One seed floods the whole grid: each sweep advances the frontier one
+    // ring; stabilize re-sweeps until nothing changes.
+    auto gen = make(R"(
+tag algo { S }
+layers { algo: grid of algo }
+rule plant { algo[.] => algo[S] }
+rule flood(rotation=all) {
+    algo[S .]
+    =>
+    algo[* S]
+}
+program {
+    resize(7, 7)
+    one plant
+    all(policy=stabilize) flood
+}
+)");
+    REQUIRE(static_cast<bool>(gen));
+    ls::level lv = gen.generate(3);
+    CHECK(count_val(lv, "algo", gen.tag("algo.S")) == 49);
+}
+
+TEST_CASE("api: some(max=N, policy=stabilize) counts sweeps") {
+    // Two sweeps from a corner seed reach cells within Manhattan distance 2.
+    auto gen = make(R"(
+tag algo { S }
+layers { algo: grid of algo }
+rule plant { algo[.] => algo[S] }
+rule flood(rotation=all) {
+    algo[S .]
+    =>
+    algo[* S]
+}
+program {
+    resize(9, 9)
+    one plant
+    some(max=2, policy=stabilize) flood
+}
+)");
+    REQUIRE(static_cast<bool>(gen));
+    int s = gen.tag("algo.S");
+    int n = count_val(gen.generate(3), "algo", s);
+    CHECK(n >= 6);    // a 2-ring diamond, clipped by edges: 6..13 cells
+    CHECK(n <= 13);
+}
+
+TEST_CASE("api: some(percent=P) applies the exact fraction of the applied set") {
+    auto src = [](int pct) {
+        return "tag geo { floor }\n"
+               "layers { level: grid of geo }\n"
+               "rule paint { level[.] => level[floor] }\n"
+               "program {\n    resize(10, 10)\n    some(percent=" +
+               std::to_string(pct) + ") paint\n}\n";
+    };
+    auto half = make(src(50));
+    REQUIRE(static_cast<bool>(half));
+    CHECK(count_val(half.generate(1), "level", half.tag("geo.floor")) == 50);
+
+    auto none = make(src(0));
+    CHECK(count_val(none.generate(1), "level", none.tag("geo.floor")) == 0);
+
+    auto full = make(src(100));
+    CHECK(count_val(full.generate(1), "level", full.tag("geo.floor")) == 100);
+}
+
+TEST_CASE("api: ordered claims in priority order under snapshot") {
+    // Both sub-rules match every empty cell; under `ordered`, the wall
+    // sub-rule claims every cell first, so floor never applies.
+    auto gen = make(R"(
+tag geo { wall, floor }
+layers { level: grid of geo }
+rule paint { ordered
+    level[.] => level[wall]
+    level[.] => level[floor]
+}
+program {
+    resize(6, 6)
+    all paint
+}
+)");
+    REQUIRE(static_cast<bool>(gen));
+    ls::level lv = gen.generate(8);
+    CHECK(count_val(lv, "level", gen.tag("geo.wall")) == 36);
+    CHECK(count_val(lv, "level", gen.tag("geo.floor")) == 0);
+}
+
+TEST_CASE("api: ordered is preemptive under incremental") {
+    // Priority: convert A to B while any A exists, else plant an A. The
+    // fixpoint is all B — and at no point can two As coexist.
+    auto gen = make(R"(
+tag t { A, B }
+layers { g: grid of t }
+rule tick { ordered
+    g[A] => g[B]
+    g[.] => g[A]
+}
+program {
+    resize(3, 3)
+    all(policy=incremental) tick
+}
+)");
+    REQUIRE(static_cast<bool>(gen));
+    ls::level lv = gen.generate(6);
+    CHECK(count_val(lv, "g", gen.tag("t.B")) == 9);
+    CHECK(count_val(lv, "g", gen.tag("t.A")) == 0);
+}
+
+TEST_CASE("api: observe channel reports highlights and statement index") {
+    auto gen = make(fill_src);
+    auto g = gen.begin(42, ls::step_mode::application, ls::observe::on);
+    CHECK(gen.statement_count() == 2);
+    CHECK(g.stmt_index() == -1);
+
+    REQUIRE(g.step());               // resize (statement boundary, no highlights)
+    CHECK(g.stmt_index() == 0);
+
+    REQUIRE(g.step());               // first fill application
+    CHECK(g.stmt_index() == 1);
+    auto hl = g.highlights();
+    REQUIRE(!hl.empty());
+    bool has_match = false, has_write = false;
+    for (auto const& h : hl) {
+        if (h.what == ls::cell_highlight::kind::match) has_match = true;
+        if (h.what == ls::cell_highlight::kind::write) has_write = true;
+        CHECK(h.layer == 0);
+        CHECK(h.x >= 0); CHECK(h.x < 8);
+        CHECK(h.y >= 0); CHECK(h.y < 4);
+    }
+    CHECK(has_match);
+    CHECK(has_write);
+    g.finish();
+
+    // observe off: no highlights recorded
+    auto g2 = gen.begin(42, ls::step_mode::application);
+    g2.step(); g2.step();
+    CHECK(g2.highlights().empty());
+}
+
+TEST_CASE("api: mid-batch snapshot shows the accumulating writes") {
+    auto gen = make(fill_src);   // 8x4 all-fill = 32 applications
+    auto g = gen.begin(42, ls::step_mode::application);
+    REQUIRE(g.step());   // resize done
+    int floor = gen.tag("geo.floor");
+    for (int k = 1; k <= 3; ++k) {
+        REQUIRE(g.step());
+        CHECK(count_val(g.snapshot(), "level", floor) == k);
+    }
+    ls::level done = g.finish();
+    CHECK(count_val(done, "level", floor) == 32);
+}
+
 TEST_CASE("api: snapshot mid-run sees committed statements only") {
     auto gen = make(scatter_src);
     auto g = gen.begin(7, ls::step_mode::statement);

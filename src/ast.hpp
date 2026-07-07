@@ -63,7 +63,7 @@ struct rule_pair {
     write_term           rhs;
 };
 
-enum class body_combinator { none, all, any };
+enum class body_combinator { none, all, any, ordered };
 
 struct rule_decl {
     source_loc             loc;
@@ -78,6 +78,10 @@ struct rule_decl {
 
 enum class strategy { one, some, all };
 
+// Execution policy (spec §6.7): what each application sees and how conflicts
+// are handled. Orthogonal to the count.
+enum class exec_policy { snapshot, incremental, stabilize };
+
 struct op_arg {                 // step 1: integer arguments only
     source_loc loc;
     long long  int_val{0};
@@ -89,9 +93,14 @@ struct program_stmt {
     // op_call — resolved against the operation table in sema
     std::string         op_name;
     std::vector<op_arg> op_args;
-    // apply — count under the (implicit, step 1) snapshot policy
+    // apply — count × policy (§6.7)
     strategy    strat{strategy::all};
-    int         max_count{0};   // some(max=N)
+    exec_policy pol{exec_policy::snapshot};
+    bool        bad_policy{false};    // policy= had an unknown value (§7.3 #30)
+    std::string policy_raw;           // its raw text, for the diagnostic
+    bool        is_percent{false};    // some(percent=P) instead of max
+    int         max_count{0};
+    int         percent{0};
     std::string rule_name;
 };
 

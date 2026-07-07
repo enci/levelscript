@@ -212,6 +212,61 @@ program { }
     CHECK(r.prog.rules[0].pairs[1].sub_rule_idx == 1);
 }
 
+// ── step 3: count × policy validity, reductivity ──────────────────────────────
+
+static const std::string rfill =
+    "rule fill { level[.] => level[floor] }\n";
+
+TEST_CASE("sema: count/policy combinations") {
+    CHECK(compile_result(prelude + rfill + "program { all(policy=ranked) fill }")
+          .has_error("unknown policy 'ranked'"));
+    CHECK(compile_result(prelude + rfill +
+          "program { some(percent=50, policy=incremental) fill }")
+          .has_error("'percent' requires the default 'snapshot' policy"));
+    CHECK(compile_result(prelude + rfill + "program { one(policy=stabilize) fill }")
+          .has_error("contradictory"));
+    compile_result ok(prelude + rfill + R"(
+program {
+    resize(4, 4)
+    some(max=3, policy=stabilize) fill
+    all(policy=incremental) fill
+}
+)");
+    INFO(ok.diags.format_all());
+    CHECK(ok.ok);
+}
+
+static bool has_warning(compile_result const& r, std::string const& needle) {
+    for (auto const& d : r.diags.all)
+        if (!d.is_error && d.message.find(needle) != std::string::npos)
+            return true;
+    return false;
+}
+
+TEST_CASE("sema: reductivity warning for a self-sustaining fixpoint") {
+    // The write never touches the matched cell — the anchor re-matches forever.
+    compile_result bad(prelude + R"(
+rule mark { level[floor] => tiles[1] }
+program { all(policy=incremental) mark }
+)");
+    REQUIRE(bad.ok);   // a warning, not an error
+    CHECK(has_warning(bad, "may never terminate"));
+
+    // The write invalidates its own match — reductive, no warning.
+    compile_result good(prelude + rfill +
+        "program { all(policy=incremental) fill }");
+    REQUIRE(good.ok);
+    CHECK(!has_warning(good, "may never terminate"));
+
+    // Bounded counts never warn, even for the self-sustaining rule.
+    compile_result bounded(prelude + R"(
+rule mark { level[floor] => tiles[1] }
+program { some(max=5, policy=incremental) mark }
+)");
+    REQUIRE(bounded.ok);
+    CHECK(!has_warning(bounded, "may never terminate"));
+}
+
 TEST_CASE("sema: tagset over the 30-value cap") {
     std::string big = "tag t { ";
     for (int i = 0; i < 31; ++i) big += "v" + std::to_string(i) + ", ";

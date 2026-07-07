@@ -214,3 +214,51 @@ rule fill_geo { all
 TEST_CASE("parser: single sub-rule under a body combinator is an error") {
     CHECK(parse_fails("rule r { all\n g[.] => g[x]\n}"));
 }
+
+// ── step 3: policies, percent, ordered ────────────────────────────────────────
+
+TEST_CASE("parser: policy arguments") {
+    auto ast = parse_ok(R"(
+program {
+    all fill
+    all(policy=stabilize) smooth
+    one(policy=incremental) start
+    some(max=200, policy=incremental) walk
+    some(percent=50) carve
+}
+)");
+    auto const& s = ast.program.stmts;
+    REQUIRE(s.size() == 5);
+    CHECK(s[0].pol == exec_policy::snapshot);   // default
+    CHECK(s[1].pol == exec_policy::stabilize);
+    CHECK(s[2].pol == exec_policy::incremental);
+    CHECK(s[3].pol == exec_policy::incremental);
+    CHECK(s[3].max_count == 200);
+    CHECK(s[4].is_percent);
+    CHECK(s[4].percent == 50);
+    CHECK(s[4].pol == exec_policy::snapshot);
+}
+
+TEST_CASE("parser: unknown policy is recorded for sema") {
+    diagnostics diags;
+    auto ast = parse("program { all(policy=ranked) r }", "test", diags);
+    REQUIRE(ast.has_value());
+    CHECK(!diags.has_errors());   // parse accepts; sema rejects (#30)
+    CHECK(ast->program.stmts[0].bad_policy);
+    CHECK(ast->program.stmts[0].policy_raw == "ranked");
+}
+
+TEST_CASE("parser: ordered body combinator") {
+    auto ast = parse_ok(R"(
+rule grow { ordered
+    g[a] => g[b]
+    g[.] => g[a]
+}
+)");
+    CHECK(ast.rules[0].body == body_combinator::ordered);
+}
+
+TEST_CASE("parser: ordered on a match or write side is an error") {
+    CHECK(parse_fails("rule r { { ordered g[a] h[b] } => g[c] }"));
+    CHECK(parse_fails("rule r { g[.] => { ordered g[a] g[b] } }"));
+}

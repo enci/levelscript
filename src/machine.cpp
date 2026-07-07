@@ -10,41 +10,166 @@ machine::machine(std::shared_ptr<compiled const> prog, uint64_t seed)
         grids_[i].is_number = prog_->layers[i].tag_id < 0;
 }
 
-// The one execution core. Statements run top to bottom; an apply statement is
-// a snapshot batch (spec §6.7, step 1: snapshot policy only): collect against
-// the front buffer, seeded-shuffle, apply non-conflicting matches to the back
-// buffer under the write mask (§6.8), swap. Yields after every application
-// and after every completed statement — pullers filter to their granularity.
+// The one execution core (spec §6.7). Statements run top to bottom; the
+// count × policy algebra lives here and only here — batch generate(),
+// progressive stepping, and observation all pull this coroutine.
+//
+//   snapshot    — one frozen pass: collect, seeded-shuffle (+ `ordered`
+//                 priority sort), apply non-conflicting matches to the back
+//                 buffer under the write mask (§6.8), swap. `percent` first
+//                 sizes the applied set a full pass would make (§6.7) and
+//                 keeps its prefix.
+//   incremental — re-collect each application; each sees all prior writes.
+//                 No mask. `all` runs to the fixpoint.
+//   stabilize   — iterated snapshot sweeps until one changes nothing; the
+//                 count unit is a sweep.
+//
+// Yields after every application and every completed statement — pullers
+// filter to their granularity.
 sequence<step_event> machine::run() {
     for (int si = 0; si < (int)prog_->stmts.size(); ++si) {
         auto const& st = prog_->stmts[si];
 
         if (st.what == compiled_stmt::kind::op_call) {
             exec_op(st.op);
-        } else {
+        } else if (st.pol == exec_policy::incremental) {
             auto const& rule = prog_->rules[st.rule_id];
             int cap = st.strat == strategy::one  ? 1
                     : st.strat == strategy::some ? st.max_count
-                    : -1;   // all
-
-            auto matches = collect(rule);
-            std::shuffle(matches.begin(), matches.end(), rng_);
-
-            for (auto& g : grids_) g.back = g.front;
-            std::unordered_set<uint64_t> written;
+                    : -1;   // all = fixpoint
             int applied = 0;
-            for (auto const& m : matches) {
-                if (cap >= 0 && applied >= cap) break;
+            while (cap < 0 || applied < cap) {
+                auto ms = collect(rule);
+                if (ms.empty()) break;
+                match m = pick_candidate(rule, ms);
                 auto const& pair = rule.pairs[m.pair];
-                if (conflicts(pair, m, written)) continue;
+                for (auto& g : grids_) g.back = g.front;
+                std::unordered_set<uint64_t> written;
+                record_highlights(pair, m);
                 apply(pair, m, written);
+                for (auto& g : grids_) std::swap(g.front, g.back);
                 ++applied;
                 co_yield step_event{step_event::kind::application, si};
             }
-            for (auto& g : grids_) std::swap(g.front, g.back);
+        } else {
+            // Batch family: snapshot = one sweep; stabilize = sweeps to a
+            // fixpoint (or the sweep cap).
+            auto const& rule = prog_->rules[st.rule_id];
+            bool stab = st.pol == exec_policy::stabilize;
+            int sweep_cap = stab ? (st.strat == strategy::all ? -1 : st.max_count) : 1;
+            int cap = (stab || st.is_percent) ? -1
+                    : st.strat == strategy::one  ? 1
+                    : st.strat == strategy::some ? st.max_count
+                    : -1;
+            int sweeps = 0;
+            while (sweep_cap < 0 || sweeps < sweep_cap) {
+                auto ms = collect(rule);
+                order_candidates(rule, ms);
+                if (st.is_percent)
+                    ms = applicable_prefix(rule, ms, st.percent);
+
+                for (auto& g : grids_) g.back = g.front;
+                std::unordered_set<uint64_t> written;
+                int applied = 0;
+                in_batch_ = true;
+                for (auto const& m : ms) {
+                    if (cap >= 0 && applied >= cap) break;
+                    auto const& pair = rule.pairs[m.pair];
+                    if (conflicts(pair, m, written)) continue;
+                    record_highlights(pair, m);
+                    apply(pair, m, written);
+                    ++applied;
+                    co_yield step_event{step_event::kind::application, si};
+                }
+                in_batch_ = false;
+                bool changed = grids_differ();
+                for (auto& g : grids_) std::swap(g.front, g.back);
+                ++sweeps;
+                if (!stab || !changed) break;
+            }
         }
 
         co_yield step_event{step_event::kind::statement, si};
+    }
+}
+
+void machine::order_candidates(compiled_rule const& rule, std::vector<match>& ms) {
+    std::shuffle(ms.begin(), ms.end(), rng_);
+    if (rule.body == body_combinator::ordered)
+        std::stable_sort(ms.begin(), ms.end(), [&rule](match const& a, match const& b) {
+            return rule.pairs[a.pair].sub_rule_idx < rule.pairs[b.pair].sub_rule_idx;
+        });
+}
+
+machine::match machine::pick_candidate(compiled_rule const& rule,
+                                       std::vector<match> const& ms) {
+    if (rule.body == body_combinator::ordered) {
+        int best = rule.pairs[ms[0].pair].sub_rule_idx;
+        for (auto const& m : ms)
+            best = std::min(best, rule.pairs[m.pair].sub_rule_idx);
+        std::vector<match> pool;
+        for (auto const& m : ms)
+            if (rule.pairs[m.pair].sub_rule_idx == best) pool.push_back(m);
+        return pool[std::uniform_int_distribution<size_t>(0, pool.size() - 1)(rng_)];
+    }
+    return ms[std::uniform_int_distribution<size_t>(0, ms.size() - 1)(rng_)];
+}
+
+std::vector<machine::match> machine::applicable_prefix(
+        compiled_rule const& rule, std::vector<match> const& ordered_ms,
+        int pct) const {
+    std::vector<match> app;
+    std::unordered_set<uint64_t> sim;
+    for (auto const& m : ordered_ms) {
+        auto const& pair = rule.pairs[m.pair];
+        if (conflicts(pair, m, sim)) continue;
+        app.push_back(m);
+        add_write_footprint(pair, m, sim);
+    }
+    int want = (int)((long long)pct * (long long)app.size() / 100);
+    if ((int)app.size() > want) app.resize(want);
+    return app;
+}
+
+void machine::add_write_footprint(compiled_pair const& pair, match const& m,
+                                  std::unordered_set<uint64_t>& out) const {
+    std::vector<compiled_pattern const*> leaves;
+    collect_write_leaves(pair.rhs, leaves);
+    for (auto const* pp : leaves) {
+        auto const& pat = *pp;
+        if (pat.grid_id < 0) continue;
+        int cols = grids_[pat.grid_id].cols;
+        for (int r = 0; r < pat.rows; ++r)
+            for (int c = 0; c < pat.cols; ++c) {
+                if (pat.at(r, c).what == compiled_cell::kind::wildcard) continue;
+                out.insert(mask_key(pat.grid_id, (m.row + r) * cols + (m.col + c)));
+            }
+    }
+}
+
+bool machine::grids_differ() const {
+    for (auto const& g : grids_)
+        if (g.front != g.back) return true;
+    return false;
+}
+
+// Matched cells (full LHS rects) + possible write cells (all leaves).
+void machine::record_highlights(compiled_pair const& pair, match const& m) {
+    if (!observe_) return;
+    highlights_.clear();
+    for (auto const& pat : pair.lhs) {
+        if (pat.grid_id < 0) continue;
+        for (int r = 0; r < pat.rows; ++r)
+            for (int c = 0; c < pat.cols; ++c)
+                highlights_.push_back({pat.grid_id, m.row + r, m.col + c, false});
+    }
+    std::vector<compiled_pattern const*> leaves;
+    collect_write_leaves(pair.rhs, leaves);
+    for (auto const* pp : leaves) {
+        if (pp->grid_id < 0) continue;
+        for (int r = 0; r < pp->rows; ++r)
+            for (int c = 0; c < pp->cols; ++c)
+                highlights_.push_back({pp->grid_id, m.row + r, m.col + c, true});
     }
 }
 
@@ -178,8 +303,11 @@ std::shared_ptr<level_data const> machine::snapshot() const {
         d->width  = grids_[0].cols;
         d->height = grids_[0].rows;
     }
+    // Mid-batch the back buffer is the visible state: committed statements
+    // plus this batch's applications so far.
     for (int i = 0; i < (int)grids_.size(); ++i)
-        d->layers.push_back({prog_->layers[i].tag_id, grids_[i].front});
+        d->layers.push_back({prog_->layers[i].tag_id,
+                             in_batch_ ? grids_[i].back : grids_[i].front});
     return d;
 }
 

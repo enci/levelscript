@@ -173,8 +173,9 @@ struct parser {
         if (at(token_type::lbrace)) {
             source_loc bl = loc();
             eat();   // '{'
-            if (accept(token_type::kw_any)) {
-                error_at(toks[pos - 1], "'{ any }' is not supported on the match side");
+            if (at(token_type::kw_any) || at(token_type::kw_ordered)) {
+                error_at(peek(), "'{ " + peek().text +
+                         " }' is not supported on the match side");
                 recover_to(token_type::rbrace);
                 return false;
             }
@@ -230,7 +231,11 @@ struct parser {
         if (accept(token_type::kw_all))      is_any = false;
         else if (accept(token_type::kw_any)) is_any = true;
         else {
-            error_at(peek(), "expected 'all' or 'any' after '{' on the write side");
+            if (at(token_type::kw_ordered))   // 'ordered' is body-level only (§7.3 #29)
+                error_at(peek(), "'ordered' is a body-level combinator; it cannot "
+                         "appear on the write side");
+            else
+                error_at(peek(), "expected 'all' or 'any' after '{' on the write side");
             recover_to(token_type::rbrace);
             return false;
         }
@@ -273,10 +278,13 @@ struct parser {
         skip_newlines();
 
         // Body-level combinator: `rule r { all pair pair … }` — multiple
-        // independent sub-rules. A single-pair body has no combinator.
-        if (at(token_type::kw_all) || at(token_type::kw_any)) {
-            r.body = at(token_type::kw_all) ? body_combinator::all
-                                            : body_combinator::any;
+        // independent sub-rules; `ordered` makes declaration order a priority
+        // (spec §5.2). A single-pair body has no combinator.
+        if (at(token_type::kw_all) || at(token_type::kw_any) ||
+            at(token_type::kw_ordered)) {
+            r.body = at(token_type::kw_all)     ? body_combinator::all
+                   : at(token_type::kw_ordered) ? body_combinator::ordered
+                                                : body_combinator::any;
             source_loc bl = loc();
             eat();
             skip_newlines();
@@ -301,17 +309,52 @@ struct parser {
 
     // ── program ──────────────────────────────────────────────────────────────
 
+    // policy = snapshot | incremental | stabilize; an unknown value is
+    // recorded raw and rejected in sema (§7.3 #30).
+    void parse_policy_arg(program_stmt& s) {
+        eat();   // 'policy'
+        if (!expect(token_type::equals, "'='")) return;
+        if (accept(token_type::kw_snapshot))         s.pol = exec_policy::snapshot;
+        else if (accept(token_type::kw_incremental)) s.pol = exec_policy::incremental;
+        else if (accept(token_type::kw_stabilize))   s.pol = exec_policy::stabilize;
+        else {
+            s.bad_policy = true;
+            s.policy_raw = peek().text;
+            eat_bad();
+        }
+    }
+
     void parse_apply(program_stmt& s) {
-        if (accept(token_type::kw_one))      s.strat = strategy::one;
-        else if (accept(token_type::kw_all)) s.strat = strategy::all;
-        else {   // 'some'
+        if (at(token_type::kw_one) || at(token_type::kw_all)) {
+            s.strat = at(token_type::kw_one) ? strategy::one : strategy::all;
+            eat();
+            if (accept(token_type::lparen)) {   // one/all take only a policy
+                if (at(token_type::kw_policy)) parse_policy_arg(s);
+                else { error_at(peek(), "expected 'policy=' here"); eat_bad(); }
+                expect(token_type::rparen, "')'");
+            }
+        } else {   // 'some' '(' max=N | percent=P (',' policy=…)? ')'
             eat();
             s.strat = strategy::some;
             if (!expect(token_type::lparen, "'('")) return;
-            if (!expect(token_type::kw_max, "'max'")) return;
-            if (!expect(token_type::equals, "'='")) return;
-            if (!expect(token_type::integer, "a count")) return;
-            s.max_count = (int)toks[pos - 1].int_val;
+            if (accept(token_type::kw_max)) {
+                if (!expect(token_type::equals, "'='")) return;
+                if (!expect(token_type::integer, "a count")) return;
+                s.max_count = (int)toks[pos - 1].int_val;
+            } else if (accept(token_type::kw_percent)) {
+                s.is_percent = true;
+                if (!expect(token_type::equals, "'='")) return;
+                if (!expect(token_type::integer, "a percentage")) return;
+                s.percent = (int)toks[pos - 1].int_val;
+            } else {
+                error_at(peek(), "expected 'max=' or 'percent='");
+                recover_to(token_type::rparen);
+                return;
+            }
+            if (accept(token_type::comma)) {
+                if (at(token_type::kw_policy)) parse_policy_arg(s);
+                else { error_at(peek(), "expected 'policy=' here"); eat_bad(); }
+            }
             if (!expect(token_type::rparen, "')'")) return;
         }
         if (expect(token_type::ident, "a rule name"))
@@ -342,7 +385,8 @@ struct parser {
         while (!at(token_type::rbrace) && !at_end()) {
             program_stmt s;
             s.loc = loc();
-            if (at(token_type::kw_one) || at(token_type::kw_all) || at(token_type::kw_some)) {
+            if (at(token_type::kw_one) || at(token_type::kw_all) ||
+                at(token_type::kw_some)) {
                 parse_apply(s);
             } else if (at(token_type::ident) && peek(1).is(token_type::lparen)) {
                 parse_op_call(s);
