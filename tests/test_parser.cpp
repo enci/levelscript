@@ -9,7 +9,7 @@ static ast_file parse_ok(std::string const& src) {
     INFO(diags.format_all());
     REQUIRE(ast.has_value());
     REQUIRE(!diags.has_errors());
-    return *ast;
+    return std::move(*ast);
 }
 
 static bool parse_fails(std::string const& src) {
@@ -76,8 +76,8 @@ rule r {
     auto const& lhs = ast.rules[0].pairs[0].lhs[0];
     CHECK(lhs.rows == 3);
     CHECK(lhs.cols == 3);
-    CHECK(lhs.cells[1][1].kind == cell_kind::tag);
-    CHECK(lhs.cells[1][1].tag == "wall");
+    CHECK(lhs.cells[1][1].kind == cell_kind::tag_mask);
+    CHECK(lhs.cells[1][1].atoms[0].name == "wall");
     CHECK(lhs.cells[0][0].kind == cell_kind::any);
 }
 
@@ -89,7 +89,7 @@ TEST_CASE("parser: cell kinds") {
     CHECK(row[1].kind == cell_kind::empty);
     CHECK(row[2].kind == cell_kind::number);
     CHECK(row[2].number == 3);
-    CHECK(row[3].kind == cell_kind::tag);
+    CHECK(row[3].kind == cell_kind::tag_mask);
 }
 
 TEST_CASE("parser: missing arrow is an error") {
@@ -177,9 +177,10 @@ TEST_CASE("parser: { any } on the match side is an error") {
     CHECK(parse_fails("rule r { { any g[a] h[b] } => g[c] }"));
 }
 
-TEST_CASE("parser: single-item combinator block is an error") {
-    CHECK(parse_fails("rule r { g[.] => { any g[a] } }"));
-    CHECK(parse_fails("rule r { { all g[a] } => g[b] }"));
+TEST_CASE("parser: single-item combinator blocks are allowed") {
+    auto ast = parse_ok("rule r { { all g[a] } => { any g[b] } }");
+    CHECK(ast.rules[0].pairs[0].lhs.size() == 1);
+    CHECK(ast.rules[0].pairs[0].rhs.items.size() == 1);
 }
 
 TEST_CASE("parser: rule attributes") {
@@ -208,11 +209,12 @@ rule fill_geo { all
     REQUIRE(ast.rules.size() == 1);
     CHECK(ast.rules[0].body == body_combinator::all);
     REQUIRE(ast.rules[0].pairs.size() == 3);
-    CHECK(ast.rules[0].pairs[2].lhs[0].cells[0][0].tag == "S");
+    CHECK(ast.rules[0].pairs[2].lhs[0].cells[0][0].atoms[0].name == "S");
 }
 
-TEST_CASE("parser: single sub-rule under a body combinator is an error") {
-    CHECK(parse_fails("rule r { all\n g[.] => g[x]\n}"));
+TEST_CASE("parser: a single sub-rule under a body combinator is allowed") {
+    auto ast = parse_ok("rule r { all\n g[.] => g[x]\n}");
+    CHECK(ast.rules[0].pairs.size() == 1);
 }
 
 // ── step 3: policies, percent, ordered ────────────────────────────────────────
@@ -261,4 +263,88 @@ rule grow { ordered
 TEST_CASE("parser: ordered on a match or write side is an error") {
     CHECK(parse_fails("rule r { { ordered g[a] h[b] } => g[c] }"));
     CHECK(parse_fails("rule r { g[.] => { ordered g[a] g[b] } }"));
+}
+
+// ── step 4: expressions, mask cells, where, params, when ─────────────────────
+
+TEST_CASE("parser: mask cells — unions and complements are whitespace-free") {
+    auto ast = parse_ok("rule r { g[wall|door !wall] => g[floor floor] }");
+    auto const& row = ast.rules[0].pairs[0].lhs[0].cells[0];
+    REQUIRE(row.size() == 2);
+    REQUIRE(row[0].atoms.size() == 2);
+    CHECK(row[0].atoms[0].name == "wall");
+    CHECK(row[0].atoms[1].name == "door");
+    CHECK(row[1].atoms[0].negate);
+    // spaced 'a | b' is NOT one cell — it fails to parse as cells
+    CHECK(parse_fails("rule r { g[wall | door] => g[floor] }"));
+}
+
+TEST_CASE("parser: expression cells and precedence") {
+    auto ast = parse_ok("rule r { g[ (tiles + 2 * 3 > 7) ] => g[ (if(d > 1, wall, floor)) ] }");
+    auto const& c = ast.rules[0].pairs[0].lhs[0].cells[0][0];
+    REQUIRE(c.kind == cell_kind::expr_cell);
+    REQUIRE(c.value->kind == expr_kind::gt);
+    auto const& add = *c.value->args[0];
+    REQUIRE(add.kind == expr_kind::add);            // + binds looser than *
+    CHECK(add.args[1]->kind == expr_kind::mul);
+    auto const& w = ast.rules[0].pairs[0].rhs.pat.cells[0][0];
+    REQUIRE(w.kind == cell_kind::expr_cell);
+    CHECK(w.value->kind == expr_kind::call);
+    CHECK(w.value->ident == "if");
+    CHECK(w.value->args.size() == 3);
+}
+
+TEST_CASE("parser: where pseudo-layer") {
+    auto ast = parse_ok(R"(
+rule edge {
+    { all
+      level[floor]
+      where[ (x == 0) ]
+    }
+    =>
+    level[wall]
+}
+)");
+    auto const& pair = ast.rules[0].pairs[0];
+    REQUIRE(pair.lhs.size() == 2);
+    CHECK(pair.lhs[1].is_where);
+    CHECK(pair.lhs[1].cells[0][0].kind == cell_kind::expr_cell);
+}
+
+TEST_CASE("parser: params block") {
+    auto ast = parse_ok(R"(
+params {
+    difficulty: number = 3
+    rooms: number = random(2, 5)
+    budget = difficulty * 10
+}
+)");
+    REQUIRE(ast.params.size() == 3);
+    CHECK(!ast.params[0].is_derived);
+    CHECK(ast.params[0].value->kind == expr_kind::int_lit);
+    CHECK(!ast.params[1].is_derived);
+    CHECK(ast.params[2].is_derived);
+    CHECK(ast.params[2].value->kind == expr_kind::mul);
+    CHECK(parse_fails("params { a: number = 1 }\nparams { b: number = 2 }"));
+}
+
+TEST_CASE("parser: when guards") {
+    auto ast = parse_ok(R"(
+program {
+    resize(4, 4)  when (difficulty > 3)
+    all fill      when (style == 0)
+}
+)");
+    REQUIRE(ast.program.stmts.size() == 2);
+    CHECK(ast.program.stmts[0].guard != nullptr);
+    CHECK(ast.program.stmts[0].guard->kind == expr_kind::gt);
+    CHECK(ast.program.stmts[1].guard->kind == expr_kind::eq);
+}
+
+TEST_CASE("parser: named unions in the tag block") {
+    auto ast = parse_ok("tag geo { wall, door, floor, blocker = wall | door }");
+    REQUIRE(ast.tags[0].values.size() == 3);
+    REQUIRE(ast.tags[0].unions.size() == 1);
+    CHECK(ast.tags[0].unions[0].name == "blocker");
+    CHECK(ast.tags[0].unions[0].members == std::vector<std::string>{"wall", "door"});
 }

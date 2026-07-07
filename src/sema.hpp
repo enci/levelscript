@@ -17,6 +17,39 @@ constexpr int64_t num_empty = INT64_MIN;
 
 inline int64_t tag_bit(int value_id) { return int64_t{1} << (value_id + 1); }
 
+// The where pseudo-layer has no real grid id (§5.9).
+constexpr int where_grid = -2;
+
+// ── compiled expressions (§5.8) ───────────────────────────────────────────────
+//
+// Nodes live in one flat arena (`compiled::exprs`), referenced by index — no
+// pointer ownership, trivially copyable, and variant transforms share nodes
+// by index (same-position reads make expressions position-independent).
+
+enum class ce_kind {
+    int_lit,       // val = integer (also the number-empty sentinel)
+    mask_lit,      // val = tag mask constant
+    grid_read,     // ref = grid id, read at the current position
+    param_read,    // ref = param id
+    pos_x, pos_y, width, height,
+    neg, not_,
+    add, sub, mul, div_,
+    lt, le, gt, ge, eq, ne,
+    and_, or_, bit_or,
+    // built-ins (§5.10): if is eager — both branches always evaluate
+    if_, min_, max_, abs_, clamp_,
+    random_,       // the one impure built-in: one PRNG draw per evaluation
+    // emptiness tests (read the cell raw, bypassing number→0 coercion)
+    is_empty, is_not_empty,   // ref = grid id; val = 1 when a number grid
+};
+
+struct compiled_expr {
+    ce_kind   kind{ce_kind::int_lit};
+    long long val{0};
+    int       ref{-1};            // grid_read / param_read / is_empty
+    int       a{-1}, b{-1}, c{-1};   // child indices into the arena
+};
+
 // ── compiled program ──────────────────────────────────────────────────────────
 //
 // `compiled` is self-contained: sema copies every name and table the runtime
@@ -24,13 +57,15 @@ inline int64_t tag_bit(int value_id) { return int64_t{1} << (value_id + 1); }
 // after analyze() and shared (const) by generators, runs, and levels.
 
 struct compiled_cell {
-    enum class kind { wildcard, value } what{kind::value};
-    int64_t val{0};   // mask (tag grid) or number; empty sentinel for '.'
+    enum class kind { wildcard, value, expr } what{kind::value};
+    int64_t val{0};    // kind::value — mask (tag grid) or number
+    int     expr{-1};  // kind::expr — arena index (matches/writes computed)
 };
 
 struct compiled_pattern {
-    int  grid_id{-1};
+    int  grid_id{-1};        // layer index, or where_grid (§5.9)
     bool is_number{false};
+    bool is_where{false};
     int  rows{0}, cols{0};
     std::vector<compiled_cell> cells;   // flat, row-major
 
@@ -91,6 +126,7 @@ struct compiled_stmt {
     int         max_count{0};
     int         percent{0};
     int         rule_id{-1};
+    int         guard{-1};   // `when` expr arena index; -1 = unguarded
 };
 
 struct compiled_layer {
@@ -101,9 +137,33 @@ struct compiled_layer {
 struct compiled {
     std::vector<std::string>              tag_names;
     std::vector<std::vector<std::string>> tag_values;   // [tag_id][value_id]
+    // named unions per tagset: (name, resolved mask) — §3
+    std::vector<std::vector<std::pair<std::string, int64_t>>> tag_unions;
     std::vector<compiled_layer>           layers;
     std::vector<compiled_rule>            rules;
     std::vector<compiled_stmt>            stmts;
+    std::vector<compiled_expr>            exprs;   // the expression arena
+
+    // params (§4.2): startup_exprs run once, in declaration order, when the
+    // inputs bind — a default only when its param was not supplied.
+    std::vector<std::string> param_names;
+    struct startup_expr { int param; int expr; bool is_default; };
+    std::vector<startup_expr> startup_exprs;
+
+    int param_id(std::string_view name) const {
+        for (int i = 0; i < (int)param_names.size(); ++i)
+            if (param_names[i] == name) return i;
+        return -1;
+    }
+    // A name's mask within a tagset: a value's bit or a union's mask; 0 = unknown.
+    int64_t mask_of(int tag, std::string_view name) const {
+        int vid = value_id(tag, name);
+        if (vid >= 0) return tag_bit(vid);
+        if (tag >= 0 && tag < (int)tag_unions.size())
+            for (auto const& [uname, mask] : tag_unions[tag])
+                if (uname == name) return mask;
+        return 0;
+    }
 
     int layer_id(std::string_view name) const {
         for (int i = 0; i < (int)layers.size(); ++i)

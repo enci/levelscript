@@ -14,9 +14,13 @@ enum class token_type {
     kw_symmetry, kw_rotation, kw_weight,
     kw_horizontal, kw_vertical, kw_none,
     kw_policy, kw_snapshot, kw_incremental, kw_stabilize, kw_percent,
+    kw_params, kw_where, kw_when,
     // punctuation
     lbrace, rbrace, lbracket, rbracket, lparen, rparen,
     comma, colon, equals, arrow, star, dot,
+    // expression operators (§5.8)
+    plus, minus, slash, pipe, bang,
+    eq_eq, bang_eq, lt, le, gt, ge, amp_amp, pipe_pipe,
 };
 
 struct token {

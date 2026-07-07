@@ -59,7 +59,8 @@ compiled_pair transform_pair(transform k, compiled_pair const& pair) {
 bool patterns_equal(compiled_pattern const& a, compiled_pattern const& b) {
     if (a.grid_id != b.grid_id || a.rows != b.rows || a.cols != b.cols) return false;
     for (int i = 0; i < (int)a.cells.size(); ++i)
-        if (a.cells[i].what != b.cells[i].what || a.cells[i].val != b.cells[i].val)
+        if (a.cells[i].what != b.cells[i].what || a.cells[i].val != b.cells[i].val ||
+            a.cells[i].expr != b.cells[i].expr)   // transforms share arena indices
             return false;
     return true;
 }
@@ -73,14 +74,288 @@ bool pair_lhs_equal(compiled_pair const& a, compiled_pair const& b) {
     return true;
 }
 
+// Expression value kinds (§5.8).
+enum class val_type { num, mask, boolean };
+
 struct analyzer {
     ast_file const&  ast;
     compiled&        out;
     diagnostics&     diags;
     std::string_view file;
 
+    // Identifier scope for the position being compiled. Cell/where exprs are
+    // permissive; `when` guards and param exprs are restricted (§4.2/§6).
+    struct scope {
+        bool allow_grids{true};
+        bool allow_pos{true};      // x / y / width / height
+        int  param_limit{-1};      // -1 = any param; else only ids < limit
+    };
+    scope scope_{};
+
     void error(source_loc loc, std::string msg) {
         diags.error(file, loc.line, loc.col, std::move(msg));
+    }
+
+    // ── expressions (§5.8) ───────────────────────────────────────────────────
+
+    int add_expr(compiled_expr e) {
+        out.exprs.push_back(e);
+        return (int)out.exprs.size() - 1;
+    }
+    int num_lit(long long v = 0) { return add_expr({ce_kind::int_lit, v, -1, -1, -1, -1}); }
+    // The typed empty value: tag → mask 0x1, number → the sentinel.
+    int typed_empty(val_type t) {
+        return t == val_type::mask
+             ? add_expr({ce_kind::mask_lit, tag_empty, -1, -1, -1, -1})
+             : add_expr({ce_kind::int_lit, num_empty, -1, -1, -1, -1});
+    }
+
+    static bool is_reserved_ident(std::string const& n) {
+        return n == "x" || n == "y" || n == "width" || n == "height";
+    }
+
+    struct builtin_spec { char const* name; ce_kind kind; int arity; };
+    static builtin_spec const* find_builtin(std::string const& name) {
+        static const builtin_spec table[] = {
+            {"if",     ce_kind::if_,     3},
+            {"min",    ce_kind::min_,    2},
+            {"max",    ce_kind::max_,    2},
+            {"abs",    ce_kind::abs_,    1},
+            {"clamp",  ce_kind::clamp_,  3},
+            {"random", ce_kind::random_, 2},
+        };
+        for (auto const& s : table)
+            if (name == s.name) return &s;
+        return nullptr;
+    }
+    static bool is_builtin_name(std::string const& n) { return find_builtin(n) != nullptr; }
+
+    // Resolve a bare identifier: x/y/width/height → param → grid → tag value
+    // or union (the enclosing cell's tagset first, else a unique value match).
+    int compile_ident(expr const& e, int ctx_tag, val_type& t) {
+        auto const& name = e.ident;
+        if (is_reserved_ident(name)) {
+            if (!scope_.allow_pos) {
+                error(e.loc, "'" + name + "' cannot be read here "
+                      "(position/dimension is not available at this scope)");
+                t = val_type::num;
+                return num_lit();
+            }
+            t = val_type::num;
+            ce_kind k = name == "x" ? ce_kind::pos_x
+                      : name == "y" ? ce_kind::pos_y
+                      : name == "width" ? ce_kind::width : ce_kind::height;
+            return add_expr({k, 0, -1, -1, -1, -1});
+        }
+        int pid = out.param_id(name);
+        if (pid >= 0) {
+            if (scope_.param_limit >= 0 && pid >= scope_.param_limit) {
+                error(e.loc, "param '" + name + "' is referenced before it is declared");
+                t = val_type::num;
+                return num_lit();
+            }
+            t = val_type::num;
+            return add_expr({ce_kind::param_read, 0, pid, -1, -1, -1});
+        }
+        int gid = out.layer_id(name);
+        if (gid >= 0) {
+            if (!scope_.allow_grids) {
+                error(e.loc, "grid '" + name + "' cannot be read here "
+                      "(only params are available at this scope)");
+                t = val_type::num;
+                return num_lit();
+            }
+            t = out.layers[gid].tag_id < 0 ? val_type::num : val_type::mask;
+            return add_expr({ce_kind::grid_read, 0, gid, -1, -1, -1});
+        }
+        if (ctx_tag >= 0) {   // tag value or union of the enclosing cell's tagset
+            int64_t m = out.mask_of(ctx_tag, name);
+            if (m != 0) {
+                t = val_type::mask;
+                return add_expr({ce_kind::mask_lit, m, -1, -1, -1, -1});
+            }
+        }
+        // unique tag value anywhere
+        int found = 0; int64_t mask = 0;
+        for (int ti = 0; ti < (int)out.tag_names.size(); ++ti) {
+            int vid = out.value_id(ti, name);
+            if (vid >= 0) { ++found; mask = tag_bit(vid); }
+        }
+        if (found == 1) {
+            t = val_type::mask;
+            return add_expr({ce_kind::mask_lit, mask, -1, -1, -1, -1});
+        }
+        error(e.loc, "unknown identifier '" + name + "' in expression");
+        t = val_type::num;
+        return num_lit();
+    }
+
+    int compile_call(expr const& e, int ctx_tag, val_type& t, int hint) {
+        builtin_spec const* spec = find_builtin(e.ident);
+        auto fail = [&](std::string msg) {
+            error(e.loc, std::move(msg));
+            t = val_type::num;
+            return num_lit();
+        };
+        if (!spec) return fail("unknown function '" + e.ident + "'");
+        if ((int)e.args.size() != spec->arity)
+            return fail("built-in '" + e.ident + "' takes " +
+                        std::to_string(spec->arity) + " argument(s), got " +
+                        std::to_string(e.args.size()));
+
+        if (spec->kind == ce_kind::if_) {
+            // if(c, a, b) — eager; a bare '.' branch types from its sibling.
+            val_type tc;
+            int cc = compile_expr(*e.args[0], ctx_tag, tc);
+            if (tc != val_type::boolean) return fail("'if' condition must be boolean");
+            bool e1 = e.args[1]->kind == expr_kind::empty_lit;
+            bool e2 = e.args[2]->kind == expr_kind::empty_lit;
+            val_type t1, t2;
+            int c1, c2;
+            if (e1 && !e2) {
+                c2 = compile_expr(*e.args[2], ctx_tag, t2, hint);
+                c1 = compile_expr(*e.args[1], ctx_tag, t1, (int)t2);
+            } else {
+                c1 = compile_expr(*e.args[1], ctx_tag, t1, hint);
+                c2 = compile_expr(*e.args[2], ctx_tag, t2, e2 ? (int)t1 : hint);
+            }
+            if (t1 != t2) return fail("'if' branches must have the same type");
+            t = t1;
+            return add_expr({ce_kind::if_, 0, -1, cc, c1, c2});
+        }
+
+        // every other built-in is numeric
+        int a[3] = {-1, -1, -1};
+        for (int i = 0; i < spec->arity; ++i) {
+            val_type ta;
+            a[i] = compile_expr(*e.args[i], ctx_tag, ta, (int)val_type::num);
+            if (ta != val_type::num)
+                return fail("'" + e.ident + "' requires number arguments");
+        }
+        t = val_type::num;
+        return add_expr({spec->kind, 0, -1, a[0], a[1], a[2]});
+    }
+
+    // Compile + type-check one expression into the arena. `ctx_tag` is the
+    // enclosing tag-grid cell's tagset (-1 when none); `hint` types a bare
+    // '.' empty literal (-1 = none, else (int)val_type).
+    int compile_expr(expr const& e, int ctx_tag, val_type& t, int hint = -1) {
+        switch (e.kind) {
+        case expr_kind::int_lit:
+            t = val_type::num;
+            return num_lit(e.int_val);
+        case expr_kind::empty_lit:
+            if (hint == (int)val_type::mask) { t = val_type::mask; return typed_empty(t); }
+            if (hint == (int)val_type::num)  { t = val_type::num;  return typed_empty(t); }
+            error(e.loc, "'.' has no inferable type here (use it against a grid, "
+                  "an if-branch, or a target cell)");
+            t = val_type::num;
+            return typed_empty(val_type::num);
+        case expr_kind::ident:
+            return compile_ident(e, ctx_tag, t);
+        case expr_kind::call:
+            return compile_call(e, ctx_tag, t, hint);
+        case expr_kind::neg: {
+            val_type ta;
+            int a = compile_expr(*e.args[0], ctx_tag, ta);
+            if (ta != val_type::num) error(e.loc, "unary '-' requires a number");
+            t = val_type::num;
+            return add_expr({ce_kind::neg, 0, -1, a, -1, -1});
+        }
+        case expr_kind::not_: {
+            val_type ta;
+            int a = compile_expr(*e.args[0], ctx_tag, ta);
+            if (ta != val_type::boolean) error(e.loc, "'!' requires a boolean");
+            t = val_type::boolean;
+            return add_expr({ce_kind::not_, 0, -1, a, -1, -1});
+        }
+        default:
+            break;
+        }
+
+        // `g == .` / `g != .` — the emptiness tests, before generic binary
+        // compilation so the empty literal needs no independent type.
+        if (e.kind == expr_kind::eq || e.kind == expr_kind::ne) {
+            bool a_empty = e.args[0]->kind == expr_kind::empty_lit;
+            bool b_empty = e.args[1]->kind == expr_kind::empty_lit;
+            if (a_empty && b_empty) {
+                error(e.loc, "'. == .' has no inferable type");
+                t = val_type::boolean;
+                return num_lit();
+            }
+            if (a_empty || b_empty) {
+                val_type to;
+                int oc = compile_expr(a_empty ? *e.args[1] : *e.args[0], ctx_tag, to);
+                t = val_type::boolean;
+                if (out.exprs[oc].kind == ce_kind::grid_read) {
+                    // read the cell RAW and test emptiness (no number→0 coercion)
+                    ce_kind k = e.kind == expr_kind::eq ? ce_kind::is_empty
+                                                        : ce_kind::is_not_empty;
+                    return add_expr({k, to == val_type::num ? 1 : 0,
+                                     out.exprs[oc].ref, -1, -1, -1});
+                }
+                int ec = typed_empty(to);
+                return add_expr({e.kind == expr_kind::eq ? ce_kind::eq : ce_kind::ne,
+                                 0, -1, oc, ec, -1});
+            }
+        }
+
+        val_type lt_, rt_;
+        int a = compile_expr(*e.args[0], ctx_tag, lt_);
+        int b = compile_expr(*e.args[1], ctx_tag, rt_);
+        auto bin = [&](ce_kind k, val_type rt) {
+            t = rt;
+            return add_expr({k, 0, -1, a, b, -1});
+        };
+        switch (e.kind) {
+        case expr_kind::add: case expr_kind::sub:
+        case expr_kind::mul: case expr_kind::div_:
+            if (lt_ != val_type::num || rt_ != val_type::num)
+                error(e.loc, "arithmetic operator requires numeric operands");
+            return bin(e.kind == expr_kind::add ? ce_kind::add
+                     : e.kind == expr_kind::sub ? ce_kind::sub
+                     : e.kind == expr_kind::mul ? ce_kind::mul : ce_kind::div_,
+                       val_type::num);
+        case expr_kind::lt: case expr_kind::le:
+        case expr_kind::gt: case expr_kind::ge:
+            if (lt_ != val_type::num || rt_ != val_type::num)
+                error(e.loc, "relational operator requires numeric operands");
+            return bin(e.kind == expr_kind::lt ? ce_kind::lt
+                     : e.kind == expr_kind::le ? ce_kind::le
+                     : e.kind == expr_kind::gt ? ce_kind::gt : ce_kind::ge,
+                       val_type::boolean);
+        case expr_kind::eq: case expr_kind::ne:
+            if (!(lt_ == val_type::num && rt_ == val_type::num) &&
+                !(lt_ == val_type::mask && rt_ == val_type::mask))
+                error(e.loc, "'==' / '!=' require two numbers or two tag values");
+            return bin(e.kind == expr_kind::eq ? ce_kind::eq : ce_kind::ne,
+                       val_type::boolean);
+        case expr_kind::and_: case expr_kind::or_:
+            if (lt_ != val_type::boolean || rt_ != val_type::boolean)
+                error(e.loc, "'&&' / '||' require boolean operands");
+            return bin(e.kind == expr_kind::and_ ? ce_kind::and_ : ce_kind::or_,
+                       val_type::boolean);
+        case expr_kind::bit_or:
+            if (lt_ != val_type::mask || rt_ != val_type::mask)
+                error(e.loc, "'|' (tag union) requires tag-valued operands");
+            return bin(ce_kind::bit_or, val_type::mask);
+        default:
+            error(e.loc, "unsupported expression");
+            t = val_type::num;
+            return num_lit();
+        }
+    }
+
+    // One collision discipline for every named declaration (the MGSL retro's
+    // check_name): reserved position idents, built-in names, grid/param cross
+    // collisions are all caught here with one message shape.
+    void check_name(source_loc loc, std::string const& kind, std::string const& name) {
+        if (is_reserved_ident(name))
+            error(loc, kind + " '" + name + "' collides with a reserved "
+                  "expression identifier (x, y, width, height)");
+        if (is_builtin_name(name))
+            error(loc, kind + " '" + name + "' collides with a built-in "
+                  "function name (if, min, max, abs, clamp, random)");
     }
 
     // ── symbol tables ────────────────────────────────────────────────────────
@@ -89,13 +364,14 @@ struct analyzer {
         for (auto const& t : ast.tags) {
             if (out.tag_id(t.name) >= 0)
                 error(t.loc, "duplicate tag '" + t.name + "'");
-            if (t.values.empty())
+            if (t.values.empty() && t.unions.empty())
                 error(t.loc, "tagset '" + t.name + "' has no values");
             if ((int)t.values.size() > 30)   // §3: bits 1..30; 0 = empty, 31 reserved
                 error(t.loc, "tagset '" + t.name + "' has " +
                       std::to_string(t.values.size()) + " values; the maximum is 30");
             std::vector<std::string> vals;
             for (auto const& v : t.values) {
+                check_name(t.loc, "tag value", v);
                 for (auto const& seen : vals)
                     if (seen == v) {
                         error(t.loc, "duplicate tag value '" + v + "' in '" + t.name + "'");
@@ -105,9 +381,32 @@ struct analyzer {
             }
             out.tag_names.push_back(t.name);
             out.tag_values.push_back(std::move(vals));
+
+            // Named unions (§3): resolve in declaration order; a member is a
+            // value or an earlier union of this tagset; a union shares the
+            // value namespace and consumes no bit.
+            int tid = (int)out.tag_names.size() - 1;
+            out.tag_unions.push_back({});
+            for (auto const& u : t.unions) {
+                check_name(u.loc, "union", u.name);
+                if (out.value_id(tid, u.name) >= 0 || out.mask_of(tid, u.name) != 0)
+                    error(u.loc, "union '" + u.name +
+                          "' redeclares a tag value or union in '" + t.name + "'");
+                int64_t mask = 0;
+                for (auto const& m : u.members) {
+                    int64_t mm = out.mask_of(tid, m);
+                    if (mm == 0)
+                        error(u.loc, "union '" + u.name + "' references '" + m +
+                              "', which is not a value or earlier union of '" +
+                              t.name + "'");
+                    mask |= mm;
+                }
+                out.tag_unions[tid].push_back({u.name, mask});
+            }
         }
 
         for (auto const& l : ast.layers.layers) {
+            check_name(ast.layers.loc, "grid", l.name);
             if (out.layer_id(l.name) >= 0) {
                 error(ast.layers.loc, "duplicate grid '" + l.name + "'");
                 continue;
@@ -121,25 +420,67 @@ struct analyzer {
             }
             out.layers.push_back({l.name, tag});
         }
+
+        for (auto const& p : ast.params) {
+            check_name(p.loc, "param", p.name);
+            if (out.layer_id(p.name) >= 0)
+                error(p.loc, "param '" + p.name + "' collides with a grid of the same name");
+            if (out.param_id(p.name) >= 0) {
+                error(p.loc, "duplicate param '" + p.name + "'");
+                continue;
+            }
+            // §7.3 #27: every input param must carry a default.
+            if (!p.is_derived && !p.value)
+                error(p.loc, "input param '" + p.name +
+                      "' must have a default, e.g. '" + p.name + ": number = 0'");
+            out.param_names.push_back(p.name);
+        }
+    }
+
+    // Param startup expressions (§4.2): derived params and input defaults share
+    // one discipline — earlier params only, no grids, no position/dimensions.
+    void compile_params() {
+        for (int i = 0; i < (int)ast.params.size(); ++i) {
+            auto const& p = ast.params[i];
+            if (!p.value) continue;   // missing default already reported
+            scope_ = scope{false, false, i};
+            val_type t;
+            int e = compile_expr(*p.value, -1, t, (int)val_type::num);
+            if (t != val_type::num)
+                error(p.loc, std::string(p.is_derived ? "derived param '" : "default for param '")
+                      + p.name + "' must evaluate to a number");
+            out.startup_exprs.push_back({i, e, !p.is_derived});
+        }
+        scope_ = scope{};
     }
 
     // ── rules ────────────────────────────────────────────────────────────────
 
     // Compile one pattern; `exp_rows/exp_cols` enforce the shape constraint
     // (spec §5.4, recursive over the write tree) — 0 means "sets the reference".
-    compiled_pattern compile_pattern(pattern const& p, int exp_rows, int exp_cols) {
+    compiled_pattern compile_pattern(pattern const& p, int exp_rows, int exp_cols,
+                                     bool is_rhs) {
         compiled_pattern cp;
-        cp.grid_id = out.layer_id(p.grid);
-        if (cp.grid_id < 0) {
-            error(p.loc, "undeclared grid '" + p.grid + "'");
-            return cp;
+        int tag = -1;
+        if (p.is_where) {
+            cp.grid_id  = where_grid;
+            cp.is_where = true;
+            if (is_rhs)   // §7.3 #11
+                error(p.loc, "'where' is a match-side pseudo-layer; it cannot "
+                      "appear on the write side");
+        } else {
+            cp.grid_id = out.layer_id(p.grid);
+            if (cp.grid_id < 0) {
+                error(p.loc, "undeclared grid '" + p.grid + "'");
+                return cp;
+            }
+            tag = out.layers[cp.grid_id].tag_id;
+            cp.is_number = tag < 0;
         }
         if (exp_rows > 0 && (p.rows != exp_rows || p.cols != exp_cols))
             error(p.loc, "pattern dimension mismatch: expected " +
                   std::to_string(exp_rows) + "x" + std::to_string(exp_cols) +
                   ", got " + std::to_string(p.rows) + "x" + std::to_string(p.cols));
-        int tag = out.layers[cp.grid_id].tag_id;
-        cp.is_number = tag < 0;
 
         if (p.rows == 0 || p.cols == 0) {
             error(p.loc, "empty pattern body");
@@ -157,37 +498,84 @@ struct analyzer {
         cp.cells.assign((size_t)p.rows * p.cols, {});
         for (int r = 0; r < p.rows; ++r) {
             int w = (int)p.cells[r].size() < p.cols ? (int)p.cells[r].size() : p.cols;
-            for (int c = 0; c < w; ++c) {
-                cell const& in = p.cells[r][c];
-                compiled_cell& cc = cp.cells[r * cp.cols + c];
-                switch (in.kind) {
-                case cell_kind::any:
-                    cc.what = compiled_cell::kind::wildcard;
-                    break;
-                case cell_kind::empty:
-                    cc.val = cp.is_number ? num_empty : tag_empty;
-                    break;
-                case cell_kind::number:
-                    if (!cp.is_number)
-                        error(in.loc, "integer cell in a tag grid");
-                    cc.val = in.number;
-                    break;
-                case cell_kind::tag: {
-                    if (cp.is_number) {
-                        error(in.loc, "expected an integer or wildcard in a 'number' grid cell");
-                        break;
-                    }
-                    int vid = out.value_id(tag, in.tag);
-                    if (vid < 0)
-                        error(in.loc, "unknown tag value '" + in.tag + "' for this grid");
-                    else
-                        cc.val = tag_bit(vid);
-                    break;
-                }
-                }
-            }
+            for (int c = 0; c < w; ++c)
+                cp.cells[r * cp.cols + c] =
+                    compile_cell(p.cells[r][c], tag, cp.is_number, p.is_where, is_rhs);
         }
         return cp;
+    }
+
+    compiled_cell compile_cell(cell const& in, int tag, bool is_number,
+                               bool is_where, bool is_rhs) {
+        compiled_cell cc;
+
+        if (is_where) {   // where cells are always parenthesized booleans (§5.9)
+            if (in.kind != cell_kind::expr_cell) {
+                error(in.loc, "'where' cells must be a parenthesized boolean expression");
+                cc.what = compiled_cell::kind::expr;
+                cc.expr = num_lit();
+                return cc;
+            }
+            val_type t;
+            cc.what = compiled_cell::kind::expr;
+            cc.expr = compile_expr(*in.value, -1, t);
+            if (t != val_type::boolean)
+                error(in.loc, "'where' cell must evaluate to a boolean");
+            return cc;
+        }
+
+        switch (in.kind) {
+        case cell_kind::any:
+            cc.what = compiled_cell::kind::wildcard;
+            break;
+        case cell_kind::empty:
+            cc.val = is_number ? num_empty : tag_empty;
+            break;
+        case cell_kind::number:
+            if (!is_number)
+                error(in.loc, "integer cell in a tag grid");
+            cc.val = in.number;
+            break;
+        case cell_kind::tag_mask: {
+            if (is_number) {
+                error(in.loc, "expected an integer or wildcard in a 'number' grid cell");
+                break;
+            }
+            int64_t full = 0;
+            for (int i = 0; i < (int)out.tag_values[tag].size(); ++i)
+                full |= tag_bit(i);
+            int64_t mask = 0;
+            for (auto const& a : in.atoms) {
+                int64_t m = out.mask_of(tag, a.name);
+                if (m == 0) {
+                    error(a.loc, "unknown tag value '" + a.name + "' for this grid");
+                    continue;
+                }
+                if (a.negate) {
+                    if (is_rhs)   // §7.3 #15: complement is match-side only
+                        error(a.loc, "tag complement '!" + a.name +
+                              "' is not allowed on the write side");
+                    mask |= full & ~m;
+                } else {
+                    mask |= m;
+                }
+            }
+            cc.val = mask;
+            break;
+        }
+        case cell_kind::expr_cell: {
+            cc.what = compiled_cell::kind::expr;
+            val_type t;
+            int hint = (int)(is_number ? val_type::num : val_type::mask);
+            cc.expr = compile_expr(*in.value, tag, t, hint);
+            if (is_number && t != val_type::num)
+                error(in.loc, "expression in a 'number' grid cell must evaluate to a number");
+            if (!is_number && t != val_type::mask)
+                error(in.loc, "expression in a tag grid cell must evaluate to a tag value");
+            break;
+        }
+        }
+        return cc;
     }
 
     compiled_write_term compile_write_term(write_term const& t,
@@ -196,7 +584,7 @@ struct analyzer {
         ct.weight = t.weight;
         if (t.what == write_term::kind::leaf) {
             ct.what    = compiled_write_term::kind::leaf;
-            ct.pattern = compile_pattern(t.pat, exp_rows, exp_cols);
+            ct.pattern = compile_pattern(t.pat, exp_rows, exp_cols, /*is_rhs=*/true);
             return ct;
         }
         ct.what = t.what == write_term::kind::all ? compiled_write_term::kind::all
@@ -242,7 +630,7 @@ struct analyzer {
         compiled_pair cp;
         int rows = 0, cols = 0;
         for (auto const& p : pr.lhs) {
-            cp.lhs.push_back(compile_pattern(p, rows, cols));
+            cp.lhs.push_back(compile_pattern(p, rows, cols, /*is_rhs=*/false));
             if (rows == 0) { rows = cp.lhs.back().rows; cols = cp.lhs.back().cols; }
         }
         cp.rhs = compile_write_term(pr.rhs, rows, cols);
@@ -327,15 +715,21 @@ struct analyzer {
 
             bool invalidates = false;
             for (auto const& lp : pair.lhs) {
-                if (lp.grid_id < 0 || invalidates) continue;
+                if (invalidates) break;
+                if (lp.is_where) { invalidates = true; break; }   // uncertain → no warning
+                if (lp.grid_id < 0) continue;
                 for (int r = 0; r < lp.rows && !invalidates; ++r)
                     for (int c = 0; c < lp.cols && !invalidates; ++c) {
                         auto const& req = lp.at(r, c);
                         if (req.what == compiled_cell::kind::wildcard) continue;
+                        // computed matches are uncertain — never a guaranteed loop
+                        if (req.what == compiled_cell::kind::expr) { invalidates = true; break; }
                         for (auto const* wp : writes) {
                             if (wp->grid_id != lp.grid_id) continue;
                             auto const& w = wp->at(r, c);
                             if (w.what == compiled_cell::kind::wildcard) continue;
+                            // computed writes are uncertain too
+                            if (w.what == compiled_cell::kind::expr) { invalidates = true; break; }
                             bool still = lp.is_number ? (w.val == req.val)
                                                       : ((w.val & req.val) != 0);
                             if (!still) { invalidates = true; break; }
@@ -427,12 +821,25 @@ struct analyzer {
                     cs.rule_id >= 0)
                     check_reductive(out.rules[cs.rule_id], s.loc);
             }
+            // `when (expr)` guard (§6): boolean, params only — no grids, no
+            // position/dimensions (there is no candidate position or committed
+            // size at statement scope).
+            if (s.guard) {
+                scope_ = scope{false, false, -1};
+                val_type t;
+                cs.guard = compile_expr(*s.guard, -1, t);
+                if (t != val_type::boolean)
+                    error(s.loc, "'when' guard must be a boolean expression");
+                scope_ = scope{};
+            }
             out.stmts.push_back(cs);
         }
     }
 
     void run() {
         build_tables();
+        if (diags.has_errors()) return;
+        compile_params();
         if (diags.has_errors()) return;
         compile_rules();
         if (diags.has_errors()) return;

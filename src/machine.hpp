@@ -51,6 +51,9 @@ class machine {
 public:
     machine(std::shared_ptr<compiled const> prog, uint64_t seed);
 
+    // Supply an input param before run(); unknown names are ignored.
+    void set_param(std::string const& name, long long value);
+
     sequence<step_event> run();
 
     // Copy the current visible state out as a self-contained level (mid-batch,
@@ -67,8 +70,15 @@ private:
     struct match { int pair; int row, col; };
 
     void exec_op(compiled_op const& op);
-    std::vector<match> collect(compiled_rule const& rule) const;
-    bool match_at(compiled_pair const& pair, int row, int col) const;
+    // Evaluate an arena expression at position (x, y). Total (§5.8): /0 = 0,
+    // wrap at 32 bits, empty number cells read as 0. `random` draws — which is
+    // why the whole matching path is non-const.
+    long long eval(int expr_idx, int x, int y);
+    // Startup params (§4.2): defaults for unsupplied inputs, then derived,
+    // in declaration order — the first PRNG draws of a run.
+    void bind_params();
+    std::vector<match> collect(compiled_rule const& rule);
+    bool match_at(compiled_pair const& pair, int row, int col);
     bool conflicts(compiled_pair const& pair, match const& m,
                    std::unordered_set<uint64_t> const& written) const;
     void apply(compiled_pair const& pair, match const& m,
@@ -102,6 +112,8 @@ private:
     std::shared_ptr<compiled const> prog_;
     std::mt19937_64                 rng_;
     std::vector<grid_state>         grids_;    // indexed by grid id
+    std::vector<long long>          params_;   // indexed by param id
+    std::vector<char>               param_supplied_;
     bool                            in_batch_{false};
     bool                            observe_{false};
     std::vector<highlight>          highlights_;

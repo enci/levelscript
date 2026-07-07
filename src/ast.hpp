@@ -1,4 +1,5 @@
 #pragma once
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -8,12 +9,46 @@ struct source_loc {
     int line{0}, col{0};
 };
 
+// ── expressions (spec §5.8) ──────────────────────────────────────────────────
+
+enum class expr_kind {
+    int_lit,       // integer literal
+    empty_lit,     // '.' — polymorphic empty value (typed from context)
+    ident,         // grid read / param / x,y,width,height / tag value or union
+    call,          // built-in function call
+    neg, not_,
+    add, sub, mul, div_,
+    lt, le, gt, ge, eq, ne,
+    and_, or_,
+    bit_or,        // '|' tag union
+};
+
+struct expr;
+using expr_ptr = std::unique_ptr<expr>;
+
+struct expr {
+    expr_kind             kind;
+    source_loc            loc;
+    long long             int_val{0};   // int_lit
+    std::string           ident;        // ident / call name
+    std::vector<expr_ptr> args;         // unary [a]; binary [a,b]; call args
+};
+
 // ── declarations ─────────────────────────────────────────────────────────────
+
+// A named union (spec §3): `blocker = wall | door` — a mask alias over the
+// tagset's own members (values or earlier unions). Consumes no bit.
+struct tag_union {
+    source_loc               loc;
+    std::string              name;
+    std::vector<std::string> members;
+};
 
 struct tag_decl {
     source_loc               loc;
     std::string              name;
     std::vector<std::string> values;
+    std::vector<tag_union>   unions;
 };
 
 struct layer_decl {
@@ -26,20 +61,40 @@ struct layers_decl {
     std::vector<layer_decl> layers;
 };
 
-// ── patterns (step 1: constant cells only) ───────────────────────────────────
+// ── params (spec §4.2) ───────────────────────────────────────────────────────
 
-enum class cell_kind { any, empty, number, tag };
+// input:   `name: number = expr` — supplied at runtime, default is mandatory
+// derived: `name = expr`         — computed once at startup
+struct param_decl {
+    source_loc  loc;
+    std::string name;
+    bool        is_derived{false};
+    expr_ptr    value;   // the default (input) or the definition (derived)
+};
+
+// ── patterns ─────────────────────────────────────────────────────────────────
+
+// One whitespace-free mask atom: `wall` or `!wall` (complement, LHS only).
+struct mask_atom {
+    source_loc  loc;
+    std::string name;
+    bool        negate{false};
+};
+
+enum class cell_kind { any, empty, number, tag_mask, expr_cell };
 
 struct cell {
-    cell_kind   kind{cell_kind::any};
-    source_loc  loc;
-    long long   number{0};   // cell_kind::number
-    std::string tag;         // cell_kind::tag
+    cell_kind              kind{cell_kind::any};
+    source_loc             loc;
+    long long              number{0};   // number
+    std::vector<mask_atom> atoms;       // tag_mask: atoms OR'd together
+    expr_ptr               value;       // expr_cell: '(' expr ')'
 };
 
 struct pattern {
     source_loc                     loc;
-    std::string                    grid;
+    std::string                    grid;       // "" when is_where
+    bool                           is_where{false};
     int                            rows{0}, cols{0};
     std::vector<std::vector<cell>> cells;   // [row][col]; row widths checked in sema
 };
@@ -102,6 +157,8 @@ struct program_stmt {
     int         max_count{0};
     int         percent{0};
     std::string rule_name;
+    // optional `when (expr)` guard (§6): boolean, params only, evaluated once
+    expr_ptr    guard;
 };
 
 struct program_decl {
@@ -112,12 +169,14 @@ struct program_decl {
 // ── file ─────────────────────────────────────────────────────────────────────
 
 struct ast_file {
-    std::vector<tag_decl>  tags;
-    layers_decl            layers;
-    std::vector<rule_decl> rules;
-    program_decl           program;
-    bool                   has_layers{false};
-    bool                   has_program{false};
+    std::vector<tag_decl>   tags;
+    layers_decl             layers;
+    std::vector<param_decl> params;
+    std::vector<rule_decl>  rules;
+    program_decl            program;
+    bool                    has_layers{false};
+    bool                    has_params{false};
+    bool                    has_program{false};
 };
 
 }  // namespace ls

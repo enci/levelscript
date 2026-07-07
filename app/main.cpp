@@ -10,7 +10,8 @@
 // does (compile, generate, read cells) a game can do the same way.
 
 static void usage(char const* argv0) {
-    std::cerr << "Usage: " << argv0 << " [--seed N] <file.ls>\n";
+    std::cerr << "Usage: " << argv0
+              << " [--seed N] [--param name=value ...] <file.ls>\n";
 }
 
 static void print_level(ls::level const& lv, std::ostream& out) {
@@ -34,11 +35,20 @@ static void print_level(ls::level const& lv, std::ostream& out) {
 int main(int argc, char* argv[]) {
     std::optional<uint64_t> seed;
     std::string path;
+    std::vector<std::pair<std::string, int>> params;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--seed" && i + 1 < argc) {
             seed = (uint64_t)std::stoull(argv[++i]);
+        } else if (arg == "--param" && i + 1 < argc) {
+            std::string kv = argv[++i];
+            auto eq = kv.find('=');
+            if (eq == std::string::npos) {
+                std::cerr << "Error: --param expects name=value, got '" << kv << "'\n";
+                return 1;
+            }
+            params.emplace_back(kv.substr(0, eq), std::stoi(kv.substr(eq + 1)));
         } else if (arg == "--help" || arg == "-h") {
             usage(argv[0]);
             return 0;
@@ -69,6 +79,6 @@ int main(int argc, char* argv[]) {
 
     uint64_t s = seed.value_or((uint64_t)
         std::chrono::high_resolution_clock::now().time_since_epoch().count());
-    print_level(gen.generate(s), std::cout);
+    print_level(gen.generate(s, params), std::cout);
     return 0;
 }

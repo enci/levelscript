@@ -89,9 +89,11 @@ struct run_state {
     int                  last_stmt{-1};
 
     run_state(std::shared_ptr<compiled const> prog, uint64_t seed, step_mode md,
-              observe obs)
+              observe obs,
+              std::vector<std::pair<std::string, int>> const& params)
         : m(std::move(prog), seed), seq(m.run()), mode(md) {
         m.set_observe(obs == observe::on);
+        for (auto const& [name, value] : params) m.set_param(name, value);
     }
 };
 }  // namespace internal
@@ -168,17 +170,20 @@ int generator::tag(const std::string& qualified) const {
     return prog_->value_id(tid, qualified.substr(dot + 1));
 }
 
-level generator::generate(uint64_t seed) const {
+level generator::generate(uint64_t seed,
+                          std::vector<std::pair<std::string, int>> const& params) const {
     if (!prog_) return {};
     machine m(prog_, seed);
+    for (auto const& [name, value] : params) m.set_param(name, value);
     auto seq = m.run();
     while (seq.next()) {}
     return level{m.snapshot()};
 }
 
-generation generator::begin(uint64_t seed, step_mode mode, observe obs) const {
+generation generator::begin(uint64_t seed, step_mode mode, observe obs,
+                            std::vector<std::pair<std::string, int>> const& params) const {
     if (!prog_) return generation{};
-    return generation{std::make_unique<internal::run_state>(prog_, seed, mode, obs)};
+    return generation{std::make_unique<internal::run_state>(prog_, seed, mode, obs, params)};
 }
 
 int generator::statement_count() const {

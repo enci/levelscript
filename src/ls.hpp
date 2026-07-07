@@ -136,12 +136,15 @@ public:
     /// tagset, valid for every layer of that tagset. -1 if unknown.
     int tag(const std::string& qualified) const;
 
-    /// Run the whole program: (seed) -> level, deterministically.
-    level generate(uint64_t seed) const;
+    /// Run the whole program: (seed, params) -> level, deterministically.
+    /// Params override the declared defaults; unknown names are ignored.
+    level generate(uint64_t seed,
+                   std::vector<std::pair<std::string, int>> const& params = {}) const;
 
     /// Start a progressive run; pull it with generation::step().
     generation begin(uint64_t seed, step_mode mode = step_mode::statement,
-                     observe obs = observe::off) const;
+                     observe obs = observe::off,
+                     std::vector<std::pair<std::string, int>> const& params = {}) const;
 
     /// Number of program statements (progress denominators).
     int statement_count() const;

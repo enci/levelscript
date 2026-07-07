@@ -39,6 +39,145 @@ struct parser {
 
     source_loc loc() const { return {peek().line, peek().col}; }
 
+    // Two tokens touch (no whitespace between) — bare mask cells `a|b`, `!a`
+    // are whitespace-free; a spaced `a | b` is not one cell (spec §2.5).
+    bool adjacent(token const& a, token const& b) const {
+        return a.line == b.line && a.col + (int)a.text.size() == b.col;
+    }
+
+    // ── expressions (spec §5.8; C precedence, lowest to highest) ─────────────
+
+    expr_ptr make_expr(expr_kind k) {
+        auto e = std::make_unique<expr>();
+        e->kind = k;
+        e->loc = loc();
+        return e;
+    }
+    expr_ptr make_binary(expr_kind k, expr_ptr a, expr_ptr b, source_loc l) {
+        auto e = std::make_unique<expr>();
+        e->kind = k;
+        e->loc = l;
+        e->args.push_back(std::move(a));
+        e->args.push_back(std::move(b));
+        return e;
+    }
+
+    expr_ptr parse_primary() {
+        if (at(token_type::integer)) {
+            auto e = make_expr(expr_kind::int_lit);
+            e->int_val = eat().int_val;
+            return e;
+        }
+        if (at(token_type::dot)) {
+            auto e = make_expr(expr_kind::empty_lit);
+            eat();
+            return e;
+        }
+        if (at(token_type::lparen)) {
+            eat();
+            auto e = parse_expr();
+            expect(token_type::rparen, "')'");
+            return e;
+        }
+        // keywords usable as names in expressions: max is also a §6 keyword
+        if (at(token_type::ident) || at(token_type::kw_max)) {
+            bool is_call = peek(1).is(token_type::lparen);
+            auto e = make_expr(is_call ? expr_kind::call : expr_kind::ident);
+            e->ident = eat().text;
+            if (is_call) {
+                eat();   // '('
+                if (!at(token_type::rparen)) {
+                    e->args.push_back(parse_expr());
+                    while (accept(token_type::comma))
+                        e->args.push_back(parse_expr());
+                }
+                expect(token_type::rparen, "')'");
+            }
+            return e;
+        }
+        error_at(peek(), "expected an expression");
+        eat_bad();
+        return make_expr(expr_kind::int_lit);
+    }
+
+    expr_ptr parse_unary() {
+        if (at(token_type::minus) || at(token_type::bang)) {
+            auto k = at(token_type::minus) ? expr_kind::neg : expr_kind::not_;
+            source_loc l = loc();
+            eat();
+            auto e = std::make_unique<expr>();
+            e->kind = k;
+            e->loc = l;
+            e->args.push_back(parse_unary());
+            return e;
+        }
+        return parse_primary();
+    }
+
+    expr_ptr parse_mul() {
+        auto e = parse_unary();
+        while (at(token_type::star) || at(token_type::slash)) {
+            auto k = at(token_type::star) ? expr_kind::mul : expr_kind::div_;
+            source_loc l = loc(); eat();
+            e = make_binary(k, std::move(e), parse_unary(), l);
+        }
+        return e;
+    }
+    expr_ptr parse_add() {
+        auto e = parse_mul();
+        while (at(token_type::plus) || at(token_type::minus)) {
+            auto k = at(token_type::plus) ? expr_kind::add : expr_kind::sub;
+            source_loc l = loc(); eat();
+            e = make_binary(k, std::move(e), parse_mul(), l);
+        }
+        return e;
+    }
+    expr_ptr parse_rel() {
+        auto e = parse_add();
+        while (at(token_type::lt) || at(token_type::le) ||
+               at(token_type::gt) || at(token_type::ge)) {
+            auto k = at(token_type::lt) ? expr_kind::lt
+                   : at(token_type::le) ? expr_kind::le
+                   : at(token_type::gt) ? expr_kind::gt : expr_kind::ge;
+            source_loc l = loc(); eat();
+            e = make_binary(k, std::move(e), parse_add(), l);
+        }
+        return e;
+    }
+    expr_ptr parse_eq() {
+        auto e = parse_rel();
+        while (at(token_type::eq_eq) || at(token_type::bang_eq)) {
+            auto k = at(token_type::eq_eq) ? expr_kind::eq : expr_kind::ne;
+            source_loc l = loc(); eat();
+            e = make_binary(k, std::move(e), parse_rel(), l);
+        }
+        return e;
+    }
+    expr_ptr parse_bor() {   // '|' tag union
+        auto e = parse_eq();
+        while (at(token_type::pipe)) {
+            source_loc l = loc(); eat();
+            e = make_binary(expr_kind::bit_or, std::move(e), parse_eq(), l);
+        }
+        return e;
+    }
+    expr_ptr parse_and() {
+        auto e = parse_bor();
+        while (at(token_type::amp_amp)) {
+            source_loc l = loc(); eat();
+            e = make_binary(expr_kind::and_, std::move(e), parse_bor(), l);
+        }
+        return e;
+    }
+    expr_ptr parse_expr() {
+        auto e = parse_and();
+        while (at(token_type::pipe_pipe)) {
+            source_loc l = loc(); eat();
+            e = make_binary(expr_kind::or_, std::move(e), parse_and(), l);
+        }
+        return e;
+    }
+
     // ── declarations ─────────────────────────────────────────────────────────
 
     void parse_tag(ast_file& out) {
@@ -50,8 +189,21 @@ struct parser {
         if (!expect(token_type::lbrace, "'{'")) return;
         skip_seps();
         while (!at(token_type::rbrace) && !at_end()) {
-            if (!expect(token_type::ident, "a tag value name")) { eat_bad(); }
-            else d.values.push_back(toks[pos - 1].text);
+            if (!expect(token_type::ident, "a tag value name")) { eat_bad(); skip_seps(); continue; }
+            std::string name = toks[pos - 1].text;
+            if (at(token_type::equals)) {   // named union: blocker = wall | door (§3)
+                tag_union u;
+                u.loc = {toks[pos - 1].line, toks[pos - 1].col};
+                u.name = std::move(name);
+                eat();   // '='
+                do {
+                    if (!expect(token_type::ident, "a union member")) break;
+                    u.members.push_back(toks[pos - 1].text);
+                } while (accept(token_type::pipe));
+                d.unions.push_back(std::move(u));
+            } else {
+                d.values.push_back(std::move(name));
+            }
             skip_seps();
         }
         expect(token_type::rbrace, "'}'");
@@ -81,22 +233,99 @@ struct parser {
         expect(token_type::rbrace, "'}'");
     }
 
+    // ── params (spec §4.2) ───────────────────────────────────────────────────
+
+    void parse_params(ast_file& out) {
+        if (out.has_params)
+            error_at(peek(), "only one 'params' block per file");
+        out.has_params = true;
+        eat();   // 'params'
+        if (!expect(token_type::lbrace, "'{'")) return;
+        skip_seps();
+        while (!at(token_type::rbrace) && !at_end()) {
+            param_decl p;
+            p.loc = loc();
+            if (!expect(token_type::ident, "a param name")) { eat_bad(); skip_seps(); continue; }
+            p.name = toks[pos - 1].text;
+            if (accept(token_type::colon)) {   // input: name ':' 'number' '=' expr
+                if (!expect(token_type::kw_number, "'number'")) { skip_seps(); continue; }
+                if (accept(token_type::equals))
+                    p.value = parse_expr();
+                // a missing default is §7.3 #27 — reported in sema with p.loc
+            } else {                           // derived: name '=' expr
+                p.is_derived = true;
+                if (!expect(token_type::equals, "':' or '='")) { skip_seps(); continue; }
+                p.value = parse_expr();
+            }
+            out.params.push_back(std::move(p));
+            skip_seps();
+        }
+        expect(token_type::rbrace, "'}'");
+    }
+
     // ── patterns ─────────────────────────────────────────────────────────────
+
+    // One whitespace-free mask atom: IDENT or !IDENT (adjacent).
+    bool parse_mask_atom(cell& c) {
+        mask_atom a;
+        a.loc = loc();
+        if (at(token_type::bang)) {
+            token const& b = eat();
+            a.negate = true;
+            if (!at(token_type::ident) || !adjacent(b, peek())) {
+                error_at(peek(), "expected a tag value right after '!'");
+                return false;
+            }
+        }
+        if (!at(token_type::ident)) {
+            error_at(peek(), "expected a tag value");
+            return false;
+        }
+        a.name = eat().text;
+        c.atoms.push_back(std::move(a));
+        return true;
+    }
 
     bool parse_cell(cell& c) {
         c.loc = loc();
         if (accept(token_type::star)) { c.kind = cell_kind::any;   return true; }
         if (accept(token_type::dot))  { c.kind = cell_kind::empty; return true; }
         if (at(token_type::integer))  { c.kind = cell_kind::number; c.number = eat().int_val; return true; }
-        if (at(token_type::ident))    { c.kind = cell_kind::tag;    c.tag    = eat().text;    return true; }
-        error_at(peek(), "expected a pattern cell (*, ., a tag value, or an integer)");
+        if (at(token_type::lparen)) {   // '( expr )' — computed cell (§5.8)
+            eat();
+            c.kind = cell_kind::expr_cell;
+            c.value = parse_expr();
+            return expect(token_type::rparen, "')'");
+        }
+        if (at(token_type::ident) || at(token_type::bang)) {
+            c.kind = cell_kind::tag_mask;
+            if (!parse_mask_atom(c)) return false;
+            // whitespace-free unions: a|b|c (each '|' adjacent on both sides)
+            while (at(token_type::pipe) && adjacent(toks[pos - 1], peek())) {
+                token const& bar = eat();
+                if (!adjacent(bar, peek())) {
+                    error_at(peek(), "a bare mask cell is whitespace-free; "
+                             "wrap a spaced union in parentheses");
+                    return false;
+                }
+                if (!parse_mask_atom(c)) return false;
+            }
+            return true;
+        }
+        error_at(peek(), "expected a pattern cell (*, ., a tag value, an integer, "
+                 "or a parenthesized expression)");
         return false;
     }
 
     bool parse_pattern(pattern& p) {
         p.loc = loc();
-        if (!expect(token_type::ident, "a grid name")) return false;
-        p.grid = toks[pos - 1].text;
+        if (at(token_type::kw_where)) {   // where pseudo-layer (§5.9)
+            p.is_where = true;
+            eat();
+        } else {
+            if (!expect(token_type::ident, "a grid name")) return false;
+            p.grid = toks[pos - 1].text;
+        }
         if (!expect(token_type::lbracket, "'['")) return false;
         skip_newlines();   // '[' may be followed by a newline before the first row
         while (!at(token_type::rbracket) && !at_end()) {
@@ -172,6 +401,7 @@ struct parser {
     bool parse_match_side(std::vector<pattern>& lhs) {
         if (at(token_type::lbrace)) {
             source_loc bl = loc();
+            (void)bl;
             eat();   // '{'
             if (at(token_type::kw_any) || at(token_type::kw_ordered)) {
                 error_at(peek(), "'{ " + peek().text +
@@ -191,9 +421,8 @@ struct parser {
                 skip_seps();
             }
             expect(token_type::rbrace, "'}'");
-            if (lhs.size() < 2)
-                diags.error(file, bl.line, bl.col,
-                            "a combinator block requires two or more items");
+            // single-item blocks are allowed (relaxed from MGSL's ≥2 rule —
+            // generated/templated rules often produce them)
             return !lhs.empty();
         }
         pattern p;
@@ -252,9 +481,8 @@ struct parser {
             skip_seps();
         }
         expect(token_type::rbrace, "'}'");
-        if (t.items.size() < 2)
-            diags.error(file, bl.line, bl.col,
-                        "a combinator block requires two or more items");
+        if (t.items.empty())
+            diags.error(file, bl.line, bl.col, "empty combinator block");
         return !t.items.empty();
     }
 
@@ -294,9 +522,8 @@ struct parser {
                 r.pairs.push_back(std::move(pr));
                 skip_newlines();
             }
-            if (r.pairs.size() < 2)
-                diags.error(file, bl.line, bl.col,
-                            "a body combinator requires two or more sub-rules");
+            if (r.pairs.empty())
+                diags.error(file, bl.line, bl.col, "empty rule body");
         } else {
             rule_pair pr;
             if (!parse_pair(pr)) { recover_to(token_type::rbrace); return; }
@@ -396,6 +623,13 @@ struct parser {
                 skip_newlines();
                 continue;
             }
+            // optional `when (expr)` guard (§6)
+            if (accept(token_type::kw_when)) {
+                if (expect(token_type::lparen, "'('")) {
+                    s.guard = parse_expr();
+                    expect(token_type::rparen, "')'");
+                }
+            }
             out.program.stmts.push_back(std::move(s));
             skip_newlines();
         }
@@ -418,6 +652,7 @@ struct parser {
             switch (peek().type) {
             case token_type::kw_tag:     parse_tag(out);     break;
             case token_type::kw_layers:  parse_layers(out);  break;
+            case token_type::kw_params:  parse_params(out);  break;
             case token_type::kw_rule:    parse_rule(out);    break;
             case token_type::kw_program:
                 if (out.has_program)

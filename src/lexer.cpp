@@ -26,6 +26,9 @@ static token_type keyword_or_ident(std::string_view text) {
         {"incremental", token_type::kw_incremental},
         {"stabilize", token_type::kw_stabilize},
         {"percent", token_type::kw_percent},
+        {"params", token_type::kw_params},
+        {"where", token_type::kw_where},
+        {"when", token_type::kw_when},
         {"symmetry", token_type::kw_symmetry},
         {"rotation", token_type::kw_rotation},
         {"weight", token_type::kw_weight},
@@ -83,16 +86,27 @@ std::vector<token> lex(std::string_view src, std::string_view file,
             continue;
         }
 
-        if (c == '=') {
-            if (i + 1 < n && src[i + 1] == '>') {
-                push(token_type::arrow, "=>", tl, tc);
+        // two-character operators first
+        auto two = [&](char c2, token_type t2) {
+            if (i + 1 < n && src[i + 1] == c2) {
+                push(t2, std::string{c, c2}, tl, tc);
                 i += 2; col += 2;
-            } else {
-                push(token_type::equals, "=", tl, tc);
-                ++i; ++col;
+                return true;
             }
+            return false;
+        };
+        if (c == '=') {
+            if (two('>', token_type::arrow)) continue;
+            if (two('=', token_type::eq_eq)) continue;
+            push(token_type::equals, "=", tl, tc);
+            ++i; ++col;
             continue;
         }
+        if (c == '!' && two('=', token_type::bang_eq)) continue;
+        if (c == '<' && two('=', token_type::le)) continue;
+        if (c == '>' && two('=', token_type::ge)) continue;
+        if (c == '&' && two('&', token_type::amp_amp)) continue;
+        if (c == '|' && two('|', token_type::pipe_pipe)) continue;
 
         token_type t = token_type::bad;
         switch (c) {
@@ -106,6 +120,13 @@ std::vector<token> lex(std::string_view src, std::string_view file,
         case ':': t = token_type::colon;    break;
         case '*': t = token_type::star;     break;
         case '.': t = token_type::dot;      break;
+        case '+': t = token_type::plus;     break;
+        case '-': t = token_type::minus;    break;
+        case '/': t = token_type::slash;    break;   // '//' comments handled above
+        case '|': t = token_type::pipe;     break;
+        case '!': t = token_type::bang;     break;
+        case '<': t = token_type::lt;       break;
+        case '>': t = token_type::gt;       break;
         default: break;
         }
         if (t == token_type::bad)

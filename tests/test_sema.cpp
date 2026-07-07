@@ -85,7 +85,7 @@ TEST_CASE("sema: some(max=0) is rejected") {
         .has_error("some(max=0)"));
 }
 
-// ── step 2: write trees, attributes, variant expansion ────────────────────────
+// -- step 2: write trees, attributes, variant expansion --
 
 TEST_CASE("sema: same-grid simultaneous write in { all } is rejected") {
     CHECK(compile_result(prelude + R"(
@@ -212,7 +212,7 @@ program { }
     CHECK(r.prog.rules[0].pairs[1].sub_rule_idx == 1);
 }
 
-// ── step 3: count × policy validity, reductivity ──────────────────────────────
+// -- step 3: count x policy validity, reductivity --
 
 static const std::string rfill =
     "rule fill { level[.] => level[floor] }\n";
@@ -244,7 +244,7 @@ static bool has_warning(compile_result const& r, std::string const& needle) {
 }
 
 TEST_CASE("sema: reductivity warning for a self-sustaining fixpoint") {
-    // The write never touches the matched cell — the anchor re-matches forever.
+    // The write never touches the matched cell ??? the anchor re-matches forever.
     compile_result bad(prelude + R"(
 rule mark { level[floor] => tiles[1] }
 program { all(policy=incremental) mark }
@@ -252,7 +252,7 @@ program { all(policy=incremental) mark }
     REQUIRE(bad.ok);   // a warning, not an error
     CHECK(has_warning(bad, "may never terminate"));
 
-    // The write invalidates its own match — reductive, no warning.
+    // The write invalidates its own match ??? reductive, no warning.
     compile_result good(prelude + rfill +
         "program { all(policy=incremental) fill }");
     REQUIRE(good.ok);
@@ -265,6 +265,122 @@ program { some(max=5, policy=incremental) mark }
 )");
     REQUIRE(bounded.ok);
     CHECK(!has_warning(bounded, "may never terminate"));
+}
+
+// -- step 4: expression types, scopes, params, unions --
+
+static const std::string rprog = "program { }\n";
+
+TEST_CASE("sema: expression type errors") {
+    CHECK(compile_result(prelude + "rule r { level[ (wall + 1) ] => level[floor] }\n" + rprog)
+          .has_error("arithmetic operator requires numeric"));
+    CHECK(compile_result(prelude + "rule r { level[ (wall == 1) ] => level[floor] }\n" + rprog)
+          .has_error("require two numbers or two tag values"));
+    CHECK(compile_result(prelude + "rule r { tiles[ (wall) ] => tiles[1] }\n" + rprog)
+          .has_error("must evaluate to a number"));
+    CHECK(compile_result(prelude + "rule r { level[ (tiles > 5) ] => level[floor] }\n" + rprog)
+          .has_error("must evaluate to a tag value"));
+    CHECK(compile_result(prelude + "rule r { level[ (. == .) ] => level[floor] }\n" + rprog)
+          .has_error("no inferable type"));
+    CHECK(compile_result(prelude + "rule r { level[ (nope + 1) ] => level[floor] }\n" + rprog)
+          .has_error("unknown identifier 'nope'"));
+}
+
+TEST_CASE("sema: built-in calls") {
+    CHECK(compile_result(prelude + "rule r { tiles[ (warp(1)) ] => tiles[1] }\n" + rprog)
+          .has_error("unknown function 'warp'"));
+    CHECK(compile_result(prelude + "rule r { tiles[ (min(1)) ] => tiles[1] }\n" + rprog)
+          .has_error("takes 2 argument(s)"));
+    CHECK(compile_result(prelude + "rule r { tiles[ (if(1, 2, 3)) ] => tiles[1] }\n" + rprog)
+          .has_error("condition must be boolean"));
+    CHECK(compile_result(prelude +
+          "rule r { tiles[ (if(tiles > 0, 1, wall)) ] => tiles[1] }\n" + rprog)
+          .has_error("branches must have the same type"));
+    compile_result ok(prelude +
+        "rule r { tiles[ (clamp(random(0, 9), 1, abs(-5))) ] => tiles[ (max(tiles, 1)) ] }\n" + rprog);
+    INFO(ok.diags.format_all());
+    CHECK(ok.ok);
+}
+
+TEST_CASE("sema: where discipline") {
+    CHECK(compile_result(prelude + "rule r { level[.] => where[ (x == 0) ] }\n" + rprog)
+          .has_error("cannot appear on the write side"));
+    CHECK(compile_result(prelude + R"(
+rule r {
+    { all
+      level[.]
+      where[ (x + 1) ]
+    }
+    =>
+    level[floor]
+}
+)" + rprog).has_error("must evaluate to a boolean"));
+}
+
+TEST_CASE("sema: complement is match-side only") {
+    CHECK(compile_result(prelude + "rule r { level[wall] => level[!wall] }\n" + rprog)
+          .has_error("not allowed on the write side"));
+}
+
+TEST_CASE("sema: param scopes") {
+    // input param without a default (??7.3 #27)
+    CHECK(compile_result("params { d: number }\n" + rprog)
+          .has_error("must have a default"));
+    // derived params read earlier params only
+    CHECK(compile_result("params { a = b * 2\n b: number = 1 }\n" + rprog)
+          .has_error("referenced before it is declared"));
+    // no grids, no position at param scope
+    CHECK(compile_result(prelude + "params { a = level + 1 }\n" + rprog)
+          .has_error("cannot be read here"));
+    CHECK(compile_result("params { a = x + 1 }\n" + rprog)
+          .has_error("cannot be read here"));
+    // reserved / collision names
+    CHECK(compile_result("params { width: number = 3 }\n" + rprog)
+          .has_error("reserved expression identifier"));
+    CHECK(compile_result("params { random: number = 3 }\n" + rprog)
+          .has_error("built-in function name"));
+    CHECK(compile_result(prelude + "params { level: number = 3 }\n" + rprog)
+          .has_error("collides with a grid"));
+    // valid: defaults may use earlier params and random
+    compile_result ok("params { a: number = 2\n b: number = random(0, a)\n c = a + b }\n" + rprog);
+    INFO(ok.diags.format_all());
+    CHECK(ok.ok);
+}
+
+TEST_CASE("sema: when guard discipline") {
+    std::string pre = prelude + rfill + "params { d: number = 0 }\n";
+    CHECK(compile_result(prelude + rfill +
+          "params { d: number = 0 }\nprogram { all fill when (d + 1) }")
+          .has_error("must be a boolean expression"));
+    CHECK(compile_result(prelude + rfill +
+          "program { all fill when ((level == floor)) }")
+          .has_error("cannot be read here"));
+    CHECK(compile_result(prelude + rfill +
+          "program { all fill when (x > 0) }")
+          .has_error("cannot be read here"));
+}
+
+TEST_CASE("sema: named unions") {
+    compile_result ok(R"(
+tag geo { wall, door, floor, blocker = wall | door, solid = blocker | floor }
+layers { level: grid of geo }
+rule r { level[blocker] => level[floor] }
+program { }
+)");
+    INFO(ok.diags.format_all());
+    REQUIRE(ok.ok);
+    CHECK(ok.prog.mask_of(0, "blocker") == (ls::tag_bit(0) | ls::tag_bit(1)));
+    CHECK(ok.prog.mask_of(0, "solid") ==
+          (ls::tag_bit(0) | ls::tag_bit(1) | ls::tag_bit(2)));
+    // the rule's LHS cell carries the union mask
+    CHECK(ok.prog.rules[0].pairs[0].lhs[0].at(0, 0).val == (ls::tag_bit(0) | ls::tag_bit(1)));
+
+    CHECK(compile_result("tag geo { wall, b = nope }\n" + rprog)
+          .has_error("not a value or earlier union"));
+    CHECK(compile_result("tag geo { wall, b = c, c = wall }\n" + rprog)
+          .has_error("not a value or earlier union"));   // forward reference
+    CHECK(compile_result("tag geo { wall, wall = wall }\n" + rprog)
+          .has_error("redeclares"));
 }
 
 TEST_CASE("sema: tagset over the 30-value cap") {

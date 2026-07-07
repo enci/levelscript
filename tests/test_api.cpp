@@ -507,6 +507,162 @@ TEST_CASE("api: mid-batch snapshot shows the accumulating writes") {
     CHECK(count_val(done, "level", floor) == 32);
 }
 
+// ── step 4: expressions, where, params, when, random ─────────────────────────
+
+TEST_CASE("api: params drive conditional writes and when guards") {
+    auto gen = make(R"(
+tag geo { wall, floor }
+layers { level: grid of geo }
+params {
+    difficulty: number = 0
+    extra = difficulty * 2
+}
+rule paint { level[.] => level[ (if(difficulty > 3, wall, floor)) ] }
+rule strip { level[wall] => level[.] }
+program {
+    resize(4, 4)
+    all paint
+    all strip  when (extra > 10)
+}
+)");
+    INFO(gen.error());
+    REQUIRE(static_cast<bool>(gen));
+
+    // default difficulty 0 → all floor
+    ls::level a = gen.generate(1);
+    CHECK(count_val(a, "level", gen.tag("geo.floor")) == 16);
+
+    // difficulty 5 → all wall, and the guard (extra=10 > 10 false) leaves them
+    ls::level b = gen.generate(1, {{"difficulty", 5}});
+    CHECK(count_val(b, "level", gen.tag("geo.wall")) == 16);
+
+    // difficulty 6 → extra=12 → guard true → walls stripped
+    ls::level c = gen.generate(1, {{"difficulty", 6}});
+    CHECK(count_val(c, "level", gen.tag("geo.wall")) == 0);
+}
+
+TEST_CASE("api: where gates positions") {
+    auto gen = make(R"(
+tag geo { wall, floor }
+layers { level: grid of geo }
+rule pave { level[.] => level[floor] }
+rule frame {
+    { all
+      level[floor]
+      where[ (x == 0 || y == 0 || x == width - 1 || y == height - 1) ]
+    }
+    =>
+    level[wall]
+}
+program {
+    resize(6, 5)
+    all pave
+    all frame
+}
+)");
+    INFO(gen.error());
+    REQUIRE(static_cast<bool>(gen));
+    ls::level lv = gen.generate(1);
+    int wall = gen.tag("geo.wall"), floor = gen.tag("geo.floor");
+    for (int y = 0; y < 5; ++y)
+        for (int x = 0; x < 6; ++x) {
+            bool edge = x == 0 || y == 0 || x == 5 || y == 4;
+            CHECK(lv["level"].at(x, y) == (edge ? wall : floor));
+        }
+}
+
+TEST_CASE("api: random cells are deterministic per seed and in range") {
+    auto gen = make(R"(
+tag geo { floor }
+layers { tiles: grid of number }
+rule roll { tiles[.] => tiles[ (random(3, 7)) ] }
+program {
+    resize(8, 8)
+    all roll
+}
+)");
+    INFO(gen.error());
+    REQUIRE(static_cast<bool>(gen));
+    ls::level a = gen.generate(9);
+    ls::level b = gen.generate(9);
+    CHECK(dump(a, "tiles") == dump(b, "tiles"));
+    for (int v : dump(a, "tiles")) {
+        CHECK(v >= 3);
+        CHECK(v <= 7);
+    }
+}
+
+TEST_CASE("api: totality — division by zero yields zero") {
+    auto gen = make(R"(
+layers { tiles: grid of number }
+params { n: number = 0 }
+rule f { tiles[.] => tiles[ (if(n == 0, 0, 100 / n)) ] }
+program {
+    resize(2, 2)
+    all f
+}
+)");
+    INFO(gen.error());
+    REQUIRE(static_cast<bool>(gen));
+    for (int v : dump(gen.generate(1), "tiles")) CHECK(v == 0);
+}
+
+TEST_CASE("api: empty tests distinguish empty from stored zero") {
+    auto gen = make(R"(
+tag geo { mark }
+layers {
+    tiles: grid of number
+    flags: grid of geo
+}
+rule zero_some { tiles[.] => tiles[0] }
+rule mark_empty {
+    { all
+      flags[.]
+      where[ ((tiles == 0) && (tiles != .)) ]
+    }
+    =>
+    flags[mark]
+}
+program {
+    resize(4, 1)
+    some(max=2) zero_some
+    all mark_empty
+}
+)");
+    INFO(gen.error());
+    REQUIRE(static_cast<bool>(gen));
+    ls::level lv = gen.generate(5);
+    // exactly the two cells holding a stored 0 get marked; empty cells (which
+    // also read as 0 in arithmetic) do not
+    CHECK(count_val(lv, "flags", gen.tag("geo.mark")) == 2);
+}
+
+TEST_CASE("api: union masks match either value") {
+    auto gen = make(R"(
+tag geo { wall, door, floor, blocker = wall | door }
+layers { level: grid of geo }
+rule mix {
+    level[.]
+    =>
+    { any
+      level[wall]
+      level[door]
+      level[floor]
+    }
+}
+rule clear_blockers { level[blocker] => level[floor] }
+program {
+    resize(6, 6)
+    all mix
+    all clear_blockers
+}
+)");
+    INFO(gen.error());
+    REQUIRE(static_cast<bool>(gen));
+    ls::level lv = gen.generate(7);
+    CHECK(count_val(lv, "level", gen.tag("geo.floor")) == 36);
+}
+
 TEST_CASE("api: snapshot mid-run sees committed statements only") {
     auto gen = make(scatter_src);
     auto g = gen.begin(7, ls::step_mode::statement);
