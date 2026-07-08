@@ -104,6 +104,9 @@ public:
     // ── observe channel (populated only when begun with observe::on) ──
     /// Index of the statement the last step worked on (-1 before first step).
     int stmt_index() const;
+    /// True when the last step completed a statement (vs. one application
+    /// within it) — progress bars and steppers key off this.
+    bool at_statement_boundary() const;
     /// Matched/written cells of the last application.
     std::vector<cell_highlight> highlights() const;
 

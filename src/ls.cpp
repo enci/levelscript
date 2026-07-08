@@ -87,6 +87,7 @@ struct run_state {
     step_mode            mode;
     bool                 done{false};
     int                  last_stmt{-1};
+    bool                 at_boundary{false};
 
     run_state(std::shared_ptr<compiled const> prog, uint64_t seed, step_mode md,
               observe obs,
@@ -109,6 +110,7 @@ bool generation::step() {
     while (s_->seq.next()) {
         auto const& e = s_->seq.value();
         s_->last_stmt = e.stmt;
+        s_->at_boundary = e.what == step_event::kind::statement;
         if (s_->mode == step_mode::application ||
             e.what == step_event::kind::statement)
             return true;
@@ -119,6 +121,10 @@ bool generation::step() {
 
 int generation::stmt_index() const {
     return s_ ? s_->last_stmt : -1;
+}
+
+bool generation::at_statement_boundary() const {
+    return s_ && s_->at_boundary;
 }
 
 std::vector<cell_highlight> generation::highlights() const {

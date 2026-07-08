@@ -1,0 +1,186 @@
+#pragma once
+// Shared internals of the lsd debugger, split across debug_ui.cpp (app state,
+// main loop, controls) and debug_ui_views.cpp (grid composite, pattern
+// previews, inspector windows).
+//
+// Execution boundary: everything that RUNS a script goes through the public
+// API in ls.hpp (ls::generator / ls::generation / ls::level). The internal
+// headers (parser.hpp / sema.hpp) are included for DISPLAY METADATA ONLY --
+// statement descriptions, rule pattern previews, tag value names. That data
+// is read-only and never executes anything.
+
+#include "ls.hpp"           // execution: compile/begin/step/snapshot/highlights
+#include "ast.hpp"          // metadata: statement + rule attribute display
+#include "sema.hpp"         // metadata: compiled patterns / tag + layer tables
+#include "project_config.hpp"
+
+#include <imgui.h>
+
+#include <cstdint>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+struct SDL_Renderer;
+struct SDL_Texture;
+
+namespace ls {
+
+// ── palette helpers ───────────────────────────────────────────────────────────
+
+// Hash-based random color; stable for a given (tag_id, value_id) pair.
+// An explicit user color from the sidecar config wins when present.
+ImU32 tag_color(int tag_id, int value_id,
+                std::unordered_map<int, uint32_t> const* colors = nullptr);
+ImU32 with_alpha(ImU32 col, float opacity);
+ImU32 heatmap_color(float t, float opacity);
+
+// The one ImU32 <-> float[3] conversion (color editors + config round trips).
+void     col3_from_u32(uint32_t c, float out[3]);
+uint32_t u32_from_col3(float const c[3]);
+
+// A layer's display palette: its tagset id (-1 = number layer) and the user
+// color overrides for that tagset, if any.
+struct palette {
+    int                                      tag_id{-1};
+    std::unordered_map<int, uint32_t> const* colors{nullptr};
+};
+palette layer_palette(compiled const& meta, project_config const& cfg, int grid_id);
+
+// Glyph for a display value: middle dot when empty, tag initial, or number.
+std::string cell_glyph(compiled const& meta, int tag_id, int v);
+
+// Text centered in a box_px square anchored at p0 (grid cells, pattern cells).
+void draw_centered_text(ImDrawList* dl, ImVec2 p0, float box_px, ImU32 col,
+                        char const* text);
+
+// ── script: one loaded .ls file ───────────────────────────────────────────────
+
+struct script {
+    std::string path;
+    generator   gen;    // execution factory -- the public API surface
+    ast_file    ast;    // display metadata only
+    compiled    meta;   // display metadata only
+    std::string status;       // one-line load status for the status bar
+    std::string full_error;   // full diagnostics of a failed load
+    bool        ok{false};
+
+    std::vector<std::string> layer_names() const {
+        std::vector<std::string> names;
+        for (auto const& l : meta.layers) names.push_back(l.name);
+        return names;
+    }
+};
+
+// (Re)load from disk: public compile for execution, plus one parse+analyze
+// for the display metadata. On failure the old gen/ast/meta stay in place.
+bool load_script(script& sc);
+
+// ── debug_run: one in-flight progressive run ─────────────────────────────────
+//
+// A thin stepper over ls::generation, begun at application granularity with
+// the observe channel on. This is the ONLY stepping mechanism: one pulled
+// event is one rule application or one statement boundary, mid-batch grids
+// come from snapshot(), highlights from highlights(), restart is a new
+// begin(). The snapshot/highlight copies are cached and refreshed once per
+// action rather than per frame.
+
+struct debug_run {
+    generation                  gen;
+    level                       snap;
+    std::vector<cell_highlight> hls;
+    int  stmt_count{0};
+    bool started{false};
+    bool done{false};
+    int  apps_in_stmt{0};    // applications of the statement being worked on
+    int  counted_stmt{-1};
+
+    void restart(generator const& g, uint64_t seed) {
+        gen = g.begin(seed, step_mode::application, observe::on);
+        stmt_count = g.statement_count();
+        started = false;
+        done = false;
+        apps_in_stmt = 0;
+        counted_stmt = -1;
+        refresh();
+    }
+
+    void refresh() {
+        snap = gen.snapshot();
+        hls  = gen.highlights();
+    }
+
+    // Pull one event; false when the run is finished.
+    bool advance() {
+        if (done) return false;
+        if (!gen.step()) { done = true; return false; }
+        started = true;
+        int s = gen.stmt_index();
+        if (s != counted_stmt) { counted_stmt = s; apps_in_stmt = 0; }
+        if (!gen.at_statement_boundary()) apps_in_stmt++;
+        return true;
+    }
+
+    // Step (F10): one application (or the closing statement boundary).
+    void step_once() { advance(); refresh(); }
+    // Next Statement (F11): pull until a statement boundary or done.
+    void next_statement() {
+        while (advance() && !gen.at_statement_boundary()) {}
+        refresh();
+    }
+    // Run: drain everything.
+    void run_all() {
+        while (advance()) {}
+        refresh();
+    }
+
+    // Statement the last event worked on (the Rule window's subject).
+    int shown_stmt() const { return gen.stmt_index(); }
+    // Statement in progress / about to run (the Program window's marker).
+    int current_stmt() const {
+        if (!started) return 0;
+        if (done) return stmt_count;
+        int last = gen.stmt_index();
+        return gen.at_statement_boundary() ? last + 1 : last;
+    }
+};
+
+// ── statement display ─────────────────────────────────────────────────────────
+
+std::string stmt_desc(program_stmt const& s);
+char const* stmt_icon(program_stmt const& s);
+
+// ── tileset texture ───────────────────────────────────────────────────────────
+
+struct tile_texture {
+    SDL_Texture* sdl_tex{nullptr};
+    int          width{0};
+    int          height{0};
+    std::string  loaded_path;
+
+    // Reload only when path has changed. Returns true if texture is ready.
+    bool sync(SDL_Renderer* renderer, std::string const& abs_path);
+
+    tile_texture() = default;
+    tile_texture(tile_texture const&)            = delete;
+    tile_texture& operator=(tile_texture const&) = delete;
+    ~tile_texture();
+};
+
+// Resolve a path relative to the .ls file's directory.
+std::string resolve_path(std::string const& ls_path, std::string const& rel);
+
+// ── views (debug_ui_views.cpp) ────────────────────────────────────────────────
+
+void draw_rule_window(script const& sc, debug_run const& run, float mini_px,
+                      project_config const& cfg);
+void draw_program_window(script const& sc, debug_run const& run);
+void draw_tags_window(compiled const& meta, project_config& cfg);
+void draw_grid_composite(script const& sc, debug_run const& run,
+                         project_config const& cfg,
+                         tile_texture const& tile_tex, float cell_px);
+void draw_layer_strip(project_config& cfg, compiled const& meta);
+void draw_settings_window(project_config& cfg, tile_texture& tile_tex,
+                          SDL_Renderer* renderer, std::string const& ls_path);
+
+}  // namespace ls
