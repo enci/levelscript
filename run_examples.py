@@ -32,10 +32,25 @@ def main() -> None:
     update = "--update" in sys.argv
     lsc = find_lsc()
     examples = sorted((ROOT / "examples").glob("*.ls"))
-    if not examples:
+    error_examples = sorted((ROOT / "examples" / "errors").glob("*.ls"))
+    if not examples and not error_examples:
         sys.exit("no examples found")
 
     failed = 0
+
+    # examples/errors/*.ls must FAIL to compile (exit != 0, diagnostics on stderr)
+    for ex in error_examples:
+        run = subprocess.run([str(lsc), "--seed", "1", str(ex)],
+                             capture_output=True, text=True)
+        if run.returncode == 0:
+            print(f"FAIL errors/{ex.name}: compiled but should not")
+            failed += 1
+        elif "error" not in run.stderr:
+            print(f"FAIL errors/{ex.name}: failed without a diagnostic")
+            failed += 1
+        else:
+            print(f"ok   errors/{ex.name}")
+
     for ex in examples:
         src = ex.read_text(encoding="utf-8")
         m = re.search(r"@seed\s+(\d+)", src)
@@ -63,9 +78,10 @@ def main() -> None:
         else:
             print(f"ok   {ex.name}")
 
+    total = len(examples) + len(error_examples)
     if failed:
-        sys.exit(f"{failed}/{len(examples)} examples failed")
-    print(f"all {len(examples)} examples pass")
+        sys.exit(f"{failed}/{total} examples failed")
+    print(f"all {total} examples pass")
 
 
 if __name__ == "__main__":

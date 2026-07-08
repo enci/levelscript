@@ -212,6 +212,11 @@ rule fill_geo { all
     CHECK(ast.rules[0].pairs[2].lhs[0].cells[0][0].atoms[0].name == "S");
 }
 
+TEST_CASE("parser: commas separate body pairs like newlines (list_sep)") {
+    auto ast = parse_ok("rule r { all\n g[a] => g[b], g[b] => g[c]\n}");
+    CHECK(ast.rules[0].pairs.size() == 2);
+}
+
 TEST_CASE("parser: a single sub-rule under a body combinator is allowed") {
     auto ast = parse_ok("rule r { all\n g[.] => g[x]\n}");
     CHECK(ast.rules[0].pairs.size() == 1);

@@ -515,12 +515,12 @@ struct parser {
                                                 : body_combinator::any;
             source_loc bl = loc();
             eat();
-            skip_newlines();
+            skip_seps();   // pairs separate by newline or comma (list_sep)
             while (!at(token_type::rbrace) && !at_end()) {
                 rule_pair pr;
                 if (!parse_pair(pr)) { recover_to(token_type::rbrace); break; }
                 r.pairs.push_back(std::move(pr));
-                skip_newlines();
+                skip_seps();
             }
             if (r.pairs.empty())
                 diags.error(file, bl.line, bl.col, "empty rule body");
