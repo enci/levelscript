@@ -1,15 +1,88 @@
 import * as vscode from 'vscode';
 import { getCached } from './cache';
 
+function findTokenAt(tokens: any[], line: number, col: number) {
+    if (!tokens) return null;
+    for (const t of tokens) {
+        if (t.line === line && col >= t.col && col < t.col + t.len) {
+            return t;
+        }
+    }
+    return null;
+}
+
+function spanToLocation(uri: vscode.Uri, loc: { line: number, col: number, len: number }): vscode.Location {
+    const start = new vscode.Position(loc.line - 1, loc.col - 1);
+    const end = new vscode.Position(loc.line - 1, loc.col - 1 + loc.len);
+    return new vscode.Location(uri, new vscode.Range(start, end));
+}
+
 export const definitionProvider: vscode.DefinitionProvider = {
-    provideDefinition(doc, pos, token) {
-        return null; // TODO
+    provideDefinition(doc, pos) {
+        const cached = getCached(doc.uri.toString());
+        if (!cached || !cached.refs) return null;
+
+        const line = pos.line + 1;
+        const col = pos.character + 1;
+
+        const ref = findTokenAt(cached.refs, line, col);
+        if (!ref) return null;
+
+        if (ref.kind === 'rule') {
+            const rule = cached.symbols.rules.find(r => r.name === ref.target);
+            if (rule && rule.loc) return spanToLocation(doc.uri, rule.loc);
+        } else if (ref.kind === 'layer') {
+            const layer = cached.symbols.layers.find(l => l.name === ref.target);
+            if (layer && layer.loc) return spanToLocation(doc.uri, layer.loc);
+        }
+
+        return null;
     }
 };
 
 export const hoverProvider: vscode.HoverProvider = {
     provideHover(doc, pos, token) {
-        return null; // TODO
+        const cached = getCached(doc.uri.toString());
+        if (!cached || !cached.ok) return null;
+
+        const line = pos.line + 1;
+        const col = pos.character + 1;
+
+        // Check if hovering over a tag value (token)
+        const t = findTokenAt(cached.tokens, line, col);
+        if (t) {
+            const tag = cached.symbols.tags[t.tag];
+            if (tag) {
+                const val = tag.values[t.value];
+                const md = new vscode.MarkdownString();
+                md.appendMarkdown(`**${val}** — *${tag.name}*\n\n`);
+                
+                const valueList = tag.values.map((v, i) => i === t.value ? `**${v}**` : v).join(', ');
+                md.appendMarkdown(`tag ${tag.name} { ${valueList} }`);
+                return new vscode.Hover(md);
+            }
+        }
+
+        // Check if hovering over a layer or rule reference
+        if (cached.refs) {
+            const ref = findTokenAt(cached.refs, line, col);
+            if (ref) {
+                const md = new vscode.MarkdownString();
+                if (ref.kind === 'layer') {
+                    const layer = cached.symbols.layers.find(l => l.name === ref.target);
+                    if (layer) {
+                        const type = layer.type === 'number' ? 'number' : layer.type;
+                        md.appendMarkdown(`**${layer.name}**: grid of \`${type}\``);
+                        return new vscode.Hover(md);
+                    }
+                } else if (ref.kind === 'rule') {
+                    md.appendMarkdown(`**rule** \`${ref.target}\``);
+                    return new vscode.Hover(md);
+                }
+            }
+        }
+
+        return null;
     }
 };
 

@@ -16,18 +16,19 @@
 
 const fs   = require('fs');
 const path = require('path');
-const { parse } = require('../out/src/language/parser');
-const { check } = require('../out/src/language/sema');
+const createLsModule = require('../ls_wasm.js');
 
 const VERBOSE = process.argv.includes('--verbose');
 const EXAMPLES = path.resolve(__dirname, '..', '..', 'examples');
+
+let wasmModule = null;
 
 function walk(dir) {
   const out = [];
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name);
     if (e.isDirectory()) out.push(...walk(p));
-    else if (e.name.endsWith('.mgsl')) out.push(p);
+    else if (e.name.endsWith('.ls')) out.push(p);
   }
   return out;
 }
@@ -46,19 +47,21 @@ function parseExpectations(src) {
   return exp;
 }
 
-function analyse(src) {
+function analyse(src, filename) {
   let all;
   try {
-    const { ast, diagnostics: parseDiags } = parse(src);
-    const semaDiags = check(ast, true).diagnostics;
-    all = [...parseDiags, ...semaDiags];
+    const res = JSON.parse(wasmModule.inspect_json(src, filename));
+    all = res.diagnostics || [];
   } catch (e) {
-    return { errors: [{ message: 'analysis threw: ' + e.message, span: { line: 0, col: 0 } }], all: [] };
+    return { errors: [{ message: 'analysis threw: ' + e.message, line: 0, col: 0 }], all: [] };
   }
   return { errors: all.filter(d => d.severity === 'error'), all };
 }
 
-const files = walk(EXAMPLES).sort();
+async function run() {
+  wasmModule = await createLsModule();
+  
+  const files = walk(EXAMPLES).sort();
 let pass = 0, fail = 0, skipped = 0, stubs = 0;
 const failures = [];
 
@@ -73,7 +76,7 @@ for (const file of files) {
   const code = src.replace(/\/\/[^\n]*/g, '').replace(/\s+/g, '');
   if (!hasDirectives && code === '') { stubs++; if (VERBOSE) console.log(`  skip [STUB ] ${rel}`); continue; }
 
-  const { errors, all } = analyse(src);
+  const { errors, all } = analyse(src, path.basename(file));
   const msgs = errors.map(e => e.message);
 
   // Decide expectation: error-expecting wins; else run-ok/clean.
@@ -96,7 +99,7 @@ for (const file of files) {
     if (VERBOSE) {
       const tag = expectsError ? 'ERR-OK' : 'CLEAN ';
       console.log(`  ok   [${tag}] ${rel}`);
-      if (VERBOSE) for (const d of all) console.log(`         ${d.severity} ${d.span.line}:${d.span.col} ${d.message}`);
+      if (VERBOSE) for (const d of all) console.log(`         ${d.severity} ${d.line}:${d.col} ${d.message}`);
     }
   } else {
     fail++;
@@ -115,3 +118,6 @@ console.log(`${files.length} files: ${pass} passed, ${fail} failed, ${stubs} emp
 if (skipped) console.log(`(${skipped} files also carry runtime grid-count assertions, not verified by the static checker)`);
 
 process.exit(fail === 0 ? 0 : 1);
+}
+
+run().catch(console.error);

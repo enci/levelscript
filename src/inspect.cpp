@@ -73,6 +73,27 @@ void emit_write_term_tokens(std::string& o, comma_list& cl,
     for (auto const& it : t.items) emit_write_term_tokens(o, cl, prog, it);
 }
 
+// Collect grid names and rule names as hover/definition references
+void emit_pattern_refs(std::string& o, comma_list& cl, pattern const& p) {
+    if (p.is_where) return;
+    if (p.grid.empty()) return;
+    cl.next();
+    o += "{\"line\":" + std::to_string(p.grid_loc.line) +
+         ",\"col\":" + std::to_string(p.grid_loc.col) +
+         ",\"len\":" + std::to_string(p.grid.size()) +
+         ",\"kind\":\"layer\",\"target\":";
+    js(o, p.grid);
+    o += "}";
+}
+
+void emit_write_term_refs(std::string& o, comma_list& cl, write_term const& t) {
+    if (t.what == write_term::kind::leaf) {
+        emit_pattern_refs(o, cl, t.pat);
+        return;
+    }
+    for (auto const& it : t.items) emit_write_term_refs(o, cl, it);
+}
+
 }  // namespace
 
 std::string inspect_json(std::string const& source, std::string const& name) {
@@ -114,6 +135,33 @@ std::string inspect_json(std::string const& source, std::string const& name) {
     }
     o += "]";
 
+    o += ",\"refs\":[";
+    if (ast) {
+        comma_list cl{o};
+        // Rule references in Program statements
+        if (ast->has_program) {
+            for (auto const& s : ast->program.stmts) {
+                if (s.what == program_stmt::kind::apply) {
+                    cl.next();
+                    o += "{\"line\":" + std::to_string(s.rule_name_loc.line) +
+                         ",\"col\":" + std::to_string(s.rule_name_loc.col) +
+                         ",\"len\":" + std::to_string(s.rule_name.size()) +
+                         ",\"kind\":\"rule\",\"target\":";
+                    js(o, s.rule_name);
+                    o += "}";
+                }
+            }
+        }
+        // Grid references in Rule patterns
+        for (auto const& r : ast->rules) {
+            for (auto const& pr : r.pairs) {
+                for (auto const& lp : pr.lhs) emit_pattern_refs(o, cl, lp);
+                emit_write_term_refs(o, cl, pr.rhs);
+            }
+        }
+    }
+    o += "]";
+
     o += ",\"symbols\":{\"tags\":[";
     {
         comma_list cl{o};
@@ -138,12 +186,22 @@ std::string inspect_json(std::string const& source, std::string const& name) {
     o += "],\"layers\":[";
     {
         comma_list cl{o};
-        for (auto const& l : prog.layers) {
+        for (int i = 0; i < (int)prog.layers.size(); ++i) {
+            auto const& l = prog.layers[i];
             cl.next();
             o += "{\"name\":";
             js(o, l.name);
             o += ",\"type\":";
             js(o, l.tag_id >= 0 ? prog.tag_names[l.tag_id] : "number");
+            
+            // Output definition location if we have it in AST
+            if (ast && ast->has_layers && i < (int)ast->layers.layers.size()) {
+                auto const& ast_l = ast->layers.layers[i];
+                o += ",\"loc\":{\"line\":" + std::to_string(ast_l.loc.line) + 
+                     ",\"col\":" + std::to_string(ast_l.loc.col) + 
+                     ",\"len\":" + std::to_string(ast_l.name.size()) + "}";
+            }
+            
             o += "}";
         }
     }
@@ -165,7 +223,19 @@ std::string inspect_json(std::string const& source, std::string const& name) {
     o += "],\"rules\":[";
     {
         comma_list cl{o};
-        for (auto const& r : prog.rules) { cl.next(); js(o, r.name); }
+        for (int i = 0; i < (int)prog.rules.size(); ++i) { 
+            cl.next(); 
+            o += "{\"name\":";
+            js(o, prog.rules[i].name);
+            
+            if (ast && i < (int)ast->rules.size()) {
+                auto const& ast_r = ast->rules[i];
+                o += ",\"loc\":{\"line\":" + std::to_string(ast_r.loc.line) + 
+                     ",\"col\":" + std::to_string(ast_r.loc.col) + 
+                     ",\"len\":" + std::to_string(ast_r.name.size()) + "}";
+            }
+            o += "}";
+        }
     }
     // completion vocabulary — kept in sync with the sema tables by the tests
     o += "],\"ops\":[\"resize\",\"upscale\",\"trim\",\"mirror\",\"pad\",\"path\"]";

@@ -10,3 +10,4 @@ extension/out/
 extension/ls_wasm.js
 extension/ls_wasm.wasm
 extension/package-lock.json
+*.vsix

@@ -34,11 +34,11 @@ TEST_CASE("inspect: healthy file emits ok, symbols, and no diagnostics") {
     CHECK(has(j, "\"name\":\"geo\""));
     CHECK(has(j, "\"values\":[\"wall\",\"floor\"]"));
     CHECK(has(j, "\"unions\":[\"blocker\"]"));
-    CHECK(has(j, "{\"name\":\"level\",\"type\":\"geo\"}"));
-    CHECK(has(j, "{\"name\":\"tiles\",\"type\":\"number\"}"));
+    CHECK(has(j, "{\"name\":\"level\",\"type\":\"geo\",\"loc\":"));
+    CHECK(has(j, "{\"name\":\"tiles\",\"type\":\"number\",\"loc\":"));
     CHECK(has(j, "{\"name\":\"difficulty\",\"derived\":false}"));
     CHECK(has(j, "{\"name\":\"budget\",\"derived\":true}"));
-    CHECK(has(j, "\"rules\":[\"fill\"]"));
+    CHECK(has(j, "\"rules\":[{\"name\":\"fill\",\"loc\":"));
     CHECK(has(j, "\"ops\":[\"resize\""));
     CHECK(has(j, "\"builtins\":[\"if\""));
 }
@@ -64,7 +64,7 @@ program { all good }
     CHECK(has(j, "\"ok\":false"));
     CHECK(has(j, "unknown tag value 'lava'"));
     CHECK(has(j, "\"name\":\"geo\""));                  // symbols survive
-    CHECK(has(j, "\"rules\":[\"bad\",\"good\"]"));
+    CHECK(has(j, "\"rules\":[{\"name\":\"bad\",\"loc\":"));
     CHECK(has(j, "\"tag\":0,\"value\":1"));             // 'floor' token survives
 }
 

@@ -219,6 +219,7 @@ struct parser {
         while (!at(token_type::rbrace) && !at_end()) {
             layer_decl l;
             if (!expect(token_type::ident, "a grid name")) { eat_bad(); skip_seps(); continue; }
+            l.loc = {toks[pos - 1].line, toks[pos - 1].col};
             l.name = toks[pos - 1].text;
             if (!expect(token_type::colon, "':'"))         { skip_seps(); continue; }
             if (!expect(token_type::kw_grid, "'grid'"))    { skip_seps(); continue; }
@@ -324,6 +325,7 @@ struct parser {
             eat();
         } else {
             if (!expect(token_type::ident, "a grid name")) return false;
+            p.grid_loc = {toks[pos - 1].line, toks[pos - 1].col};
             p.grid = toks[pos - 1].text;
         }
         if (!expect(token_type::lbracket, "'['")) return false;
@@ -584,8 +586,10 @@ struct parser {
             }
             if (!expect(token_type::rparen, "')'")) return;
         }
-        if (expect(token_type::ident, "a rule name"))
+        if (expect(token_type::ident, "a rule name")) {
+            s.rule_name_loc = {toks[pos - 1].line, toks[pos - 1].col};
             s.rule_name = toks[pos - 1].text;
+        }
     }
 
     // One op-call argument value: INTEGER (a leading '-' is accepted so value
