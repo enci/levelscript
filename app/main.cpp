@@ -1,3 +1,4 @@
+#include "inspect.hpp"
 #include "ls.hpp"
 #include <chrono>
 #include <fstream>
@@ -11,7 +12,7 @@
 
 static void usage(char const* argv0) {
     std::cerr << "Usage: " << argv0
-              << " [--seed N] [--param name=value ...] <file.ls>\n";
+              << " [--seed N] [--param name=value ...] [--inspect] <file.ls>\n";
 }
 
 static void print_level(ls::level const& lv, std::ostream& out) {
@@ -36,10 +37,13 @@ int main(int argc, char* argv[]) {
     std::optional<uint64_t> seed;
     std::string path;
     std::vector<std::pair<std::string, int>> params;
+    bool inspect = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        if (arg == "--seed" && i + 1 < argc) {
+        if (arg == "--inspect") {
+            inspect = true;
+        } else if (arg == "--seed" && i + 1 < argc) {
             seed = (uint64_t)std::stoull(argv[++i]);
         } else if (arg == "--param" && i + 1 < argc) {
             std::string kv = argv[++i];
@@ -69,6 +73,11 @@ int main(int argc, char* argv[]) {
     }
     std::ostringstream buf;
     buf << ifs.rdbuf();
+
+    if (inspect) {   // editor tooling: JSON report, exit 0 (diagnostics inside)
+        std::cout << ls::inspect_json(buf.str(), path) << '\n';
+        return 0;
+    }
 
     auto gen = ls::generator::compile(buf.str(), path);
     if (!gen) {

@@ -1105,13 +1105,13 @@ struct analyzer {
         }
     }
 
-    void run() {
+    void run(bool best_effort) {
         build_tables();
-        if (diags.has_errors()) return;
+        if (!best_effort && diags.has_errors()) return;
         compile_params();
-        if (diags.has_errors()) return;
+        if (!best_effort && diags.has_errors()) return;
         compile_rules();
-        if (diags.has_errors()) return;
+        if (!best_effort && diags.has_errors()) return;
         if (ast.has_program) compile_program();
     }
 };
@@ -1119,9 +1119,9 @@ struct analyzer {
 }  // namespace
 
 bool analyze(ast_file const& ast, compiled& out, diagnostics& diags,
-             std::string_view file) {
+             std::string_view file, bool best_effort) {
     analyzer a{ast, out, diags, file};
-    a.run();
+    a.run(best_effort);
     return !diags.has_errors();
 }
 
