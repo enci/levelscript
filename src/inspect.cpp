@@ -48,8 +48,22 @@ void emit_pattern_tokens(std::string& o, comma_list& cl,
     if (gid < 0) return;
     int tid = prog.layers[gid].tag_id;
     if (tid < 0) return;   // number grid: no value coloring
-    for (auto const& row : p.cells)
+    for (auto const& row : p.cells) {
         for (auto const& c : row) {
+            if (c.kind == cell_kind::any) {
+                cl.next();
+                o += "{\"line\":" + std::to_string(c.loc.line) +
+                     ",\"col\":" + std::to_string(c.loc.col) +
+                     ",\"len\":1,\"tag\":-1,\"value\":-1}";
+                continue;
+            }
+            if (c.kind == cell_kind::empty) {
+                cl.next();
+                o += "{\"line\":" + std::to_string(c.loc.line) +
+                     ",\"col\":" + std::to_string(c.loc.col) +
+                     ",\"len\":1,\"tag\":-2,\"value\":-2}";
+                continue;
+            }
             if (c.kind != cell_kind::tag_mask) continue;
             for (auto const& a : c.atoms) {
                 int vid = prog.value_id(tid, a.name);
@@ -62,6 +76,7 @@ void emit_pattern_tokens(std::string& o, comma_list& cl,
                      ",\"value\":" + std::to_string(vid) + "}";
             }
         }
+    }
 }
 
 void emit_write_term_tokens(std::string& o, comma_list& cl,
@@ -171,7 +186,18 @@ std::string inspect_json(std::string const& source, std::string const& name) {
             js(o, prog.tag_names[ti]);
             o += ",\"values\":[";
             comma_list vl{o};
-            for (auto const& v : prog.tag_values[ti]) { vl.next(); js(o, v); }
+            for (int i = 0; i < (int)prog.tag_values[ti].size(); ++i) { 
+                vl.next(); 
+                o += "{\"name\":";
+                js(o, prog.tag_values[ti][i]);
+                if (ast && ast->has_layers && ti < (int)ast->tags.size() && i < (int)ast->tags[ti].values.size()) {
+                    auto const& ast_val = ast->tags[ti].values[i];
+                    o += ",\"loc\":{\"line\":" + std::to_string(ast_val.loc.line) + 
+                         ",\"col\":" + std::to_string(ast_val.loc.col) + 
+                         ",\"len\":" + std::to_string(ast_val.name.size()) + "}";
+                }
+                o += "}";
+            }
             o += "],\"unions\":[";
             comma_list ul{o};
             if (ti < (int)prog.tag_unions.size())

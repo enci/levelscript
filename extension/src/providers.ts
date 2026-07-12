@@ -26,7 +26,18 @@ export const definitionProvider: vscode.DefinitionProvider = {
         const col = pos.character + 1;
 
         const ref = findTokenAt(cached.refs, line, col);
-        if (!ref) return null;
+        if (!ref) {
+            // Also check if we are hovering over a token that could be a tag value definition
+            const t = findTokenAt(cached.tokens, line, col);
+            if (t && t.tag >= 0 && t.value >= 0) {
+                const tag = cached.symbols.tags[t.tag];
+                if (tag) {
+                    const val = tag.values[t.value];
+                    if (val && val.loc) return spanToLocation(doc.uri, val.loc);
+                }
+            }
+            return null;
+        }
 
         if (ref.kind === 'rule') {
             const rule = cached.symbols.rules.find(r => r.name === ref.target);
@@ -50,14 +61,14 @@ export const hoverProvider: vscode.HoverProvider = {
 
         // Check if hovering over a tag value (token)
         const t = findTokenAt(cached.tokens, line, col);
-        if (t) {
+        if (t && t.tag >= 0 && t.value >= 0) {
             const tag = cached.symbols.tags[t.tag];
             if (tag) {
-                const val = tag.values[t.value];
+                const val = tag.values[t.value]?.name;
                 const md = new vscode.MarkdownString();
                 md.appendMarkdown(`**${val}** — *${tag.name}*\n\n`);
                 
-                const valueList = tag.values.map((v, i) => i === t.value ? `**${v}**` : v).join(', ');
+                const valueList = tag.values.map((v, i) => i === t.value ? `**${v.name}**` : v.name).join(', ');
                 md.appendMarkdown(`tag ${tag.name} { ${valueList} }`);
                 return new vscode.Hover(md);
             }
@@ -104,7 +115,7 @@ export const completionProvider: vscode.CompletionItemProvider = {
         // inside patterns, suggest values. We can just throw all values for now
         cached.symbols.tags.forEach(tag => {
             tag.values.forEach(v => {
-                items.push(new vscode.CompletionItem(v, vscode.CompletionItemKind.EnumMember));
+                items.push(new vscode.CompletionItem(v.name, vscode.CompletionItemKind.EnumMember));
             });
             tag.unions.forEach(u => {
                 items.push(new vscode.CompletionItem(u, vscode.CompletionItemKind.Enum));

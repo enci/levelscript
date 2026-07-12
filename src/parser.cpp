@@ -190,10 +190,11 @@ struct parser {
         skip_seps();
         while (!at(token_type::rbrace) && !at_end()) {
             if (!expect(token_type::ident, "a tag value name")) { eat_bad(); skip_seps(); continue; }
+            source_loc name_loc = {toks[pos - 1].line, toks[pos - 1].col};
             std::string name = toks[pos - 1].text;
             if (at(token_type::equals)) {   // named union: blocker = wall | door (§3)
                 tag_union u;
-                u.loc = {toks[pos - 1].line, toks[pos - 1].col};
+                u.loc = name_loc;
                 u.name = std::move(name);
                 eat();   // '='
                 do {
@@ -202,7 +203,7 @@ struct parser {
                 } while (accept(token_type::pipe));
                 d.unions.push_back(std::move(u));
             } else {
-                d.values.push_back(std::move(name));
+                d.values.push_back({name_loc, std::move(name)});
             }
             skip_seps();
         }

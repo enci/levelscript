@@ -44,10 +44,15 @@ struct tag_union {
     std::vector<std::string> members;
 };
 
+struct tag_value {
+    source_loc  loc;
+    std::string name;
+};
+
 struct tag_decl {
     source_loc               loc;
     std::string              name;
-    std::vector<std::string> values;
+    std::vector<tag_value>   values;
     std::vector<tag_union>   unions;
 };
 

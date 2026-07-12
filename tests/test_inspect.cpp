@@ -32,7 +32,7 @@ TEST_CASE("inspect: healthy file emits ok, symbols, and no diagnostics") {
     CHECK(has(j, "\"ok\":true"));
     CHECK(has(j, "\"diagnostics\":[]"));
     CHECK(has(j, "\"name\":\"geo\""));
-    CHECK(has(j, "\"values\":[\"wall\",\"floor\"]"));
+    CHECK(has(j, "\"values\":[{\"name\":\"wall\",\"loc\":"));
     CHECK(has(j, "\"unions\":[\"blocker\"]"));
     CHECK(has(j, "{\"name\":\"level\",\"type\":\"geo\",\"loc\":"));
     CHECK(has(j, "{\"name\":\"tiles\",\"type\":\"number\",\"loc\":"));

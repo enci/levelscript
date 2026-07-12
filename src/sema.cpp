@@ -371,13 +371,13 @@ struct analyzer {
                       std::to_string(t.values.size()) + " values; the maximum is 30");
             std::vector<std::string> vals;
             for (auto const& v : t.values) {
-                check_name(t.loc, "tag value", v);
+                check_name(v.loc, "tag value", v.name);
                 for (auto const& seen : vals)
-                    if (seen == v) {
-                        error(t.loc, "duplicate tag value '" + v + "' in '" + t.name + "'");
+                    if (seen == v.name) {
+                        error(v.loc, "duplicate tag value '" + v.name + "' in '" + t.name + "'");
                         break;
                     }
-                vals.push_back(v);
+                vals.push_back(v.name);
             }
             out.tag_names.push_back(t.name);
             out.tag_values.push_back(std::move(vals));

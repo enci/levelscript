@@ -2,25 +2,33 @@ import * as vscode from 'vscode';
 import { DecorationSpan } from './types';
 
 // Palette of colors for tag values (modulo cycle)
-const colors = [
-    '#f44336', '#e91e63', '#9c27b0', '#673ab7', '#3f51b5',
-    '#2196f3', '#03a9f4', '#00bcd4', '#009688', '#4caf50',
-    '#8bc34a', '#cddc39', '#ffeb3b', '#ffc107', '#ff9800',
-    '#ff5722', '#795548', '#9e9e9e', '#607d8b'
-];
+const PALETTE_DARK  = ['#7c3d3d','#7c5c3d','#7c7c3d','#4a7c3d','#3d7c5c','#3d7c7c',
+                       '#3d5c7c','#3d3d7c','#5c3d7c','#7c3d7c','#7c3d5c','#5c4a3d'];
+const PALETTE_LIGHT = ['#ffd7d7','#ffe7d7','#fffbd7','#d7ffd7','#d7ffe7','#d7ffff',
+                       '#d7e7ff','#d7d7ff','#e7d7ff','#ffd7ff','#ffd7e7','#ffe7cc'];
+
+function tagColor(index: number, dark: boolean): string {
+    return (dark ? PALETTE_DARK : PALETTE_LIGHT)[index % 12];
+}
+
+function emptyColor(dark: boolean): string {
+    return dark ? '#3a3a46' : '#e4e4ea';   // slate blue-gray
+}
+
+function anyColor(dark: boolean): string {
+    return dark ? '#40392f' : '#ece3d4';   // warm gray
+}
 
 const decTypes = new Map<string, vscode.TextEditorDecorationType>();
 
-function getDecType(colorIndex: number): vscode.TextEditorDecorationType {
-    const key = colorIndex.toString();
-    let dt = decTypes.get(key);
+function getDecType(color: string): vscode.TextEditorDecorationType {
+    let dt = decTypes.get(color);
     if (!dt) {
-        const color = colors[colorIndex % colors.length];
         dt = vscode.window.createTextEditorDecorationType({
-            color: color,
-            fontWeight: 'bold'
+            backgroundColor: color,
+            borderRadius: '2px',
         });
-        decTypes.set(key, dt);
+        decTypes.set(color, dt);
     }
     return dt;
 }
@@ -28,19 +36,29 @@ function getDecType(colorIndex: number): vscode.TextEditorDecorationType {
 export function applyDecorations(editor: vscode.TextEditor, tokens: DecorationSpan[]) {
     clearAll(editor);
 
-    const map = new Map<number, vscode.Range[]>();
+    const isDark = vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark 
+                || vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.HighContrast;
+
+    const map = new Map<string, vscode.Range[]>();
     for (const t of tokens) {
-        // use a combo of tag id and value id for coloring
-        const colorHash = t.tag * 31 + t.value;
-        const ranges = map.get(colorHash) || [];
+        let color: string;
+        if (t.tag === -1) {
+            color = anyColor(isDark);
+        } else if (t.tag === -2) {
+            color = emptyColor(isDark);
+        } else {
+            color = tagColor(t.value + t.tag * 12, isDark);
+        }
+
+        const ranges = map.get(color) || [];
         const start = new vscode.Position(t.line - 1, t.col - 1);
-        const end = new vscode.Position(t.line - 1, t.col - 1 + t.len);
+        const end = new vscode.Position(t.line - 1, t.col - 1 + Math.max(t.len, 1));
         ranges.push(new vscode.Range(start, end));
-        map.set(colorHash, ranges);
+        map.set(color, ranges);
     }
 
-    for (const [hash, ranges] of map.entries()) {
-        editor.setDecorations(getDecType(hash), ranges);
+    for (const [color, ranges] of map.entries()) {
+        editor.setDecorations(getDecType(color), ranges);
     }
 }
 

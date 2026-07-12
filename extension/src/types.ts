@@ -27,7 +27,7 @@ export interface InspectionResult {
     tokens: DecorationSpan[];
     refs?: RefSpan[];
     symbols: {
-        tags: { name: string, values: string[], unions: string[] }[];
+        tags: { name: string, values: { name: string, loc?: Location }[], unions: string[] }[];
         layers: { name: string, type: string, loc?: Location }[];
         params: { name: string, derived: boolean }[];
         rules: { name: string, loc?: Location }[];
