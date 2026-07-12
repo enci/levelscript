@@ -211,8 +211,10 @@ struct compiled {
 };
 
 // Analyze a parsed file into a self-contained compiled program.
-// Returns false (with diagnostics) on any error.
+// Returns false (with diagnostics) on any error. `best_effort` keeps going
+// through later phases despite errors — editor tooling wants every table the
+// file still supports (plus the extra diagnostics), not a first-phase bail.
 bool analyze(ast_file const& ast, compiled& out, diagnostics& diags,
-             std::string_view file);
+             std::string_view file, bool best_effort = false);
 
 }  // namespace ls

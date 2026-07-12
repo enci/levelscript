@@ -44,14 +44,20 @@ struct tag_union {
     std::vector<std::string> members;
 };
 
+struct tag_value {
+    source_loc  loc;
+    std::string name;
+};
+
 struct tag_decl {
     source_loc               loc;
     std::string              name;
-    std::vector<std::string> values;
+    std::vector<tag_value>   values;
     std::vector<tag_union>   unions;
 };
 
 struct layer_decl {
+    source_loc  loc;
     std::string name;
     std::string type;   // tagset name, or "number"
 };
@@ -93,6 +99,7 @@ struct cell {
 
 struct pattern {
     source_loc                     loc;
+    source_loc                     grid_loc;
     std::string                    grid;       // "" when is_where
     bool                           is_where{false};
     int                            rows{0}, cols{0};
@@ -164,6 +171,7 @@ struct program_stmt {
     int         max_count{0};
     int         percent{0};
     std::string rule_name;
+    source_loc  rule_name_loc;
     // optional `when (expr)` guard (§6): boolean, params only, evaluated once
     expr_ptr    guard;
 };

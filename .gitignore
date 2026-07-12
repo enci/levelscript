@@ -4,3 +4,10 @@ build/
 __pycache__/
 *.user
 CLAUDE.md
+.idea
+extension/node_modules/
+extension/out/
+extension/ls_wasm.js
+extension/ls_wasm.wasm
+extension/package-lock.json
+*.vsix

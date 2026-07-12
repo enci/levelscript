@@ -1,0 +1,59 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "LevelScript",
+  "scopeName": "source.levelscript",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#keyword" },
+    { "include": "#pattern-body" },
+    { "include": "#operator" },
+    { "include": "#number" },
+    { "include": "#identifier" }
+  ],
+  "repository": {
+    "comment": {
+      "name": "comment.line.double-slash.levelscript",
+      "match": "//.*$"
+    },
+    "keyword": {
+      "name": "keyword.control.levelscript",
+      "match": "\\b(tag|layers|grid|of|number|rule|program|params|where|when|any|all|one|some|ordered|symmetry|rotation|weight|max|percent|policy|snapshot|incremental|stabilize|none|horizontal|vertical|ordered)\\b"
+    },
+    "operator": {
+      "name": "keyword.operator.levelscript",
+      "match": "=>|==|!=|<=|>=|&&|\\|\\||[+\\-*/|!<>=]"
+    },
+    "pattern-body": {
+      "name": "meta.pattern.levelscript",
+      "begin": "\\[",
+      "end": "\\]",
+      "beginCaptures": { "0": { "name": "punctuation.definition.pattern.begin.levelscript" } },
+      "endCaptures":   { "0": { "name": "punctuation.definition.pattern.end.levelscript" } },
+      "patterns": [
+        { "include": "#wildcard" },
+        { "include": "#builtin" },
+        { "include": "#operator" },
+        { "include": "#number" },
+        { "include": "#identifier" }
+      ]
+    },
+    "builtin": {
+      "name": "support.function.builtin.levelscript",
+      "match": "\\b(if|min|max|abs|clamp|random|resize|upscale|trim|mirror|pad|path)\\b(?=\\s*\\()"
+    },
+    "wildcard": {
+      "patterns": [
+        { "name": "constant.language.wildcard.any.levelscript",   "match": "\\*" },
+        { "name": "constant.language.wildcard.empty.levelscript", "match": "\\." }
+      ]
+    },
+    "number": {
+      "name": "constant.numeric.levelscript",
+      "match": "\\b[0-9]+\\b"
+    },
+    "identifier": {
+      "name": "entity.name.levelscript",
+      "match": "[\\w]+"
+    }
+  }
+}

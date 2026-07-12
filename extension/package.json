@@ -1,0 +1,60 @@
+{
+  "name": "levelscript",
+  "displayName": "LevelScript",
+  "description": "Syntax highlighting, diagnostics, tag-value coloring, hover, go-to-definition, and completion for .ls files",
+  "version": "0.2.0",
+  "publisher": "BojanEndrovski",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/enci/mgsl.git"
+  },
+  "icon": "icon.png",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:levelscript"
+  ],
+  "main": "./out/src/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "levelscript",
+        "aliases": [
+          "LevelScript",
+          "ls"
+        ],
+        "extensions": [
+          ".ls"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "levelscript",
+        "scopeName": "source.levelscript",
+        "path": "./syntaxes/levelscript.tmLanguage.json"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "test": "npm run compile && node scripts/check-examples.js",
+    "gen-icon": "node scripts/gen-icon.js",
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0",
+    "@vscode/vsce": "^3.6.2"
+  }
+}
