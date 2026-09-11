@@ -89,6 +89,18 @@ std::string cell_glyph(compiled const& meta, int tag_id, int v) {
     return vals[v].substr(0, 1);
 }
 
+// grid::at() returns a value MASK for a tag layer (bit 1..30 - a single bit
+// for a normal cell, spec §3), but tag_color()/cell_glyph() and the tag-color
+// config's vmap all still key by the 0-based value id. Converts a mask back
+// to that id (the lowest set value bit); -1 (the public API's empty/invalid
+// sentinel) passes through unchanged.
+static int mask_to_vid(int mask) {
+    if (mask < 0) return mask;
+    for (int b = 1; b <= 30; ++b)
+        if (mask & (1 << b)) return b - 1;
+    return -1;
+}
+
 void draw_centered_text(ImDrawList* dl, ImVec2 p0, float box_px, ImU32 col,
                         char const* text) {
     ImVec2 ts = ImGui::CalcTextSize(text);
@@ -212,9 +224,7 @@ static cell_view pattern_cell_view(compiled const& meta, compiled_pattern const&
     }
     // Tag mask: empty-only reads as '.', otherwise show the lowest value bit
     // (a union mask previews as its first member).
-    int vid = -1;
-    for (int b = 1; b <= 30; ++b)
-        if (cc.val & (int64_t{1} << b)) { vid = b - 1; break; }
+    int vid = mask_to_vid((int)cc.val);
     if (vid < 0) return { IM_COL32(80, 80, 80, 255), "." };
     return { tag_color(pal.tag_id, vid, pal.colors), cell_glyph(meta, pal.tag_id, vid) };
 }
@@ -538,6 +548,11 @@ void draw_grid_composite(script const& sc, debug_run const& run,
             for (int x = 0; x < cols; ++x) {
                 int v = g.at(x, y);
                 if (v == -1) continue;   // empty (public API sentinel)
+                // tag_color()/cell_glyph() key by 0-based value id; v is a
+                // mask for a tag layer (spec §3) but the real number as-is
+                // for a numeric one (tile/heatmap modes are numeric-only or
+                // numeric-semantics, so they keep using v directly).
+                int vid = g.is_number() ? v : mask_to_vid(v);
 
                 ImVec2 p0 = { origin.x + x * cell_px, origin.y + y * cell_px };
                 ImVec2 p1 = { p0.x + cell_px,         p0.y + cell_px         };
@@ -574,15 +589,15 @@ void draw_grid_composite(script const& sc, debug_run const& run,
 
                     case layer_mode::color:
                         dl->AddRectFilled(p0, p1,
-                            with_alpha(tag_color(pal.tag_id, v, pal.colors), lc.opacity));
+                            with_alpha(tag_color(pal.tag_id, vid, pal.colors), lc.opacity));
                         break;
 
                     case layer_mode::text:
                     default:
                         if (show_glyph)
                             draw_centered_text(dl, p0, cell_px,
-                                with_alpha(tag_color(pal.tag_id, v, pal.colors), lc.opacity),
-                                cell_glyph(sc.meta, pal.tag_id, v).c_str());
+                                with_alpha(tag_color(pal.tag_id, vid, pal.colors), lc.opacity),
+                                cell_glyph(sc.meta, pal.tag_id, vid).c_str());
                         break;
                 }
             }
@@ -632,12 +647,13 @@ void draw_grid_composite(script const& sc, debug_run const& run,
                 std::string val_label;
                 if (v == -1)               val_label = "\xc2\xb7";
                 else if (g.is_number())    val_label = std::to_string(v);
-                else                       val_label = g.name(v);
+                else                       val_label = g.valueName(v);
 
                 if (v != -1) {
                     palette pal = layer_palette(sc.meta, cfg, sc.meta.layer_id(lc.name));
+                    int vid = g.is_number() ? v : mask_to_vid(v);
                     ImVec4 colf = ImGui::ColorConvertU32ToFloat4(
-                        tag_color(pal.tag_id, v, pal.colors));
+                        tag_color(pal.tag_id, vid, pal.colors));
                     ImGui::ColorButton("##s", colf,
                         ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoPicker,
                         {10.f, 10.f});

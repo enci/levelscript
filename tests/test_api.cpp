@@ -53,26 +53,29 @@ TEST_CASE("api: generate fills the level") {
 
     ls::grid geo = lv["level"];
     int floor = gen.tag("geo.floor");
-    REQUIRE(floor >= 0);
+    REQUIRE(floor > 0);   // 0 means unknown; a resolved mask is >= 2
     for (int y = 0; y < lv.height(); ++y)
         for (int x = 0; x < lv.width(); ++x) {
             CHECK(geo.at(x, y) == floor);
-            CHECK(!geo.empty(x, y));
+            CHECK(!geo.is_empty(x, y));
         }
 
     // untouched number layer stays empty
     ls::grid tiles = lv["tiles"];
     CHECK(tiles.is_number());
-    CHECK(tiles.empty(0, 0));
+    CHECK(tiles.is_empty(0, 0));
 }
 
 TEST_CASE("api: tag resolution") {
     auto gen = make(fill_src);
-    CHECK(gen.tag("geo.wall") == 0);
-    CHECK(gen.tag("geo.floor") == 1);
-    CHECK(gen.tag("geo.lava") == -1);
-    CHECK(gen.tag("nope.wall") == -1);
-    CHECK(gen.tag("wall") == -1);   // must be qualified
+    // tag() returns the value's bit mask (spec §3: bit 1..30 in declaration
+    // order), not a 0-based id; 0 means unknown (not -1), so an unresolved
+    // name ORed into a composite mask degrades correctly.
+    CHECK(gen.tag("geo.wall") == (1 << 1));
+    CHECK(gen.tag("geo.floor") == (1 << 2));
+    CHECK(gen.tag("geo.lava") == 0);
+    CHECK(gen.tag("nope.wall") == 0);
+    CHECK(gen.tag("wall") == 0);   // must be qualified
 }
 
 TEST_CASE("api: queries are total") {
@@ -149,20 +152,20 @@ TEST_CASE("api: stepping matches batch generation") {
     auto gen = make(scatter_src);
 
     // statement granularity: one step per program statement
-    auto g1 = gen.begin(7, ls::step_mode::statement);
+    auto g1 = gen.run(7, ls::step_mode::statement);
     int stmts = 0;
     while (g1.step()) ++stmts;
     CHECK(stmts == 2);   // resize + some(max=5)
 
     // application granularity: resize stops once, each application once
-    auto g2 = gen.begin(7, ls::step_mode::application);
+    auto g2 = gen.run(7, ls::step_mode::application);
     int steps = 0;
     while (g2.step()) ++steps;
     CHECK(steps == 2 + 5);   // resize stmt + 5 applications + apply stmt boundary
                              // (the batch's own statement boundary is the 7th)
 
     // finish() == generate() for the same seed
-    auto g3 = gen.begin(7);
+    auto g3 = gen.run(7);
     ls::level via_steps = g3.finish();
     ls::level via_batch = gen.generate(7);
     CHECK(dump(via_steps, "algo") == dump(via_batch, "algo"));
@@ -465,15 +468,15 @@ program {
 
 TEST_CASE("api: observe channel reports highlights and statement index") {
     auto gen = make(fill_src);
-    auto g = gen.begin(42, ls::step_mode::application, ls::observe::on);
+    auto g = gen.run(42, ls::step_mode::application, ls::observe::on);
     CHECK(gen.statement_count() == 2);
-    CHECK(g.stmt_index() == -1);
+    CHECK(g.statement_index() == -1);
 
     REQUIRE(g.step());               // resize (statement boundary, no highlights)
-    CHECK(g.stmt_index() == 0);
+    CHECK(g.statement_index() == 0);
 
     REQUIRE(g.step());               // first fill application
-    CHECK(g.stmt_index() == 1);
+    CHECK(g.statement_index() == 1);
     auto hl = g.highlights();
     REQUIRE(!hl.empty());
     bool has_match = false, has_write = false;
@@ -489,14 +492,14 @@ TEST_CASE("api: observe channel reports highlights and statement index") {
     g.finish();
 
     // observe off: no highlights recorded
-    auto g2 = gen.begin(42, ls::step_mode::application);
+    auto g2 = gen.run(42, ls::step_mode::application);
     g2.step(); g2.step();
     CHECK(g2.highlights().empty());
 }
 
 TEST_CASE("api: mid-batch snapshot shows the accumulating writes") {
     auto gen = make(fill_src);   // 8x4 all-fill = 32 applications
-    auto g = gen.begin(42, ls::step_mode::application);
+    auto g = gen.run(42, ls::step_mode::application);
     REQUIRE(g.step());   // resize done
     int floor = gen.tag("geo.floor");
     for (int k = 1; k <= 3; ++k) {
@@ -851,7 +854,7 @@ program {
 
 TEST_CASE("api: snapshot mid-run sees committed statements only") {
     auto gen = make(scatter_src);
-    auto g = gen.begin(7, ls::step_mode::statement);
+    auto g = gen.run(7, ls::step_mode::statement);
 
     REQUIRE(g.step());               // resize done
     ls::level after_resize = g.snapshot();

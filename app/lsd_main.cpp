@@ -5,7 +5,7 @@
 #include <string>
 
 // lsd -- the LevelScript debugger: an interactive ImGui frontend over the
-// public generation API (compile once, step application by application).
+// public run API (compile once, step application by application).
 
 static void usage(char const* argv0) {
     std::cerr << "Usage: " << argv0 << " [--seed N] <file.ls>\n";

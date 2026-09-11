@@ -165,7 +165,7 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed) {
     bool     seed_locked = pref_seed_locked;
 
     // The one in-flight run. Every step/snapshot/highlight below goes through
-    // this public-API generation; Reset constructs a fresh one via begin().
+    // this public-API run; Reset constructs a fresh one via generator::run().
     debug_run run;
     run.restart(sc.gen, seed);
 

@@ -10,13 +10,31 @@ using internal::machine;
 using internal::sequence;
 using internal::step_event;
 
+// Tag cells store a 32-bit mask (spec §3/§4.1): bit 0 = empty, values occupy
+// bits 1..30 in declaration order, bit 31 reserved. `value_mask` isolates the
+// value bits from a raw cell.
+constexpr int64_t value_mask = 0x7FFFFFFE;
+
 // ── grid ─────────────────────────────────────────────────────────────────────
 
 grid::grid(std::shared_ptr<level_data const> data, int layer)
     : data_(std::move(data)), layer_(layer) {}
 
-// Decode raw storage to a display value: -1 empty, else the tag value id
-// (lowest set value bit) or the stored number.
+std::string grid::name() const {
+    if (!data_ || layer_ < 0 || layer_ >= (int)data_->info->layers.size()) return "";
+    return data_->info->layers[layer_].name;
+}
+
+bool grid::is_number() const {
+    return data_ && layer_ >= 0 && layer_ < (int)data_->layers.size()
+        && data_->layers[layer_].tag_id < 0;
+}
+
+// -1 is out-of-band only (empty / out of range / invalid) — for a tag cell
+// the value mask itself (bits 1..30, a single bit for a normal cell, several
+// for a union write); for a number cell the stored number as-is. A number
+// cell can legitimately store -1, which is why is_empty() exists as the real
+// emptiness test rather than `at() == -1`.
 int grid::at(int x, int y) const {
     if (!data_ || layer_ < 0 || layer_ >= (int)data_->layers.size()) return -1;
     if (x < 0 || x >= data_->width || y < 0 || y >= data_->height) return -1;
@@ -24,22 +42,41 @@ int grid::at(int x, int y) const {
     int64_t raw = l.cells[y * data_->width + x];
     if (l.tag_id < 0)   // number grid
         return raw == num_empty ? -1 : (int)raw;
-    for (int b = 1; b <= 30; ++b)
-        if (raw & (int64_t{1} << b)) return b - 1;
-    return -1;   // only the empty bit (or nothing) set
+    if (raw & tag_empty) return -1;         // real empty (bit 0 set)
+    return (int)(raw & value_mask);         // value mask, 0 only if malformed
 }
 
-bool grid::empty(int x, int y) const { return at(x, y) == -1; }
-
-bool grid::is_number() const {
-    return data_ && layer_ >= 0 && layer_ < (int)data_->layers.size()
-        && data_->layers[layer_].tag_id < 0;
+bool grid::is_empty(int x, int y) const {
+    // Out of range / invalid reads as empty — a safe default for loop code
+    // that does `if (grid.is_empty(x, y)) continue`.
+    if (!data_ || layer_ < 0 || layer_ >= (int)data_->layers.size()) return true;
+    if (x < 0 || x >= data_->width || y < 0 || y >= data_->height) return true;
+    auto const& l = data_->layers[layer_];
+    int64_t raw = l.cells[y * data_->width + x];
+    return l.tag_id < 0 ? (raw == num_empty) : ((raw & tag_empty) != 0);
 }
 
-std::string grid::name(int value_id) const {
+bool grid::has(int x, int y, int mask) const {
+    if (!data_ || layer_ < 0 || layer_ >= (int)data_->layers.size()) return false;
+    if (x < 0 || x >= data_->width || y < 0 || y >= data_->height) return false;
+    auto const& l = data_->layers[layer_];
+    if (l.tag_id < 0) return false;   // number grid: no mask to test
+    int64_t raw = l.cells[y * data_->width + x];
+    return (raw & (int64_t)mask) != 0;
+}
+
+std::string grid::valueName(int mask) const {
     if (!data_ || layer_ < 0 || layer_ >= (int)data_->layers.size()) return "";
     int tag = data_->layers[layer_].tag_id;
     if (tag < 0 || tag >= (int)data_->info->tag_values.size()) return "";
+
+    int64_t m = (int64_t)mask & value_mask;
+    if (m == 0 || (m & (m - 1)) != 0) return "";   // not exactly one value bit
+
+    int bit = 0;
+    while (!((m >> bit) & 1)) ++bit;
+    int value_id = bit - 1;   // tag_bit(vid) == 1 << (vid + 1)
+
     auto const& vals = data_->info->tag_values[tag];
     if (value_id < 0 || value_id >= (int)vals.size()) return "";
     return vals[value_id];
@@ -76,7 +113,7 @@ std::string level::layer_name(int index) const {
     return "";
 }
 
-// ── generation ───────────────────────────────────────────────────────────────
+// ── run ──────────────────────────────────────────────────────────────────────
 
 namespace internal {
 // One in-flight run: the machine and the coroutine pulling it. Heap-allocated
@@ -99,13 +136,13 @@ struct run_state {
 };
 }  // namespace internal
 
-generation::generation()  = default;
-generation::~generation() = default;
-generation::generation(generation&&) noexcept            = default;
-generation& generation::operator=(generation&&) noexcept = default;
-generation::generation(std::unique_ptr<internal::run_state> s) : s_(std::move(s)) {}
+run::run()  = default;
+run::~run() = default;
+run::run(run&&) noexcept            = default;
+run& run::operator=(run&&) noexcept = default;
+run::run(std::unique_ptr<internal::run_state> s) : s_(std::move(s)) {}
 
-bool generation::step() {
+bool run::step() {
     if (!s_ || s_->done) return false;
     while (s_->seq.next()) {
         auto const& e = s_->seq.value();
@@ -119,15 +156,15 @@ bool generation::step() {
     return false;
 }
 
-int generation::stmt_index() const {
+int run::statement_index() const {
     return s_ ? s_->last_stmt : -1;
 }
 
-bool generation::at_statement_boundary() const {
+bool run::at_statement_boundary() const {
     return s_ && s_->at_boundary;
 }
 
-std::vector<cell_highlight> generation::highlights() const {
+std::vector<cell_highlight> run::highlights() const {
     std::vector<cell_highlight> out;
     if (!s_) return out;
     for (auto const& h : s_->m.highlights())
@@ -137,11 +174,11 @@ std::vector<cell_highlight> generation::highlights() const {
     return out;
 }
 
-level generation::snapshot() const {
+level run::snapshot() const {
     return s_ ? level{s_->m.snapshot()} : level{};
 }
 
-level generation::finish() {
+level run::finish() {
     while (step()) {}
     return snapshot();
 }
@@ -169,11 +206,12 @@ generator generator::compile(const std::string& source, const std::string& name)
 }
 
 int generator::tag(const std::string& qualified) const {
-    if (!prog_) return -1;
+    if (!prog_) return 0;
     auto dot = qualified.find('.');
-    if (dot == std::string::npos) return -1;
+    if (dot == std::string::npos) return 0;
     int tid = prog_->tag_id(qualified.substr(0, dot));
-    return prog_->value_id(tid, qualified.substr(dot + 1));
+    if (tid < 0) return 0;
+    return (int)prog_->mask_of(tid, qualified.substr(dot + 1));
 }
 
 level generator::generate(uint64_t seed,
@@ -186,10 +224,10 @@ level generator::generate(uint64_t seed,
     return level{m.snapshot()};
 }
 
-generation generator::begin(uint64_t seed, step_mode mode, observe obs,
-                            std::vector<std::pair<std::string, int>> const& params) const {
-    if (!prog_) return generation{};
-    return generation{std::make_unique<internal::run_state>(prog_, seed, mode, obs, params)};
+class run generator::run(uint64_t seed, step_mode mode, observe obs,
+                         std::vector<std::pair<std::string, int>> const& params) const {
+    if (!prog_) return ls::run{};
+    return ls::run{std::make_unique<internal::run_state>(prog_, seed, mode, obs, params)};
 }
 
 int generator::statement_count() const {

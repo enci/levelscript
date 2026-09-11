@@ -4,12 +4,12 @@
 // previews, inspector windows).
 //
 // Execution boundary: everything that RUNS a script goes through the public
-// API in ls.hpp (ls::generator / ls::generation / ls::level). The internal
+// API in ls.hpp (ls::generator / ls::run / ls::level). The internal
 // headers (parser.hpp / sema.hpp) are included for DISPLAY METADATA ONLY --
 // statement descriptions, rule pattern previews, tag value names. That data
 // is read-only and never executes anything.
 
-#include "ls.hpp"           // execution: compile/begin/step/snapshot/highlights
+#include "ls.hpp"           // execution: compile/run/step/snapshot/highlights
 #include "ast.hpp"          // metadata: statement + rule attribute display
 #include "sema.hpp"         // metadata: compiled patterns / tag + layer tables
 #include "project_config.hpp"
@@ -78,15 +78,15 @@ bool load_script(script& sc);
 
 // ── debug_run: one in-flight progressive run ─────────────────────────────────
 //
-// A thin stepper over ls::generation, begun at application granularity with
+// A thin stepper over ls::run, started at application granularity with
 // the observe channel on. This is the ONLY stepping mechanism: one pulled
 // event is one rule application or one statement boundary, mid-batch grids
 // come from snapshot(), highlights from highlights(), restart is a new
-// begin(). The snapshot/highlight copies are cached and refreshed once per
+// run(). The snapshot/highlight copies are cached and refreshed once per
 // action rather than per frame.
 
 struct debug_run {
-    generation                  gen;
+    run                          gen;
     level                       snap;
     std::vector<cell_highlight> hls;
     int  stmt_count{0};
@@ -96,7 +96,7 @@ struct debug_run {
     int  counted_stmt{-1};
 
     void restart(generator const& g, uint64_t seed) {
-        gen = g.begin(seed, step_mode::application, observe::on);
+        gen = g.run(seed, step_mode::application, observe::on);
         stmt_count = g.statement_count();
         started = false;
         done = false;
@@ -115,7 +115,7 @@ struct debug_run {
         if (done) return false;
         if (!gen.step()) { done = true; return false; }
         started = true;
-        int s = gen.stmt_index();
+        int s = gen.statement_index();
         if (s != counted_stmt) { counted_stmt = s; apps_in_stmt = 0; }
         if (!gen.at_statement_boundary()) apps_in_stmt++;
         return true;
@@ -135,12 +135,12 @@ struct debug_run {
     }
 
     // Statement the last event worked on (the Rule window's subject).
-    int shown_stmt() const { return gen.stmt_index(); }
+    int shown_stmt() const { return gen.statement_index(); }
     // Statement in progress / about to run (the Program window's marker).
     int current_stmt() const {
         if (!started) return 0;
         if (done) return stmt_count;
-        int last = gen.stmt_index();
+        int last = gen.statement_index();
         return gen.at_statement_boundary() ? last + 1 : last;
     }
 };

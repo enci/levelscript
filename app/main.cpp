@@ -24,7 +24,7 @@ static void print_level(ls::level const& lv, std::ostream& out) {
                 int v = g.at(x, y);
                 if (v < 0)               out << '.';
                 else if (g.is_number())  out << v;
-                else                     out << g.name(v)[0];
+                else                     out << g.valueName(v)[0];
                 if (x + 1 < lv.width()) out << ' ';
             }
             out << '\n';
