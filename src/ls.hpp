@@ -33,14 +33,25 @@ class grid {
 public:
     grid() = default;
 
-    /// Cell at (x, y): the tag value id, or the stored number for number
-    /// layers; -1 when empty (or out of range / invalid).
-    int  at(int x, int y) const;
-    bool empty(int x, int y) const;
+    /// Name of the layer this grid was pulled from ("" if invalid).
+    std::string name() const;
     bool is_number() const;
 
-    /// Name of a tag value id ("" for number layers or out of range).
-    std::string name(int value_id) const;
+    /// Cell at (x, y): for a tag layer, the stored value mask (bits 1..30 —
+    /// a single bit for a normal cell, multiple bits for a union write); for
+    /// a number layer, the stored number. -1 is out-of-band only — empty,
+    /// out of range, or an invalid grid — and for number layers is not a
+    /// reliable emptiness test on its own (a cell can legitimately store the
+    /// number -1). Use is_empty() for a real emptiness test.
+    int  at(int x, int y) const;
+    bool is_empty(int x, int y) const;
+    /// True if the cell's stored mask overlaps `mask` at all — the one query
+    /// that stays correct for a union cell (multiple value bits set).
+    bool has(int x, int y, int mask) const;
+
+    /// Name of a single-bit value mask ("" if `mask` isn't exactly one value
+    /// bit, or is out of range / a number layer).
+    std::string valueName(int mask) const;
 
 private:
     friend class level;
@@ -66,13 +77,13 @@ public:
 
 private:
     friend class generator;
-    friend class generation;
+    friend class run;
     explicit level(std::shared_ptr<internal::level_data const> data);
 
     std::shared_ptr<internal::level_data const> data_;
 };
 
-// ── generation — one in-flight progressive run ──────────────────────────────
+// ── run — one in-flight progressive generation ──────────────────────────────
 
 enum class step_mode { statement, application };
 enum class observe   { off, on };
@@ -86,14 +97,14 @@ struct cell_highlight {
     kind what;
 };
 
-class generation {
+class run {
 public:
-    generation();
-    generation(generation&&) noexcept;
-    generation& operator=(generation&&) noexcept;
-    ~generation();
+    run();
+    run(run&&) noexcept;
+    run& operator=(run&&) noexcept;
+    ~run();
 
-    /// Advance by the granularity fixed at begin(); false when done.
+    /// Advance by the granularity fixed at generator::run(); false when done.
     bool step();
     /// Copy of the current state — mid-batch, committed statements plus this
     /// batch's applications so far.
@@ -103,7 +114,7 @@ public:
 
     // ── observe channel (populated only when begun with observe::on) ──
     /// Index of the statement the last step worked on (-1 before first step).
-    int stmt_index() const;
+    int statement_index() const;
     /// True when the last step completed a statement (vs. one application
     /// within it) — progress bars and steppers key off this.
     bool at_statement_boundary() const;
@@ -112,7 +123,7 @@ public:
 
 private:
     friend class generator;
-    explicit generation(std::unique_ptr<internal::run_state> s);
+    explicit run(std::unique_ptr<internal::run_state> s);
 
     std::unique_ptr<internal::run_state> s_;
 };
@@ -135,8 +146,11 @@ public:
     /// over a rule that can never terminate); "" when there are none.
     std::string warnings() const { return warnings_; }
 
-    /// Tag value id, qualified by tagset: tag("geo.wall"). Ids are per
-    /// tagset, valid for every layer of that tagset. -1 if unknown.
+    /// Value mask, qualified by tagset: tag("geo.wall") -> that value's bit;
+    /// also resolves a named union to its composite mask. Masks are per
+    /// tagset, valid for every layer of that tagset. 0 if unknown (an
+    /// unknown tag ORed into a composite mask degrades correctly, unlike -1
+    /// would).
     int tag(const std::string& qualified) const;
 
     /// Run the whole program: (seed, params) -> level, deterministically.
@@ -144,10 +158,13 @@ public:
     level generate(uint64_t seed,
                    std::vector<std::pair<std::string, int>> const& params = {}) const;
 
-    /// Start a progressive run; pull it with generation::step().
-    generation begin(uint64_t seed, step_mode mode = step_mode::statement,
-                     observe obs = observe::off,
-                     std::vector<std::pair<std::string, int>> const& params = {}) const;
+    /// Start a progressive run; pull it with run::step(). Named `class run`
+    /// (not bare `run`) in the return position: this method's own name is
+    /// `run`, and an unqualified `run run(...)` here would silently change
+    /// which `run` the return type names (GCC: "changes meaning of 'run'").
+    class run run(uint64_t seed, step_mode mode = step_mode::statement,
+                  observe obs = observe::off,
+                  std::vector<std::pair<std::string, int>> const& params = {}) const;
 
     /// Number of program statements (progress denominators).
     int statement_count() const;

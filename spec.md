@@ -138,7 +138,7 @@ A `tag_union` names a mask over the tagset's own members. Each `union_atom` is a
 tag geometry { wall, floor, door, blocker = wall | door }
 ```
 
-**Encoding and cap.** A tagset holds at most **30** `tag_value`s (compile error if exceeded); these occupy bits 1..30. Bit 0 is reserved for **empty** (section 4.1), bit 31 is reserved. Each cell of a tag grid stores a 32-bit mask. A normal (single-valued) cell has exactly one value bit set; a cell may hold a multi-bit mask when written by a `|` expression or a named union (section 5.5).
+**Encoding and cap.** A tagset holds at most **30** `tag_value`s (compile error if exceeded); these occupy bits 1..30 **in declaration order** - the first value declared is bit 1, the second bit 2, and so on. Bit 0 is reserved for **empty** (section 4.1), bit 31 is reserved. The bit assignment is normative: embedders may rely on it to compute a value's mask directly from its declaration position, without a name lookup. Each cell of a tag grid stores a 32-bit mask. A normal (single-valued) cell has exactly one value bit set; a cell may hold a multi-bit mask when written by a `|` expression or a named union (section 5.5).
 
 A `tag_union` is a **named alias** for a mask over the tagset's value bits. It consumes **no** bit of its own and does **not** count toward the 30-value cap. A union name resolves, everywhere it may appear, to the bitwise OR of its members' masks - it is fully equivalent to writing that `|` expression inline. A union name shares the tagset's value namespace (redeclaring a value name is a duplicate error).
 
