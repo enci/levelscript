@@ -40,6 +40,12 @@ export function runStep(id: number): RunState {
     return JSON.parse(wasmModule.run_step(id)) as RunState;
 }
 
+// Advance to the next statement boundary (one or more applications).
+export function runNextStatement(id: number): RunState {
+    if (!wasmModule) throw new Error("WASM not initialized");
+    return JSON.parse(wasmModule.run_next_statement(id)) as RunState;
+}
+
 export function runFinish(id: number): RunState {
     if (!wasmModule) throw new Error("WASM not initialized");
     return JSON.parse(wasmModule.run_finish(id)) as RunState;
