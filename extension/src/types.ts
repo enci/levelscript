@@ -62,9 +62,11 @@ export interface RunLevel {
 
 export interface RunState {
     done: boolean;
+    seed: number;
     statementIndex: number;
     statementCount: number;
     atStatementBoundary: boolean;
+    appsInStatement: number;
     highlights: RunHighlight[];
     level: RunLevel;
 }

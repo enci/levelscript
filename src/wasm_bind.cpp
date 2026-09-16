@@ -37,8 +37,25 @@ void js(std::string& o, std::string_view s) {
 struct session {
     ls::generator gen;
     ls::run       r;
+    unsigned int  seed{0};
     bool          done{false};
+    // Applications pulled for the statement currently being worked on — same
+    // bookkeeping as lsd's debug_run::advance() (app/debug_ui_internal.hpp),
+    // recomputed as we go since a step can land mid-statement.
+    int           apps_in_stmt{0};
+    int           counted_stmt{-1};
 };
+
+// Pull one application/statement-boundary event, updating apps_in_stmt.
+// False once the run is finished — mirrors lsd's debug_run::advance().
+bool advance(session& s) {
+    if (s.done) return false;
+    if (!s.r.step()) { s.done = true; return false; }
+    int idx = s.r.statement_index();
+    if (idx != s.counted_stmt) { s.counted_stmt = idx; s.apps_in_stmt = 0; }
+    if (!s.r.at_statement_boundary()) s.apps_in_stmt++;
+    return true;
+}
 
 std::unordered_map<int, session> g_sessions;
 int g_next_id = 1;
@@ -106,10 +123,12 @@ void emit_highlights(std::string& o, ls::run const& r) {
 std::string state_json(session const& s, ls::level const& lvl) {
     std::string o = "{\"done\":";
     o += s.done ? "true" : "false";
+    o += ",\"seed\":" + std::to_string(s.seed);
     o += ",\"statementIndex\":" + std::to_string(s.r.statement_index());
     o += ",\"statementCount\":" + std::to_string(s.gen.statement_count());
     o += ",\"atStatementBoundary\":";
     o += s.r.at_statement_boundary() ? "true" : "false";
+    o += ",\"appsInStatement\":" + std::to_string(s.apps_in_stmt);
     o += ",\"highlights\":";
     emit_highlights(o, s.r);
     o += ",\"level\":";
@@ -130,7 +149,7 @@ int run_begin(std::string const& source, std::string const& name, unsigned int s
     }
     ls::run r = gen.run(seed, ls::step_mode::application, ls::observe::on);
     int id = g_next_id++;
-    g_sessions.emplace(id, session{std::move(gen), std::move(r), false});
+    g_sessions.emplace(id, session{std::move(gen), std::move(r), seed, false});
     return id;
 }
 
@@ -150,7 +169,17 @@ std::string run_step(int id) {
     auto it = g_sessions.find(id);
     if (it == g_sessions.end()) return "{}";
     session& s = it->second;
-    if (!s.done) s.done = !s.r.step();
+    advance(s);
+    return state_json(s, s.r.snapshot());
+}
+
+// Advance to the next statement boundary (lsd's "Next Statement" / F11):
+// pull applications until one completes a statement, or the run ends.
+std::string run_next_statement(int id) {
+    auto it = g_sessions.find(id);
+    if (it == g_sessions.end()) return "{}";
+    session& s = it->second;
+    while (advance(s) && !s.r.at_statement_boundary()) {}
     return state_json(s, s.r.snapshot());
 }
 
@@ -159,9 +188,8 @@ std::string run_finish(int id) {
     auto it = g_sessions.find(id);
     if (it == g_sessions.end()) return "{}";
     session& s = it->second;
-    ls::level lvl = s.r.finish();
-    s.done = true;
-    return state_json(s, lvl);
+    while (advance(s)) {}
+    return state_json(s, s.r.snapshot());
 }
 
 void run_end(int id) {
@@ -174,6 +202,7 @@ EMSCRIPTEN_BINDINGS(ls_module) {
     function("run_last_error", &run_last_error);
     function("run_state", &run_state);
     function("run_step", &run_step);
+    function("run_next_statement", &run_next_statement);
     function("run_finish", &run_finish);
     function("run_end", &run_end);
 }
