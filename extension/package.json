@@ -2,7 +2,7 @@
   "name": "levelscript",
   "displayName": "LevelScript",
   "description": "Syntax highlighting, diagnostics, tag-value coloring, hover, go-to-definition, and completion for .ls files",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "publisher": "BojanEndrovski",
   "license": "MIT",
   "repository": {
