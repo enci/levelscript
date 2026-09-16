@@ -40,7 +40,29 @@
         "scopeName": "source.levelscript",
         "path": "./syntaxes/levelscript.tmLanguage.json"
       }
-    ]
+    ],
+    "commands": [
+      {
+        "command": "levelscript.run",
+        "title": "LevelScript: Run",
+        "icon": "$(play)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "levelscript.run",
+          "when": "resourceLangId == levelscript",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "levelscript.run",
+          "when": "resourceLangId == levelscript"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
