@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { InspectionResult } from './types';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const createLsModule = require('../ls_wasm.js');
+const createLsModule = require('../../ls_wasm.js');
 
 let wasmModule: any = null;
 
