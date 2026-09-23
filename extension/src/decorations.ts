@@ -2,10 +2,10 @@ import * as vscode from 'vscode';
 import { DecorationSpan } from './types';
 
 // Palette of colors for tag values (modulo cycle)
-const PALETTE_DARK  = ['#7c3d3d','#7c5c3d','#7c7c3d','#4a7c3d','#3d7c5c','#3d7c7c',
-                       '#3d5c7c','#3d3d7c','#5c3d7c','#7c3d7c','#7c3d5c','#5c4a3d'];
-const PALETTE_LIGHT = ['#ffd7d7','#ffe7d7','#fffbd7','#d7ffd7','#d7ffe7','#d7ffff',
-                       '#d7e7ff','#d7d7ff','#e7d7ff','#ffd7ff','#ffd7e7','#ffe7cc'];
+const PALETTE_DARK  = ['#853232','#855b32','#858532','#438532','#32855b','#328585',
+                       '#325b85','#323285','#5b3285','#853285','#85325b','#664d3b'];
+const PALETTE_LIGHT = ['#ffadad','#ffd6ad','#ffffad','#beffad','#adffd6','#adffff',
+                       '#add6ff','#adadff','#d6adff','#ffadff','#ffadd6','#ffd19e'];
 
 function tagColor(index: number, dark: boolean): string {
     return (dark ? PALETTE_DARK : PALETTE_LIGHT)[index % 12];

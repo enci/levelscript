@@ -28,8 +28,12 @@ namespace ls {
 
 // ── palette helpers ───────────────────────────────────────────────────────────
 
-// Hash-based random color; stable for a given (tag_id, value_id) pair.
-// An explicit user color from the sidecar config wins when present.
+// Color for a tag value, stable for a given (tag_id, value_id) pair and
+// matched to the same 12-color cycle the VS Code extension's decorations.ts
+// paints that value with in the editor (light/dark chosen from the current
+// ImGui style). Falls back to a hash-based color for non-tag cells (number
+// grids, tag_id < 0). An explicit user color from the sidecar config wins
+// over either when present.
 ImU32 tag_color(int tag_id, int value_id,
                 std::unordered_map<int, uint32_t> const* colors = nullptr);
 ImU32 with_alpha(ImU32 col, float opacity);
