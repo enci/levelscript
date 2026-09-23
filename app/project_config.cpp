@@ -99,18 +99,41 @@ project_config project_config::load(std::string const& ls_path,
     if (f.is_open()) {
         json j = json::parse(f, nullptr, /*allow_exceptions=*/false);
         if (j.is_object()) {
-            cfg.cell_px = jget(j, "cell_px", 16.f);
+            if (j.contains("cell_zoom") && j["cell_zoom"].is_number()) {
+                cfg.cell_zoom = jget(j, "cell_zoom", 1.f);
+            } else {
+                // Pre-zoom sidecar: derive zoom from the old absolute
+                // cell_px setting so an existing project's view size holds.
+                cfg.cell_zoom = jget(j, "cell_px", project_config::base_cell_px)
+                              / project_config::base_cell_px;
+            }
             cfg.mini_px = jget(j, "mini_px", 24.f);
             uint32_t bg;
             if (hex_to_color(jget(j, "grid_bg_color", std::string{}), bg))
                 cfg.grid_bg_color = bg;
-            if (j.contains("tileset") && j["tileset"].is_object()) {
+            bool migrate_tile_layers = false;
+            if (j.contains("tilesets") && j["tilesets"].is_array()) {
+                for (auto const& jt : j["tilesets"]) {
+                    if (!jt.is_object()) continue;
+                    cfg.tilesets.push_back({
+                        jget(jt, "name", std::string{"Tileset"}),
+                        jget(jt, "path", std::string{}),
+                        jget(jt, "tile_w", 16),
+                        jget(jt, "tile_h", 16),
+                    });
+                }
+            } else if (j.contains("tileset") && j["tileset"].is_object()) {
+                // Pre-multi-tileset sidecar: one global tileset implicitly
+                // shared by every "tile" mode layer. Migrate it into a
+                // single named entry and point those layers at it below.
                 auto const& jt = j["tileset"];
-                cfg.tileset = tileset_config{
+                cfg.tilesets.push_back({
+                    "Tileset",
                     jget(jt, "path", std::string{}),
                     jget(jt, "tile_w", 16),
                     jget(jt, "tile_h", 16),
-                };
+                });
+                migrate_tile_layers = true;
             }
             if (j.contains("layers") && j["layers"].is_array()) {
                 for (auto const& jl : j["layers"]) {
@@ -120,8 +143,14 @@ project_config project_config::load(std::string const& ls_path,
                         jget(jl, "visible", true),
                         jget(jl, "opacity", 1.0f),
                         mode_from_str(jget(jl, "mode", std::string{"text"})),
+                        jget(jl, "tileset", std::string{}),
                     });
                 }
+            }
+            if (migrate_tile_layers) {
+                for (auto& lc : cfg.layers)
+                    if (lc.mode == layer_mode::tile && lc.tileset.empty())
+                        lc.tileset = "Tileset";
             }
             if (j.contains("tag_colors") && j["tag_colors"].is_object()) {
                 for (auto const& [tname, jvc] : j["tag_colors"].items()) {
@@ -144,15 +173,17 @@ project_config project_config::load(std::string const& ls_path,
 
 void project_config::save(std::string const& ls_path) const {
     json j;
-    j["cell_px"]       = cell_px;
+    j["cell_zoom"]     = cell_zoom;
     j["mini_px"]       = mini_px;
     j["grid_bg_color"] = color_to_hex(grid_bg_color);
-    if (tileset) {
-        j["tileset"] = {
-            {"path", tileset->path},
-            {"tile_w", tileset->tile_w},
-            {"tile_h", tileset->tile_h},
-        };
+    j["tilesets"] = json::array();
+    for (auto const& ts : tilesets) {
+        j["tilesets"].push_back({
+            {"name", ts.name},
+            {"path", ts.path},
+            {"tile_w", ts.tile_w},
+            {"tile_h", ts.tile_h},
+        });
     }
     j["layers"] = json::array();
     for (auto const& lc : layers) {
@@ -161,6 +192,7 @@ void project_config::save(std::string const& ls_path) const {
             {"visible", lc.visible},
             {"opacity", lc.opacity},
             {"mode", mode_str(lc.mode)},
+            {"tileset", lc.tileset},
         });
     }
     if (!tag_colors.empty()) {
@@ -175,6 +207,13 @@ void project_config::save(std::string const& ls_path) const {
     }
     std::ofstream f(json_path(ls_path));
     f << j.dump(2) << '\n';
+}
+
+tileset_config const* project_config::find_tileset(std::string const& name) const {
+    if (name.empty()) return nullptr;
+    for (auto const& ts : tilesets)
+        if (ts.name == name) return &ts;
+    return nullptr;
 }
 
 }  // namespace ls

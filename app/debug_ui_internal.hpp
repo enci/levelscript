@@ -174,6 +174,13 @@ struct tile_texture {
 // Resolve a path relative to the .ls file's directory.
 std::string resolve_path(std::string const& ls_path, std::string const& rel);
 
+// (Re)load every tileset in cfg.tilesets into `textures` (keyed by tileset
+// name, sync()'d in place so an unchanged path is a no-op), and drop entries
+// for tilesets no longer configured, freeing their GPU texture.
+void sync_tilesets(SDL_Renderer* renderer, std::string const& ls_path,
+                   project_config const& cfg,
+                   std::unordered_map<std::string, tile_texture>& textures);
+
 // ── views (debug_ui_views.cpp) ────────────────────────────────────────────────
 
 void draw_rule_window(script const& sc, debug_run const& run, float mini_px,
@@ -182,9 +189,11 @@ void draw_program_window(script const& sc, debug_run const& run);
 void draw_tags_window(compiled const& meta, project_config& cfg);
 void draw_grid_composite(script const& sc, debug_run const& run,
                          project_config const& cfg,
-                         tile_texture const& tile_tex, float cell_px);
+                         std::unordered_map<std::string, tile_texture> const& tile_textures,
+                         float cell_px);
 void draw_layer_strip(project_config& cfg, compiled const& meta);
-void draw_settings_window(project_config& cfg, tile_texture& tile_tex,
+void draw_settings_window(project_config& cfg,
+                          std::unordered_map<std::string, tile_texture>& tile_textures,
                           SDL_Renderer* renderer, std::string const& ls_path);
 
 }  // namespace ls

@@ -2,6 +2,7 @@
 #include "phosphor_icons.hpp"
 
 #include <SDL3/SDL.h>
+#include <imgui_impl_sdlrenderer3.h>
 #include <stb_image.h>
 
 #include <algorithm>
@@ -168,6 +169,9 @@ bool tile_texture::sync(SDL_Renderer* renderer, std::string const& abs_path) {
     SDL_DestroySurface(surf);
     stbi_image_free(px);
     if (!sdl_tex) return false;
+    // Point sampling, not SDL's default bilinear - most tilesets here are
+    // pixel art, and linear filtering blurs it when the viewport upscales.
+    SDL_SetTextureScaleMode(sdl_tex, SDL_SCALEMODE_NEAREST);
     width = w;
     height = h;
     loaded_path = abs_path;
@@ -182,6 +186,18 @@ std::string resolve_path(std::string const& ls_path, std::string const& rel) {
     if (rel.empty()) return {};
     size_t pos = ls_path.find_last_of("/\\");
     return (pos == std::string::npos) ? rel : ls_path.substr(0, pos + 1) + rel;
+}
+
+void sync_tilesets(SDL_Renderer* renderer, std::string const& ls_path,
+                   project_config const& cfg,
+                   std::unordered_map<std::string, tile_texture>& textures) {
+    for (auto const& ts : cfg.tilesets)
+        textures[ts.name].sync(renderer, resolve_path(ls_path, ts.path));
+    for (auto it = textures.begin(); it != textures.end(); ) {
+        bool live = std::any_of(cfg.tilesets.begin(), cfg.tilesets.end(),
+                                [&](tileset_config const& ts) { return ts.name == it->first; });
+        if (live) ++it; else it = textures.erase(it);
+    }
 }
 
 // ── statement display ─────────────────────────────────────────────────────────
@@ -528,9 +544,27 @@ void draw_tags_window(compiled const& meta, project_config& cfg) {
 
 // ── composite grid ────────────────────────────────────────────────────────────
 
+// tile_texture::sync() sets NEAREST on the SDL_Texture itself, but the
+// SDL3 renderer backend (imgui_impl_sdlrenderer3.cpp) resets every texture
+// it draws to a frame-wide sampler mode of its own (LINEAR by default) via
+// ImGui_ImplSDLRenderer3_RenderState::CurrentScaleMode, stomping that
+// per-texture setting for the whole frame. Bracketing the tile AddImage
+// calls with these draw callbacks is the backend's documented way to
+// override that mode for just those draw commands, so tilesets stay
+// pixel-sharp instead of blurring back to LINEAR.
+static void set_sampler_nearest(ImDrawList const*, ImDrawCmd const*) {
+    if (auto* rs = ImGui_ImplSDLRenderer3_GetRenderState())
+        rs->CurrentScaleMode = SDL_SCALEMODE_NEAREST;
+}
+static void set_sampler_linear(ImDrawList const*, ImDrawCmd const*) {
+    if (auto* rs = ImGui_ImplSDLRenderer3_GetRenderState())
+        rs->CurrentScaleMode = SDL_SCALEMODE_LINEAR;
+}
+
 void draw_grid_composite(script const& sc, debug_run const& run,
                          project_config const& cfg,
-                         tile_texture const& tile_tex, float cell_px) {
+                         std::unordered_map<std::string, tile_texture> const& tile_textures,
+                         float cell_px) {
     // The grid rendered is the public snapshot: committed statements plus the
     // current batch's applications so far (refreshed once per action).
     level const& lv = run.snap;
@@ -562,9 +596,6 @@ void draw_grid_composite(script const& sc, debug_run const& run,
     bool        show_glyph = cell_px >= 10.f;
     float       total_w    = cols * cell_px;
     float       total_h    = rows * cell_px;
-    ImTextureID tile_id = tile_tex.sdl_tex
-                          ? (ImTextureID)(intptr_t)tile_tex.sdl_tex
-                          : (ImTextureID)0;
 
     // Flat panel background, all layers stacked directly on top of it.
     dl->AddRectFilled(origin, { origin.x + total_w, origin.y + total_h },
@@ -579,14 +610,24 @@ void draw_grid_composite(script const& sc, debug_run const& run,
         int     lid = sc.meta.layer_id(lc.name);
         palette pal = layer_palette(sc.meta, cfg, lid);
 
-        // Hoist tile constants out of the inner loop so all AddImage calls
-        // use the same texture and can be merged into a single draw command.
-        int   tiles_per_row = (tile_id && cfg.tileset)
-                              ? std::max(1, tile_tex.width / cfg.tileset->tile_w) : 1;
-        float tile_uv_w     = (tile_id && cfg.tileset)
-                              ? (float)cfg.tileset->tile_w / tile_tex.width  : 0.f;
-        float tile_uv_h     = (tile_id && cfg.tileset)
-                              ? (float)cfg.tileset->tile_h / tile_tex.height : 0.f;
+        // Resolve this layer's own tileset (Tile mode only; other modes
+        // never touch these). Hoisted out of the inner loop so all AddImage
+        // calls for the layer use the same texture and can merge into one
+        // draw command.
+        tileset_config const* ts  = cfg.find_tileset(lc.tileset);
+        auto                   it = ts ? tile_textures.find(ts->name) : tile_textures.end();
+        tile_texture const*   tex = (it != tile_textures.end()) ? &it->second : nullptr;
+        ImTextureID tile_id = (tex && tex->sdl_tex)
+                              ? (ImTextureID)(intptr_t)tex->sdl_tex : (ImTextureID)0;
+        int   tiles_per_row = (tile_id && ts)
+                              ? std::max(1, tex->width / ts->tile_w) : 1;
+        float tile_uv_w     = (tile_id && ts)
+                              ? (float)ts->tile_w / tex->width  : 0.f;
+        float tile_uv_h     = (tile_id && ts)
+                              ? (float)ts->tile_h / tex->height : 0.f;
+
+        bool tiling = (lc.mode == layer_mode::tile) && tile_id && ts;
+        if (tiling) dl->AddCallback(set_sampler_nearest, nullptr);
 
         for (int y = 0; y < rows; ++y) {
             for (int x = 0; x < cols; ++x) {
@@ -604,7 +645,7 @@ void draw_grid_composite(script const& sc, debug_run const& run,
                 switch (lc.mode) {
 
                     case layer_mode::tile: {
-                        if (!tile_id || !cfg.tileset) {
+                        if (!tile_id || !ts) {
                             dl->AddRectFilled(p0, p1,
                                 with_alpha(IM_COL32(120, 120, 120, 255), lc.opacity));
                             break;
@@ -646,6 +687,7 @@ void draw_grid_composite(script const& sc, debug_run const& run,
                 }
             }
         }
+        if (tiling) dl->AddCallback(set_sampler_linear, nullptr);
 
         // Highlights for this layer (last application's match/write cells).
         float border = std::max(1.5f, cell_px * 0.08f);
@@ -744,6 +786,24 @@ static void draw_mode_combo(layer_mode& mode, bool numeric) {
     }
 }
 
+// Which tileset (by name) a Tile-mode layer draws from. Only shown once a
+// layer is actually in Tile mode - other modes never read this field.
+static void draw_tileset_combo(std::string& name,
+                               std::vector<tileset_config> const& tilesets) {
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(110.f);
+    char const* preview = name.empty() ? "(none)" : name.c_str();
+    if (ImGui::BeginCombo("##tileset", preview)) {
+        if (ImGui::Selectable("(none)", name.empty())) name.clear();
+        for (auto const& ts : tilesets) {
+            bool selected = (ts.name == name);
+            if (ImGui::Selectable(ts.name.c_str(), selected)) name = ts.name;
+            if (selected) ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+}
+
 void draw_layer_strip(project_config& cfg, compiled const& meta) {
     for (int i = 0; i < (int)cfg.layers.size(); ++i) {
         auto& lc = cfg.layers[(size_t)i];
@@ -760,6 +820,8 @@ void draw_layer_strip(project_config& cfg, compiled const& meta) {
         int lid = meta.layer_id(lc.name);
         bool numeric = (lid < 0) || (meta.layers[(size_t)lid].tag_id < 0);
         draw_mode_combo(lc.mode, numeric);
+        if (lc.mode == layer_mode::tile)
+            draw_tileset_combo(lc.tileset, cfg.tilesets);
 
         ImGui::EndChild();
         ImGui::PopID();
@@ -769,10 +831,13 @@ void draw_layer_strip(project_config& cfg, compiled const& meta) {
 // ── settings window ───────────────────────────────────────────────────────────
 // Things set once per project and rarely touched again while it's running.
 
-void draw_settings_window(project_config& cfg, tile_texture& tile_tex,
+void draw_settings_window(project_config& cfg,
+                          std::unordered_map<std::string, tile_texture>& tile_textures,
                           SDL_Renderer* renderer, std::string const& ls_path) {
     ImGui::SetNextItemWidth(160.f);
-    ImGui::DragFloat("Viewport Cell Size", &cfg.cell_px, 0.25f, 4.f, 48.f, "%.0f px");
+    ImGui::DragFloat("Viewport Zoom", &cfg.cell_zoom, 0.05f, 0.25f, 8.f, "%.2fx");
+    ImGui::SameLine();
+    ImGui::TextDisabled("(%.0f px/cell)", cfg.cell_px());
 
     ImGui::SetNextItemWidth(160.f);
     ImGui::DragFloat("Rule Cell Size", &cfg.mini_px, 0.25f, 4.f, 48.f, "%.0f px");
@@ -783,20 +848,39 @@ void draw_settings_window(project_config& cfg, tile_texture& tile_tex,
         cfg.grid_bg_color = u32_from_col3(col);
 
     ImGui::Separator();
-    bool has_tileset = cfg.tileset.has_value();
-    if (ImGui::Checkbox("Enable Tileset", &has_tileset)) {
-        if (has_tileset) cfg.tileset = tileset_config{};
-        else             cfg.tileset.reset();
-    }
+    ImGui::TextUnformatted("Tilesets");
 
-    if (cfg.tileset) {
-        auto& ts = *cfg.tileset;
+    int remove_index = -1;
+    for (int i = 0; i < (int)cfg.tilesets.size(); ++i) {
+        auto& ts = cfg.tilesets[(size_t)i];
+        ImGui::PushID(i);
+        ImGui::BeginChild("##ts_chip", { 0.f, 0.f },
+                          ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeX
+                          | ImGuiChildFlags_AutoResizeY);
+
+        std::string old_name = ts.name;
+        char name_buf[128];
+        size_t nn = ts.name.size() < sizeof(name_buf) - 1 ? ts.name.size()
+                                                           : sizeof(name_buf) - 1;
+        ts.name.copy(name_buf, nn);
+        name_buf[nn] = '\0';
+        ImGui::SetNextItemWidth(120.f);
+        if (ImGui::InputText("##name", name_buf, sizeof(name_buf))) {
+            ts.name = name_buf;
+            // Layers reference a tileset by name (see project_config.hpp) --
+            // keep their assignment pointing at the same tileset on rename.
+            for (auto& lc : cfg.layers)
+                if (lc.tileset == old_name) lc.tileset = ts.name;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(phosphor::PH_X)) remove_index = i;
+
         char path_buf[512];
         size_t n = ts.path.size() < sizeof(path_buf) - 1 ? ts.path.size()
                                                          : sizeof(path_buf) - 1;
         ts.path.copy(path_buf, n);
         path_buf[n] = '\0';
-        ImGui::SetNextItemWidth(-1.f);
+        ImGui::SetNextItemWidth(260.f);
         if (ImGui::InputText("##path", path_buf, sizeof(path_buf)))
             ts.path = path_buf;
         // step=0 disables the +/- buttons -- not used as integer UI anywhere else.
@@ -807,13 +891,30 @@ void draw_settings_window(project_config& cfg, tile_texture& tile_tex,
         ImGui::InputInt("H##th", &ts.tile_h, 0, 0);
 
         std::string abs = resolve_path(ls_path, ts.path);
-        bool loaded = tile_tex.sync(renderer, abs);
+        tile_texture& tex = tile_textures[ts.name];
+        bool loaded = tex.sync(renderer, abs);
         if (!ts.path.empty()) {
             if (loaded)
-                ImGui::TextDisabled("Loaded %dx%d", tile_tex.width, tile_tex.height);
+                ImGui::TextDisabled("Loaded %dx%d", tex.width, tex.height);
             else
                 ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "Not found");
         }
+
+        ImGui::EndChild();
+        ImGui::PopID();
+    }
+    if (remove_index >= 0) {
+        std::string removed = cfg.tilesets[(size_t)remove_index].name;
+        cfg.tilesets.erase(cfg.tilesets.begin() + remove_index);
+        tile_textures.erase(removed);
+        for (auto& lc : cfg.layers)
+            if (lc.tileset == removed) lc.tileset.clear();
+    }
+
+    if (ImGui::Button("Add Tileset")) {
+        cfg.tilesets.push_back({
+            "Tileset " + std::to_string(cfg.tilesets.size() + 1), "", 16, 16,
+        });
     }
 }
 
