@@ -11,12 +11,56 @@ namespace ls {
 
 // ── palette ───────────────────────────────────────────────────────────────────
 
+// Same 12-color cycle as the VS Code extension's decorations.ts, so a tag
+// value painted in the editor and one drawn here read as the same color.
+// Indexed as (value_id + tag_id * 12) % 12, matching tagColor() there.
+static constexpr ImU32 k_palette_dark[12] = {
+    IM_COL32(133,  50,  50, 255), IM_COL32(133,  91,  50, 255),
+    IM_COL32(133, 133,  50, 255), IM_COL32( 67, 133,  50, 255),
+    IM_COL32( 50, 133,  91, 255), IM_COL32( 50, 133, 133, 255),
+    IM_COL32( 50,  91, 133, 255), IM_COL32( 50,  50, 133, 255),
+    IM_COL32( 91,  50, 133, 255), IM_COL32(133,  50, 133, 255),
+    IM_COL32(133,  50,  91, 255), IM_COL32(102,  77,  59, 255),
+};
+static constexpr ImU32 k_palette_light[12] = {
+    IM_COL32(255, 173, 173, 255), IM_COL32(255, 214, 173, 255),
+    IM_COL32(255, 255, 173, 255), IM_COL32(190, 255, 173, 255),
+    IM_COL32(173, 255, 214, 255), IM_COL32(173, 255, 255, 255),
+    IM_COL32(173, 214, 255, 255), IM_COL32(173, 173, 255, 255),
+    IM_COL32(214, 173, 255, 255), IM_COL32(255, 173, 255, 255),
+    IM_COL32(255, 173, 214, 255), IM_COL32(255, 209, 158, 255),
+};
+
+// lsd has no theme flag threaded through the view code; read it back off
+// the style, the same way the app already probes ImGuiCol_WindowBg for the
+// title bar tint and clear color (debug_ui.cpp).
+static bool is_dark_theme() {
+    return ImGui::GetStyle().Colors[ImGuiCol_WindowBg].x < 0.5f;
+}
+
+// Black or white text, whichever reads better on `bg` - the light palette
+// above is pale enough that white text (draw_pattern's old fixed color)
+// loses most of its contrast.
+static ImU32 contrast_text_color(ImU32 bg) {
+    float r = ((bg >> IM_COL32_R_SHIFT) & 0xFF) / 255.f;
+    float g = ((bg >> IM_COL32_G_SHIFT) & 0xFF) / 255.f;
+    float b = ((bg >> IM_COL32_B_SHIFT) & 0xFF) / 255.f;
+    float luma = 0.299f * r + 0.587f * g + 0.114f * b;
+    return luma > 0.6f ? IM_COL32(25, 25, 25, 230) : IM_COL32(255, 255, 255, 220);
+}
+
 ImU32 tag_color(int tag_id, int value_id,
                 std::unordered_map<int, uint32_t> const* colors) {
     if (colors) {
         auto it = colors->find(value_id);
         if (it != colors->end()) return it->second;
     }
+    if (tag_id >= 0 && value_id >= 0) {
+        auto const& pal = is_dark_theme() ? k_palette_dark : k_palette_light;
+        return pal[(value_id + tag_id * 12) % 12];
+    }
+    // Number/where cells have no tagset and so no editor-side color to
+    // match - keep the old hash-based fallback for those.
     uint32_t h = ((uint32_t)(tag_id + 1) * 2654435761u)
                ^ ((uint32_t)(value_id + 1) * 2246822519u);
     h ^= h >> 16;
@@ -242,7 +286,7 @@ static void draw_pattern(compiled const& meta, compiled_pattern const& pat,
             cell_view cv = pattern_cell_view(meta, pat, pat.at(r, c), pal);
             ImVec2 p0 = { origin.x + c * stride, origin.y + r * stride };
             dl->AddRectFilled(p0, { p0.x + px, p0.y + px }, cv.bg, rounding);
-            draw_centered_text(dl, p0, px, IM_COL32(255, 255, 255, 220),
+            draw_centered_text(dl, p0, px, contrast_text_color(cv.bg),
                                cv.glyph.c_str());
         }
     }
