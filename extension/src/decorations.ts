@@ -2,6 +2,24 @@ import * as vscode from 'vscode';
 import { DecorationSpan, InspectionResult } from './types';
 import { tagColor, emptyColor, anyColor } from './palette';
 
+// Palette of colors for tag values (modulo cycle)
+const PALETTE_DARK  = ['#853232','#855b32','#858532','#438532','#32855b','#328585',
+                       '#325b85','#323285','#5b3285','#853285','#85325b','#664d3b'];
+const PALETTE_LIGHT = ['#ffadad','#ffd6ad','#ffffad','#beffad','#adffd6','#adffff',
+                       '#add6ff','#adadff','#d6adff','#ffadff','#ffadd6','#ffd19e'];
+
+function tagColor(index: number, dark: boolean): string {
+    return (dark ? PALETTE_DARK : PALETTE_LIGHT)[index % 12];
+}
+
+function emptyColor(dark: boolean): string {
+    return dark ? '#3a3a46' : '#e4e4ea';   // slate blue-gray
+}
+
+function anyColor(dark: boolean): string {
+    return dark ? '#40392f' : '#ece3d4';   // warm gray
+}
+
 const decTypes = new Map<string, vscode.TextEditorDecorationType>();
 
 function getDecType(color: string): vscode.TextEditorDecorationType {
