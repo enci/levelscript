@@ -178,9 +178,8 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed) {
     SDL_Renderer* renderer = SDL_CreateRenderer(window, nullptr);
     SDL_SetRenderVSync(renderer, 1);
 
-    tile_texture tile_tex;
-    if (cfg.tileset)
-        tile_tex.sync(renderer, resolve_path(path, cfg.tileset->path));
+    std::unordered_map<std::string, tile_texture> tile_textures;
+    sync_tilesets(renderer, path, cfg, tile_textures);
 
     // ── ImGui ─────────────────────────────────────────────────────────────────
     IMGUI_CHECKVERSION();
@@ -358,9 +357,8 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed) {
             }
         }
 
-        // Sync tileset texture if path changed via UI.
-        if (cfg.tileset)
-            tile_tex.sync(renderer, resolve_path(path, cfg.tileset->path));
+        // Sync tileset textures if a path changed via UI.
+        sync_tilesets(renderer, path, cfg, tile_textures);
 
         ImGui_ImplSDLRenderer3_NewFrame();
         ImGui_ImplSDL3_NewFrame();
@@ -477,7 +475,7 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed) {
             // Leave room at the bottom for the layer strip.
             ImGui::BeginChild("##grid", {0.f, -40.f}, false,
                               ImGuiWindowFlags_HorizontalScrollbar);
-            draw_grid_composite(sc, run, cfg, tile_tex, cfg.cell_px);
+            draw_grid_composite(sc, run, cfg, tile_textures, cfg.cell_px());
             ImGui::EndChild();
 
             ImGui::BeginChild("##layer_strip", {0.f, 0.f}, false,
@@ -504,7 +502,7 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed) {
         ImGui::End();
 
         ImGui::Begin("SETTINGS");
-        draw_settings_window(cfg, tile_tex, renderer, path);
+        draw_settings_window(cfg, tile_textures, renderer, path);
         ImGui::End();
 
         // ── status bar ──────────────────────────────────────────────────────
