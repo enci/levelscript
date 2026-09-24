@@ -1,6 +1,7 @@
 build/
 .vs/
 .vscode/
+!extension/.vscode/
 __pycache__/
 *.user
 CLAUDE.md
