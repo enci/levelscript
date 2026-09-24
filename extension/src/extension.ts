@@ -3,6 +3,7 @@ import { applyDecorations, clearAll } from './decorations';
 import { setCached, deleteCached } from './cache';
 import { definitionProvider, hoverProvider, completionProvider } from './providers';
 import { initWasm, inspectJson } from './wasm';
+import { registerRunner } from './runner';
 
 const LS_LANG = 'levelscript';
 let diagnosticCollection: vscode.DiagnosticCollection;
@@ -41,6 +42,8 @@ export async function activate(ctx: vscode.ExtensionContext) {
     ),
   );
 
+  registerRunner(ctx);
+
   if (vscode.window.activeTextEditor?.document.languageId === LS_LANG) {
     analyse(vscode.window.activeTextEditor.document);
   }
@@ -71,8 +74,9 @@ function analyse(doc: vscode.TextDocument) {
 
     const editor = vscode.window.activeTextEditor;
     if (editor?.document.uri.toString() === doc.uri.toString()) {
-      if (result.tokens && result.tokens.length > 0)
-        applyDecorations(editor, result.tokens);
+      const hasTagDecls = result.symbols.tags.some(t => t.values.some(v => v.loc));
+      if ((result.tokens && result.tokens.length > 0) || hasTagDecls)
+        applyDecorations(editor, result.tokens, result.symbols.tags);
       else
         clearAll(editor);
     }

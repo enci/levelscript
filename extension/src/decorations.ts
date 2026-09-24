@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import { DecorationSpan } from './types';
+import { DecorationSpan, InspectionResult } from './types';
+import { tagColor, emptyColor, anyColor } from './palette';
 
 // Palette of colors for tag values (modulo cycle)
 const PALETTE_DARK  = ['#853232','#855b32','#858532','#438532','#32855b','#328585',
@@ -33,10 +34,21 @@ function getDecType(color: string): vscode.TextEditorDecorationType {
     return dt;
 }
 
-export function applyDecorations(editor: vscode.TextEditor, tokens: DecorationSpan[]) {
+function addRange(map: Map<string, vscode.Range[]>, color: string, line: number, col: number, len: number) {
+    const ranges = map.get(color) || [];
+    const start = new vscode.Position(line - 1, col - 1);
+    const end = new vscode.Position(line - 1, col - 1 + Math.max(len, 1));
+    ranges.push(new vscode.Range(start, end));
+    map.set(color, ranges);
+}
+
+// Colors pattern-cell tag values (spec's occurrences of `wall`, `floor`, ...
+// inside rules/patterns) and, using the same palette, the value names in
+// their `tag { ... }` declaration — the declaration doubles as the legend.
+export function applyDecorations(editor: vscode.TextEditor, tokens: DecorationSpan[], tags: InspectionResult['symbols']['tags']) {
     clearAll(editor);
 
-    const isDark = vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark 
+    const isDark = vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark
                 || vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.HighContrast;
 
     const map = new Map<string, vscode.Range[]>();
@@ -49,13 +61,16 @@ export function applyDecorations(editor: vscode.TextEditor, tokens: DecorationSp
         } else {
             color = tagColor(t.value + t.tag * 12, isDark);
         }
-
-        const ranges = map.get(color) || [];
-        const start = new vscode.Position(t.line - 1, t.col - 1);
-        const end = new vscode.Position(t.line - 1, t.col - 1 + Math.max(t.len, 1));
-        ranges.push(new vscode.Range(start, end));
-        map.set(color, ranges);
+        addRange(map, color, t.line, t.col, t.len);
     }
+
+    tags.forEach((tag, tagIdx) => {
+        tag.values.forEach((v, valueIdx) => {
+            if (!v.loc) return;
+            const color = tagColor(valueIdx + tagIdx * 12, isDark);
+            addRange(map, color, v.loc.line, v.loc.col, v.loc.len);
+        });
+    });
 
     for (const [color, ranges] of map.entries()) {
         editor.setDecorations(getDecType(color), ranges);

@@ -35,3 +35,38 @@ export interface InspectionResult {
         builtins: string[];
     };
 }
+
+// ── run/debug wasm bindings (see src/wasm_bind.cpp) ─────────────────────────
+
+export interface RunLayer {
+    name: string;
+    isNumber: boolean;
+    // Row-major, width*height entries. Tag cells: array of value names
+    // (empty array = empty cell, more than one = a union write). Number
+    // cells: the number, or null when empty.
+    cells: (string[] | number | null)[];
+}
+
+export interface RunHighlight {
+    layer: number;
+    x: number;
+    y: number;
+    what: 'match' | 'write';
+}
+
+export interface RunLevel {
+    width: number;
+    height: number;
+    layers: RunLayer[];
+}
+
+export interface RunState {
+    done: boolean;
+    seed: number;
+    statementIndex: number;
+    statementCount: number;
+    atStatementBoundary: boolean;
+    appsInStatement: number;
+    highlights: RunHighlight[];
+    level: RunLevel;
+}
