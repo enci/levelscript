@@ -1,4 +1,5 @@
 build/
+build-wasm/
 .vs/
 .vscode/
 !extension/.vscode/

@@ -4,6 +4,13 @@ project(levelscript CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Emscripten builds only produce the VS Code extension's WASM module (see
+# src/CMakeLists.txt); skip the debugger/test dependencies entirely.
+if(EMSCRIPTEN)
+    add_subdirectory(src)
+    return()
+endif()
+
 include(FetchContent)
 
 # ── lsd (debugger) dependencies: SDL3 + ImGui + JSON + stb + FreeType ─────────
