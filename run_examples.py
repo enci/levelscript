@@ -18,7 +18,8 @@ ROOT = Path(__file__).parent
 
 def find_lsc() -> Path:
     candidates = [
-        ROOT / "build" / "app" / cfg / exe
+        ROOT / "build" / sub / "app" / cfg / exe
+        for sub in (".", "clion")
         for cfg in ("Debug", "Release", ".")
         for exe in ("lsc.exe", "lsc")
     ]
