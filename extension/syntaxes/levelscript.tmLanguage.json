@@ -30,6 +30,7 @@
       "beginCaptures": { "0": { "name": "punctuation.definition.pattern.begin.levelscript" } },
       "endCaptures":   { "0": { "name": "punctuation.definition.pattern.end.levelscript" } },
       "patterns": [
+        { "include": "#comment" },
         { "include": "#wildcard" },
         { "include": "#builtin" },
         { "include": "#operator" },
