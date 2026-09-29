@@ -38,7 +38,8 @@ export async function activate(ctx: vscode.ExtensionContext) {
     vscode.languages.registerCompletionItemProvider(
       { language: LS_LANG },
       completionProvider,
-      '[', ' ', '\n'
+      // never ' ' or '\n': Enter would open a list and the next Enter accept it
+      '[', '(', '=', ',', '|'
     ),
   );
 

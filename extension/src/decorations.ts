@@ -24,12 +24,18 @@ function addRange(map: Map<string, vscode.Range[]>, color: string, line: number,
     map.set(color, ranges);
 }
 
-// A cell's background also covers the one whitespace character after it, so
-// a pattern row reads as a solid strip rather than separated chips.
-function cellLen(doc: vscode.TextDocument, t: DecorationSpan): number {
+// A cell's background runs across the whitespace up to the next cell on the
+// same line, so a pattern row reads as a solid strip even when columns are
+// aligned with several spaces. The last cell of a row covers just the one
+// whitespace character after it - never up to a ']' or a trailing comment.
+function cellLen(doc: vscode.TextDocument, t: DecorationSpan, next: DecorationSpan | undefined): number {
     const text = doc.lineAt(t.line - 1).text;
-    const next = text.charAt(t.col - 1 + t.len);
-    return next === ' ' || next === '\t' ? t.len + 1 : t.len;
+    const end = t.col - 1 + t.len;
+    if (next && next.line === t.line && next.col - 1 > end &&
+        /^[ \t]+$/.test(text.slice(end, next.col - 1)))
+        return next.col - t.col;
+    const c = text.charAt(end);
+    return c === ' ' || c === '\t' ? t.len + 1 : t.len;
 }
 
 // Colors pattern cells (tag values, unions, number literals, `*`, `.`) and,
@@ -42,7 +48,8 @@ export function applyDecorations(editor: vscode.TextEditor, tokens: DecorationSp
                 || vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.HighContrast;
 
     const map = new Map<string, vscode.Range[]>();
-    for (const t of tokens) {
+    const sorted = [...tokens].sort((a, b) => a.line - b.line || a.col - b.col);
+    sorted.forEach((t, k) => {
         let color: string;
         if (t.tag === -1) {
             color = anyColor(isDark);
@@ -53,8 +60,8 @@ export function applyDecorations(editor: vscode.TextEditor, tokens: DecorationSp
         } else {
             color = tagColor(t.value + t.tag * 12, isDark);
         }
-        addRange(map, color, t.line, t.col, cellLen(editor.document, t));
-    }
+        addRange(map, color, t.line, t.col, cellLen(editor.document, t, sorted[k + 1]));
+    });
 
     tags.forEach((tag, tagIdx) => {
         tag.values.forEach((v, valueIdx) => {

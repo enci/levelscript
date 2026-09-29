@@ -2,7 +2,7 @@
   "name": "levelscript",
   "displayName": "LevelScript",
   "description": "Syntax highlighting, diagnostics, tag-value coloring, hover, go-to-definition, and completion for .ls files",
-  "version": "0.4.0",
+  "version": "0.5.1",
   "publisher": "BojanEndrovski",
   "license": "UNLICENSED",
   "icon": "icon.png",
@@ -65,7 +65,7 @@
     "build:wasm": "cd .. && emcmake cmake -B build-wasm -DCMAKE_BUILD_TYPE=Release && cmake --build build-wasm",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "test": "npm run compile && node scripts/check-examples.js",
+    "test": "npm run compile && node scripts/check-examples.js && node scripts/check-completion.js",
     "gen-icon": "node scripts/gen-icon.js",
     "package": "vsce package",
     "publish": "vsce publish"

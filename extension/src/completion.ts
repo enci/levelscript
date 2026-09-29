@@ -1,0 +1,258 @@
+// Completion context: where in the grammar (spec.md) the cursor sits, decided
+// from the text before it. Pure (no vscode import) so scripts/ can test it.
+//
+// A tiny scanner tokenizes up to the word being typed, skipping comments, and
+// keeps a stack of open '{' '[' '(' frames. Each frame knows what opened it
+// (a `tag` block, a rule's attributes, `some(`, `path(`, a pattern of grid g,
+// ...) and the tokens seen inside it so far; the innermost frame plus its last
+// token or two decide the context. Anything unrecognized is 'none' - no list
+// at all beats a list of everything.
+
+export type CompletionContext =
+    | { kind: 'none' }
+    | { kind: 'top' }                                   // tag / layers / params / rule / program
+    | { kind: 'unionMember'; tag: string }              // tag t { ..., D = F | _ }
+    | { kind: 'gridOf' }                                // layers { g: _ }
+    | { kind: 'of' }                                    // layers { g: grid _ }
+    | { kind: 'gridType' }                              // layers { g: grid of _ }
+    | { kind: 'paramType' }                             // params { p: _ }
+    | { kind: 'expr'; grids: boolean; pos: boolean }    // expressions (section 5.8)
+    | { kind: 'ruleAttr' }                              // rule r(_)
+    | { kind: 'attrValue'; attr: string }               // rule r(symmetry=_)
+    | { kind: 'ruleBody'; start: boolean }              // a pattern may start here
+    | { kind: 'combinator' }                            // { _   (all / any)
+    | { kind: 'weight' }                                // { any (_ ) g[...] }
+    | { kind: 'cell'; grid: string }                    // g[ _ ]
+    | { kind: 'statement'; guard: boolean }             // program { _ }
+    | { kind: 'ruleName' }                              // program { one _ }
+    | { kind: 'strategyArg'; strategy: string }         // some(_)
+    | { kind: 'policyValue' }                           // one(policy=_)
+    | { kind: 'opArg'; op: string; index: number; used: string[] }  // path(_)
+    | { kind: 'opValue'; op: string; param: string };   // path(into=_)
+
+// Operation parameter schemas (spec section 6.0). The op names are checked
+// against the compiler's inspect `ops` list by scripts/check-completion.js.
+export type OpParamKind = 'int' | 'grid' | 'pred' | 'value' | 'expr' | 'enum';
+export interface OpParam { name: string; kind: OpParamKind; positional: boolean; required: boolean; values?: string[] }
+export const OPS: { name: string; params: OpParam[]; snippet: string }[] = [
+    { name: 'resize',  snippet: 'resize(${1:w}, ${2:h})',
+      params: [{ name: 'w', kind: 'int', positional: true, required: true },
+               { name: 'h', kind: 'int', positional: true, required: true }] },
+    { name: 'upscale', snippet: 'upscale(${1:n}, ${2:m})',
+      params: [{ name: 'n', kind: 'int', positional: true, required: true },
+               { name: 'm', kind: 'int', positional: true, required: true }] },
+    { name: 'trim',    snippet: 'trim()', params: [] },
+    { name: 'mirror',  snippet: 'mirror(${1|horizontal,vertical|})',
+      params: [{ name: 'axis', kind: 'enum', positional: true, required: true, values: ['horizontal', 'vertical'] }] },
+    { name: 'pad',     snippet: 'pad(${1:n})',
+      params: [{ name: 'n', kind: 'int', positional: true, required: true }] },
+    { name: 'path',    snippet: 'path(from=${1}, to=${2}, into=${3}, write=${4})',
+      params: [{ name: 'from', kind: 'pred', positional: false, required: true },
+               { name: 'to', kind: 'pred', positional: false, required: true },
+               { name: 'into', kind: 'grid', positional: false, required: true },
+               { name: 'write', kind: 'value', positional: false, required: true },
+               { name: 'over', kind: 'grid', positional: false, required: false },
+               { name: 'passable', kind: 'pred', positional: false, required: false },
+               { name: 'connectivity', kind: 'enum', positional: false, required: false, values: ['4', '8'] },
+               { name: 'cost', kind: 'expr', positional: false, required: false }] },
+];
+
+interface Tok { t: string; owner?: string }   // t: text; owner set on synthetic closers
+interface Frame {
+    open: '{' | '[' | '(' | '';
+    owner: string;       // what opened it: 'top' 'tag:t' 'layers' 'params' 'rule' 'program' 'combinator' 'set' 'grid:g' 'where' 'attrs' 'strategy:one' 'op:path' 'when' 'weight' 'expr'
+    scope: 'full' | 'restricted' | '';   // expression scope inherited by '(' frames
+    toks: Tok[];
+}
+
+const OPERATORS = new Set(['+', '-', '*', '/', '==', '!=', '<', '<=', '>', '>=', '&&', '||', '|', '!']);
+const STRATEGIES = new Set(['one', 'all', 'some']);
+
+function isIdentStart(c: string) { return /[A-Za-z_]/.test(c); }
+function isIdent(c: string) { return /[A-Za-z0-9_]/.test(c); }
+
+export function completionContext(text: string, offset: number): CompletionContext {
+    // the word being typed is the filter text, not context
+    let wordStart = offset;
+    while (wordStart > 0 && isIdent(text[wordStart - 1])) wordStart--;
+
+    const stack: Frame[] = [{ open: '', owner: 'top', scope: '', toks: [] }];
+    const top = () => stack[stack.length - 1];
+
+    let i = 0;
+    while (i < wordStart) {
+        const c = text[i];
+        if (c === '/' && text[i + 1] === '/') {
+            const eol = text.indexOf('\n', i);
+            if (eol < 0 || eol >= offset) return { kind: 'none' };   // typing in a comment
+            i = eol;
+            continue;
+        }
+        if (/\s/.test(c)) { i++; continue; }
+        if (isIdentStart(c) || /[0-9]/.test(c)) {
+            let j = i + 1;
+            while (j < wordStart && isIdent(text[j])) j++;
+            top().toks.push({ t: text.slice(i, j) });
+            i = j;
+            continue;
+        }
+        const two = text.slice(i, i + 2);
+        if (['=>', '==', '!=', '<=', '>=', '&&', '||'].includes(two)) {
+            top().toks.push({ t: two });
+            i += 2;
+            continue;
+        }
+        if (c === '{' || c === '[' || c === '(') {
+            stack.push(openFrame(c, stack));
+        } else if (c === '}' || c === ']' || c === ')') {
+            if (stack.length > 1) {
+                const f = stack.pop()!;
+                top().toks.push({ t: c, owner: f.owner });
+            }
+        } else {
+            top().toks.push({ t: c });
+        }
+        i++;
+    }
+    return classify(stack);
+}
+
+// The top frame's tokens since the last completed declaration.
+function currentDecl(toks: Tok[]): Tok[] {
+    let k = toks.length;
+    while (k > 0 && !(toks[k - 1].t === '}' && toks[k - 1].owner !== undefined)) k--;
+    return toks.slice(k);
+}
+
+function openFrame(c: '{' | '[' | '(', stack: Frame[]): Frame {
+    const parent = stack[stack.length - 1];
+    const toks = parent.toks;
+    const prev = toks[toks.length - 1]?.t;
+    const prev2 = toks[toks.length - 2]?.t;
+    const frame = (owner: string, scope: Frame['scope'] = ''): Frame =>
+        ({ open: c, owner, scope, toks: [] });
+
+    if (c === '{') {
+        if (parent.owner === 'top') {
+            const decl = currentDecl(toks);
+            const kw = decl[0]?.t;
+            if (kw === 'tag') return frame('tag:' + (decl[1]?.t ?? ''));
+            if (kw === 'layers' || kw === 'params' || kw === 'program') return frame(kw);
+            if (kw === 'rule') return frame('rule');
+            return frame('other');
+        }
+        if (parent.owner === 'attrs' && prev === '=' && prev2 === 'rotation') return frame('set');
+        if (parent.owner === 'rule' || parent.owner === 'combinator') return frame('combinator');
+        return frame('other');
+    }
+    if (c === '[') {
+        if (prev === 'where') return frame('where');
+        if (prev && isIdentStart(prev[0])) return frame('grid:' + prev);
+        return frame('other');
+    }
+    // '('
+    if (parent.owner === 'top' && currentDecl(toks)[0]?.t === 'rule') return frame('attrs');
+    if (parent.owner === 'program') {
+        if (prev && STRATEGIES.has(prev)) return frame('strategy:' + prev);
+        if (prev === 'when') return frame('when', 'restricted');
+        if (prev && isIdentStart(prev[0])) return frame('op:' + prev, 'full');
+        return frame('other');
+    }
+    if (parent.owner === 'rule' || parent.owner === 'combinator') return frame('weight');
+    if (parent.owner === 'params') return frame('expr', 'restricted');
+    if (parent.owner.startsWith('grid:') || parent.owner === 'where') return frame('expr', 'full');
+    if (parent.scope) return frame('expr', parent.scope);
+    return frame('other');
+}
+
+// Tokens after which an expression operand may start.
+function exprMayStart(prev: string | undefined) {
+    return prev === undefined || prev === '(' || prev === ',' || prev === '=' || OPERATORS.has(prev);
+}
+
+function classify(stack: Frame[]): CompletionContext {
+    const f = stack[stack.length - 1];
+    const toks = f.toks;
+    const last = toks[toks.length - 1];
+    const prev = last?.t;
+    const prev2 = toks[toks.length - 2]?.t;
+    const none: CompletionContext = { kind: 'none' };
+
+    switch (f.owner) {
+    case 'top':
+        // between declarations only - after `tag`, `rule` etc. a name is being declared
+        return prev === undefined || (prev === '}' && last.owner !== undefined) ? { kind: 'top' } : none;
+    case 'layers':
+        if (prev === ':') return { kind: 'gridOf' };
+        if (prev === 'grid') return { kind: 'of' };
+        if (prev === 'of') return { kind: 'gridType' };
+        return none;
+    case 'params':
+        if (prev === ':') return { kind: 'paramType' };
+        // `p: number = _` or `p = _`, and operands after operators - not a new entry's name
+        if (prev === '=' || (prev !== undefined && OPERATORS.has(prev)))
+            return { kind: 'expr', grids: false, pos: false };
+        return none;
+    case 'attrs':
+        if (prev === undefined || prev === ',') return { kind: 'ruleAttr' };
+        if (prev === '=' && prev2) return { kind: 'attrValue', attr: prev2 };
+        return none;
+    case 'rule':
+    case 'combinator': {
+        if (prev === undefined) return f.owner === 'rule' ? { kind: 'ruleBody', start: true } : { kind: 'combinator' };
+        if (prev === '=>' || prev === ']' || prev === '}' || prev === ')' || prev === ',' ||
+            prev === 'any' || prev === 'all' || prev === 'ordered')
+            return { kind: 'ruleBody', start: false };
+        return none;
+    }
+    case 'weight':
+        return prev === undefined ? { kind: 'weight' } : none;
+    case 'program': {
+        if (prev === undefined) return { kind: 'statement', guard: false };
+        if (prev === 'one' || prev === 'all' || (prev === ')' && last.owner?.startsWith('strategy:')))
+            return { kind: 'ruleName' };
+        if (prev === ')' && last.owner?.startsWith('op:')) return { kind: 'statement', guard: true };
+        if (prev === ')' && last.owner === 'when') return { kind: 'statement', guard: false };
+        // `one r _` / `some(max=3) r _`: an application just ended
+        const before = toks[toks.length - 2];
+        if (isIdentStart(prev[0]) && before &&
+            (before.t === 'one' || before.t === 'all' || (before.t === ')' && before.owner?.startsWith('strategy:'))))
+            return { kind: 'statement', guard: true };
+        return none;
+    }
+    case 'set':
+        return none;
+    case 'where':
+        return none;   // where cells are '(' expressions
+    }
+    if (f.owner.startsWith('tag:'))
+        return prev === '=' || prev === '|' ? { kind: 'unionMember', tag: f.owner.slice(4) } : none;
+    if (f.owner.startsWith('grid:')) {
+        // a cell may start anywhere except right after an atom-joining '|' / '!' ... which also want a value
+        return { kind: 'cell', grid: f.owner.slice(5) };
+    }
+    if (f.owner.startsWith('strategy:')) {
+        if (prev === undefined || prev === ',') return { kind: 'strategyArg', strategy: f.owner.slice(9) };
+        if (prev === '=' && prev2 === 'policy') return { kind: 'policyValue' };
+        return none;
+    }
+    if (f.owner.startsWith('op:')) {
+        const op = f.owner.slice(3);
+        if (prev === undefined || prev === ',') {
+            const used: string[] = [];
+            let index = 0;
+            for (let k = 0; k < toks.length; k++) {
+                if (toks[k].t === ',') index++;
+                if (toks[k].t === '=' && k > 0) used.push(toks[k - 1].t);
+            }
+            return { kind: 'opArg', op, index, used };
+        }
+        if (prev === '=' && prev2) return { kind: 'opValue', op, param: prev2 };
+        return none;
+    }
+    if (f.owner === 'when' || f.owner === 'expr')
+        return exprMayStart(prev)
+            ? { kind: 'expr', grids: f.scope === 'full', pos: f.scope === 'full' }
+            : none;
+    return none;
+}
