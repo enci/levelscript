@@ -866,3 +866,77 @@ TEST_CASE("api: snapshot mid-run sees committed statements only") {
 
     g.finish();
 }
+
+// -- spec 0.5 delta Δ3: a same-LHS variant with different writes is its own
+//    candidate. Statistical over seeds; each seed is deterministic, so these
+//    are stable, and the failure odds of a correct build are < 2^-100. --
+
+TEST_CASE("api: H-flip of a same-LHS rule writes both orientations") {
+    auto gen = make(R"(
+tag t { a, b, c }
+layers { g: grid of t }
+rule fill { g[.] => g[a] }
+rule pair(symmetry=horizontal) { g[a a] => g[b c] }
+program {
+    resize(2, 1)
+    all fill
+    one pair
+}
+)");
+    INFO(gen.error());
+    REQUIRE(static_cast<bool>(gen));
+    int b = gen.tag("t.b"), c = gen.tag("t.c");
+    int bc = 0, cb = 0;
+    const int runs = 400;
+    for (int seed = 1; seed <= runs; ++seed) {
+        ls::level lv = gen.generate(seed);
+        ls::grid g = lv["g"];
+        if (g.at(0, 0) == b && g.at(1, 0) == c) ++bc;
+        else if (g.at(0, 0) == c && g.at(1, 0) == b) ++cb;
+    }
+    CHECK(bc + cb == runs);
+    // both variants are equal-weight candidates: expect ~50/50
+    CHECK(bc > runs / 4);
+    CHECK(cb > runs / 4);
+}
+
+TEST_CASE("api: rotation=all on a symmetric LHS reaches every write corner") {
+    auto gen = make(R"(
+tag t { s, f }
+layers { g: grid of t }
+rule fill { g[.] => g[s] }
+rule reduce(rotation=all) {
+    g[
+        s s
+        s s ]
+    =>
+    g[
+        s f
+        f f ]
+}
+program {
+    resize(2, 2)
+    all fill
+    one reduce
+}
+)");
+    INFO(gen.error());
+    REQUIRE(static_cast<bool>(gen));
+    int s = gen.tag("t.s");
+    int corner_hits[4] = {0, 0, 0, 0};
+    const int runs = 400;
+    for (int seed = 1; seed <= runs; ++seed) {
+        ls::level lv = gen.generate(seed);
+        ls::grid g = lv["g"];
+        int count = 0, where = -1;
+        for (int y = 0; y < 2; ++y)
+            for (int x = 0; x < 2; ++x)
+                if (g.at(x, y) == s) { ++count; where = y * 2 + x; }
+        REQUIRE(count == 1);
+        ++corner_hits[where];
+    }
+    for (int k = 0; k < 4; ++k) {
+        INFO("corner " << k);
+        CHECK(corner_hits[k] > runs / 8);   // ~25% each
+    }
+}
