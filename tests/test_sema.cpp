@@ -464,3 +464,83 @@ TEST_CASE("sema: tagset over the 30-value cap") {
     big += "}\nprogram { }";
     CHECK(compile_result(big).has_error("maximum is 30"));
 }
+
+// -- spec 0.5 delta: Δ3 variant dedup key, Δ1 contextual names --
+
+static const std::string trio = R"(
+tag t3 { a, b, c }
+layers { g: grid of t3 }
+)";
+
+TEST_CASE("sema: variant dedup keys on the (match, write) pair (spec §5.6.2)") {
+    SECTION("same LHS, different writes: the H-flip survives") {
+        compile_result r(trio + "rule r(symmetry=horizontal) { g[a a] => g[b c] }\n" + rprog);
+        REQUIRE(r.ok);
+        CHECK(r.prog.rules[0].pairs.size() == 2);
+    }
+    SECTION("same LHS, same writes: collapses to 1") {
+        compile_result r(trio + "rule r(symmetry=horizontal) { g[a a] => g[b b] }\n" + rprog);
+        REQUIRE(r.ok);
+        CHECK(r.prog.rules[0].pairs.size() == 1);
+    }
+    SECTION("a symmetric LHS with a single-corner write keeps all four rotations") {
+        compile_result r(trio + R"(
+rule r(rotation=all) {
+    g[
+        a a
+        a a ]
+    =>
+    g[
+        a b
+        b b ]
+}
+)" + rprog);
+        REQUIRE(r.ok);
+        CHECK(r.prog.rules[0].pairs.size() == 4);
+    }
+    SECTION("{ any } item order is part of the key (accepted cost, §10.2)") {
+        compile_result r(trio +
+            "rule r(symmetry=horizontal) { g[a a] => { any g[b c] g[c b] } }\n" + rprog);
+        REQUIRE(r.ok);
+        CHECK(r.prog.rules[0].pairs.size() == 2);
+    }
+    SECTION("a flip-invariant weighted { any } write collapses to 1") {
+        compile_result r(trio +
+            "rule r(symmetry=horizontal) { g[a a] => { any (weight=3) g[b b]  g[c c] } }\n" + rprog);
+        REQUIRE(r.ok);
+        CHECK(r.prog.rules[0].pairs.size() == 1);
+    }
+}
+
+TEST_CASE("sema: contextual names (spec §2.4)") {
+    SECTION("none/horizontal/vertical/symmetry/rotation are legal names") {
+        compile_result r(R"(
+tag none { horizontal, vertical }
+layers { symmetry: grid of none }
+params { rotation: number = 1 }
+rule r(symmetry=horizontal) { symmetry[horizontal vertical] => symmetry[vertical horizontal] }
+program { mirror(horizontal) }
+)");
+        INFO(r.diags.format_all());
+        CHECK(r.ok);
+    }
+    SECTION("max is still unavailable as a name: it is a built-in (check 21)") {
+        CHECK(compile_result("tag t { max }\nlayers { g: grid of t }\n" + rprog)
+              .has_error("built-in"));
+        CHECK(compile_result("params { max: number = 3 }\n" + rprog)
+              .has_error("built-in function name"));
+        CHECK(compile_result("tag t { a }\nlayers { max: grid of t }\n" + rprog)
+              .has_error("built-in"));
+    }
+    SECTION("attribute and axis values are still validated") {
+        CHECK(compile_result(trio + "rule r(symmetry=rotation) { g[.] => g[a] }\n" + rprog)
+              .has_error("invalid value 'rotation'"));
+        CHECK(compile_result(trio + "program { mirror(none) }\n").has_error("none"));
+    }
+}
+
+TEST_CASE("sema: a missing program block is reported by analyze (check 9)") {
+    // in sema, not generator::compile, so the editor's inspect path sees it
+    CHECK(compile_result(prelude).has_error("no 'program' block"));
+    CHECK(compile_result("").has_error("no 'program' block"));
+}

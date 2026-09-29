@@ -65,13 +65,26 @@ bool patterns_equal(compiled_pattern const& a, compiled_pattern const& b) {
     return true;
 }
 
-// Variant dedup key: two variants are duplicates when every LHS pattern is
-// cell-identical (they would produce the same candidates).
-bool pair_lhs_equal(compiled_pair const& a, compiled_pair const& b) {
+// Structural write-tree equality: same combinator nesting, same item order,
+// same weights, cell-identical leaves.
+bool write_terms_equal(compiled_write_term const& a, compiled_write_term const& b) {
+    if (a.what != b.what || a.weight != b.weight) return false;
+    if (a.what == compiled_write_term::kind::leaf)
+        return patterns_equal(a.pattern, b.pattern);
+    if (a.items.size() != b.items.size()) return false;
+    for (int i = 0; i < (int)a.items.size(); ++i)
+        if (!write_terms_equal(a.items[i], b.items[i])) return false;
+    return true;
+}
+
+// Variant dedup key (spec §5.6.2): two variants are duplicates iff both the
+// match side and the write tree are structurally equal. A same-LHS variant
+// with different writes survives as its own candidate.
+bool pairs_equal(compiled_pair const& a, compiled_pair const& b) {
     if (a.lhs.size() != b.lhs.size()) return false;
     for (int i = 0; i < (int)a.lhs.size(); ++i)
         if (!patterns_equal(a.lhs[i], b.lhs[i])) return false;
-    return true;
+    return write_terms_equal(a.rhs, b.rhs);
 }
 
 // Expression value kinds (§5.8).
@@ -672,8 +685,9 @@ struct analyzer {
             compiled_rule cr;
             cr.name = r.name;
             cr.body = r.body;
-            // Expand each sub-rule into its variants; dedup by LHS equality,
-            // scoped per sub-rule so same-LHS sub-rules both survive (§10.3).
+            // Expand each sub-rule into its variants; dedup by (match, write)
+            // equality, scoped per sub-rule so same-LHS sub-rules both survive
+            // (§5.6.2, §10.2).
             for (int bi = 0; bi < (int)r.pairs.size(); ++bi) {
                 compiled_pair base = compile_base_pair(r.pairs[bi]);
                 base.sub_rule_idx = bi;
@@ -684,7 +698,7 @@ struct analyzer {
                         cand.sub_rule_idx = bi;
                         bool dup = false;
                         for (auto const& v : variants)
-                            if (pair_lhs_equal(v, cand)) { dup = true; break; }
+                            if (pairs_equal(v, cand)) { dup = true; break; }
                         if (!dup) variants.push_back(std::move(cand));
                     }
                 for (auto& v : variants) cr.pairs.push_back(std::move(v));
@@ -1106,6 +1120,9 @@ struct analyzer {
     }
 
     void run(bool best_effort) {
+        // §7.3 check 9 — here rather than in generator::compile so every
+        // frontend (lsc, embedding, lsc --inspect / the editor) reports it
+        if (!ast.has_program) error({1, 1}, "no 'program' block");
         build_tables();
         if (!best_effort && diags.has_errors()) return;
         compile_params();
