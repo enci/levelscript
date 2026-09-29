@@ -1,10 +1,12 @@
 #!/usr/bin/env node
-// Runs the extension's parser + sema (the diagnostics engine) over every .mgsl
+// Runs the extension's parser + sema (the diagnostics engine) over every .ls
 // file under ../../examples and checks the results against each file's
 // `// @expect ...` annotations.
 //
 //   @expect error                  → analysis must report >= 1 error
 //   @expect stderr-contains <text> → some error message must contain <text>
+//                                    (with run-ok it names a runtime warning;
+//                                    SKIPPED, static-only)
 //   @expect run-ok                 → analysis must report 0 errors
 //   @expect grid <g> count(...)    → runtime assertion; SKIPPED (static-only)
 //   (no @expect directives)        → treated as run-ok (must be clean)
@@ -80,7 +82,7 @@ for (const file of files) {
   const msgs = errors.map(e => e.message);
 
   // Decide expectation: error-expecting wins; else run-ok/clean.
-  const expectsError = exp.error || exp.contains.length > 0;
+  const expectsError = exp.error || (exp.contains.length > 0 && !exp.runOk);
   const expectsClean = !expectsError; // run-ok, or no directive, or runtime-only
 
   const problems = [];
@@ -105,7 +107,7 @@ for (const file of files) {
     fail++;
     failures.push({ rel, problems });
   }
-  if (exp.runtimeOnly && !expectsError) skipped++; // note: runtime assertions not verified here
+  if ((exp.runtimeOnly || exp.contains.length > 0) && !expectsError) skipped++; // runtime assertions not verified here
 }
 
 console.log('');

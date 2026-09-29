@@ -1,5 +1,5 @@
 // @expect error
-// @expect stderr-contains not allowed
+// @expect stderr-contains only allowed on '{ any }' items
 tag t { a }
 tag u { x }
 layers {

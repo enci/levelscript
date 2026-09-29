@@ -718,7 +718,7 @@ struct parser {
                 parse_program(out);
                 break;
             default:
-                error_at(peek(), "expected a declaration (tag, layers, rule, program)");
+                error_at(peek(), "expected a declaration (tag, layers, params, rule, program)");
                 eat_bad();
                 break;
             }

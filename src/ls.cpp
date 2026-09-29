@@ -192,13 +192,9 @@ generator generator::compile(const std::string& source, const std::string& name)
 
     auto ast = parse(source, label, diags);
     if (ast && !diags.has_errors()) {
-        if (!ast->has_program)
-            diags.error(label, 1, 1, "no 'program' block");
-        else {
-            auto prog = std::make_shared<compiled>();
-            if (analyze(*ast, *prog, diags, label))
-                g.prog_ = std::move(prog);
-        }
+        auto prog = std::make_shared<compiled>();
+        if (analyze(*ast, *prog, diags, label))
+            g.prog_ = std::move(prog);
     }
     if (!g.prog_) g.error_ = diags.format_all();
     else if (!diags.all.empty()) g.warnings_ = diags.format_all();

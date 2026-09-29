@@ -387,3 +387,20 @@ params { rotation: number = 1 }
     REQUIRE(ast.tags.size() == 1);
     CHECK(ast.tags[0].name == "none");
 }
+
+TEST_CASE("parser: an unclosed pattern reports the missing ']' once") {
+    diagnostics diags;
+    parse("rule r {\n    g[.\n    =>\n    g[a]\n}\n", "test", diags);
+    REQUIRE(diags.all.size() == 1);
+    CHECK(diags.all[0].message.find("expected ']'") != std::string::npos);
+}
+
+TEST_CASE("parser: an unknown attribute is parsed whole — one diagnostic (§5.1)") {
+    for (char const* attrs : {"colour=red", "colour=3", "colour=all", "colour={90, 180}"}) {
+        diagnostics diags;
+        parse(std::string("rule r(") + attrs + ") { g[.] => g[a] }\n", "test", diags);
+        INFO(attrs);
+        REQUIRE(diags.all.size() == 1);
+        CHECK(diags.all[0].message.find("unknown rule attribute 'colour'") != std::string::npos);
+    }
+}
