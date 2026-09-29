@@ -33,7 +33,7 @@ TEST_CASE("inspect: healthy file emits ok, symbols, and no diagnostics") {
     CHECK(has(j, "\"diagnostics\":[]"));
     CHECK(has(j, "\"name\":\"geo\""));
     CHECK(has(j, "\"values\":[{\"name\":\"wall\",\"loc\":"));
-    CHECK(has(j, "\"unions\":[\"blocker\"]"));
+    CHECK(has(j, "\"unions\":[{\"name\":\"blocker\",\"loc\":{\"line\":2,\"col\":24,\"len\":7}}]"));
     CHECK(has(j, "{\"name\":\"level\",\"type\":\"geo\",\"loc\":"));
     CHECK(has(j, "{\"name\":\"tiles\",\"type\":\"number\",\"loc\":"));
     CHECK(has(j, "{\"name\":\"difficulty\",\"derived\":false}"));
@@ -101,4 +101,26 @@ TEST_CASE("inspect: message strings are JSON-escaped") {
     std::string j = ls::inspect_json("tag \"x\" { a }", "test.ls");
     CHECK(has(j, "\"ok\":false"));
     CHECK(has(j, "\\\""));   // escaped quote inside a message
+}
+
+TEST_CASE("inspect: unions, number literals, and wildcards are colorable") {
+    std::string j = ls::inspect_json(R"(tag t { F, W, D = F | W }
+layers {
+    g: grid of t
+    n: grid of number
+}
+rule r { { all g[* D]  n[* 12] } => { all g[F D]  n[. 3] } }
+program { }
+)", "test.ls");
+    CHECK(has(j, "\"diagnostics\":[]"));
+    // union D takes the slot after its tag's values (F=0, W=1 -> D=2)
+    CHECK(has(j, "{\"line\":6,\"col\":20,\"len\":1,\"tag\":0,\"value\":2}"));
+    CHECK(has(j, "{\"line\":6,\"col\":47,\"len\":1,\"tag\":0,\"value\":2}"));
+    // '*' in a tag grid and in a number grid
+    CHECK(has(j, "{\"line\":6,\"col\":18,\"len\":1,\"tag\":-1,\"value\":-1}"));
+    CHECK(has(j, "{\"line\":6,\"col\":26,\"len\":1,\"tag\":-1,\"value\":-1}"));
+    // number-grid literals carry their value; '.' is the empty token
+    CHECK(has(j, "{\"line\":6,\"col\":28,\"len\":2,\"tag\":-3,\"value\":12}"));
+    CHECK(has(j, "{\"line\":6,\"col\":53,\"len\":1,\"tag\":-2,\"value\":-2}"));
+    CHECK(has(j, "{\"line\":6,\"col\":55,\"len\":1,\"tag\":-3,\"value\":3}"));
 }

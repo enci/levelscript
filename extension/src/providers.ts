@@ -32,8 +32,8 @@ export const definitionProvider: vscode.DefinitionProvider = {
             if (t && t.tag >= 0 && t.value >= 0) {
                 const tag = cached.symbols.tags[t.tag];
                 if (tag) {
-                    const val = tag.values[t.value];
-                    if (val && val.loc) return spanToLocation(doc.uri, val.loc);
+                    const sym = tag.values[t.value] ?? tag.unions[t.value - tag.values.length];
+                    if (sym && sym.loc) return spanToLocation(doc.uri, sym.loc);
                 }
             }
             return null;
@@ -64,11 +64,14 @@ export const hoverProvider: vscode.HoverProvider = {
         if (t && t.tag >= 0 && t.value >= 0) {
             const tag = cached.symbols.tags[t.tag];
             if (tag) {
-                const val = tag.values[t.value]?.name;
+                const isUnion = t.value >= tag.values.length;
+                const name = isUnion ? tag.unions[t.value - tag.values.length]?.name
+                                     : tag.values[t.value]?.name;
                 const md = new vscode.MarkdownString();
-                md.appendMarkdown(`**${val}** — *${tag.name}*\n\n`);
-                
-                const valueList = tag.values.map((v, i) => i === t.value ? `**${v.name}**` : v.name).join(', ');
+                md.appendMarkdown(`**${name}** — *${isUnion ? 'union in ' : ''}${tag.name}*\n\n`);
+
+                const valueList = [...tag.values, ...tag.unions]
+                    .map((v, i) => i === t.value ? `**${v.name}**` : v.name).join(', ');
                 md.appendMarkdown(`tag ${tag.name} { ${valueList} }`);
                 return new vscode.Hover(md);
             }
@@ -118,7 +121,7 @@ export const completionProvider: vscode.CompletionItemProvider = {
                 items.push(new vscode.CompletionItem(v.name, vscode.CompletionItemKind.EnumMember));
             });
             tag.unions.forEach(u => {
-                items.push(new vscode.CompletionItem(u, vscode.CompletionItemKind.Enum));
+                items.push(new vscode.CompletionItem(u.name, vscode.CompletionItemKind.Enum));
             });
         });
 

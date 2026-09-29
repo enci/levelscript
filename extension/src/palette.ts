@@ -11,10 +11,15 @@ export function tagColor(index: number, dark: boolean): string {
     return (dark ? PALETTE_DARK : PALETTE_LIGHT)[index % 12];
 }
 
+// Number-grid literals cycle through the same 12 colors by value.
+export function numberCellColor(n: number, dark: boolean): string {
+    return tagColor(((n % 12) + 12) % 12, dark);
+}
+
 export function emptyColor(dark: boolean): string {
     return dark ? '#3a3a46' : '#e4e4ea';   // slate blue-gray
 }
 
 export function anyColor(dark: boolean): string {
-    return dark ? '#40392f' : '#ece3d4';   // warm gray
+    return dark ? '#5a5042' : '#ddd0b8';   // warm gray
 }

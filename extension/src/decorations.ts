@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { DecorationSpan, InspectionResult } from './types';
-import { tagColor, emptyColor, anyColor } from './palette';
+import { tagColor, emptyColor, anyColor, numberCellColor } from './palette';
 
 const decTypes = new Map<string, vscode.TextEditorDecorationType>();
 
@@ -24,9 +24,17 @@ function addRange(map: Map<string, vscode.Range[]>, color: string, line: number,
     map.set(color, ranges);
 }
 
-// Colors pattern-cell tag values (spec's occurrences of `wall`, `floor`, ...
-// inside rules/patterns) and, using the same palette, the value names in
-// their `tag { ... }` declaration — the declaration doubles as the legend.
+// A cell's background also covers the one whitespace character after it, so
+// a pattern row reads as a solid strip rather than separated chips.
+function cellLen(doc: vscode.TextDocument, t: DecorationSpan): number {
+    const text = doc.lineAt(t.line - 1).text;
+    const next = text.charAt(t.col - 1 + t.len);
+    return next === ' ' || next === '\t' ? t.len + 1 : t.len;
+}
+
+// Colors pattern cells (tag values, unions, number literals, `*`, `.`) and,
+// using the same palette, the value and union names in their `tag { ... }`
+// declaration — the declaration doubles as the legend.
 export function applyDecorations(editor: vscode.TextEditor, tokens: DecorationSpan[], tags: InspectionResult['symbols']['tags']) {
     clearAll(editor);
 
@@ -40,10 +48,12 @@ export function applyDecorations(editor: vscode.TextEditor, tokens: DecorationSp
             color = anyColor(isDark);
         } else if (t.tag === -2) {
             color = emptyColor(isDark);
+        } else if (t.tag === -3) {
+            color = numberCellColor(t.value, isDark);
         } else {
             color = tagColor(t.value + t.tag * 12, isDark);
         }
-        addRange(map, color, t.line, t.col, t.len);
+        addRange(map, color, t.line, t.col, cellLen(editor.document, t));
     }
 
     tags.forEach((tag, tagIdx) => {
@@ -51,6 +61,11 @@ export function applyDecorations(editor: vscode.TextEditor, tokens: DecorationSp
             if (!v.loc) return;
             const color = tagColor(valueIdx + tagIdx * 12, isDark);
             addRange(map, color, v.loc.line, v.loc.col, v.loc.len);
+        });
+        tag.unions.forEach((u, unionIdx) => {
+            if (!u.loc) return;
+            const color = tagColor(tag.values.length + unionIdx + tagIdx * 12, isDark);
+            addRange(map, color, u.loc.line, u.loc.col, u.loc.len);
         });
     });
 

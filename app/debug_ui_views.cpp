@@ -130,8 +130,12 @@ std::string cell_glyph(compiled const& meta, int tag_id, int v) {
     if (tag_id < 0 || tag_id >= (int)meta.tag_values.size())
         return std::to_string(v);
     auto const& vals = meta.tag_values[tag_id];
-    if (v >= (int)vals.size()) return "?";
-    return vals[v].substr(0, 1);
+    if (v < (int)vals.size()) return vals[v].substr(0, 1);
+    // union slots follow the values (see mask_to_slot)
+    int ui = v - (int)vals.size();
+    if (tag_id < (int)meta.tag_unions.size() && ui < (int)meta.tag_unions[tag_id].size())
+        return meta.tag_unions[tag_id][ui].first.substr(0, 1);
+    return "?";
 }
 
 // grid::at() returns a value MASK for a tag layer (bit 1..30 - a single bit
@@ -144,6 +148,38 @@ static int mask_to_vid(int mask) {
     for (int b = 1; b <= 30; ++b)
         if (mask & (1 << b)) return b - 1;
     return -1;
+}
+
+// The display slot for a tag-layer mask - what tag_color(), cell_glyph() and
+// the tag-color overrides key by. A mask that is exactly a named union takes
+// that union's slot, numbered after the tagset's values (the same numbering
+// the VS Code extension's decorations use); anything else falls back to its
+// lowest value bit.
+static int mask_to_slot(compiled const& meta, int tag_id, int mask) {
+    if (mask > 0 && tag_id >= 0 && tag_id < (int)meta.tag_unions.size()) {
+        auto const& us = meta.tag_unions[tag_id];
+        for (int i = 0; i < (int)us.size(); ++i)
+            if (us[i].second == mask)
+                return (int)meta.tag_values[tag_id].size() + i;
+    }
+    return mask_to_vid(mask);
+}
+
+// Tooltip label for a tag-layer mask: the value name, the union name when
+// the mask is exactly a named union, else the member names joined by '|'.
+static std::string mask_label(compiled const& meta, int tag_id, int mask) {
+    if (tag_id < 0 || tag_id >= (int)meta.tag_values.size()) return "?";
+    int slot = mask_to_slot(meta, tag_id, mask);
+    auto const& vals = meta.tag_values[tag_id];
+    if (slot >= (int)vals.size())
+        return meta.tag_unions[tag_id][slot - (int)vals.size()].first;
+    std::string out;
+    for (int vi = 0; vi < (int)vals.size() && vi < 30; ++vi)
+        if (mask & (1 << (vi + 1))) {
+            if (!out.empty()) out += '|';
+            out += vals[vi];
+        }
+    return out.empty() ? "?" : out;
 }
 
 void draw_centered_text(ImDrawList* dl, ImVec2 p0, float box_px, ImU32 col,
@@ -284,7 +320,7 @@ static cell_view pattern_cell_view(compiled const& meta, compiled_pattern const&
     }
     // Tag mask: empty-only reads as '.', otherwise show the lowest value bit
     // (a union mask previews as its first member).
-    int vid = mask_to_vid((int)cc.val);
+    int vid = mask_to_slot(meta, pal.tag_id, (int)cc.val);
     if (vid < 0) return { IM_COL32(80, 80, 80, 255), "." };
     return { tag_color(pal.tag_id, vid, pal.colors), cell_glyph(meta, pal.tag_id, vid) };
 }
@@ -536,6 +572,35 @@ void draw_tags_window(compiled const& meta, project_config& cfg) {
 
                 ImGui::PopID();
             }
+            // Named unions follow the values, in the palette slots after them
+            // (mask_to_slot) - `D = F | W` gets its own editable swatch.
+            if (ti < (int)meta.tag_unions.size()) {
+                auto const& us = meta.tag_unions[(size_t)ti];
+                for (int ui = 0; ui < (int)us.size(); ++ui) {
+                    int slot = (int)vals.size() + ui;
+                    ImGui::PushID(slot);
+
+                    ImU32 cur = vmap.count(slot) ? vmap.at(slot) : tag_color(ti, slot);
+                    float col[3];
+                    col3_from_u32(cur, col);
+                    if (ImGui::ColorEdit3("##vc", col,
+                            ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel))
+                        vmap[slot] = u32_from_col3(col);
+                    ImGui::SameLine();
+
+                    std::string members;
+                    for (int vi = 0; vi < (int)vals.size() && vi < 30; ++vi)
+                        if (us[(size_t)ui].second & (int64_t(1) << (vi + 1))) {
+                            if (!members.empty()) members += " | ";
+                            members += vals[(size_t)vi];
+                        }
+                    ImGui::TextUnformatted(us[(size_t)ui].first.c_str());
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("= %s", members.c_str());
+
+                    ImGui::PopID();
+                }
+            }
             ImGui::TreePop();
         }
         ImGui::PopID();
@@ -637,7 +702,7 @@ void draw_grid_composite(script const& sc, debug_run const& run,
                 // mask for a tag layer (spec §3) but the real number as-is
                 // for a numeric one (tile/heatmap modes are numeric-only or
                 // numeric-semantics, so they keep using v directly).
-                int vid = g.is_number() ? v : mask_to_vid(v);
+                int vid = g.is_number() ? v : mask_to_slot(sc.meta, pal.tag_id, v);
 
                 ImVec2 p0 = { origin.x + x * cell_px, origin.y + y * cell_px };
                 ImVec2 p1 = { p0.x + cell_px,         p0.y + cell_px         };
@@ -730,14 +795,16 @@ void draw_grid_composite(script const& sc, debug_run const& run,
                 grid g = lv[lc.name];
                 int  v = g.at(hx, hy);
 
+                int lid = sc.meta.layer_id(lc.name);
+                int tid = lid >= 0 ? sc.meta.layers[lid].tag_id : -1;
                 std::string val_label;
                 if (v == -1)               val_label = "\xc2\xb7";
                 else if (g.is_number())    val_label = std::to_string(v);
-                else                       val_label = g.valueName(v);
+                else                       val_label = mask_label(sc.meta, tid, v);
 
                 if (v != -1) {
                     palette pal = layer_palette(sc.meta, cfg, sc.meta.layer_id(lc.name));
-                    int vid = g.is_number() ? v : mask_to_vid(v);
+                    int vid = g.is_number() ? v : mask_to_slot(sc.meta, pal.tag_id, v);
                     ImVec4 colf = ImGui::ColorConvertU32ToFloat4(
                         tag_color(pal.tag_id, vid, pal.colors));
                     ImGui::ColorButton("##s", colf,
