@@ -39,15 +39,25 @@ struct comma_list {
     }
 };
 
-// One tag-value occurrence in a pattern cell — what the colored-pattern
-// decorations paint.
+// Palette slot of a named union: the "next colors" after its tag's values,
+// so a union reads as its own swatch rather than a blend of its members.
+int union_slot(compiled const& prog, int tid, std::string const& name) {
+    if (tid < 0 || tid >= (int)prog.tag_unions.size()) return -1;
+    auto const& us = prog.tag_unions[tid];
+    for (int i = 0; i < (int)us.size(); ++i)
+        if (us[i].first == name) return (int)prog.tag_values[tid].size() + i;
+    return -1;
+}
+
+// One colorable occurrence in a pattern cell — what the colored-pattern
+// decorations paint. tag >= 0: a tag value or union (value = palette slot);
+// -1: '*'; -2: '.'; -3: a number-grid literal (value = the number).
 void emit_pattern_tokens(std::string& o, comma_list& cl,
                          compiled const& prog, pattern const& p) {
     if (p.is_where) return;
     int gid = prog.layer_id(p.grid);
     if (gid < 0) return;
-    int tid = prog.layers[gid].tag_id;
-    if (tid < 0) return;   // number grid: no value coloring
+    int tid = prog.layers[gid].tag_id;   // -1: number grid
     for (auto const& row : p.cells) {
         for (auto const& c : row) {
             if (c.kind == cell_kind::any) {
@@ -64,10 +74,19 @@ void emit_pattern_tokens(std::string& o, comma_list& cl,
                      ",\"len\":1,\"tag\":-2,\"value\":-2}";
                 continue;
             }
-            if (c.kind != cell_kind::tag_mask) continue;
+            if (c.kind == cell_kind::number) {
+                cl.next();
+                o += "{\"line\":" + std::to_string(c.loc.line) +
+                     ",\"col\":" + std::to_string(c.loc.col) +
+                     ",\"len\":" + std::to_string(std::to_string(c.number).size()) +
+                     ",\"tag\":-3,\"value\":" + std::to_string(c.number) + "}";
+                continue;
+            }
+            if (c.kind != cell_kind::tag_mask || tid < 0) continue;
             for (auto const& a : c.atoms) {
                 int vid = prog.value_id(tid, a.name);
-                if (vid < 0) continue;   // unions/unknowns stay unpainted
+                if (vid < 0) vid = union_slot(prog, tid, a.name);
+                if (vid < 0) continue;   // unknown names stay unpainted
                 cl.next();
                 o += "{\"line\":" + std::to_string(a.loc.line) +
                      ",\"col\":" + std::to_string(a.loc.col + (a.negate ? 1 : 0)) +
@@ -204,7 +223,15 @@ std::string inspect_json(std::string const& source, std::string const& name) {
                 for (auto const& [uname, mask] : prog.tag_unions[ti]) {
                     (void)mask;
                     ul.next();
+                    o += "{\"name\":";
                     js(o, uname);
+                    if (ast && ti < (int)ast->tags.size())
+                        for (auto const& au : ast->tags[ti].unions)
+                            if (au.name == uname)
+                                o += ",\"loc\":{\"line\":" + std::to_string(au.loc.line) +
+                                     ",\"col\":" + std::to_string(au.loc.col) +
+                                     ",\"len\":" + std::to_string(au.name.size()) + "}";
+                    o += "}";
                 }
             o += "]}";
         }
