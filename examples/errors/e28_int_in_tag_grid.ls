@@ -1,6 +1,6 @@
 // E28: integer literal used as a cell value in a tagged (non-number) grid.
 // @expect error
-// @expect stderr-contains non-number grid
+// @expect stderr-contains integer cell in a tag grid
 tag t { a, b }
 layers { g: grid of t }
 rule bad {

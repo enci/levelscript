@@ -1,6 +1,6 @@
 // E-nest-3: weight is still rejected inside { all }, including nested.
 // @expect error
-// @expect stderr-contains 'weight' is not allowed
+// @expect stderr-contains only allowed on '{ any }' items
 tag geometry { floor }
 tag item { chest }
 layers { level: grid of geometry  items: grid of item }
