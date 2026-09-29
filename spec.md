@@ -66,8 +66,7 @@ COMMENT        ::= '//' <any chars> NEWLINE
 tag  layers  grid  of  number
 rule  program  params  where  when
 any  all  one  some  ordered
-symmetry  rotation  weight  max
-horizontal  vertical  none
+weight
 policy  snapshot  incremental  stabilize  percent
 ```
 
@@ -79,6 +78,8 @@ RESERVED_CHARS ::= '[' | ']' | '{' | '}' | '(' | ')' | ',' | '='
                  | <ASCII letters, digits, and '_'>
 ```
 `?` is not reserved; it is held for future syntax and lexes as an error.
+
+**Contextual names.** A few grammar terminals are matched by identifier text rather than reserved: `max` in a `some(...)` count (section 6), and the attribute names and values of section 5.6 (`symmetry`, `rotation`, `none`, `horizontal`, `vertical`). They lex as `IDENT`. `max` is still unavailable as a tag value, grid, or param name, because it is a built-in function name (section 5.10, section 7.3 check 21); the others may be used as names, since each slot resolves them against its own table.
 
 **Operation names are not keywords.** The built-in operations `resize`, `upscale`, `trim`, `mirror`, `pad`, `path` (section 6.0) are resolved from the operation table, not reserved - like the built-in *functions* of section 5.10, a bare name that is not an operation call is just an identifier. They may be used as tag values, grid names, or params; they resolve as operations only in `op_call` position (section 6).
 
@@ -242,7 +243,7 @@ rule_decl         ::= 'rule' IDENT rule_attrs? '{' rule_body '}'
 rule_attrs        ::= '(' attr_list ')'
 attr_list         ::= attr (',' attr)*
 attr              ::= IDENT '=' attr_value
-attr_value        ::= IDENT | INTEGER
+attr_value        ::= IDENT | INTEGER | 'all' | '{' INTEGER (',' INTEGER)* '}'
 rule_body         ::= pattern_pair
                     | combinator pattern_pair_list
 pattern_pair_list ::= pattern_pair (list_sep pattern_pair)* list_sep?
@@ -382,7 +383,7 @@ Conditional writes select among tags with `if` (section 5.10): `level[ (if(diffi
 
 ### 5.4 Match-write shape constraint
 
-For each match-write pair, the match pattern and every write pattern must have identical dimensions. This applies **recursively** through nested write blocks: every leaf `pattern` anywhere in the write tree - and hence every `{ any }` alternative and every `{ all }` item at any depth - must match the LHS footprint dimensions. The compiler rejects mismatched shapes at any level.
+For each match-write pair, the match pattern and every write pattern must have identical dimensions. This applies **recursively** through nested write blocks: every leaf `pattern` anywhere in the write tree - and hence every `{ any }` alternative and every `{ all }` item at any depth - must have the LHS pattern's dimensions. The compiler rejects mismatched shapes at any level.
 
 ### 5.5 Weights and union writes
 
@@ -434,9 +435,9 @@ The set delimiter is `{ }` - the existing set brackets (section 3 tag value sets
 
 The angle values `90`, `180`, `270` are integer literals validated in this attribute slot; they are not keywords, and they do not interact with numeric grids or expressions. An angle other than 90/180/270 is a compile error.
 
-`symmetry` and `rotation` are independent; the variant set is the **de-duplicated union** of the two attributes' variants composed together (identity always included). Because `symmetry=all` includes the both-axis flip and `rotation=all` includes 180, those coincide and collapse to a single variant. The full dihedral group D4 is `symmetry=all, rotation=all` - 8 distinct variants after de-duplication.
+`symmetry` and `rotation` are independent; the variant set is the **de-duplicated union** of the two attributes' variants composed together (identity always included). Two variants are duplicates iff both their transformed match side and their transformed write tree are structurally equal (section 10.2). A variant whose match side coincides with another's but whose writes differ is kept: for example, the H-flip of `g[a a] => g[b c]` survives as `g[a a] => g[c b]`, and the two compete as separate candidates (section 6.7). Because `symmetry=all` includes the both-axis flip and `rotation=all` includes 180, those coincide and collapse to a single variant. The full dihedral group D4 is `symmetry=all, rotation=all` - 8 distinct variants after de-duplication.
 
-**Grammar** - attribute constraints:
+**Value constraints** (semantic, applied to the generic `attr` form of section 5.1):
 ```
 attr       ::= 'symmetry' '=' sym_value
              | 'rotation' '=' rot_value
@@ -445,20 +446,18 @@ rot_value  ::= 'none' | 'all' | angle | angle_set
 angle_set  ::= '{' angle (',' angle)* '}'
 angle      ::= '90' | '180' | '270'
 ```
-`90`/`180`/`270` are the `INTEGER` token, accepted only here and only with those three values (semantic check). A single-element set `{90}` is legal and equals the bare `90`. `symmetry` stays single-valued.
-
-The general `attr ::= IDENT '=' attr_value` form in section 5.1 covers parsing; the compiler validates attribute names and values against the table above.
+These are checks, not productions: the parser accepts any `attr` of section 5.1, and the compiler validates it against the table above (section 7.3, checks 7 and 18). The quoted names (`symmetry`, `rotation`, `none`, `horizontal`, `vertical`) match `IDENT` text; they are contextual names, not keywords (section 2.4). `all` is the keyword. `90`/`180`/`270` are the `INTEGER` token, accepted only here and only with those three values. A single-element set `{90}` is legal and equals the bare `90`. `symmetry` stays single-valued.
 
 ### 5.7 Match and write footprints
 
 Each pattern carries two compile-time footprints, derived from its cells:
 
-- **Read footprint**: the set of cell offsets the matcher actually reads. A cell contributes to the read footprint if it specifies a value - a tag value, an integer literal, or `.` (empty). Cells marked `*` (any) are *not* in the read footprint, since the matcher never inspects them.
-- **Write footprint**: the set of cell offsets the rewriter actually writes. A cell contributes to the write footprint if it specifies a value - a tag value, an integer literal, or `.` (which clears the cell). Cells marked `*` are *not* in the write footprint, since they preserve whatever was matched.
+- **Read footprint**: the set of cell offsets the matcher actually reads. Every cell other than `*` contributes to the read footprint: a tag value, a complement, an inline or named union, an integer literal, or `.` (empty). Expression cells are covered below. Cells marked `*` (any) are *not* in the read footprint, since the matcher never inspects them.
+- **Write footprint**: the set of cell offsets the rewriter actually writes. Every cell other than `*` contributes to the write footprint: a tag value, an inline or named union, an integer literal, or `.` (which clears the cell). Expression cells are covered below. Cells marked `*` are *not* in the write footprint, since they preserve whatever was matched.
 
 Footprints are defined relative to the pattern's origin (top-left corner). When the rule fires at grid position (x, y), each footprint is translated by (x, y) to identify which grid cells are read or written.
 
-The bounding rectangle of a pattern is its W x H region, but the footprints may be sparse subsets (a 3x3 pattern with `*` corners has plus-shaped footprints). Footprints drive the runtime's write-protection behavior; see section 6.8.
+The bounding rectangle of a pattern is its W x H region, but the footprints may be sparse subsets (a 3x3 pattern with `*` corners has plus-shaped footprints). The write footprint drives the write-protection mask (section 6.8). The read footprint does not participate in conflict handling; it defines which cells a match inspects, and which cells the observe channel reports as matched (Appendix A).
 
 **Expression cells.** An expression cell's read footprint is the set of grid cells its expression reads at the current position. Same-position cross-grid reads (a bare grid name, section 5.8) contribute the referenced grid's cell at this offset. Reads of `x`, `y`, `width`, `height`, and params read no grid cell and contribute nothing. `where` cells contribute to the read footprint only (never the write footprint). On the RHS, an expression cell's write footprint is its own grid cell.
 
@@ -578,8 +577,8 @@ program_decl    ::= 'program' '{' statement_list '}'
 statement_list  ::= statement*
 statement       ::= (op_call | apply_stmt) guard?
 guard           ::= 'when' '(' expr ')'
-op_call         ::= IDENT '(' arg_list? ')'
-arg_list        ::= positional_args
+op_call         ::= IDENT '(' op_args? ')'
+op_args         ::= positional_args
                   | named_args
                   | positional_args ',' named_args
 positional_args ::= arg_value (',' arg_value)*
@@ -595,7 +594,7 @@ count_arg       ::= 'max' '=' INTEGER | 'percent' '=' INTEGER
 policy_arg      ::= 'policy' '=' policy_name
 policy_name     ::= 'snapshot' | 'incremental' | 'stabilize'
 ```
-A program statement is either an **operation call** (`op_call` - a built-in operation applied to the grid stack, section 6.0) or a **rule application** (`apply_stmt` - a strategy plus a rule name). In an `op_call`, arguments are **positional first, then named**; the operation name and its arguments resolve **semantically** against the operation table (section 6.0), not by the grammar - there are no per-verb productions and no verb keywords. Newlines are permitted inside an argument list. `IDENT` after a strategy must reference a declared rule (semantic check; forward references are fine). Every strategy may carry `policy=`; omitted, it defaults to `snapshot`. `one`/`all` take only a policy; `some` takes a count (`max` **or** `percent`, never both) and an optional policy. A guard (`when`) may follow any statement.
+A program statement is either an **operation call** (`op_call` - a built-in operation applied to the grid stack, section 6.0) or a **rule application** (`apply_stmt` - a strategy plus a rule name). In an `op_call`, arguments are **positional first, then named**; the operation name and its arguments resolve **semantically** against the operation table (section 6.0), not by the grammar - there are no per-verb productions and no verb keywords. Newlines are permitted inside an argument list. `IDENT` after a strategy must reference a declared rule (semantic check; forward references are fine). Every strategy may carry `policy=`; omitted, it defaults to `snapshot`. `one`/`all` take only a policy; `some` takes a count (`max` **or** `percent`, never both) and an optional policy. (`max` here is a contextual name matched by `IDENT` text, not a keyword; section 2.4.) A guard (`when`) may follow any statement.
 
 Reads:
 ```ls
@@ -749,7 +748,7 @@ All policies share **candidate collection**: for each anchor position in row-maj
 Because all candidates saw one snapshot, earlier writes are invisible to later applications; the mask alone prevents two applications writing the same cell.
 
 **`incremental`** - each application re-snapshots and therefore sees prior writes:
-1. Snapshot; collect; pick one candidate (shuffled; weighted per section 5.5 if the write is `{ any }`). Apply and commit.
+1. Snapshot; collect; pick one candidate uniformly (a single draw; under `ordered`, uniformly within the highest-priority group, section 10.4). Apply and commit; the `{ any }` alternatives on its write tree are drawn at application, weighted per section 5.5.
 2. Repeat. Each step re-snapshots, so the next pick sees the last write.
 
 One application per step means no intra-step conflict, so **`incremental` uses no mask**. Stop at the count cap; `all` runs until a step finds no candidate (**fixpoint**, section 6.9).
@@ -764,12 +763,12 @@ Each sweep is internally a `snapshot` batch (mask per sweep); between sweeps the
 
 | | `snapshot` | `incremental` | `stabilize` |
 |---|---|---|---|
-| `one` | yes | yes (same as snapshot at 1) | no |
+| `one` | yes | yes (same distribution as snapshot; different draws) | no |
 | `some(max=N)` | yes (up to N of batch) | yes (N steps) | yes (N sweeps) |
 | `some(percent=P)` | yes | no | no |
 | `all` | yes (full batch) | yes (fixpoint) | yes (fixpoint) |
 
-Invalid combinations are compile errors (section 7.3). `percent` needs the whole applied set as its denominator (it runs the full pass to size it), so it is `snapshot`-only. `one` with `stabilize` is contradictory (a single application cannot reach a sweep fixpoint).
+Invalid combinations are compile errors (section 7.3). `percent` needs the whole applied set as its denominator (it runs the full pass to size it), so it is `snapshot`-only. `one` with `stabilize` is contradictory (a single application cannot reach a sweep fixpoint). `one` under `snapshot` and under `incremental` select from the same distribution, because the first entry of a shuffle is a uniform pick. They consume different draws, however (a full shuffle vs. a single uniform pick, section 10.4), so a given seed yields different outputs.
 
 **Variants and alternatives.** Each matching variant is a **separate candidate**, so shuffling treats variants with equal priority - no top-left/first-declared bias; when several variants match one anchor, the one applied is whichever the shuffle selects. At application the runtime walks the resolved write tree and draws once per `{ any }` node on the resolved path (section 5.2), each weighted per section 5.5 and reproducible per seed (section 10.6).
 
@@ -1024,12 +1023,12 @@ This section is non-normative; it records how the reference implementation is bu
 - **One execution core.** The interpreter is a single C++20 coroutine that yields step events at application and statement boundaries. Batch generation (`generator::generate`), progressive generation (`generation::step`, with granularity a filter on the event puller), and any debug/visualization UI all pull the same coroutine. There is never a second interpreter to drift from the first.
 - **The compiled artifact is self-contained.** Semantic analysis copies everything the runtime and the embedding API need - names, tables, compiled rules, the operation schedule - into one immutable object shared by reference counting; the AST is discarded after analysis. Generated levels are likewise self-contained values that outlive their generator (Appendix A).
 - **Ids over strings.** Grids, tag values, and rules are integer indices into vectors; names resolve once at the API boundary. Conflict masks are hashed sets keyed by a packed (grid id, flat cell index).
-- **Tables over keyword grammar.** Operations (section 6.0) and expression built-ins (section 5.10) resolve by name against schema tables; one generic call production serves both layers, and adding an entry is a table row plus an executor.
+- **Tables over keyword grammar.** Operations (section 6.0) and expression built-ins (section 5.10) resolve by name against schema tables; each layer has one generic call production (`IDENT '(' arg_list? ')'` in expressions, `op_call` in programs), and adding an entry is a table row plus an executor.
 - **No faults.** Compilation collects diagnostics; execution degrades with a warning and continues (section 7.4). The embedding API never throws.
 
 ### 10.2 Symmetry expansion
 
-Symmetry and rotation are expanded at compile time. `symmetry` contributes up to four dimension-preserving flips (identity, H, V, both-axis); `rotation` contributes turns (identity, 90, 180, 270, or a set). The two are composed and the resulting variant set is **de-duplicated by LHS equality, scoped per sub-rule** (so two sub-rules with the same LHS both survive) - the both-axis flip and the 180-degree rotation are the same transform, so `symmetry=all, rotation=all` collapses to the 8 distinct variants of D4. The runtime treats each surviving variant as an independent pattern (section 6.7); duplicate elimination is purely a compile-time step and never observable at runtime.
+Symmetry and rotation are expanded at compile time. `symmetry` contributes up to four dimension-preserving flips (identity, H, V, both-axis); `rotation` contributes turns (identity, 90, 180, 270, or a set). The two are composed and the resulting variant set is **de-duplicated by structural equality of the transformed (match side, write tree) pair, scoped per sub-rule** (so two sub-rules with the same LHS both survive). Structural equality means the same pattern cells (expression cells compared as expression trees), the same `{ any }`/`{ all }` nesting in the same item order, and the same weights. The both-axis flip and the 180-degree rotation are the same transform, so `symmetry=all, rotation=all` collapses to the 8 variants of D4 (fewer when the rule is itself symmetric). The runtime treats each surviving variant as an independent pattern (section 6.7). Elimination happens at compile time, but its result is observable, because each variant is a separate candidate weighting its anchor in the shuffle and in the `incremental` pick. That is why the key is normative (section 5.6.2).
 
 ### 10.3 Snapshot implementation
 
