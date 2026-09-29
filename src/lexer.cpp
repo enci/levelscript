@@ -18,7 +18,7 @@ static token_type keyword_or_ident(std::string_view text) {
         {"number", token_type::kw_number}, {"rule", token_type::kw_rule},
         {"program", token_type::kw_program},
         {"one", token_type::kw_one},       {"all", token_type::kw_all},
-        {"some", token_type::kw_some},     {"max", token_type::kw_max},
+        {"some", token_type::kw_some},
         {"any", token_type::kw_any},
         {"ordered", token_type::kw_ordered},
         {"policy", token_type::kw_policy},
@@ -29,12 +29,7 @@ static token_type keyword_or_ident(std::string_view text) {
         {"params", token_type::kw_params},
         {"where", token_type::kw_where},
         {"when", token_type::kw_when},
-        {"symmetry", token_type::kw_symmetry},
-        {"rotation", token_type::kw_rotation},
         {"weight", token_type::kw_weight},
-        {"horizontal", token_type::kw_horizontal},
-        {"vertical", token_type::kw_vertical},
-        {"none", token_type::kw_none},
     };
     auto it = keywords.find(text);
     return it == keywords.end() ? token_type::ident : it->second;

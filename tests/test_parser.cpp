@@ -353,3 +353,37 @@ TEST_CASE("parser: named unions in the tag block") {
     CHECK(ast.tags[0].unions[0].name == "blocker");
     CHECK(ast.tags[0].unions[0].members == std::vector<std::string>{"wall", "door"});
 }
+
+TEST_CASE("parser: contextual names in their grammar slots (spec §2.4)") {
+    auto ast = parse_ok(R"(
+rule a(symmetry=none, rotation=none) { g[.] => g[x] }
+rule b(rotation=all, symmetry=vertical) { g[.] => g[x] }
+rule c { g[ (max(g, 1)) ] => g[x] }
+program {
+    some(max=3) a
+    mirror(horizontal)
+    mirror(vertical)
+}
+)");
+    REQUIRE(ast.rules.size() == 3);
+    CHECK(ast.rules[0].symmetry == "none");
+    CHECK(ast.rules[0].rotation_angles.empty());
+    CHECK(ast.rules[1].symmetry == "vertical");
+    CHECK(ast.rules[1].rotation_angles == std::vector<long long>{90, 180, 270});
+    auto const& s = ast.program.stmts;
+    REQUIRE(s.size() == 3);
+    CHECK(s[0].max_count == 3);
+    REQUIRE(s[1].op_args.size() == 1);
+    CHECK(s[1].op_args[0].ident == "horizontal");
+    CHECK(s[2].op_args[0].ident == "vertical");
+}
+
+TEST_CASE("parser: contextual names are legal declaration names (spec §2.4)") {
+    auto ast = parse_ok(R"(
+tag none { horizontal, vertical, symmetry, rotation }
+layers { none: grid of none }
+params { rotation: number = 1 }
+)");
+    REQUIRE(ast.tags.size() == 1);
+    CHECK(ast.tags[0].name == "none");
+}

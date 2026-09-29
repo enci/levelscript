@@ -57,3 +57,17 @@ TEST_CASE("lexer: unexpected character is an error") {
     CHECK(diags.has_errors());
     CHECK(t[1].is(token_type::bad));
 }
+
+TEST_CASE("lexer: contextual names lex as identifiers (spec §2.4)") {
+    auto t = lex_ok("max symmetry rotation horizontal vertical none");
+    REQUIRE(t.size() == 7);
+    for (int i = 0; i < 6; ++i) CHECK(t[i].is(token_type::ident));
+    CHECK(t[0].text == "max");
+    CHECK(t[5].text == "none");
+    // the true keywords stay reserved
+    auto k = lex_ok("all some percent weight");
+    CHECK(k[0].is(token_type::kw_all));
+    CHECK(k[1].is(token_type::kw_some));
+    CHECK(k[2].is(token_type::kw_percent));
+    CHECK(k[3].is(token_type::kw_weight));
+}

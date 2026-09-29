@@ -24,6 +24,10 @@ struct parser {
     bool at_end() const          { return at(token_type::end); }
     bool accept(token_type t)    { if (at(t)) { eat(); return true; } return false; }
 
+    // Contextual names (spec §2.4): lexed as ident, matched by text.
+    bool at_word(std::string_view w) const { return at(token_type::ident) && peek().text == w; }
+    bool accept_word(std::string_view w)   { if (at_word(w)) { eat(); return true; } return false; }
+
     void error_at(token const& t, std::string msg) {
         diags.error(file, t.line, t.col, std::move(msg));
     }
@@ -79,8 +83,7 @@ struct parser {
             expect(token_type::rparen, "')'");
             return e;
         }
-        // keywords usable as names in expressions: max is also a §6 keyword
-        if (at(token_type::ident) || at(token_type::kw_max)) {
+        if (at(token_type::ident)) {
             bool is_call = peek(1).is(token_type::lparen);
             auto e = make_expr(is_call ? expr_kind::call : expr_kind::ident);
             e->ident = eat().text;
@@ -331,9 +334,15 @@ struct parser {
         }
         if (!expect(token_type::lbracket, "'['")) return false;
         skip_newlines();   // '[' may be followed by a newline before the first row
-        while (!at(token_type::rbracket) && !at_end()) {
+        // '=>' and '}' can never be cells: an unclosed pattern stops there and
+        // reports the missing ']' instead of a cell error per token
+        auto body_ends = [&] {
+            return at(token_type::rbracket) || at(token_type::arrow) ||
+                   at(token_type::rbrace) || at_end();
+        };
+        while (!body_ends()) {
             std::vector<cell> row;
-            while (!at(token_type::newline) && !at(token_type::rbracket) && !at_end()) {
+            while (!at(token_type::newline) && !body_ends()) {
                 cell c;
                 if (!parse_cell(c)) { eat_bad(); continue; }
                 row.push_back(std::move(c));
@@ -350,7 +359,7 @@ struct parser {
     // ── rule attributes: (symmetry=…, rotation=…) ────────────────────────────
 
     void parse_rotation_value(rule_decl& r) {
-        if (accept(token_type::kw_none)) return;
+        if (accept_word("none")) return;
         if (accept(token_type::kw_all)) {
             r.rotation_angles = {90, 180, 270};
             return;
@@ -374,26 +383,34 @@ struct parser {
         eat_bad();
     }
 
+    // attr_value ::= IDENT | INTEGER | 'all' | '{' INTEGER (',' INTEGER)* '}'
+    void skip_attr_value() {
+        if (accept(token_type::lbrace)) { recover_to(token_type::rbrace); return; }
+        if (at(token_type::ident) || at(token_type::integer) || at(token_type::kw_all))
+            eat();
+    }
+
     void parse_rule_attrs(rule_decl& r) {
         do {
-            if (accept(token_type::kw_symmetry)) {
+            if (accept_word("symmetry")) {
                 if (!expect(token_type::equals, "'='")) return;
                 // value text captured raw; validated in sema
-                if (at(token_type::kw_none) || at(token_type::kw_horizontal) ||
-                    at(token_type::kw_vertical) || at(token_type::kw_all) ||
-                    at(token_type::ident))
+                if (at(token_type::kw_all) || at(token_type::ident))
                     r.symmetry = eat().text;
                 else {
                     error_at(peek(), "invalid symmetry value");
                     eat_bad();
                 }
-            } else if (accept(token_type::kw_rotation)) {
+            } else if (accept_word("rotation")) {
                 if (!expect(token_type::equals, "'='")) return;
                 parse_rotation_value(r);
             } else {
+                // generic `attr ::= IDENT '=' attr_value` (§5.1): parse it
+                // whole so an unknown name is one diagnostic, not a cascade
                 error_at(peek(), "unknown rule attribute '" + peek().text +
                          "' (expected symmetry or rotation)");
                 eat_bad();
+                if (accept(token_type::equals)) skip_attr_value();
             }
         } while (accept(token_type::comma));
         expect(token_type::rparen, "')'");
@@ -567,7 +584,7 @@ struct parser {
             eat();
             s.strat = strategy::some;
             if (!expect(token_type::lparen, "'('")) return;
-            if (accept(token_type::kw_max)) {
+            if (accept_word("max")) {
                 if (!expect(token_type::equals, "'='")) return;
                 if (!expect(token_type::integer, "a count")) return;
                 s.max_count = (int)toks[pos - 1].int_val;
@@ -611,10 +628,8 @@ struct parser {
             a.value = parse_expr();
             return expect(token_type::rparen, "')'");
         }
-        // bare identifier — a grid name, tag value, or enum word; the mirror
-        // axis words lex as keywords, so they are accepted explicitly
-        if (at(token_type::ident) || at(token_type::kw_horizontal) ||
-            at(token_type::kw_vertical)) {
+        // bare identifier — a grid name, tag value, or enum word
+        if (at(token_type::ident)) {
             a.what = op_arg::kind::ident;
             a.ident = eat().text;
             return true;
