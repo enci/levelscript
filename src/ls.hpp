@@ -85,6 +85,10 @@ private:
 
 // ── run — one in-flight progressive generation ──────────────────────────────
 
+/// statement: one leaf statement (a rule application or an operation, at top
+/// level or inside a sequence) per step(); application: one rule application
+/// per step (operations and atomic batches still advance whole). Applying a
+/// sequence is never a step of its own.
 enum class step_mode { statement, application };
 enum class observe   { off, on };
 
@@ -95,6 +99,14 @@ struct cell_highlight {
     int  layer;
     int  x, y;
     kind what;
+};
+
+/// One level of run::stmt_stack(): `index` is the statement's position in
+/// its enclosing list (the program, or a sequence body); `iteration` is the
+/// 0-based iteration of the enclosing sequence application (0 at top level).
+struct stmt_frame {
+    int index;
+    int iteration;
 };
 
 class run {
@@ -113,8 +125,15 @@ public:
     level finish();
 
     // ── observe channel (populated only when begun with observe::on) ──
-    /// Index of the statement the last step worked on (-1 before first step).
+    /// Index of the top-level program statement the last step worked on
+    /// (-1 before the first step); inside a sequence, the statement that
+    /// applied it.
     int statement_index() const;
+    /// Position of the last step through nested sequences, outermost first:
+    /// frame 0 is the top-level statement, each further frame a statement
+    /// inside the sequence the frame before applied. Empty before the first
+    /// step.
+    std::vector<stmt_frame> stmt_stack() const;
     /// True when the last step completed a statement (vs. one application
     /// within it) — progress bars and steppers key off this.
     bool at_statement_boundary() const;
@@ -166,7 +185,8 @@ public:
                   observe obs = observe::off,
                   std::vector<std::pair<std::string, int>> const& params = {}) const;
 
-    /// Number of program statements (progress denominators).
+    /// Number of top-level program statements (progress denominators); a
+    /// sequence application counts as one.
     int statement_count() const;
 
 private:

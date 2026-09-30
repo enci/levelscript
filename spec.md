@@ -16,7 +16,7 @@ LevelScript is a domain-specific language for procedural generation of grid-base
 
 1. **Declarative**: the program describes *what to match and write*, not *how to iterate*.
 2. **Visual**: pattern bodies look like the grids they match; an editor can render them with colored backgrounds.
-3. **Minimal surface area**: a small set of orthogonal concepts (tags, grids, rules, programs, operations) covers the design space.
+3. **Minimal surface area**: a small set of orthogonal concepts (tags, grids, rules, sequences, programs, operations) covers the design space.
 4. **Predictable execution**: snapshot-based rule application; one well-defined collect-then-pick model for all strategies.
 5. **Cognitive load over terseness**: a rule should read clearly in isolation, even if that costs a few characters. Boilerplate is required only when ambiguity would otherwise exist.
 
@@ -29,7 +29,7 @@ Formal grammar productions throughout this document use EBNF: `::=` defines a pr
 **Grammar** - top-level structure:
 ```
 source_file ::= top_decl*
-top_decl    ::= tag_decl | layers_decl | params_decl | rule_decl | program_decl
+top_decl    ::= tag_decl | layers_decl | params_decl | rule_decl | sequence_decl | program_decl
 ```
 
 ### 2.1 Source files
@@ -49,7 +49,7 @@ Block comments are not supported.
 - **Start character**: an ASCII letter (`A`-`Z`, `a`-`z`) or `_`.
 - **Continue character**: an ASCII letter, an ASCII digit (`0`-`9`), or `_`.
 
-So `wall`, `Mauer`, `_internal` are valid; non-ASCII names lex as errors. This rule applies to tag names, tag value names, grid names, param names, and rule names alike.
+So `wall`, `Mauer`, `_internal` are valid; non-ASCII names lex as errors. This rule applies to tag names, tag value names, grid names, param names, rule names, and sequence names alike.
 
 **Grammar:**
 ```
@@ -64,7 +64,7 @@ COMMENT        ::= '//' <any chars> NEWLINE
 
 ```
 tag  layers  grid  of  number
-rule  program  params  where  when
+rule  sequence  program  params  where  when
 any  all  one  some  ordered
 weight
 policy  snapshot  incremental  stabilize  percent
@@ -594,7 +594,7 @@ count_arg       ::= 'max' '=' INTEGER | 'percent' '=' INTEGER
 policy_arg      ::= 'policy' '=' policy_name
 policy_name     ::= 'snapshot' | 'incremental' | 'stabilize'
 ```
-A program statement is either an **operation call** (`op_call` - a built-in operation applied to the grid stack, section 6.0) or a **rule application** (`apply_stmt` - a strategy plus a rule name). In an `op_call`, arguments are **positional first, then named**; the operation name and its arguments resolve **semantically** against the operation table (section 6.0), not by the grammar - there are no per-verb productions and no verb keywords. Newlines are permitted inside an argument list. `IDENT` after a strategy must reference a declared rule (semantic check; forward references are fine). Every strategy may carry `policy=`; omitted, it defaults to `snapshot`. `one`/`all` take only a policy; `some` takes a count (`max` **or** `percent`, never both) and an optional policy. (`max` here is a contextual name matched by `IDENT` text, not a keyword; section 2.4.) A guard (`when`) may follow any statement.
+A program statement is either an **operation call** (`op_call` - a built-in operation applied to the grid stack, section 6.0) or an **application** (`apply_stmt` - a strategy plus a rule or sequence name). In an `op_call`, arguments are **positional first, then named**; the operation name and its arguments resolve **semantically** against the operation table (section 6.0), not by the grammar - there are no per-verb productions and no verb keywords. Newlines are permitted inside an argument list. `IDENT` after a strategy must reference a declared rule or sequence (section 6.10; semantic check; forward references are fine). Every strategy over a rule may carry `policy=`; omitted, it defaults to `snapshot`. Over a sequence, `policy=` and `percent` are errors (section 6.10). `one`/`all` take only a policy; `some` takes a count (`max` **or** `percent`, never both) and an optional policy. (`max` here is a contextual name matched by `IDENT` text, not a keyword; section 2.4.) A guard (`when`) may follow any statement.
 
 Reads:
 ```ls
@@ -616,7 +616,7 @@ program {
     all room_pass     when (style == 1)
 }
 ```
-Selection among rules is expressed by complementary guards, as with `style` above. There is no `if`/`else` program block; statements stay a flat, top-to-bottom list.
+Selection among rules is expressed by complementary guards, as with `style` above. There is no `if`/`else` program block; statements stay a flat, top-to-bottom list. A sequence (section 6.10) does not change this: it is a named statement list applied by name, like a rule, not a nested block.
 
 ### 6.0 Built-in operations
 
@@ -735,7 +735,7 @@ Consequence, stated normatively: **the search algorithm is unobservable.** Any c
 
 ### 6.7 Rule application semantics
 
-An apply statement pairs a **count** (`one`/`all`/`some`) with an **execution policy** (`policy=`, default `snapshot`). The count bounds how many applications occur; the policy governs what each application sees and how conflicts are handled.
+An apply statement over a rule pairs a **count** (`one`/`all`/`some`) with an **execution policy** (`policy=`, default `snapshot`). (An apply statement over a sequence takes a count only; see section 6.10.) The count bounds how many applications occur; the policy governs what each application sees and how conflicts are handled.
 
 All policies share **candidate collection**: for each anchor position in row-major `(y, x)` order, the rule's match side is tested - every sub-rule and every symmetry/rotation variant (section 5.6) - at that anchor. Each matching `(anchor, sub-rule, variant)` is a **candidate**. The anchor is the pattern's top-left origin (section 5.7); a candidate exists only where the (possibly reshaped) variant fits entirely within the grid - **matching is bounded, never wrapped**.
 
@@ -787,7 +787,7 @@ The mask is the only conflict mechanism; the runtime special-cases no other "con
 
 ### 6.9 Termination
 
-**Bounded strategies always terminate:** `one`; `some(max=N)` and `some(percent=P)` under any policy; and `all(policy=snapshot)` (a single pass over a finite candidate set).
+**Bounded strategies over a rule always terminate** (for sequences, see below): `one`; `some(max=N)` and `some(percent=P)` under any policy; and `all(policy=snapshot)` (a single pass over a finite candidate set).
 
 **Fixpoint strategies run until nothing changes:** `all(policy=incremental)` and `all(policy=stabilize)`. These terminate **iff the rule is reductive** - iff repeated application cannot keep producing new matches. A reductive rule (fills empties, removes tags, narrows values) reaches a fixpoint; a generative one (a rule whose write recreates its own match) may not, and `all` with a fixpoint policy will then loop forever.
 
@@ -802,6 +802,54 @@ The analysis is conservative in both directions:
 `all(policy=stabilize)` is **exempt**: its loop exits on a no-change sweep, so an idempotent write (one that re-matches but rewrites the same value) still reaches the fixpoint - the guaranteed-loop argument does not apply.
 
 The warning is a compile-time **warning**, not an error (section 7.4); it is surfaced to embedders via `generator::warnings()` (Appendix A) and to CLI users on stderr.
+
+**Sequences** (section 6.10). `one S` and `some(max=N) S` bound the number of **iterations**; each iteration terminates iff its body statements do, so a fixpoint statement inside the body can still diverge. `all S` is a fixpoint strategy: it terminates iff some iteration is stable. As with rules, that is the author's responsibility; the compiler flags only the case that is certain to diverge by changing dimensions (section 6.10).
+
+### 6.10 Sequences
+
+A **sequence** is a named, reusable statement list, applied by name like a rule.
+
+```ls
+sequence smooth {
+    all erode
+    all grow
+}
+
+program {
+    resize(40, 25)
+    all fill
+    some(max=4) smooth    // up to 4 iterations of the body
+    all smooth            // iterate until an iteration changes nothing
+}
+```
+
+**Grammar:**
+```
+sequence_decl ::= 'sequence' IDENT '{' statement_list '}'
+```
+The body is the program's `statement_list` (section 6), unchanged: rule applications, sequence applications, and operation calls, each with an optional `when` guard. There are no inline rules. Rules and sequences share one namespace; an `apply_stmt`'s `IDENT` resolves to either one (section 7.3, check 39). A sequence may apply other sequences. A sequence that applies itself, directly or through others, is a compile error (check 38). Declaration order does not matter, and an unapplied sequence is legal, like an unused rule. An empty body is legal; every iteration of it is stable.
+
+**Iteration.** Applying a sequence runs its body from top to bottom; one run of the body is an **iteration**. Each body statement executes exactly as it would in `program`, with its own count, policy, and guard, and sees every prior write. A sequence adds no snapshot, write mask, or pass of its own.
+
+**Stability.** An iteration is **stable** iff the grid stack at its end equals the stack at its start: the same dimensions, and every cell of every layer holding the same value. Stability compares states, not writes. Writing an unchanged value does not count as a change, and neither does a cell changed and changed back within the iteration. Stability is judged on the iteration just run. A stable iteration ends the statement even if a further iteration could have changed the stack through different draws (`random`, `{ any }`, `path` ties); the same holds for `stabilize` sweeps (section 6.7).
+
+**Counts.** The count unit is one iteration:
+
+| statement | runs |
+|---|---|
+| `one S` | exactly one iteration |
+| `some(max=N) S` | up to N iterations; stops early after a stable iteration |
+| `all S` | iterations until one is stable (**fixpoint**, section 6.9) |
+
+The early stop under `some(max=N)` mirrors `some(max=N, policy=stabilize)`: the count is an upper bound, and a stable iteration ends the statement. `policy=` is not valid on a sequence application, because each body statement carries its own policy. `some(percent=P)` is not valid either: its denominator would be the number of iterations a fixpoint run takes, which may be unbounded (check 37). For a fraction of each inner batch, write `percent` on the inner statements.
+
+**Guards.** A `when` on a sequence application gates the whole application. It is evaluated once, when the statement is reached (section 6). A `when` on a statement inside the body is evaluated each time that statement is reached, which is once per iteration. Guards read params only, so the value is constant unless the guard calls `random`, which draws on every evaluation.
+
+**Draw order.** A sequence application has no draw sites of its own, and the stability check draws nothing. Body statements draw per section 10.6 as each one is reached, iteration after iteration.
+
+**The dimension warning.** For `all S`, the compiler warns when no iteration can be stable because every iteration changes the grid dimensions. This happens when S's body contains an `upscale` whose factors are not both 1, or a `pad` whose margin is greater than 0, and that operation is **reached on every iteration**. That requires two things: neither the operation nor any enclosing nested sequence application carries a `when` guard, and every enclosing nested application runs at least one iteration, which every count does (`some(max=0)` is an error, check 28). The warning reads: *"'all' over sequence '<name>' may never terminate: '<operation>' changes the grid dimensions on every iteration, so no iteration can be stable."*
+
+Like the reductivity warning, this check is conservative. A guard suppresses the warning, because it may be false. Silence proves nothing, because a rule in the body can still keep recreating its own match. Bounded applications (`one`, `some(max=N)`) are never warned: `some(max=3) grow_and_upscale` is legitimate intended growth.
 
 ---
 
@@ -837,7 +885,7 @@ The compiler must reject:
 5. **Weight scope.** `(weight=N)` is rejected inside `{ all ... }` blocks and on bare patterns (parse error).
 6. **Tag/grid resolution.** Every identifier in a pattern cell must resolve per section 5.8 (for a bare mask literal: a tag value or union of the grid's declared tagset).
 7. **Attribute validation.** Attribute names and values must be in the table of section 5.6.
-8. **Reference resolution.** Grid names, tag names, and rule names must be declared somewhere in the file. (Forward references in the program block are allowed; declaration order does not matter.)
+8. **Reference resolution.** Grid names, tag names, rule names, and sequence names must be declared somewhere in the file. (Forward references in the program block are allowed; declaration order does not matter.)
 9. **Single program per file.** Exactly one `program_decl` per source file.
 10. **Tagset over cap.** A tagset with more than 30 values.
 11. **`where` on RHS.** A `where` pattern on the write side.
@@ -857,7 +905,7 @@ The compiler must reject:
 25. **Invalid union.** A `tag_union` whose member is not a `tag_value` or earlier `tag_union` of the same tagset; a member that forward-references a later union; or a union cycle. (A union name colliding with a `tag_value` name, a grid, a param, a reserved identifier, or a built-in is caught by the existing duplicate/collision checks - a union shares the tagset's value namespace.)
 26. **Default param scope.** A default expression (section 4.2) that reads a grid, `x`/`y`, or `width`/`height`; that forward-references a later param; or that participates in a cycle. (Same discipline as check 23; a default may reference earlier params and may call `random`.)
 27. **Input param without a default.** An `input_param` written as `name : number` with no `= expr` (every input param must carry a default, section 4.2).
-28. **Invalid count/policy combination.** `percent` with a policy other than `snapshot`; `one` with `policy=stabilize`; `max` and `percent` both in one `some(...)`.
+28. **Invalid count/policy combination.** For a rule application: `percent` with a policy other than `snapshot`; `one` with `policy=stabilize`; `max` and `percent` both in one `some(...)`. For any application: `some(max=0)`, which applies nothing. (Sequence applications: check 37.)
 29. **`ordered` misplacement.** `ordered` used as a match-side or write-side combinator (it is body-level only).
 30. **Unknown policy.** A `policy=` value not in {`snapshot`, `incremental`, `stabilize`}.
 31. **Same-grid simultaneous write.** Within one `{ all }` write block, two items whose write footprints overlap on the **same grid** at the same cell (e.g. `{ all g[wall] g[floor] }`). Simultaneous writes to one cell are ambiguous; use a union `|` (section 5.5) to store multiple values. (Different grids at the same position are fine - the mask is (grid, cell)-keyed, section 6.8.)
@@ -866,6 +914,9 @@ The compiler must reject:
 34. **Missing required operation argument.** A required parameter not supplied.
 35. **Operation argument kind / enum.** An argument whose kind does not match the parameter (e.g. `grid` given a non-grid); an `enum` value outside its set (`mirror` axis not in {horizontal, vertical}; `connectivity` not in {4, 8}); or an ambiguous bare-tag `pred` (no layer, or more than one layer, could hold the tag - section 6.6).
 36. **Operation value constraint.** `resize`/`upscale` dimensions must be positive; a `pad` margin must be non-negative. (Value checks applied after kind resolution.)
+37. **Invalid sequence count.** `policy=` on a sequence application (any policy, including an explicit `snapshot`), or `some(percent=P)` of a sequence (section 6.10).
+38. **Sequence cycle.** A sequence that applies itself, directly or through other sequences.
+39. **Duplicate rule or sequence name.** Rules and sequences share one namespace: two declarations with the same name, whether both are rules, both are sequences, or one of each.
 
 ### 7.4 Warnings
 
@@ -874,6 +925,7 @@ Warnings never stop compilation or execution; the runtime degrades with a warnin
 **Compile-time warnings** (surfaced via `generator::warnings()`, Appendix A):
 
 1. **Reductivity.** `all(policy=incremental)` over a rule where no unconditional write invalidates its own LHS - "may never terminate" (section 6.9). Not an error: the analysis is conservative, and a build pipeline may still choose to treat warnings as failures.
+2. **Unreachable sequence fixpoint.** `all` over a sequence where every iteration is certain to change the grid dimensions, through an `upscale` or `pad` reached on every iteration (section 6.10).
 
 **Runtime warnings** (logged; the statement becomes a no-op):
 
@@ -1006,6 +1058,10 @@ Draft 0.5 covers roadmap steps 1-5 of the implementation. Deferred, in rough pri
 
 **Templates and imports.** Named constant grids stamped by rules (`template Vault3x3 { ... }`), and `use "path/file.ls"` to share templates and tag declarations across files (Spelunky-style chunk libraries). Deferred together; imports are only compelling once templates exist.
 
+**Inline rules.** Anonymous rules in statement position (in `program` and `sequence` bodies alike, never in only one of them). Open costs: diagnostics and the observe channel identify rules by name, so an inline rule would need a synthesized one (`smooth#2`); rule attributes would have to mix with the statement's count options; `all { all ... }` stacks the count and the body combinator on one word; and design principle 5 favours rules that read in isolation. Parked, not rejected.
+
+**Applicability-driven sequences.** The planned answer to data-dependent `if`, in the MarkovJunior style: a statement **succeeds** if it made any change, and an `ordered` sequence runs its first item that succeeds, then restarts from the top. This gives `else if` over grid state with no condition expressions and no aggregate queries (those belong to graph layers). Parameter-driven branching is already served by `when` guards on sequence applications. Parked.
+
 **Multiple programs per file.** Currently one program per file; multiple named programs (a file as a library of generators) is a likely future need.
 
 **Position-keyed PRNG.** Rejected for 0.5 (section 7.2) but recorded: hashing (seed, x, y) instead of drawing from one stream would decouple match-side `random` from evaluation order and restore parallel matching (section 10.4). It would change every seeded output; if ever adopted, it is a major-version change.
@@ -1066,7 +1122,13 @@ A single PRNG stream (`mt19937_64` in the reference implementation), seeded from
 5. **At application**: one draw per `{ any }` node on the resolved write path, outer before inner, earlier sibling first (a single-item `{ any }` still draws, section 5.2); then write-cell expressions, row-major per resolved leaf.
 6. **`path` statements** follow the section 6.6 draw contract: predicate passes (`from`, `to`, `passable`), per-cell `cost`, exactly one tie-key draw, then the start-to-goal `write` stamps.
 
+A sequence application (section 6.10) adds no draw sites: its body statements draw per items 2-6 as each one is reached, and the stability check draws nothing.
+
 Determinism is per (seed, params, implementation version) - section 7.2.
+
+### 10.7 Sequence stability
+
+The reference approach copies the grid stack at the start of an iteration and compares it at the end. That costs one extra stack, the same order of cost as the snapshot double buffer (section 10.3). A cheaper equivalent keeps a per-(grid, cell) set of cells written during the iteration, and compares only those against their start values, plus the dimensions. It must still compare values, because a cell written back to its original value is not a change (section 6.10). Both approaches are unobservable. `one S` never needs the comparison.
 
 ---
 
@@ -1095,7 +1157,7 @@ if (geo.at(x, y) == wall) ...
 | `int tag(const std::string& qualified)` | Tag value id, qualified by tagset: `tag("geometry.wall")`. Ids are per tagset, valid for every layer of that tagset. `-1` if unknown. |
 | `level generate(uint64_t seed, const std::vector<std::pair<std::string, int>>& params = {})` | Run the whole program: (seed, params) -> `level`, deterministically (section 7.2). Params override declared defaults; unknown names are ignored. |
 | `generation begin(uint64_t seed, step_mode mode = step_mode::statement, observe obs = observe::off, const std::vector<std::pair<std::string, int>>& params = {})` | Start a progressive run; pull it with `generation::step()`. |
-| `int statement_count()` | Number of program statements (progress denominators). |
+| `int statement_count()` | Number of top-level program statements (progress denominators). Statements inside sequences are not counted; a sequence application counts as one. |
 
 ### `level` - one generated outcome: the stack of co-registered grids
 
@@ -1123,13 +1185,15 @@ if (geo.at(x, y) == wall) ...
 | `bool step()` | Advance by the granularity fixed at `begin()`; `false` when done. |
 | `level snapshot()` | Copy of the current state - committed statements plus the current batch's applications so far. |
 | `level finish()` | Drain whatever remains and return the finished level (the "skip" path). |
-| `int stmt_index()` | Index of the statement the last step worked on (`-1` before the first step). Observe channel. |
+| `int stmt_index()` | Index of the top-level program statement the last step worked on (`-1` before the first step). Inside a sequence, this is the index of the top-level statement that applied it. Observe channel. |
+| `std::vector<stmt_frame> stmt_stack()` | Position of the last step through nested sequences, outermost first. Frame 0 is the top-level statement (its `index` equals `stmt_index()`); each further frame is a statement inside the sequence applied by the frame before it. Empty before the first step. Observe channel. |
 | `std::vector<cell_highlight> highlights()` | Matched/written cells of the last application. Observe channel; populated only when begun with `observe::on`. |
 
 Supporting types:
 
-- `enum class step_mode { statement, application }` - the pull granularity: one program statement per `step()`, or one rule application per `step()` (operations and atomic batches still advance whole).
-- `enum class observe { off, on }` - whether the run records the observe channel (`stmt_index`, `highlights`); off costs nothing.
+- `enum class step_mode { statement, application }` - the pull granularity: one **leaf** statement per `step()`, or one rule application per `step()` (operations and atomic batches still advance whole). A leaf statement is a rule application or an operation, at top level or inside a sequence. Applying a sequence is not itself a step, and neither is its stability check.
+- `enum class observe { off, on }` - whether the run records the observe channel (`stmt_index`, `stmt_stack`, `highlights`); off costs nothing.
+- `struct stmt_frame { int index; int iteration; }` - one level of the statement stack. `index` is the statement's position in its enclosing list (the program, or a sequence body). `iteration` is the 0-based iteration of the enclosing sequence application (always 0 for the top-level frame).
 - `struct cell_highlight { enum class kind { match, write }; int layer; int x, y; kind what; }` - one highlighted cell: which layer/cell the last application matched or wrote.
 
 `generation` is move-only (it owns the in-flight coroutine state). Dropping it mid-run is safe; `finish()` is the explicit skip-to-end.

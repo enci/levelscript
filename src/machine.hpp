@@ -26,7 +26,14 @@ struct level_data {
 // a filter on the puller, never a second code path.
 struct step_event {
     enum class kind { application, statement } what{kind::statement};
-    int stmt{-1};
+    int stmt{-1};   // top-level program statement (a sequence's applying one)
+};
+
+// One level of the statement stack (spec §6.10, Appendix A stmt_stack):
+// position in the enclosing list, and the enclosing sequence's iteration.
+struct frame {
+    int index{0};
+    int iteration{0};
 };
 
 struct grid_state {
@@ -65,9 +72,26 @@ public:
     // written cells. Off by default — the release path skips the recording.
     void set_observe(bool on) { observe_ = on; }
     std::vector<highlight> const& highlights() const { return highlights_; }
+    // Where the last event happened: outermost first; empty before the first.
+    std::vector<frame> const& frames() const { return frames_; }
 
 private:
     struct match { int pair; int row, col; };
+
+    // One rule application or operation - a leaf statement. Yields its
+    // applications; the caller yields the statement boundary.
+    sequence<step_event> run_leaf(compiled_stmt const& st, int top);
+    // A sequence application (§6.10): iterations of the body until the count
+    // runs out or an iteration is stable.
+    sequence<step_event> run_sequence(compiled_stmt const& st, int top);
+
+    // The whole grid stack, for sequence stability (§6.10, §10.7).
+    struct stack_state {
+        int rows{0}, cols{0};
+        std::vector<std::vector<int64_t>> cells;
+    };
+    stack_state capture() const;
+    bool unchanged_since(stack_state const& s) const;
 
     void exec_op(compiled_op const& op);
     void run_path(compiled_op const& op);   // §6.6
@@ -113,6 +137,10 @@ private:
     std::shared_ptr<compiled const> prog_;
     std::mt19937_64                 rng_;
     std::vector<grid_state>         grids_;    // indexed by grid id
+    // The stack's dimensions - kept apart from the layers so a layer-less
+    // program still has a size (width/height, stability, the level).
+    int                             rows_{0}, cols_{0};
+    std::vector<frame>              frames_;
     std::vector<long long>          params_;   // indexed by param id
     std::vector<char>               param_supplied_;
     bool                            in_batch_{false};

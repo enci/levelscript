@@ -425,21 +425,50 @@ static void draw_rule_variant(compiled const& meta, compiled_pair const& pair,
     ImGui::EndGroup();
 }
 
+// The leaf statement the last step worked on, followed down the statement
+// stack through nested sequences (§6.10). `trail` collects "in <sequence>
+// (iteration k)" for each level. Null when there is no step yet.
+static std::pair<program_stmt const*, compiled_stmt const*>
+shown_leaf(script const& sc, debug_run const& run, std::string& trail) {
+    auto frames = run.gen.stmt_stack();
+    if (frames.empty()) return {nullptr, nullptr};
+    auto const* ast_list  = &sc.ast.program.stmts;
+    auto const* meta_list = &sc.meta.stmts;
+    for (size_t k = 0; k < frames.size(); ++k) {
+        int idx = frames[k].index;
+        if (idx < 0 || idx >= (int)ast_list->size() || idx >= (int)meta_list->size())
+            return {nullptr, nullptr};
+        auto const& ps = (*ast_list)[(size_t)idx];
+        auto const& cs = (*meta_list)[(size_t)idx];
+        if (k + 1 == frames.size()) return {&ps, &cs};
+        int sid = cs.seq_id;
+        if (sid < 0 || sid >= (int)sc.meta.sequences.size() ||
+            sid >= (int)sc.ast.sequences.size())
+            return {nullptr, nullptr};
+        if (!trail.empty()) trail += " > ";
+        trail += sc.meta.sequences[(size_t)sid].name + " (iteration " +
+                 std::to_string(frames[k + 1].iteration + 1) + ")";
+        ast_list  = &sc.ast.sequences[(size_t)sid].stmts;
+        meta_list = &sc.meta.sequences[(size_t)sid].stmts;
+    }
+    return {nullptr, nullptr};
+}
+
 void draw_rule_window(script const& sc, debug_run const& run, float mini_px,
                       project_config const& cfg) {
-    auto const& stmts = sc.ast.program.stmts;
-    int show = run.shown_stmt();
-    if (show < 0 || show >= (int)stmts.size()) {
+    std::string trail;
+    auto [leaf, cleaf] = shown_leaf(sc, run, trail);
+    if (!leaf) {
         ImGui::TextDisabled("(none yet)");
         return;
     }
-    auto const& stmt = stmts[(size_t)show];
+    if (!trail.empty()) ImGui::TextDisabled("in %s", trail.c_str());
+    auto const& stmt = *leaf;
     if (stmt.what != program_stmt::kind::apply) {
         ImGui::TextDisabled("%s", stmt_desc(stmt).c_str());
         return;
     }
-    if (show >= (int)sc.meta.stmts.size()) return;
-    int rid = sc.meta.stmts[(size_t)show].rule_id;
+    int rid = cleaf->rule_id;
     if (rid < 0 || rid >= (int)sc.meta.rules.size()) {
         ImGui::TextDisabled("?");
         return;

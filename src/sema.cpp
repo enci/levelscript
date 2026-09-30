@@ -1,4 +1,5 @@
 #include "sema.hpp"
+#include <algorithm>
 #include <unordered_set>
 
 namespace ls {
@@ -1066,9 +1067,71 @@ struct analyzer {
         return true;
     }
 
-    void compile_program() {
-        for (auto const& s : ast.program.stmts) {
+    // ── statements (§6): the program body and every sequence body ──────────
+
+    // Levenshtein distance - did-you-mean for unknown rule/sequence names.
+    static int edit_distance(std::string const& a, std::string const& b) {
+        std::vector<int> row(b.size() + 1);
+        for (size_t j = 0; j <= b.size(); ++j) row[j] = (int)j;
+        for (size_t i = 1; i <= a.size(); ++i) {
+            int diag = row[0];
+            row[0] = (int)i;
+            for (size_t j = 1; j <= b.size(); ++j) {
+                int up = row[j];
+                row[j] = std::min({row[j] + 1, row[j - 1] + 1,
+                                   diag + (a[i - 1] == b[j - 1] ? 0 : 1)});
+                diag = up;
+            }
+        }
+        return row[b.size()];
+    }
+
+    std::string did_you_mean(std::string const& name) const {
+        std::string best, kind;
+        int best_d = 3;   // suggest within 2 edits only
+        for (auto const& r : out.rules) {
+            int d = edit_distance(name, r.name);
+            if (d < best_d) { best_d = d; best = r.name; kind = "rule"; }
+        }
+        for (auto const& sq : out.sequences) {
+            int d = edit_distance(name, sq.name);
+            if (d < best_d) { best_d = d; best = sq.name; kind = "sequence"; }
+        }
+        return best.empty() ? "" : "; did you mean " + kind + " '" + best + "'?";
+    }
+
+    // Rules and sequences share one namespace (§7.3 #39). Every sequence gets
+    // a slot, duplicates included, so out.sequences[i] is ast.sequences[i];
+    // name lookups find the first declaration.
+    void register_sequences() {
+        for (auto const& sq : ast.sequences) {
+            bool dup = false;
+            for (auto const& r : ast.rules)
+                if (r.name == sq.name) {
+                    error(sq.loc, "duplicate name '" + sq.name + "': already declared as a "
+                          "rule on line " + std::to_string(r.loc.line) +
+                          " - rules and sequences share one namespace");
+                    dup = true;
+                    break;
+                }
+            for (size_t k = 0; !dup && k < out.sequences.size(); ++k)
+                if (out.sequences[k].name == sq.name) {
+                    error(sq.loc, "duplicate sequence '" + sq.name + "' (first declared on line " +
+                          std::to_string(ast.sequences[k].loc.line) + ")");
+                    dup = true;
+                }
+            out.sequences.push_back({sq.name, {}});
+        }
+    }
+
+    // Compile one statement list. `where` names the enclosing sequence for
+    // diagnostics ("" = the program).
+    void compile_stmts(std::vector<program_stmt> const& in,
+                       std::vector<compiled_stmt>& outv, std::string const& where) {
+        std::string ctx = where.empty() ? "" : " (sequence '" + where + "')";
+        for (auto const& s : in) {
             compiled_stmt cs;
+            cs.loc = s.loc;
             if (s.what == program_stmt::kind::op_call) {
                 cs.what = compiled_stmt::kind::op_call;
                 if (!compile_op_call(s, cs.op)) continue;
@@ -1081,28 +1144,42 @@ struct analyzer {
                 cs.percent = s.percent;
                 for (int i = 0; i < (int)out.rules.size(); ++i)
                     if (out.rules[i].name == s.rule_name) { cs.rule_id = i; break; }
-                if (cs.rule_id < 0) {
-                    error(s.loc, "undeclared rule '" + s.rule_name + "'");
+                if (cs.rule_id < 0)
+                    for (int i = 0; i < (int)out.sequences.size(); ++i)
+                        if (out.sequences[i].name == s.rule_name) { cs.seq_id = i; break; }
+                if (cs.rule_id < 0 && cs.seq_id < 0) {
+                    error(s.loc, "undeclared rule or sequence '" + s.rule_name + "'" +
+                          did_you_mean(s.rule_name));
                     continue;
                 }
                 if (s.strat == strategy::some && !s.is_percent && s.max_count == 0)
                     error(s.loc, "'some(max=0)' applies no matches; did you mean a different strategy?");
-                // §7.3 #30: unknown policy value.
-                if (s.bad_policy)
-                    error(s.loc, "unknown policy '" + s.policy_raw +
-                          "'; expected snapshot, incremental, or stabilize");
-                // §7.3 #28: invalid count/policy combination.
-                if (s.is_percent && s.pol != exec_policy::snapshot)
-                    error(s.loc, "'percent' requires the default 'snapshot' policy");
-                if (s.strat == strategy::one && s.pol == exec_policy::stabilize)
-                    error(s.loc, "'one' with 'policy=stabilize' is contradictory "
-                          "(a single application cannot reach a sweep fixpoint)");
-                // Reductivity warning (§6.9 — LevelScript addition): an
-                // `all(policy=incremental)` fixpoint over a rule whose write
-                // never invalidates its own match cannot terminate.
-                if (s.strat == strategy::all && s.pol == exec_policy::incremental &&
-                    cs.rule_id >= 0)
-                    check_reductive(out.rules[cs.rule_id], s.loc);
+                if (cs.seq_id >= 0) {
+                    // §7.3 #37: a sequence application takes a count only.
+                    if (s.policy_given)
+                        error(s.loc, "'policy=' is not valid on sequence '" + s.rule_name +
+                              "'; each statement inside a sequence carries its own policy");
+                    if (s.is_percent)
+                        error(s.loc, "'some(percent=...)' is not valid on sequence '" +
+                              s.rule_name + "'; use 'some(max=N)', or 'percent' on the "
+                              "statements inside it");
+                } else {
+                    // §7.3 #30: unknown policy value.
+                    if (s.bad_policy)
+                        error(s.loc, "unknown policy '" + s.policy_raw +
+                              "'; expected snapshot, incremental, or stabilize" + ctx);
+                    // §7.3 #28: invalid count/policy combination.
+                    if (s.is_percent && s.pol != exec_policy::snapshot)
+                        error(s.loc, "'percent' requires the default 'snapshot' policy" + ctx);
+                    if (s.strat == strategy::one && s.pol == exec_policy::stabilize)
+                        error(s.loc, "'one' with 'policy=stabilize' is contradictory "
+                              "(a single application cannot reach a sweep fixpoint)" + ctx);
+                    // Reductivity warning (§6.9 — LevelScript addition): an
+                    // `all(policy=incremental)` fixpoint over a rule whose write
+                    // never invalidates its own match cannot terminate.
+                    if (s.strat == strategy::all && s.pol == exec_policy::incremental)
+                        check_reductive(out.rules[cs.rule_id], s.loc);
+                }
             }
             // `when (expr)` guard (§6): boolean, params only — no grids, no
             // position/dimensions (there is no candidate position or committed
@@ -1112,10 +1189,80 @@ struct analyzer {
                 val_type t;
                 cs.guard = compile_expr(*s.guard, -1, t);
                 if (t != val_type::boolean)
-                    error(s.loc, "'when' guard must be a boolean expression");
+                    error(s.loc, "'when' guard must be a boolean expression" + ctx);
                 scope_ = scope{};
             }
-            out.stmts.push_back(cs);
+            outv.push_back(cs);
+        }
+    }
+
+    // §7.3 #38: a sequence that applies itself, directly or through others.
+    void check_sequence_cycles() {
+        int n = (int)out.sequences.size();
+        std::vector<int> state(n, 0);   // 0 new, 1 on the DFS path, 2 done
+        std::vector<int> path;
+        auto dfs = [&](auto&& self, int i) -> void {
+            state[i] = 1;
+            path.push_back(i);
+            for (auto const& st : out.sequences[i].stmts) {
+                int j = st.seq_id;
+                if (st.what != compiled_stmt::kind::apply || j < 0) continue;
+                if (state[j] == 1) {
+                    if (j == i) {
+                        error(ast.sequences[i].loc, "sequence '" + out.sequences[i].name +
+                              "' applies itself");
+                    } else {
+                        std::string chain;
+                        auto from = std::find(path.begin(), path.end(), j);
+                        for (auto it = from; it != path.end(); ++it)
+                            chain += "'" + out.sequences[*it].name + "' -> ";
+                        error(ast.sequences[j].loc, "sequence cycle: " + chain + "'" +
+                              out.sequences[j].name + "'");
+                    }
+                } else if (state[j] == 0) {
+                    self(self, j);
+                }
+            }
+            path.pop_back();
+            state[i] = 2;
+        };
+        for (int i = 0; i < n; ++i)
+            if (state[i] == 0) dfs(dfs, i);
+    }
+
+    // The operation that changes the grid dimensions on every iteration of
+    // sequence `sid` ("" if none is certain): an unguarded non-identity
+    // upscale/pad, directly or through unguarded nested applications (every
+    // count runs at least one iteration). §6.10.
+    std::string dims_changer(int sid, std::vector<char>& seen) const {
+        if (seen[sid]) return "";
+        seen[sid] = 1;
+        for (auto const& st : out.sequences[sid].stmts) {
+            if (st.guard >= 0) continue;
+            if (st.what == compiled_stmt::kind::op_call) {
+                if (st.op.kind == op_kind::upscale && (st.op.w != 1 || st.op.h != 1)) return "upscale";
+                if (st.op.kind == op_kind::pad && st.op.w > 0) return "pad";
+            } else if (st.seq_id >= 0) {
+                std::string inner = dims_changer(st.seq_id, seen);
+                if (!inner.empty()) return inner;
+            }
+        }
+        return "";
+    }
+
+    // §7.4 warning 2: `all S` where no iteration can be stable.
+    void warn_unstable_fixpoints(std::vector<compiled_stmt> const& stmts) {
+        for (auto const& st : stmts) {
+            if (st.what != compiled_stmt::kind::apply || st.seq_id < 0 ||
+                st.strat != strategy::all)
+                continue;
+            std::vector<char> seen(out.sequences.size(), 0);
+            std::string op = dims_changer(st.seq_id, seen);
+            if (!op.empty())
+                diags.warning(file, st.loc.line, st.loc.col,
+                    "'all' over sequence '" + out.sequences[st.seq_id].name +
+                    "' may never terminate: '" + op + "' changes the grid dimensions "
+                    "on every iteration, so no iteration can be stable");
         }
     }
 
@@ -1129,7 +1276,14 @@ struct analyzer {
         if (!best_effort && diags.has_errors()) return;
         compile_rules();
         if (!best_effort && diags.has_errors()) return;
-        if (ast.has_program) compile_program();
+        register_sequences();
+        for (size_t i = 0; i < ast.sequences.size(); ++i)
+            compile_stmts(ast.sequences[i].stmts, out.sequences[i].stmts, ast.sequences[i].name);
+        if (ast.has_program) compile_stmts(ast.program.stmts, out.stmts, "");
+        check_sequence_cycles();
+        if (diags.has_errors()) return;   // the warning walks sequences: cycle-free only
+        warn_unstable_fixpoints(out.stmts);
+        for (auto const& sq : out.sequences) warn_unstable_fixpoints(sq.stmts);
     }
 };
 

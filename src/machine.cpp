@@ -41,8 +41,8 @@ long long machine::eval(int idx, int x, int y) {
     case ce_kind::mask_lit: return e.val;
     case ce_kind::pos_x:    return x;
     case ce_kind::pos_y:    return y;
-    case ce_kind::width:    return grids_.empty() ? 0 : grids_[0].cols;
-    case ce_kind::height:   return grids_.empty() ? 0 : grids_[0].rows;
+    case ce_kind::width:    return cols_;
+    case ce_kind::height:   return rows_;
     case ce_kind::param_read:
         return e.ref >= 0 && e.ref < (int)params_.size() ? params_[e.ref] : 0;
     case ce_kind::grid_read: {
@@ -127,75 +127,139 @@ sequence<step_event> machine::run() {
 
     for (int si = 0; si < (int)prog_->stmts.size(); ++si) {
         auto const& st = prog_->stmts[si];
+        frames_.assign(1, frame{si, 0});
+        bool seq = st.what == compiled_stmt::kind::apply && st.seq_id >= 0;
 
-        // A false `when` guard skips the statement in full (§6); it still
-        // yields its statement boundary so progress advances.
+        // A false `when` guard skips the statement in full (§6). A skipped
+        // leaf still yields its boundary so progress advances; applying a
+        // sequence is never a step of its own (Appendix A).
         if (st.guard >= 0 && eval(st.guard, 0, 0) == 0) {
-            co_yield step_event{step_event::kind::statement, si};
+            if (!seq) co_yield step_event{step_event::kind::statement, si};
             continue;
         }
-
-        if (st.what == compiled_stmt::kind::op_call) {
-            exec_op(st.op);
-        } else if (st.pol == exec_policy::incremental) {
-            auto const& rule = prog_->rules[st.rule_id];
-            int cap = st.strat == strategy::one  ? 1
-                    : st.strat == strategy::some ? st.max_count
-                    : -1;   // all = fixpoint
-            int applied = 0;
-            while (cap < 0 || applied < cap) {
-                auto ms = collect(rule);
-                if (ms.empty()) break;
-                match m = pick_candidate(rule, ms);
-                auto const& pair = rule.pairs[m.pair];
-                for (auto& g : grids_) g.back = g.front;
-                std::unordered_set<uint64_t> written;
-                record_highlights(pair, m);
-                apply(pair, m, written);
-                for (auto& g : grids_) std::swap(g.front, g.back);
-                ++applied;
-                co_yield step_event{step_event::kind::application, si};
-            }
-        } else {
-            // Batch family: snapshot = one sweep; stabilize = sweeps to a
-            // fixpoint (or the sweep cap).
-            auto const& rule = prog_->rules[st.rule_id];
-            bool stab = st.pol == exec_policy::stabilize;
-            int sweep_cap = stab ? (st.strat == strategy::all ? -1 : st.max_count) : 1;
-            int cap = (stab || st.is_percent) ? -1
-                    : st.strat == strategy::one  ? 1
-                    : st.strat == strategy::some ? st.max_count
-                    : -1;
-            int sweeps = 0;
-            while (sweep_cap < 0 || sweeps < sweep_cap) {
-                auto ms = collect(rule);
-                order_candidates(rule, ms);
-                if (st.is_percent)
-                    ms = applicable_prefix(rule, ms, st.percent);
-
-                for (auto& g : grids_) g.back = g.front;
-                std::unordered_set<uint64_t> written;
-                int applied = 0;
-                in_batch_ = true;
-                for (auto const& m : ms) {
-                    if (cap >= 0 && applied >= cap) break;
-                    auto const& pair = rule.pairs[m.pair];
-                    if (conflicts(pair, m, written)) continue;
-                    record_highlights(pair, m);
-                    apply(pair, m, written);
-                    ++applied;
-                    co_yield step_event{step_event::kind::application, si};
-                }
-                in_batch_ = false;
-                bool changed = grids_differ();
-                for (auto& g : grids_) std::swap(g.front, g.back);
-                ++sweeps;
-                if (!stab || !changed) break;
-            }
+        if (seq) {
+            auto sub = run_sequence(st, si);
+            while (sub.next()) co_yield sub.value();
+            continue;
         }
-
+        auto sub = run_leaf(st, si);
+        while (sub.next()) co_yield sub.value();
         co_yield step_event{step_event::kind::statement, si};
     }
+}
+
+sequence<step_event> machine::run_leaf(compiled_stmt const& st, int top) {
+    if (st.what == compiled_stmt::kind::op_call) {
+        exec_op(st.op);
+    } else if (st.pol == exec_policy::incremental) {
+        auto const& rule = prog_->rules[st.rule_id];
+        int cap = st.strat == strategy::one  ? 1
+                : st.strat == strategy::some ? st.max_count
+                : -1;   // all = fixpoint
+        int applied = 0;
+        while (cap < 0 || applied < cap) {
+            auto ms = collect(rule);
+            if (ms.empty()) break;
+            match m = pick_candidate(rule, ms);
+            auto const& pair = rule.pairs[m.pair];
+            for (auto& g : grids_) g.back = g.front;
+            std::unordered_set<uint64_t> written;
+            record_highlights(pair, m);
+            apply(pair, m, written);
+            for (auto& g : grids_) std::swap(g.front, g.back);
+            ++applied;
+            co_yield step_event{step_event::kind::application, top};
+        }
+    } else {
+        // Batch family: snapshot = one sweep; stabilize = sweeps to a
+        // fixpoint (or the sweep cap).
+        auto const& rule = prog_->rules[st.rule_id];
+        bool stab = st.pol == exec_policy::stabilize;
+        int sweep_cap = stab ? (st.strat == strategy::all ? -1 : st.max_count) : 1;
+        int cap = (stab || st.is_percent) ? -1
+                : st.strat == strategy::one  ? 1
+                : st.strat == strategy::some ? st.max_count
+                : -1;
+        int sweeps = 0;
+        while (sweep_cap < 0 || sweeps < sweep_cap) {
+            auto ms = collect(rule);
+            order_candidates(rule, ms);
+            if (st.is_percent)
+                ms = applicable_prefix(rule, ms, st.percent);
+
+            for (auto& g : grids_) g.back = g.front;
+            std::unordered_set<uint64_t> written;
+            int applied = 0;
+            in_batch_ = true;
+            for (auto const& m : ms) {
+                if (cap >= 0 && applied >= cap) break;
+                auto const& pair = rule.pairs[m.pair];
+                if (conflicts(pair, m, written)) continue;
+                record_highlights(pair, m);
+                apply(pair, m, written);
+                ++applied;
+                co_yield step_event{step_event::kind::application, top};
+            }
+            in_batch_ = false;
+            bool changed = grids_differ();
+            for (auto& g : grids_) std::swap(g.front, g.back);
+            ++sweeps;
+            if (!stab || !changed) break;
+        }
+    }
+
+}
+
+// §6.10: `one` = 1 iteration; `some(max=N)` = up to N, stopping after a
+// stable one; `all` = until one is stable. Body statements run exactly as in
+// the program; the frames record where each step happened.
+sequence<step_event> machine::run_sequence(compiled_stmt const& st, int top) {
+    auto const& body = prog_->sequences[st.seq_id].stmts;
+    int cap = st.strat == strategy::one  ? 1
+            : st.strat == strategy::some ? st.max_count
+            : -1;
+    size_t depth = frames_.size();
+    for (int it = 0; cap < 0 || it < cap; ++it) {
+        bool check = cap != 1;   // `one S` never needs the comparison (§10.7)
+        stack_state start;
+        if (check) start = capture();
+        for (int j = 0; j < (int)body.size(); ++j) {
+            auto const& bs = body[j];
+            frames_.resize(depth);
+            frames_.push_back(frame{j, it});
+            bool seq = bs.what == compiled_stmt::kind::apply && bs.seq_id >= 0;
+            if (bs.guard >= 0 && eval(bs.guard, 0, 0) == 0) {   // once per iteration
+                if (!seq) co_yield step_event{step_event::kind::statement, top};
+                continue;
+            }
+            if (seq) {
+                auto sub = run_sequence(bs, top);
+                while (sub.next()) co_yield sub.value();
+                continue;
+            }
+            auto sub = run_leaf(bs, top);
+            while (sub.next()) co_yield sub.value();
+            co_yield step_event{step_event::kind::statement, top};
+        }
+        frames_.resize(depth);
+        if (check && unchanged_since(start)) break;
+    }
+}
+
+machine::stack_state machine::capture() const {
+    stack_state s{rows_, cols_, {}};
+    s.cells.reserve(grids_.size());
+    for (auto const& g : grids_) s.cells.push_back(g.front);
+    return s;
+}
+
+// Stability compares states, not writes: dimensions plus every cell of every
+// layer. A cell written back to its old value is no change (§6.10).
+bool machine::unchanged_since(stack_state const& s) const {
+    if (s.rows != rows_ || s.cols != cols_) return false;
+    for (size_t i = 0; i < grids_.size(); ++i)
+        if (grids_[i].front != s.cells[i]) return false;
+    return true;
 }
 
 void machine::order_candidates(compiled_rule const& rule, std::vector<match>& ms) {
@@ -297,6 +361,8 @@ void machine::exec_op(compiled_op const& op) {
     switch (op.kind) {
 
     case op_kind::resize:   // content-preserving, top-left anchored (§6.1)
+        rows_ = op.h;
+        cols_ = op.w;
         for (auto& g : grids_)
             rebuild(g, op.h, op.w, [&g](int r, int c) {
                 return r < g.rows && c < g.cols ? g.get(r, c) : g.empty_raw();
@@ -304,6 +370,8 @@ void machine::exec_op(compiled_op const& op) {
         return;
 
     case op_kind::upscale:  // duplicate every cell into an n x m block (§6.2)
+        rows_ *= op.h;
+        cols_ *= op.w;
         for (auto& g : grids_)
             rebuild(g, g.rows * op.h, g.cols * op.w, [&g, &op](int r, int c) {
                 return g.get(r / op.h, c / op.w);
@@ -313,6 +381,8 @@ void machine::exec_op(compiled_op const& op) {
     case op_kind::pad: {    // uniform empty border on all sides (§6.5)
         int n = op.w;
         if (n <= 0) return;
+        rows_ += 2 * n;
+        cols_ += 2 * n;
         for (auto& g : grids_)
             rebuild(g, g.rows + 2 * n, g.cols + 2 * n, [&g, n](int r, int c) {
                 return r >= n && r < g.rows + n && c >= n && c < g.cols + n
@@ -339,6 +409,8 @@ void machine::exec_op(compiled_op const& op) {
                          "leaving grids unchanged\n";
             return;
         }
+        rows_ = max_r - min_r + 1;
+        cols_ = max_c - min_c + 1;
         for (auto& g : grids_)
             rebuild(g, max_r - min_r + 1, max_c - min_c + 1,
                     [&g, min_r, min_c](int r, int c) {
@@ -629,10 +701,8 @@ void machine::apply(compiled_pair const& pair, match const& m,
 std::shared_ptr<level_data const> machine::snapshot() const {
     auto d = std::make_shared<level_data>();
     d->info = prog_;
-    if (!grids_.empty()) {
-        d->width  = grids_[0].cols;
-        d->height = grids_[0].rows;
-    }
+    d->width  = cols_;
+    d->height = rows_;
     // Mid-batch the back buffer is the visible state: committed statements
     // plus this batch's applications so far.
     for (int i = 0; i < (int)grids_.size(); ++i)

@@ -16,6 +16,7 @@ static token_type keyword_or_ident(std::string_view text) {
         {"tag", token_type::kw_tag},       {"layers", token_type::kw_layers},
         {"grid", token_type::kw_grid},     {"of", token_type::kw_of},
         {"number", token_type::kw_number}, {"rule", token_type::kw_rule},
+        {"sequence", token_type::kw_sequence},
         {"program", token_type::kw_program},
         {"one", token_type::kw_one},       {"all", token_type::kw_all},
         {"some", token_type::kw_some},

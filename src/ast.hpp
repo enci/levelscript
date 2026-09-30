@@ -165,15 +165,24 @@ struct program_stmt {
     // apply — count × policy (§6.7)
     strategy    strat{strategy::all};
     exec_policy pol{exec_policy::snapshot};
+    bool        policy_given{false};  // policy= written at all (§7.3 #37 on sequences)
     bool        bad_policy{false};    // policy= had an unknown value (§7.3 #30)
     std::string policy_raw;           // its raw text, for the diagnostic
     bool        is_percent{false};    // some(percent=P) instead of max
     int         max_count{0};
     int         percent{0};
-    std::string rule_name;
+    std::string rule_name;            // a rule or a sequence (§6.10); resolved in sema
     source_loc  rule_name_loc;
     // optional `when (expr)` guard (§6): boolean, params only, evaluated once
     expr_ptr    guard;
+};
+
+// A named statement list, applied by name like a rule (§6.10).
+struct sequence_decl {
+    source_loc                loc;
+    source_loc                name_loc;
+    std::string               name;
+    std::vector<program_stmt> stmts;
 };
 
 struct program_decl {
@@ -188,6 +197,7 @@ struct ast_file {
     layers_decl             layers;
     std::vector<param_decl> params;
     std::vector<rule_decl>  rules;
+    std::vector<sequence_decl> sequences;
     program_decl            program;
     bool                    has_layers{false};
     bool                    has_params{false};

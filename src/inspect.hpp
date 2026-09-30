@@ -19,7 +19,7 @@
 //       "tags":   [{"name","values":[{"name","loc"}],"unions":[{"name","loc"}]}],
 //       "layers": [{"name","type"}],       // type: tagset name or "number"
 //       "params": [{"name","derived"}],
-//       "rules":  [...],
+//       "rules":  [...], "sequences": [{"name","loc"}],
 //       "ops":    [...], "builtins": [...] // completion vocabulary
 //     }
 //   }

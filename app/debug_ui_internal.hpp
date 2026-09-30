@@ -98,6 +98,7 @@ struct debug_run {
     bool done{false};
     int  apps_in_stmt{0};    // applications of the statement being worked on
     int  counted_stmt{-1};
+    std::vector<stmt_frame> counted_stack;   // leaf position apps_in_stmt counts for
 
     void restart(generator const& g, uint64_t seed) {
         gen = g.run(seed, step_mode::application, observe::on);
@@ -119,8 +120,14 @@ struct debug_run {
         if (done) return false;
         if (!gen.step()) { done = true; return false; }
         started = true;
+        // a new leaf statement - at top level or inside a sequence (§6.10)
         int s = gen.statement_index();
-        if (s != counted_stmt) { counted_stmt = s; apps_in_stmt = 0; }
+        auto st = gen.stmt_stack();
+        bool same = s == counted_stmt && st.size() == counted_stack.size();
+        for (size_t k = 0; same && k < st.size(); ++k)
+            same = st[k].index == counted_stack[k].index &&
+                   st[k].iteration == counted_stack[k].iteration;
+        if (!same) { counted_stmt = s; counted_stack = std::move(st); apps_in_stmt = 0; }
         if (!gen.at_statement_boundary()) apps_in_stmt++;
         return true;
     }
@@ -145,7 +152,10 @@ struct debug_run {
         if (!started) return 0;
         if (done) return stmt_count;
         int last = gen.statement_index();
-        return gen.at_statement_boundary() ? last + 1 : last;
+        // only a top-level boundary finishes a program statement; a leaf
+        // inside a sequence leaves the marker on the applying statement
+        bool top_done = gen.at_statement_boundary() && gen.stmt_stack().size() <= 1;
+        return top_done ? last + 1 : last;
     }
 };
 

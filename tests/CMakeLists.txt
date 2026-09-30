@@ -4,6 +4,7 @@ add_executable(ls_tests
     test_sema.cpp
     test_api.cpp
     test_inspect.cpp
+    test_sequence.cpp
 )
 
 target_link_libraries(ls_tests PRIVATE ls_lib Catch2::Catch2WithMain)

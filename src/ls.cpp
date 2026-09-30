@@ -164,6 +164,13 @@ bool run::at_statement_boundary() const {
     return s_ && s_->at_boundary;
 }
 
+std::vector<stmt_frame> run::stmt_stack() const {
+    std::vector<stmt_frame> out;
+    if (!s_ || s_->last_stmt < 0) return out;
+    for (auto const& f : s_->m.frames()) out.push_back({f.index, f.iteration});
+    return out;
+}
+
 std::vector<cell_highlight> run::highlights() const {
     std::vector<cell_highlight> out;
     if (!s_) return out;

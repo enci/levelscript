@@ -172,20 +172,26 @@ std::string inspect_json(std::string const& source, std::string const& name) {
     o += ",\"refs\":[";
     if (ast) {
         comma_list cl{o};
-        // Rule references in Program statements
-        if (ast->has_program) {
-            for (auto const& s : ast->program.stmts) {
-                if (s.what == program_stmt::kind::apply) {
-                    cl.next();
-                    o += "{\"line\":" + std::to_string(s.rule_name_loc.line) +
-                         ",\"col\":" + std::to_string(s.rule_name_loc.col) +
-                         ",\"len\":" + std::to_string(s.rule_name.size()) +
-                         ",\"kind\":\"rule\",\"target\":";
-                    js(o, s.rule_name);
-                    o += "}";
-                }
+        // Rule / sequence references in program and sequence statements
+        auto stmt_refs = [&](std::vector<program_stmt> const& stmts) {
+            for (auto const& s : stmts) {
+                if (s.what != program_stmt::kind::apply) continue;
+                bool is_seq = false;
+                for (auto const& sq : ast->sequences)
+                    if (sq.name == s.rule_name) is_seq = true;
+                for (auto const& r : ast->rules)
+                    if (r.name == s.rule_name) is_seq = false;   // rules win lookups
+                cl.next();
+                o += "{\"line\":" + std::to_string(s.rule_name_loc.line) +
+                     ",\"col\":" + std::to_string(s.rule_name_loc.col) +
+                     ",\"len\":" + std::to_string(s.rule_name.size()) +
+                     ",\"kind\":\"" + (is_seq ? "sequence" : "rule") + "\",\"target\":";
+                js(o, s.rule_name);
+                o += "}";
             }
-        }
+        };
+        if (ast->has_program) stmt_refs(ast->program.stmts);
+        for (auto const& sq : ast->sequences) stmt_refs(sq.stmts);
         // Grid references in Rule patterns
         for (auto const& r : ast->rules) {
             for (auto const& pr : r.pairs) {
@@ -288,6 +294,18 @@ std::string inspect_json(std::string const& source, std::string const& name) {
                      ",\"len\":" + std::to_string(ast_r.name.size()) + "}";
             }
             o += "}";
+        }
+    }
+    o += "],\"sequences\":[";
+    if (ast) {
+        comma_list cl{o};
+        for (auto const& sq : ast->sequences) {
+            cl.next();
+            o += "{\"name\":";
+            js(o, sq.name);
+            o += ",\"loc\":{\"line\":" + std::to_string(sq.name_loc.line) +
+                 ",\"col\":" + std::to_string(sq.name_loc.col) +
+                 ",\"len\":" + std::to_string(sq.name.size()) + "}}";
         }
     }
     // completion vocabulary — kept in sync with the sema tables by the tests
