@@ -33,8 +33,12 @@ struct parser {
     }
     bool expect(token_type t, char const* what) {
         if (accept(t)) return true;
-        error_at(peek(), std::string("expected ") + what +
-                 (peek().text.empty() ? "" : ", got '" + peek().text + "'"));
+        if (t == token_type::ident && is_keyword(peek().type))
+            error_at(peek(), std::string("expected ") + what + ", got '" + peek().text +
+                     "' - a reserved keyword cannot be used as a name");
+        else
+            error_at(peek(), std::string("expected ") + what +
+                     (peek().text.empty() ? "" : ", got '" + peek().text + "'"));
         return false;
     }
 
@@ -560,6 +564,7 @@ struct parser {
     // recorded raw and rejected in sema (§7.3 #30).
     void parse_policy_arg(program_stmt& s) {
         eat();   // 'policy'
+        s.policy_given = true;
         if (!expect(token_type::equals, "'='")) return;
         if (accept(token_type::kw_snapshot))         s.pol = exec_policy::snapshot;
         else if (accept(token_type::kw_incremental)) s.pol = exec_policy::incremental;
@@ -661,11 +666,9 @@ struct parser {
         expect(token_type::rparen, "')'");
     }
 
-    void parse_program(ast_file& out) {
-        out.program.loc = loc();
-        out.has_program = true;
-        eat();   // 'program'
-        if (!expect(token_type::lbrace, "'{'")) return;
+    // statement_list (§6) - the body of `program` and of every `sequence`.
+    // `where` names the enclosing sequence for diagnostics ("" = program).
+    void parse_statement_list(std::vector<program_stmt>& out, std::string const& where) {
         skip_newlines();
         while (!at(token_type::rbrace) && !at_end()) {
             program_stmt s;
@@ -676,8 +679,15 @@ struct parser {
             } else if (at(token_type::ident) && peek(1).is(token_type::lparen)) {
                 parse_op_call(s);
             } else {
-                error_at(peek(), "expected a statement (a strategy + rule, or an operation call)");
-                eat_bad();
+                if (where.empty())
+                    error_at(peek(), "expected a statement (a strategy + rule, or an operation call)");
+                else
+                    error_at(peek(), "expected a statement in sequence '" + where +
+                             "'; rules are declared with 'rule' and applied by name, "
+                             "e.g. 'all fill'");
+                // one diagnostic per bad line, not one per token
+                while (!at(token_type::newline) && !at(token_type::rbrace) && !at_end())
+                    eat();
                 skip_newlines();
                 continue;
             }
@@ -688,10 +698,37 @@ struct parser {
                     expect(token_type::rparen, "')'");
                 }
             }
-            out.program.stmts.push_back(std::move(s));
+            out.push_back(std::move(s));
             skip_newlines();
         }
+    }
+
+    void parse_program(ast_file& out) {
+        out.program.loc = loc();
+        out.has_program = true;
+        eat();   // 'program'
+        if (!expect(token_type::lbrace, "'{'")) return;
+        parse_statement_list(out.program.stmts, "");
         expect(token_type::rbrace, "'}'");
+    }
+
+    // sequence_decl ::= 'sequence' IDENT '{' statement_list '}'   (§6.10)
+    void parse_sequence(ast_file& out) {
+        sequence_decl sq;
+        sq.loc = loc();
+        eat();   // 'sequence'
+        if (!expect(token_type::ident, "a sequence name")) return;
+        sq.name_loc = {toks[pos - 1].line, toks[pos - 1].col};
+        sq.name = toks[pos - 1].text;
+        if (at(token_type::lparen)) {
+            error_at(peek(), "expected '{' after sequence name '" + sq.name +
+                     "'; sequences take no attributes");
+            recover_to(token_type::rparen);
+        }
+        if (!expect(token_type::lbrace, "'{'")) return;
+        parse_statement_list(sq.stmts, sq.name);
+        expect(token_type::rbrace, "'}'");
+        out.sequences.push_back(std::move(sq));
     }
 
     // ── recovery ─────────────────────────────────────────────────────────────
@@ -711,14 +748,15 @@ struct parser {
             case token_type::kw_tag:     parse_tag(out);     break;
             case token_type::kw_layers:  parse_layers(out);  break;
             case token_type::kw_params:  parse_params(out);  break;
-            case token_type::kw_rule:    parse_rule(out);    break;
+            case token_type::kw_rule:     parse_rule(out);     break;
+            case token_type::kw_sequence: parse_sequence(out); break;
             case token_type::kw_program:
                 if (out.has_program)
                     error_at(peek(), "only one 'program' block per file");
                 parse_program(out);
                 break;
             default:
-                error_at(peek(), "expected a declaration (tag, layers, params, rule, program)");
+                error_at(peek(), "expected a declaration (tag, layers, params, rule, sequence, program)");
                 eat_bad();
                 break;
             }

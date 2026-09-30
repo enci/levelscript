@@ -145,14 +145,23 @@ struct compiled_op {
 
 struct compiled_stmt {
     enum class kind { op_call, apply } what{kind::apply};
+    source_loc  loc;
     compiled_op op;                       // op_call
     strategy    strat{strategy::all};     // apply — count × policy (§6.7)
     exec_policy pol{exec_policy::snapshot};
     bool        is_percent{false};
     int         max_count{0};
     int         percent{0};
-    int         rule_id{-1};
+    int         rule_id{-1};   // apply over a rule
+    int         seq_id{-1};    // apply over a sequence (§6.10): a count only
     int         guard{-1};   // `when` expr arena index; -1 = unguarded
+};
+
+// A named statement list (§6.10), applied by name like a rule; one run of
+// the body is an iteration.
+struct compiled_sequence {
+    std::string                name;
+    std::vector<compiled_stmt> stmts;
 };
 
 struct compiled_layer {
@@ -167,7 +176,8 @@ struct compiled {
     std::vector<std::vector<std::pair<std::string, int64_t>>> tag_unions;
     std::vector<compiled_layer>           layers;
     std::vector<compiled_rule>            rules;
-    std::vector<compiled_stmt>            stmts;
+    std::vector<compiled_sequence>        sequences;
+    std::vector<compiled_stmt>            stmts;   // the program's (top level)
     std::vector<compiled_expr>            exprs;   // the expression arena
 
     // params (§4.2): startup_exprs run once, in declaration order, when the

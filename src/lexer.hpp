@@ -10,7 +10,7 @@ enum class token_type {
     ident, integer, newline, end, bad,
     // keywords (spec §2.4); contextual names such as `max`, `symmetry`, or
     // `horizontal` lex as ident and are matched by text in the parser
-    kw_tag, kw_layers, kw_grid, kw_of, kw_number, kw_rule, kw_program,
+    kw_tag, kw_layers, kw_grid, kw_of, kw_number, kw_rule, kw_sequence, kw_program,
     kw_one, kw_all, kw_some, kw_any, kw_ordered, kw_weight,
     kw_policy, kw_snapshot, kw_incremental, kw_stabilize, kw_percent,
     kw_params, kw_where, kw_when,
@@ -21,6 +21,11 @@ enum class token_type {
     plus, minus, slash, pipe, bang,
     eq_eq, bang_eq, lt, le, gt, ge, amp_amp, pipe_pipe,
 };
+
+// Reserved words (spec §2.4) - the kw_* block above.
+inline bool is_keyword(token_type t) {
+    return t >= token_type::kw_tag && t <= token_type::kw_when;
+}
 
 struct token {
     token_type  type{token_type::end};
