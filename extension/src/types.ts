@@ -20,7 +20,7 @@ export interface InspectorDiagnostic {
 }
 
 export interface RefSpan extends Location {
-    kind: 'layer' | 'rule';
+    kind: 'layer' | 'rule' | 'sequence';
     target: string;
 }
 
@@ -34,6 +34,7 @@ export interface InspectionResult {
         layers: { name: string, type: string, loc?: Location }[];
         params: { name: string, derived: boolean }[];
         rules: { name: string, loc?: Location }[];
+        sequences: { name: string, loc?: Location }[];
         ops: string[];
         builtins: string[];
     };

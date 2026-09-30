@@ -10,7 +10,7 @@
 
 export type CompletionContext =
     | { kind: 'none' }
-    | { kind: 'top' }                                   // tag / layers / params / rule / program
+    | { kind: 'top' }                                   // tag / layers / params / rule / sequence / program
     | { kind: 'unionMember'; tag: string }              // tag t { ..., D = F | _ }
     | { kind: 'gridOf' }                                // layers { g: _ }
     | { kind: 'of' }                                    // layers { g: grid _ }
@@ -23,8 +23,8 @@ export type CompletionContext =
     | { kind: 'combinator' }                            // { _   (all / any)
     | { kind: 'weight' }                                // { any (_ ) g[...] }
     | { kind: 'cell'; grid: string }                    // g[ _ ]
-    | { kind: 'statement'; guard: boolean }             // program { _ }
-    | { kind: 'ruleName' }                              // program { one _ }
+    | { kind: 'statement'; guard: boolean }             // program { _ }, sequence s { _ }
+    | { kind: 'ruleName' }                              // program { one _ } - rules and sequences
     | { kind: 'strategyArg'; strategy: string }         // some(_)
     | { kind: 'policyValue' }                           // one(policy=_)
     | { kind: 'opArg'; op: string; index: number; used: string[] }  // path(_)
@@ -138,6 +138,7 @@ function openFrame(c: '{' | '[' | '(', stack: Frame[]): Frame {
             const kw = decl[0]?.t;
             if (kw === 'tag') return frame('tag:' + (decl[1]?.t ?? ''));
             if (kw === 'layers' || kw === 'params' || kw === 'program') return frame(kw);
+            if (kw === 'sequence') return frame('program');   // same statement_list (§6.10)
             if (kw === 'rule') return frame('rule');
             return frame('other');
         }

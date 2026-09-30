@@ -66,6 +66,14 @@ const cases = [
     ['rule r { { all g[.] where[ (x == ▮', { kind: 'expr', grids: true, pos: true }],
     ['rule r { { all g[.] where[ ▮', { kind: 'none' }],
 
+    // sequences (§6.10): same statement list as the program
+    ['sequence ▮', { kind: 'none' }],
+    ['sequence s(▮', { kind: 'none' }],
+    ['sequence s {\n    ▮', { kind: 'statement', guard: false }],
+    ['sequence s {\n    all r\n    ▮', { kind: 'statement', guard: true }],
+    ['sequence s {\n    some(max=2) ▮', { kind: 'ruleName' }],
+    [decls + 'sequence s { all r }\n\n▮', { kind: 'top' }],
+
     // program
     ['program {\n    ▮', { kind: 'statement', guard: false }],
     ['program {\n    resize(4, 4)\n    ▮', { kind: 'statement', guard: true }],

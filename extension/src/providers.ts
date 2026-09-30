@@ -44,6 +44,9 @@ export const definitionProvider: vscode.DefinitionProvider = {
         if (ref.kind === 'rule') {
             const rule = cached.symbols.rules.find(r => r.name === ref.target);
             if (rule && rule.loc) return spanToLocation(doc.uri, rule.loc);
+        } else if (ref.kind === 'sequence') {
+            const seq = cached.symbols.sequences?.find(s => s.name === ref.target);
+            if (seq && seq.loc) return spanToLocation(doc.uri, seq.loc);
         } else if (ref.kind === 'layer') {
             const layer = cached.symbols.layers.find(l => l.name === ref.target);
             if (layer && layer.loc) return spanToLocation(doc.uri, layer.loc);
@@ -94,6 +97,9 @@ export const hoverProvider: vscode.HoverProvider = {
                 } else if (ref.kind === 'rule') {
                     md.appendMarkdown(`**rule** \`${ref.target}\``);
                     return new vscode.Hover(md);
+                } else if (ref.kind === 'sequence') {
+                    md.appendMarkdown(`**sequence** \`${ref.target}\``);
+                    return new vscode.Hover(md);
                 }
             }
         }
@@ -142,6 +148,7 @@ export const completionProvider: vscode.CompletionItemProvider = {
             snippet('layers', 'layers {\n\t$0\n}', K.Keyword);
             snippet('params', 'params {\n\t$0\n}', K.Keyword);
             snippet('rule', 'rule ${1:name} {\n\t$0\n}', K.Keyword);
+            snippet('sequence', 'sequence ${1:name} {\n\t$0\n}', K.Keyword);
             snippet('program', 'program {\n\t$0\n}', K.Keyword);
             break;
         case 'unionMember':
@@ -203,8 +210,10 @@ export const completionProvider: vscode.CompletionItemProvider = {
             break;
         case 'ruleName':
             sym?.rules.forEach(r => word(r.name, K.Method, 'rule'));
+            sym?.sequences?.forEach(s => word(s.name, K.Module, 'sequence'));
             break;
         case 'strategyArg':
+            // the target is not typed yet: offer everything a rule takes
             if (ctx.strategy === 'some') {
                 snippet('max', 'max=${1:1}', K.Property);
                 snippet('percent', 'percent=${1:50}', K.Property);
