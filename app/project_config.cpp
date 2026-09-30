@@ -37,15 +37,45 @@ static std::string mode_str(layer_mode m) {
         case layer_mode::color:   return "color";
         case layer_mode::tile:    return "tile";
         case layer_mode::heatmap: return "heatmap";
+        case layer_mode::shape:   return "shape";
+        case layer_mode::corner:  return "corner";
     }
     return "text";
+}
+
+static std::string corner_str(corner_size c) {
+    switch (c) {
+        case corner_size::small: return "small";
+        case corner_size::tiny:  return "tiny";
+        default:                 return "normal";
+    }
+}
+
+static corner_size corner_from_str(std::string const& s) {
+    if (s == "small") return corner_size::small;
+    if (s == "tiny")  return corner_size::tiny;
+    return corner_size::normal;
 }
 
 static layer_mode mode_from_str(std::string const& s) {
     if (s == "color")   return layer_mode::color;
     if (s == "tile")    return layer_mode::tile;
     if (s == "heatmap") return layer_mode::heatmap;
+    if (s == "shape")   return layer_mode::shape;
+    if (s == "corner")  return layer_mode::corner;
     return layer_mode::text;
+}
+
+static constexpr char const* k_shape_names[k_tag_shape_count] = {
+    "none", "circle", "ring", "square", "diamond", "triangle", "cross", "star", "hexagon",
+};
+
+char const* shape_name(tag_shape s) { return k_shape_names[(int)s]; }
+
+tag_shape shape_from_name(std::string const& s) {
+    for (int i = 0; i < k_tag_shape_count; ++i)
+        if (s == k_shape_names[i]) return (tag_shape)i;
+    return tag_shape::none;   // unknown names (newer sidecar) degrade to none
 }
 
 // 0xAABBGGRR -> "rrggbb" (alpha dropped; every stored color is opaque).
@@ -144,6 +174,7 @@ project_config project_config::load(std::string const& ls_path,
                         jget(jl, "opacity", 1.0f),
                         mode_from_str(jget(jl, "mode", std::string{"text"})),
                         jget(jl, "tileset", std::string{}),
+                        corner_from_str(jget(jl, "corner", std::string{"normal"})),
                     });
                 }
             }
@@ -162,6 +193,18 @@ project_config project_config::load(std::string const& ls_path,
                         if (end != key.c_str() && val.is_string() &&
                             hex_to_color(val.get<std::string>(), col))
                             cfg.tag_colors[tname][(int)vid] = col;
+                    }
+                }
+            }
+            if (j.contains("tag_shapes") && j["tag_shapes"].is_object()) {
+                for (auto const& [tname, jvs] : j["tag_shapes"].items()) {
+                    if (!jvs.is_object()) continue;
+                    for (auto const& [key, val] : jvs.items()) {
+                        char* end = nullptr;
+                        long vid = std::strtol(key.c_str(), &end, 10);
+                        if (end == key.c_str() || !val.is_string()) continue;
+                        tag_shape sh = shape_from_name(val.get<std::string>());
+                        if (sh != tag_shape::none) cfg.tag_shapes[tname][(int)vid] = sh;
                     }
                 }
             }
@@ -193,6 +236,7 @@ void project_config::save(std::string const& ls_path) const {
             {"opacity", lc.opacity},
             {"mode", mode_str(lc.mode)},
             {"tileset", lc.tileset},
+            {"corner", corner_str(lc.corner)},
         });
     }
     if (!tag_colors.empty()) {
@@ -205,6 +249,11 @@ void project_config::save(std::string const& ls_path) const {
         }
         j["tag_colors"] = jtc;
     }
+    json jts;
+    for (auto const& [tname, vmap] : tag_shapes)
+        for (auto const& [vid, sh] : vmap)
+            if (sh != tag_shape::none) jts[tname][std::to_string(vid)] = shape_name(sh);
+    if (!jts.empty()) j["tag_shapes"] = jts;
     std::ofstream f(json_path(ls_path));
     f << j.dump(2) << '\n';
 }

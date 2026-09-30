@@ -58,6 +58,9 @@ std::string cell_glyph(compiled const& meta, int tag_id, int v);
 void draw_centered_text(ImDrawList* dl, ImVec2 p0, float box_px, ImU32 col,
                         char const* text);
 
+// Filled marker centered on `c`, fitting a circle of radius `r`.
+void draw_shape(ImDrawList* dl, ImVec2 c, float r, tag_shape shape, ImU32 col);
+
 // ── script: one loaded .ls file ───────────────────────────────────────────────
 
 struct script {
@@ -201,7 +204,8 @@ void draw_grid_composite(script const& sc, debug_run const& run,
                          project_config const& cfg,
                          std::unordered_map<std::string, tile_texture> const& tile_textures,
                          float cell_px);
-void draw_layer_strip(project_config& cfg, compiled const& meta);
+// Returns the height it occupied, so the caller can size the grid above it.
+float draw_layer_strip(project_config& cfg, compiled const& meta);
 void draw_settings_window(project_config& cfg,
                           std::unordered_map<std::string, tile_texture>& tile_textures,
                           SDL_Renderer* renderer, std::string const& ls_path);

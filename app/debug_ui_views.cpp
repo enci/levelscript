@@ -6,6 +6,7 @@
 #include <stb_image.h>
 
 #include <algorithm>
+#include <cmath>
 #include <climits>
 
 namespace ls {
@@ -570,6 +571,92 @@ void draw_program_window(script const& sc, debug_run const& run) {
     ImGui::EndChild();
 }
 
+// ── shapes ────────────────────────────────────────────────────────────────────
+
+void draw_shape(ImDrawList* dl, ImVec2 c, float r, tag_shape shape, ImU32 col) {
+    float const t = std::max(1.f, r * 0.3f);   // stroke for outline shapes
+    switch (shape) {
+        case tag_shape::none: break;
+        case tag_shape::circle:  dl->AddCircleFilled(c, r, col, 20); break;
+        case tag_shape::ring:    dl->AddCircle(c, r - t * 0.5f, col, 20, t); break;
+        case tag_shape::square:
+            dl->AddRectFilled({ c.x - r * 0.85f, c.y - r * 0.85f },
+                              { c.x + r * 0.85f, c.y + r * 0.85f }, col);
+            break;
+        case tag_shape::diamond: dl->AddNgonFilled(c, r * 1.1f, col, 4); break;
+        case tag_shape::hexagon: dl->AddNgonFilled(c, r, col, 6); break;
+        case tag_shape::triangle:
+            dl->AddTriangleFilled({ c.x, c.y - r },
+                                  { c.x + r * 0.95f, c.y + r * 0.75f },
+                                  { c.x - r * 0.95f, c.y + r * 0.75f }, col);
+            break;
+        case tag_shape::cross: {
+            float d = r * 0.75f;
+            dl->AddLine({ c.x - d, c.y - d }, { c.x + d, c.y + d }, col, t);
+            dl->AddLine({ c.x - d, c.y + d }, { c.x + d, c.y - d }, col, t);
+            break;
+        }
+        case tag_shape::star: {
+            // Triangle fan from the center: fine for a concave outline.
+            constexpr float k_pi = 3.14159265f;
+            ImVec2 pts[10];
+            for (int i = 0; i < 10; ++i) {
+                float a  = -k_pi / 2 + i * k_pi / 5;
+                float rr = (i % 2 == 0) ? r * 1.1f : r * 0.45f;
+                pts[i] = { c.x + std::cos(a) * rr, c.y + std::sin(a) * rr };
+            }
+            for (int i = 0; i < 10; ++i)
+                dl->AddTriangleFilled(c, pts[i], pts[(i + 1) % 10], col);
+            break;
+        }
+    }
+}
+
+// A small button showing the current shape; click opens a grid of all shapes.
+static bool shape_picker(tag_shape& shape, ImU32 col) {
+    bool changed = false;
+    float const box = ImGui::GetFrameHeight();
+    if (ImGui::Button("##shape", { box * 1.4f, box })) ImGui::OpenPopup("##shape_pop");
+    ImVec2 lo = ImGui::GetItemRectMin(), hi = ImGui::GetItemRectMax();
+    ImVec2 mid = { (lo.x + hi.x) * 0.5f, (lo.y + hi.y) * 0.5f };
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    if (shape == tag_shape::none)
+        dl->AddLine({ mid.x - 4.f, mid.y }, { mid.x + 4.f, mid.y },
+                    ImGui::GetColorU32(ImGuiCol_TextDisabled), 1.5f);
+    else
+        draw_shape(dl, mid, box * 0.32f, shape, col);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Shape: %s", shape_name(shape));
+
+    if (ImGui::BeginPopup("##shape_pop")) {
+        for (int i = 0; i < k_tag_shape_count; ++i) {
+            ImGui::PushID(i);
+            if (i % 5 != 0) ImGui::SameLine();
+            bool sel = (int)shape == i;
+            if (ImGui::Selectable("##s", sel, 0, { 26.f, 26.f })) {
+                shape   = (tag_shape)i;
+                changed = true;
+                ImGui::CloseCurrentPopup();
+            }
+            ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+            ImVec2 m = { (a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f };
+            if (i == 0)
+                ImGui::GetWindowDrawList()->AddLine({ m.x - 5.f, m.y }, { m.x + 5.f, m.y },
+                    ImGui::GetColorU32(ImGuiCol_TextDisabled), 1.5f);
+            else
+                draw_shape(ImGui::GetWindowDrawList(), m, 8.f, (tag_shape)i, col);
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", shape_name((tag_shape)i));
+            ImGui::PopID();
+        }
+        ImGui::EndPopup();
+    }
+    return changed;
+}
+
+// Set/clear an entry in the sparse shape map (none == absent).
+static void set_shape(std::unordered_map<int, tag_shape>& m, int slot, tag_shape sh) {
+    if (sh == tag_shape::none) m.erase(slot); else m[slot] = sh;
+}
+
 // ── tags window ───────────────────────────────────────────────────────────────
 
 void draw_tags_window(compiled const& meta, project_config& cfg) {
@@ -580,6 +667,13 @@ void draw_tags_window(compiled const& meta, project_config& cfg) {
 
     for (int ti = 0; ti < (int)meta.tag_names.size(); ++ti) {
         auto& vmap = cfg.tag_colors[meta.tag_names[(size_t)ti]];
+        auto& smap = cfg.tag_shapes[meta.tag_names[(size_t)ti]];
+        // Shape row helper: preview uses the value's current color.
+        auto shape_cell = [&](int slot, ImU32 col) {
+            tag_shape sh = smap.count(slot) ? smap.at(slot) : tag_shape::none;
+            if (shape_picker(sh, col)) set_shape(smap, slot, sh);
+            ImGui::SameLine();
+        };
 
         ImGui::PushID(ti);
         bool open = ImGui::TreeNodeEx(meta.tag_names[(size_t)ti].c_str(),
@@ -596,6 +690,7 @@ void draw_tags_window(compiled const& meta, project_config& cfg) {
                         ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel))
                     vmap[vi] = u32_from_col3(col);
                 ImGui::SameLine();
+                shape_cell(vi, cur);
 
                 ImGui::TextUnformatted(vals[(size_t)vi].c_str());
 
@@ -616,6 +711,7 @@ void draw_tags_window(compiled const& meta, project_config& cfg) {
                             ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel))
                         vmap[slot] = u32_from_col3(col);
                     ImGui::SameLine();
+                    shape_cell(slot, cur);
 
                     std::string members;
                     for (int vi = 0; vi < (int)vals.size() && vi < 30; ++vi)
@@ -695,6 +791,13 @@ void draw_grid_composite(script const& sc, debug_run const& run,
     dl->AddRectFilled(origin, { origin.x + total_w, origin.y + total_h },
                       cfg.grid_bg_color);
 
+    // Corner-mode layers each get their own tile corner (TL, TR, BR, BL, then
+    // wrapping), assigned by position among ALL corner layers so toggling a
+    // layer's visibility never moves the others.
+    std::vector<int> corner_slot(cfg.layers.size(), 0);
+    for (size_t li = 0, n = 0; li < cfg.layers.size(); ++li)
+        if (cfg.layers[li].mode == layer_mode::corner) corner_slot[li] = (int)(n++ % 4);
+
     // ── per layer: content -> highlights, stacked in composite order ─────────
     for (size_t li = 0; li < cfg.layers.size(); ++li) {
         auto const& lc = cfg.layers[li];
@@ -719,6 +822,13 @@ void draw_grid_composite(script const& sc, debug_run const& run,
                               ? (float)ts->tile_w / tex->width  : 0.f;
         float tile_uv_h     = (tile_id && ts)
                               ? (float)ts->tile_h / tex->height : 0.f;
+
+        // Shape mode: this tag's per-value shapes (sparse; unset -> circle).
+        std::unordered_map<int, tag_shape> const* shapes = nullptr;
+        if (lc.mode == layer_mode::shape && pal.tag_id >= 0) {
+            auto sit = cfg.tag_shapes.find(sc.meta.tag_names[(size_t)pal.tag_id]);
+            if (sit != cfg.tag_shapes.end()) shapes = &sit->second;
+        }
 
         bool tiling = (lc.mode == layer_mode::tile) && tile_id && ts;
         if (tiling) dl->AddCallback(set_sampler_nearest, nullptr);
@@ -766,6 +876,38 @@ void draw_grid_composite(script const& sc, debug_run const& run,
                         break;
                     }
 
+                    case layer_mode::shape: {
+                        tag_shape sh = tag_shape::circle;
+                        if (shapes) {
+                            auto f = shapes->find(vid);
+                            if (f != shapes->end()) sh = f->second;
+                        }
+                        draw_shape(dl, { (p0.x + p1.x) * 0.5f, (p0.y + p1.y) * 0.5f },
+                                   cell_px * 0.36f, sh,
+                                   with_alpha(tag_color(pal.tag_id, vid, pal.colors),
+                                              lc.opacity));
+                        break;
+                    }
+
+                    case layer_mode::corner: {
+                        float  s   = cell_px * (lc.corner == corner_size::tiny  ? 0.18f
+                                               : lc.corner == corner_size::small ? 0.28f
+                                                                                 : 0.40f);
+                        ImU32  col = with_alpha(tag_color(pal.tag_id, vid, pal.colors),
+                                                lc.opacity);
+                        switch (corner_slot[li]) {
+                            case 0: dl->AddTriangleFilled(p0, { p0.x + s, p0.y },
+                                                          { p0.x, p0.y + s }, col); break;
+                            case 1: dl->AddTriangleFilled({ p1.x, p0.y }, { p1.x - s, p0.y },
+                                                          { p1.x, p0.y + s }, col); break;
+                            case 2: dl->AddTriangleFilled(p1, { p1.x - s, p1.y },
+                                                          { p1.x, p1.y - s }, col); break;
+                            default: dl->AddTriangleFilled({ p0.x, p1.y }, { p0.x + s, p1.y },
+                                                           { p0.x, p1.y - s }, col); break;
+                        }
+                        break;
+                    }
+
                     case layer_mode::color:
                         dl->AddRectFilled(p0, p1,
                             with_alpha(tag_color(pal.tag_id, vid, pal.colors), lc.opacity));
@@ -810,7 +952,8 @@ void draw_grid_composite(script const& sc, debug_run const& run,
 
     ImGui::Dummy({ total_w, total_h });
 
-    // Hover tooltip: cell coordinates and every visible layer's value.
+    // Hover tooltip: cell coordinates and every layer's value (hidden layers
+    // are listed too, dimmed).
     if (ImGui::IsItemHovered()) {
         ImVec2 mp = ImGui::GetMousePos();
         int hx = (int)((mp.x - origin.x) / cell_px);
@@ -820,7 +963,6 @@ void draw_grid_composite(script const& sc, debug_run const& run,
             ImGui::TextDisabled("x %d  y %d", hx, hy);
             ImGui::Separator();
             for (auto const& lc : cfg.layers) {
-                if (!lc.visible) continue;
                 grid g = lv[lc.name];
                 int  v = g.at(hx, hy);
 
@@ -841,7 +983,10 @@ void draw_grid_composite(script const& sc, debug_run const& run,
                         {10.f, 10.f});
                     ImGui::SameLine();
                 }
+                if (!lc.visible) ImGui::PushStyleColor(ImGuiCol_Text,
+                                     ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
                 ImGui::Text("%s: %s", lc.name.c_str(), val_label.c_str());
+                if (!lc.visible) ImGui::PopStyleColor();
             }
             ImGui::EndTooltip();
         }
@@ -859,8 +1004,12 @@ static void draw_mode_combo(layer_mode& mode, bool numeric) {
         { layer_mode::color,   phosphor::PH_PALETTE,     "Color"   },
         { layer_mode::tile,    phosphor::PH_IMAGE,       "Tile"    },
         { layer_mode::heatmap, phosphor::PH_THERMOMETER, "Heatmap" },
+        { layer_mode::shape,   phosphor::PH_SHAPES,      "Shape"   },
+        { layer_mode::corner,  phosphor::PH_CORNERS_OUT, "Corner"  },
     };
-    if (!numeric && mode == layer_mode::tile) mode = layer_mode::color;
+    if (!numeric && mode == layer_mode::tile)  mode = layer_mode::color;
+    if (numeric  && (mode == layer_mode::shape || mode == layer_mode::corner))
+        mode = layer_mode::color;   // both need a tag layer
 
     mode_item const* current = &k_items[0];
     for (auto const& mi : k_items)
@@ -872,7 +1021,9 @@ static void draw_mode_combo(layer_mode& mode, bool numeric) {
     if (!open && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", current->name);
     if (open) {
         for (auto const& mi : k_items) {
-            if (!numeric && mi.mode == layer_mode::tile) continue;
+            if (!numeric && mi.mode == layer_mode::tile)  continue;
+            if (numeric  && (mi.mode == layer_mode::shape || mi.mode == layer_mode::corner))
+                continue;
             bool selected = (mi.mode == mode);
             if (ImGui::Selectable(mi.icon, selected)) mode = mi.mode;
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", mi.name);
@@ -887,9 +1038,14 @@ static void draw_mode_combo(layer_mode& mode, bool numeric) {
 static void draw_tileset_combo(std::string& name,
                                std::vector<tileset_config> const& tilesets) {
     ImGui::SameLine();
-    ImGui::SetNextItemWidth(110.f);
-    char const* preview = name.empty() ? "(none)" : name.c_str();
-    if (ImGui::BeginCombo("##tileset", preview)) {
+    ImGui::SetNextItemWidth(46.f);
+    // Compact preview (first 3 chars) until opened; the list shows full names.
+    std::string preview = name.empty() ? "--" : name.substr(0, 3);
+    ImGui::SetNextWindowSizeConstraints({ 130.f, 0.f }, { FLT_MAX, FLT_MAX });
+    bool open = ImGui::BeginCombo("##tileset", preview.c_str());
+    if (!open && ImGui::IsItemHovered())
+        ImGui::SetTooltip("Tileset: %s", name.empty() ? "(none)" : name.c_str());
+    if (open) {
         if (ImGui::Selectable("(none)", name.empty())) name.clear();
         for (auto const& ts : tilesets) {
             bool selected = (ts.name == name);
@@ -900,11 +1056,45 @@ static void draw_tileset_combo(std::string& name,
     }
 }
 
-void draw_layer_strip(project_config& cfg, compiled const& meta) {
+// Corner-triangle size: a compact combo (3 letters) like the tileset one.
+static void draw_corner_size_combo(corner_size& size) {
+    static char const* const k_short[] = { "Nrm", "Sml", "Tny" };
+    static char const* const k_full[]  = { "Normal", "Small", "Tiny" };
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(46.f);
+    ImGui::SetNextWindowSizeConstraints({ 90.f, 0.f }, { FLT_MAX, FLT_MAX });
+    bool open = ImGui::BeginCombo("##corner", k_short[(int)size]);
+    if (!open && ImGui::IsItemHovered())
+        ImGui::SetTooltip("Corner size: %s", k_full[(int)size]);
+    if (open) {
+        for (int i = 0; i < 3; ++i)
+            if (ImGui::Selectable(k_full[i], (int)size == i)) size = (corner_size)i;
+        ImGui::EndCombo();
+    }
+}
+
+float draw_layer_strip(project_config& cfg, compiled const& meta) {
+    // Chips flow left to right and wrap onto new rows instead of scrolling.
+    // A chip's width is only known after it is drawn, so wrapping uses the
+    // widths measured on the previous frame (the redraw cooldown settles it).
+    static std::vector<float> widths;
+    widths.resize(cfg.layers.size(), 0.f);
+
+    ImGuiStyle const& st = ImGui::GetStyle();
+    float const start_y  = ImGui::GetCursorPosY();
+    float const right    = ImGui::GetWindowContentRegionMax().x;
+
+    // Tighter than the default: the strip is secondary to the grid.
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, { 4.f, 2.f });
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,   { 4.f, 2.f });
     for (int i = 0; i < (int)cfg.layers.size(); ++i) {
         auto& lc = cfg.layers[(size_t)i];
         ImGui::PushID(i);
-        if (i > 0) ImGui::SameLine();
+        if (i > 0) {
+            float x = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x
+                    + ImGui::GetScrollX();
+            if (x + st.ItemSpacing.x + widths[(size_t)i] <= right) ImGui::SameLine();
+        }
 
         ImGui::BeginChild("##layer_chip", { 0.f, 0.f },
                           ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeX
@@ -918,10 +1108,15 @@ void draw_layer_strip(project_config& cfg, compiled const& meta) {
         draw_mode_combo(lc.mode, numeric);
         if (lc.mode == layer_mode::tile)
             draw_tileset_combo(lc.tileset, cfg.tilesets);
+        if (lc.mode == layer_mode::corner)
+            draw_corner_size_combo(lc.corner);
 
+        widths[(size_t)i] = ImGui::GetWindowWidth();
         ImGui::EndChild();
         ImGui::PopID();
     }
+    ImGui::PopStyleVar(2);
+    return ImGui::GetCursorPosY() - start_y;
 }
 
 // ── settings window ───────────────────────────────────────────────────────────

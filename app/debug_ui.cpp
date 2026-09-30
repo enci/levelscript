@@ -368,7 +368,8 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed) {
         // A fixed-height, no-scrollbar window clips its content unless the
         // height also covers ImGui's own window padding (top + bottom).
         float bar_pad      = ImGui::GetStyle().WindowPadding.y * 2.f;
-        float statusbar_h  = ImGui::GetFrameHeight() + bar_pad;
+        const float status_pad_y = 3.f;   // slimmer than the control bar
+        float statusbar_h  = ImGui::GetTextLineHeight() + status_pad_y * 2.f;
         float controlbar_h = ImGui::GetFrameHeight() + bar_pad;
         viewport->WorkPos.y  += controlbar_h;   // reserve a top strip for the control bar
         viewport->WorkSize.y -= controlbar_h + statusbar_h;   // + a bottom strip for the status bar
@@ -378,7 +379,9 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed) {
         {
             ImGui::SetNextWindowPos(viewport->Pos);
             ImGui::SetNextWindowSize({ viewport->Size.x, controlbar_h });
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.f);   // pinned chrome stays square
             ImGui::Begin("##ControlBar", nullptr, k_bar_flags);
+            ImGui::PopStyleVar();
 
             // Icon button with a hover tooltip carrying the full label and
             // shortcut. When `active` is true it renders held-down (a "stays
@@ -472,15 +475,17 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed) {
         // ── grid (layer strip + canvas) ─────────────────────────────────────
         ImGui::Begin("VIEWPORT");
         {
-            // Leave room at the bottom for the layer strip.
-            ImGui::BeginChild("##grid", {0.f, -40.f}, false,
-                              ImGuiWindowFlags_HorizontalScrollbar);
+            // Leave room at the bottom for the layer strip; its height (wrapped
+            // rows) is measured each frame and applied on the next.
+            static float strip_h = 30.f;
+            ImGui::BeginChild("##grid", {0.f, -(strip_h + ImGui::GetStyle().ItemSpacing.y)},
+                              false, ImGuiWindowFlags_HorizontalScrollbar);
             draw_grid_composite(sc, run, cfg, tile_textures, cfg.cell_px());
             ImGui::EndChild();
 
             ImGui::BeginChild("##layer_strip", {0.f, 0.f}, false,
-                              ImGuiWindowFlags_HorizontalScrollbar);
-            draw_layer_strip(cfg, sc.meta);
+                              ImGuiWindowFlags_NoScrollbar);
+            strip_h = draw_layer_strip(cfg, sc.meta);
             ImGui::EndChild();
         }
         ImGui::End();
@@ -510,41 +515,77 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed) {
             ImGui::SetNextWindowPos({ viewport->Pos.x,
                                       viewport->Pos.y + viewport->Size.y - statusbar_h });
             ImGui::SetNextWindowSize({ viewport->Size.x, statusbar_h });
+
+            // VS Code (Dark+/Light+) style: a saturated bar with white text --
+            // blue while the script is healthy, red when the last (re)load
+            // failed. The right-hand chip is a darker block carrying the load
+            // status so a failure is hard to miss.
+            const ImVec4 bar_col  = sc.ok ? ImVec4(0.000f, 0.478f, 0.800f, 1.f)   // #007ACC
+                                          : ImVec4(0.780f, 0.180f, 0.180f, 1.f);
+            const ImVec4 chip_col = sc.ok ? ImVec4(0.000f, 0.360f, 0.600f, 1.f)
+                                          : ImVec4(0.520f, 0.070f, 0.070f, 1.f);
+            const ImVec4 text_col = { 1.f, 1.f, 1.f, 1.f };
+            const ImVec4 dim_col  = { 1.f, 1.f, 1.f, 0.78f };
+            ImGui::PushStyleColor(ImGuiCol_WindowBg, bar_col);
+            ImGui::PushStyleColor(ImGuiCol_Text, dim_col);
+            ImGui::PushStyleColor(ImGuiCol_TextDisabled, dim_col);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,
+                                { ImGui::GetStyle().WindowPadding.x, status_pad_y });
+            // Tooltips are deferred until the bar's style overrides are popped,
+            // so they keep the normal popup colors instead of white-on-white.
+            std::string bar_tip;
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.f);
             ImGui::Begin("##StatusBar", nullptr, k_bar_flags);
+            ImGui::PopStyleVar();
 
             std::string status = std::string(phosphor::PH_STEPS) + " stmt "
                 + std::to_string(run.current_stmt()) + "/"
                 + std::to_string(run.stmt_count);
             if (run.started && run.apps_in_stmt > 0)
                 status += "   apps=" + std::to_string(run.apps_in_stmt);
-            ImGui::TextDisabled("%s", status.c_str());
-            if (run.done) { ImGui::SameLine(); ImGui::TextDisabled("[done]"); }
+            ImGui::TextUnformatted(status.c_str());
+            if (run.done) { ImGui::SameLine(); ImGui::TextUnformatted("[done]"); }
 
             ImGui::SameLine(0.f, 24.f);
-            ImGui::TextDisabled("%s", phosphor::PH_DICE_FIVE);
+            ImGui::TextUnformatted(phosphor::PH_DICE_FIVE);
             ImGui::SameLine();
             char seed_hex[24];
             std::snprintf(seed_hex, sizeof(seed_hex), "%08llX",
                           (unsigned long long)seed);
-            ImGui::TextDisabled("%s", seed_hex);
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Click to copy");
+            ImGui::TextUnformatted(seed_hex);
+            if (ImGui::IsItemHovered()) bar_tip = "Click to copy";
             if (ImGui::IsItemClicked()) ImGui::SetClipboardText(seed_hex);
 
+            ImGui::SameLine(0.f, 24.f);
+            ImGui::Text("%s %d x %d", phosphor::PH_GRID_FOUR,
+                        run.snap.width(), run.snap.height());
+            if (ImGui::IsItemHovered()) bar_tip = "Grid size (columns x rows)";
+
+            // Load-status chip, flush against the right edge.
             if (!sc.status.empty()) {
-                ImGui::SameLine(0.f, 24.f);
-                if (sc.ok) {
-                    ImGui::TextDisabled("%s", phosphor::PH_CHECK_CIRCLE);
-                    ImGui::SameLine();
-                    ImGui::TextDisabled("%s", sc.status.c_str());
-                } else {
-                    ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "%s",
-                                       phosphor::PH_WARNING_CIRCLE);
-                    ImGui::SameLine();
-                    ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "%s",
-                                       sc.status.c_str());
-                }
+                std::string msg = std::string(sc.ok ? phosphor::PH_CHECK_CIRCLE
+                                                    : phosphor::PH_WARNING_CIRCLE)
+                                + "  " + sc.status;
+                const float chip_pad = 12.f;
+                ImVec2 wpos  = ImGui::GetWindowPos();
+                ImVec2 wsize = ImGui::GetWindowSize();
+                float  chip_w = std::min(ImGui::CalcTextSize(msg.c_str()).x + chip_pad * 2.f,
+                                         wsize.x * 0.6f);
+                ImVec2 c0 = { wpos.x + wsize.x - chip_w, wpos.y };
+                ImVec2 c1 = { wpos.x + wsize.x,          wpos.y + wsize.y };
+                ImDrawList* dl = ImGui::GetWindowDrawList();
+                dl->AddRectFilled(c0, c1, ImGui::GetColorU32(chip_col));
+                dl->PushClipRect(c0, c1, true);
+                dl->AddText({ c0.x + chip_pad, wpos.y + status_pad_y },
+                            ImGui::GetColorU32(text_col), msg.c_str());
+                dl->PopClipRect();
+                if (!sc.ok && ImGui::IsMouseHoveringRect(c0, c1))
+                    bar_tip = sc.full_error;
             }
             ImGui::End();
+            ImGui::PopStyleVar();
+            ImGui::PopStyleColor(3);
+            if (!bar_tip.empty()) ImGui::SetTooltip("%s", bar_tip.c_str());
         }
 
         // ── render ────────────────────────────────────────────────────────────
@@ -578,30 +619,32 @@ static void set_light_theme() {
     auto& style = ImGui::GetStyle();
     style.FrameRounding = 5.0f;
     style.ChildRounding = 5.0f;
+    style.PopupRounding = 5.0f;
+    style.WindowRounding = 5.0f;   // tooltips use this, not PopupRounding
     style.GrabRounding  = 5.0f;
     ImVec4* c = style.Colors;
     c[ImGuiCol_Text]                 = ImVec4(0.15f, 0.15f, 0.15f, 1.00f);
     c[ImGuiCol_TextDisabled]         = ImVec4(0.50f, 0.50f, 0.50f, 1.00f);
-    c[ImGuiCol_WindowBg]             = ImVec4(0.90f, 0.90f, 0.91f, 1.00f);
+    c[ImGuiCol_WindowBg]             = ImVec4(0.95f, 0.95f, 0.96f, 1.00f);
     c[ImGuiCol_ChildBg]              = ImVec4(0.00f, 0.00f, 0.00f, 0.05f);
     c[ImGuiCol_PopupBg]              = ImVec4(0.95f, 0.95f, 0.96f, 0.98f);
     c[ImGuiCol_Border]               = ImVec4(0.70f, 0.70f, 0.72f, 0.40f);
     c[ImGuiCol_BorderShadow]         = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
-    c[ImGuiCol_FrameBg]              = ImVec4(0.82f, 0.82f, 0.83f, 1.00f);
+    c[ImGuiCol_FrameBg]              = ImVec4(0.87f, 0.87f, 0.88f, 1.00f);
     c[ImGuiCol_FrameBgHovered]       = ImVec4(0.75f, 0.75f, 0.77f, 1.00f);
     c[ImGuiCol_FrameBgActive]        = ImVec4(0.68f, 0.68f, 0.70f, 1.00f);
-    c[ImGuiCol_TitleBg]              = ImVec4(0.82f, 0.82f, 0.83f, 1.00f);
+    c[ImGuiCol_TitleBg]              = ImVec4(0.87f, 0.87f, 0.88f, 1.00f);
     c[ImGuiCol_TitleBgActive]        = ImVec4(0.75f, 0.75f, 0.77f, 1.00f);
-    c[ImGuiCol_TitleBgCollapsed]     = ImVec4(0.90f, 0.90f, 0.91f, 0.75f);
-    c[ImGuiCol_MenuBarBg]            = ImVec4(0.86f, 0.86f, 0.87f, 1.00f);
-    c[ImGuiCol_ScrollbarBg]          = ImVec4(0.86f, 0.86f, 0.87f, 1.00f);
+    c[ImGuiCol_TitleBgCollapsed]     = ImVec4(0.95f, 0.95f, 0.96f, 0.75f);
+    c[ImGuiCol_MenuBarBg]            = ImVec4(0.91f, 0.91f, 0.92f, 1.00f);
+    c[ImGuiCol_ScrollbarBg]          = ImVec4(0.91f, 0.91f, 0.92f, 1.00f);
     c[ImGuiCol_ScrollbarGrab]        = ImVec4(0.70f, 0.70f, 0.72f, 1.00f);
     c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.60f, 0.60f, 0.62f, 1.00f);
     c[ImGuiCol_ScrollbarGrabActive]  = ImVec4(0.50f, 0.50f, 0.52f, 1.00f);
     c[ImGuiCol_CheckMark]            = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
     c[ImGuiCol_SliderGrab]           = ImVec4(0.55f, 0.55f, 0.57f, 1.00f);
     c[ImGuiCol_SliderGrabActive]     = ImVec4(0.45f, 0.45f, 0.47f, 1.00f);
-    c[ImGuiCol_Button]               = ImVec4(0.78f, 0.78f, 0.80f, 1.00f);
+    c[ImGuiCol_Button]               = ImVec4(0.83f, 0.83f, 0.85f, 1.00f);
     c[ImGuiCol_ButtonHovered]        = ImVec4(0.70f, 0.70f, 0.72f, 1.00f);
     c[ImGuiCol_ButtonActive]         = ImVec4(0.62f, 0.62f, 0.64f, 1.00f);
     c[ImGuiCol_Header]               = ImVec4(0.26f, 0.59f, 0.98f, 0.25f);
@@ -640,6 +683,8 @@ static void set_dark_theme() {
     auto& style = ImGui::GetStyle();
     style.FrameRounding = 5.0f;
     style.ChildRounding = 5.0f;
+    style.PopupRounding = 5.0f;
+    style.WindowRounding = 5.0f;   // tooltips use this, not PopupRounding
     style.GrabRounding  = 5.0f;
     ImVec4* c = style.Colors;
     c[ImGuiCol_Text]                 = ImVec4(0.85f, 0.85f, 0.85f, 1.00f);

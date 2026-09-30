@@ -6,7 +6,17 @@
 
 namespace ls {
 
-enum class layer_mode { text, color, tile, heatmap };
+enum class layer_mode { text, color, tile, heatmap, shape, corner };
+
+// Marker shape a tag value can be given (used by the shape layer mode).
+// Persisted by name, so the enum can grow without breaking old sidecars.
+enum class tag_shape { none, circle, ring, square, diamond, triangle, cross, star, hexagon };
+constexpr int k_tag_shape_count = 9;
+char const* shape_name(tag_shape s);
+tag_shape   shape_from_name(std::string const& s);
+
+// Corner-triangle leg length as a fraction of the cell.
+enum class corner_size { normal, small, tiny };
 
 struct layer_config {
     std::string name;
@@ -18,6 +28,7 @@ struct layer_config {
     // tag_colors below, so renaming a tileset in Settings breaks the
     // reference - re-pick it there if that happens.
     std::string tileset;
+    corner_size corner{corner_size::normal};   // Corner mode only
 };
 
 struct tileset_config {
@@ -42,6 +53,8 @@ struct project_config {
     std::vector<layer_config>     layers;   // composite order: index 0 = bottom
     // tag_name -> value_id -> 0xAABBGGRR
     std::unordered_map<std::string, std::unordered_map<int, uint32_t>> tag_colors;
+    // tag_name -> value_id -> shape; absent means tag_shape::none
+    std::unordered_map<std::string, std::unordered_map<int, tag_shape>> tag_shapes;
 
     // Load from <ls_path>.json; builds defaults from layer_names if absent.
     static project_config load(std::string const& ls_path,
