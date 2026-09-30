@@ -17,7 +17,7 @@
     },
     "keyword": {
       "name": "keyword.control.levelscript",
-      "match": "\\b(tag|layers|grid|of|number|rule|program|params|where|when|any|all|one|some|ordered|symmetry|rotation|weight|max|percent|policy|snapshot|incremental|stabilize|none|horizontal|vertical|ordered)\\b"
+      "match": "\\b(tag|layers|grid|of|number|rule|sequence|program|params|where|when|any|all|one|some|ordered|symmetry|rotation|weight|max|percent|policy|snapshot|incremental|stabilize|none|horizontal|vertical|ordered)\\b"
     },
     "operator": {
       "name": "keyword.operator.levelscript",
