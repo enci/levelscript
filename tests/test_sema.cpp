@@ -324,7 +324,7 @@ TEST_CASE("sema: complement is match-side only") {
 }
 
 TEST_CASE("sema: param scopes") {
-    // input param without a default (??7.3 #27)
+    // input param without a default (section 7.3, check 27)
     CHECK(compile_result("params { d: number }\n" + rprog)
           .has_error("must have a default"));
     // derived params read earlier params only
@@ -473,7 +473,7 @@ tag t3 { a, b, c }
 layers { g: grid of t3 }
 )";
 
-TEST_CASE("sema: variant dedup keys on the (match, write) pair (spec §5.6.2)") {
+TEST_CASE("sema: variant dedup keys on the (match, write) pair (spec section 5.6.2)") {
     SECTION("same LHS, different writes: the H-flip survives") {
         compile_result r(trio + "rule r(symmetry=horizontal) { g[a a] => g[b c] }\n" + rprog);
         REQUIRE(r.ok);
@@ -499,7 +499,7 @@ rule r(rotation=all) {
         REQUIRE(r.ok);
         CHECK(r.prog.rules[0].pairs.size() == 4);
     }
-    SECTION("{ any } item order is part of the key (accepted cost, §10.2)") {
+    SECTION("{ any } item order is part of the key (accepted cost, section 10.2)") {
         compile_result r(trio +
             "rule r(symmetry=horizontal) { g[a a] => { any g[b c] g[c b] } }\n" + rprog);
         REQUIRE(r.ok);
@@ -513,7 +513,7 @@ rule r(rotation=all) {
     }
 }
 
-TEST_CASE("sema: contextual names (spec §2.4)") {
+TEST_CASE("sema: contextual names (spec section 2.4)") {
     SECTION("none/horizontal/vertical/symmetry/rotation are legal names") {
         compile_result r(R"(
 tag none { horizontal, vertical }

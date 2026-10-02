@@ -1,4 +1,4 @@
-// Named sequences (spec §6.10) — the conformance suite ls-tests-sequence.md,
+// Named sequences (spec section 6.10) — the conformance suite ls-tests-sequence.md,
 // Q01–Q50, one TEST_CASE per Q. Harness conventions follow the suite:
 // iterations are read off stmt_stack(), "equivalent to program B" means
 // byte-identical levels for seeds 1–20 with default params.
@@ -87,7 +87,7 @@ int cell_sum(ls::level const& lv, char const* layer) {
     return s;
 }
 
-// The saturating counter of the suite's §3: `inc` raises the 1x1 cell by 1
+// The saturating counter of the suite's section 3: `inc` raises the 1x1 cell by 1
 // while it is below `cap`.
 std::string counter(int cap) {
     return R"(
@@ -801,10 +801,29 @@ sequence main {
     INFO(gen.error());
     REQUIRE(static_cast<bool>(gen));
     int wall = gen.tag("terrain.wall");
+    // The same fill on its own: identical draws, so the identical grid.
+    auto fill_only = make(cave_decls + "sequence main {\n resize(40, 25)\n all fill\n}\n");
+    REQUIRE(static_cast<bool>(fill_only));
+    auto isolated = [&](ls::grid g) {
+        int n = 0;
+        for (int y = 1; y < 24; ++y)
+            for (int x = 1; x < 39; ++x) {
+                bool v = g.at(x, y) == wall, like = false;
+                for (int dy = -1; dy <= 1; ++dy)
+                    for (int dx = -1; dx <= 1; ++dx)
+                        if ((dx || dy) && (g.at(x + dx, y + dy) == wall) == v) like = true;
+                if (!like) ++n;
+            }
+        return n;
+    };
     for (uint64_t seed = 1; seed <= 20; ++seed) {
         INFO("seed " << seed);
         auto t = run_trace(gen, seed);
-        CHECK(iterations(t, {2}) == 2);
+        // 2 iterations: one that smooths, one stable. A fill with no isolated
+        // cell at all (~1.7% of seeds) is stable at once: 1 iteration.
+        bool nothing_to_smooth =
+            isolated(fill_only.generate(fill_only.sequence("main"), seed)["level"]) == 0;
+        CHECK(iterations(t, {2}) == (nothing_to_smooth ? 1 : 2));
         // no isolated cell survives: every interior cell has a like neighbour
         ls::grid g = t.final["level"];
         for (int y = 1; y < 24; ++y)

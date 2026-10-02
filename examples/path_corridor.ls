@@ -1,4 +1,4 @@
-// Showcase (v0.7): `path` — the first structural operation (§6.6).
+// Showcase (v0.7): `path` — the first structural operation (section 6.6).
 //
 // A wall splits the map in two; the only opening is at (5, 5). `path` computes
 // a shortest floor-only route from the `door` marker to the `exit` marker and
@@ -7,7 +7,7 @@
 // Every shortest route must pass the gap, so its length is fixed:
 // manhattan((1,1)→(5,5)) + manhattan((5,5)→(9,1)) + 1 = 8 + 8 + 1 = 17 cells —
 // but WHICH equally-short corridor gets carved varies with the seed (ties break
-// by seed, §7.2). Downstream rules would consume the route with ordinary
+// by seed, section 7.2). Downstream rules would consume the route with ordinary
 // same-position reads (e.g. `marks[corridor] => level[floor]`).
 //
 // @seed 3

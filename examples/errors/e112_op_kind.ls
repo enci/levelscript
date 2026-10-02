@@ -1,4 +1,4 @@
-// E-op-7 (v0.7): an argument whose kind does not match the parameter (§7.3 #35).
+// E-op-7 (v0.7): an argument whose kind does not match the parameter (section 7.3, check 35).
 // @expect error
 // @expect stderr-contains must be an integer
 tag t { a }

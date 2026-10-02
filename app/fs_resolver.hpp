@@ -5,7 +5,7 @@
 #include <sstream>
 #include <string>
 
-// The tools' module resolver (spec §2.6, Appendix A): a `use` path is relative
+// The tools' module resolver (spec section 2.6, Appendix A): a `use` path is relative
 // to the using module's directory, '/'-separated. The canonical name is the
 // lexically normalized path, so every spelling of one file is one module.
 

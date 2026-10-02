@@ -15,7 +15,7 @@ static void usage(char const* argv0) {
 int main(int argc, char* argv[]) {
     std::optional<uint64_t> seed;
     std::string path;
-    std::string entry = "main";   // a tool convention (§6), changeable in the UI
+    std::string entry = "main";   // a tool convention (section 6), changeable in the UI
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];

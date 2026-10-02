@@ -7,10 +7,10 @@ namespace ls {
 
 struct source_loc {
     int line{0}, col{0};
-    int mod{0};   // module id within a compile (§2.6); labels diagnostics
+    int mod{0};   // module id within a compile (section 2.6); labels diagnostics
 };
 
-// ── expressions (spec §5.8) ──────────────────────────────────────────────────
+// ── expressions (spec section 5.8) ──────────────────────────────────────────────────
 
 enum class expr_kind {
     int_lit,       // integer literal
@@ -37,7 +37,7 @@ struct expr {
 
 // ── declarations ─────────────────────────────────────────────────────────────
 
-// A named union (spec §3): `blocker = wall | door` — a mask alias over the
+// A named union (spec section 3): `blocker = wall | door` — a mask alias over the
 // tagset's own members (values or earlier unions). Consumes no bit.
 struct tag_union {
     source_loc               loc;
@@ -68,7 +68,7 @@ struct layers_decl {
     std::vector<layer_decl> layers;
 };
 
-// ── params (spec §4.2) ───────────────────────────────────────────────────────
+// ── params (spec section 4.2) ───────────────────────────────────────────────────────
 
 // input:   `name: number = expr` — supplied at runtime, default is mandatory
 // derived: `name = expr`         — computed once at startup
@@ -107,7 +107,7 @@ struct pattern {
     std::vector<std::vector<cell>> cells;   // [row][col]; row widths checked in sema
 };
 
-// A recursive write-side term (spec §5.2): a leaf pattern, an `{ all }` block
+// A recursive write-side term (spec section 5.2): a leaf pattern, an `{ all }` block
 // (write every item simultaneously), or an `{ any }` block (pick one weighted
 // item). Items nest to any depth.
 struct write_term {
@@ -142,11 +142,11 @@ struct rule_decl {
 
 enum class strategy { one, some, all };
 
-// Execution policy (spec §6.7): what each application sees and how conflicts
+// Execution policy (spec section 6.7): what each application sees and how conflicts
 // are handled. Orthogonal to the count.
 enum class exec_policy { snapshot, incremental, stabilize };
 
-// One operation-call argument (spec §6.0). Positional when `name` is empty;
+// One operation-call argument (spec section 6.0). Positional when `name` is empty;
 // the value is an integer, a bare identifier (grid, tag value, enum word), or
 // a parenthesized expression.
 struct op_arg {
@@ -164,22 +164,22 @@ struct program_stmt {
     // op_call — resolved against the operation table in sema
     std::string         op_name;
     std::vector<op_arg> op_args;
-    // apply — count × policy (§6.7)
+    // apply — count × policy (section 6.7)
     strategy    strat{strategy::all};
     exec_policy pol{exec_policy::snapshot};
-    bool        policy_given{false};  // policy= written at all (§7.3 #37 on sequences)
-    bool        bad_policy{false};    // policy= had an unknown value (§7.3 #30)
+    bool        policy_given{false};  // policy= written at all (section 7.3, check 37 on sequences)
+    bool        bad_policy{false};    // policy= had an unknown value (section 7.3, check 30)
     std::string policy_raw;           // its raw text, for the diagnostic
     bool        is_percent{false};    // some(percent=P) instead of max
     int         max_count{0};
     int         percent{0};
-    std::string rule_name;            // a rule or a sequence (§6.10); resolved in sema
+    std::string rule_name;            // a rule or a sequence (section 6.10); resolved in sema
     source_loc  rule_name_loc;
-    // optional `when (expr)` guard (§6): boolean, params only, evaluated once
+    // optional `when (expr)` guard (section 6): boolean, params only, evaluated once
     expr_ptr    guard;
 };
 
-// A named statement list, applied by name like a rule (§6.10).
+// A named statement list, applied by name like a rule (section 6.10).
 struct sequence_decl {
     source_loc                loc;
     source_loc                name_loc;
@@ -189,7 +189,7 @@ struct sequence_decl {
 
 // ── file ─────────────────────────────────────────────────────────────────────
 
-// `use "path"` (§2.6) - resolved by the module loader, not the analyzer.
+// `use "path"` (section 2.6) - resolved by the module loader, not the analyzer.
 struct use_decl {
     source_loc  loc;
     std::string path;

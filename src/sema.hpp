@@ -10,17 +10,17 @@ namespace ls {
 // ── cell encoding ─────────────────────────────────────────────────────────────
 //
 // Tag grid cells store a 32-bit mask: bit 0 = empty, value i on bit i+1;
-// matching is any-overlap `(stored & mask) != 0` (spec §4.1). Number grid
+// matching is any-overlap `(stored & mask) != 0` (spec section 4.1). Number grid
 // cells store the integer directly with a dedicated empty sentinel.
 constexpr int64_t tag_empty = 0x1;
 constexpr int64_t num_empty = INT64_MIN;
 
 inline int64_t tag_bit(int value_id) { return int64_t{1} << (value_id + 1); }
 
-// The where pseudo-layer has no real grid id (§5.9).
+// The where pseudo-layer has no real grid id (section 5.9).
 constexpr int where_grid = -2;
 
-// ── compiled expressions (§5.8) ───────────────────────────────────────────────
+// ── compiled expressions (section 5.8) ───────────────────────────────────────────────
 //
 // Nodes live in one flat arena (`compiled::exprs`), referenced by index — no
 // pointer ownership, trivially copyable, and variant transforms share nodes
@@ -36,7 +36,7 @@ enum class ce_kind {
     add, sub, mul, div_,
     lt, le, gt, ge, eq, ne,
     and_, or_, bit_or,
-    // built-ins (§5.10): if is eager — both branches always evaluate
+    // built-ins (section 5.10): if is eager — both branches always evaluate
     if_, min_, max_, abs_, clamp_,
     random_,       // the one impure built-in: one PRNG draw per evaluation
     // emptiness tests (read the cell raw, bypassing number→0 coercion)
@@ -63,7 +63,7 @@ struct compiled_cell {
 };
 
 struct compiled_pattern {
-    int  grid_id{-1};        // layer index, or where_grid (§5.9)
+    int  grid_id{-1};        // layer index, or where_grid (section 5.9)
     bool is_number{false};
     bool is_where{false};
     int  rows{0}, cols{0};
@@ -72,7 +72,7 @@ struct compiled_pattern {
     compiled_cell const& at(int r, int c) const { return cells[r * cols + c]; }
 };
 
-// Compiled recursive write term (spec §5.2). The runtime resolves a tree to
+// Compiled recursive write term (spec section 5.2). The runtime resolves a tree to
 // its applied leaves per application ({ all } = every item, { any } = one
 // weighted draw per node); footprints/conflicts use every leaf, conservative
 // across { any } branches.
@@ -98,7 +98,7 @@ struct compiled_pair {
     std::vector<compiled_pattern> lhs;
     compiled_write_term           rhs;
     int                           sub_rule_idx{0};
-    // Which transform of the declared sub-rule this variant is (§5.6), as the
+    // Which transform of the declared sub-rule this variant is (section 5.6), as the
     // attributes produced it: rotation= then symmetry=. Identity is 0 / none.
     // Display and tooling only; the runtime never reads them.
     enum class mirror : uint8_t { none, h, v, both };
@@ -112,11 +112,11 @@ struct compiled_rule {
     std::vector<compiled_pair> pairs;   // all symmetry/rotation variants, deduped
 };
 
-// ── operations (spec §6.0) ────────────────────────────────────────────────────
+// ── operations (spec section 6.0) ────────────────────────────────────────────────────
 
 enum class op_kind { resize, upscale, trim, mirror, pad, path };
 
-// A compiled per-cell predicate (§6.0 `pred`): a bare tag reads its unique
+// A compiled per-cell predicate (section 6.0 `pred`): a bare tag reads its unique
 // layer with mask-overlap semantics; an expression is a boolean per cell.
 struct compiled_pred {
     bool    given{false};
@@ -137,7 +137,7 @@ struct compiled_op {
     op_kind kind{op_kind::trim};
     // resize/upscale dims; pad margin (w); mirror axis (w: 1 = horizontal)
     int w{0}, h{0};
-    // path (§6.6)
+    // path (section 6.6)
     compiled_pred  from, to;
     compiled_pred  passable;        // !given → default: non-empty in any layer
     int            into_grid{-1};
@@ -153,17 +153,17 @@ struct compiled_stmt {
     enum class kind { op_call, apply } what{kind::apply};
     source_loc  loc;
     compiled_op op;                       // op_call
-    strategy    strat{strategy::all};     // apply — count × policy (§6.7)
+    strategy    strat{strategy::all};     // apply — count × policy (section 6.7)
     exec_policy pol{exec_policy::snapshot};
     bool        is_percent{false};
     int         max_count{0};
     int         percent{0};
     int         rule_id{-1};   // apply over a rule
-    int         seq_id{-1};    // apply over a sequence (§6.10): a count only
+    int         seq_id{-1};    // apply over a sequence (section 6.10): a count only
     int         guard{-1};   // `when` expr arena index; -1 = unguarded
 };
 
-// A named statement list (§6.10), applied by name like a rule; one run of
+// A named statement list (section 6.10), applied by name like a rule; one run of
 // the body is an iteration.
 struct compiled_sequence {
     std::string                name;
@@ -178,15 +178,15 @@ struct compiled_layer {
 struct compiled {
     std::vector<std::string>              tag_names;
     std::vector<std::vector<std::string>> tag_values;   // [tag_id][value_id]
-    // named unions per tagset: (name, resolved mask) — §3
+    // named unions per tagset: (name, resolved mask) — section 3
     std::vector<std::vector<std::pair<std::string, int64_t>>> tag_unions;
     std::vector<compiled_layer>           layers;
     std::vector<compiled_rule>            rules;
     std::vector<compiled_sequence>        sequences;   // canonical order = API ids
-    std::vector<std::string>              modules;     // canonical names, canonical order (§2.6)
+    std::vector<std::string>              modules;     // canonical names, canonical order (section 2.6)
     std::vector<compiled_expr>            exprs;   // the expression arena
 
-    // params (§4.2): startup_exprs run once, in declaration order, when the
+    // params (section 4.2): startup_exprs run once, in declaration order, when the
     // inputs bind — a default only when its param was not supplied.
     std::vector<std::string> param_names;
     struct startup_expr { int param; int expr; bool is_default; };
@@ -228,7 +228,7 @@ struct compiled {
 
 struct module_closure;
 
-// Analyze a loaded module closure (§2.6) into a self-contained compiled
+// Analyze a loaded module closure (section 2.6) into a self-contained compiled
 // artifact. Returns false (with diagnostics) on any error. `best_effort`
 // keeps going through later phases despite errors — editor tooling wants
 // every table the closure still supports (plus the extra diagnostics), not a

@@ -25,7 +25,7 @@ struct parser {
     bool at_end() const          { return at(token_type::end); }
     bool accept(token_type t)    { if (at(t)) { eat(); return true; } return false; }
 
-    // Contextual names (spec §2.4): lexed as ident, matched by text.
+    // Contextual names (spec section 2.4): lexed as ident, matched by text.
     bool at_word(std::string_view w) const { return at(token_type::ident) && peek().text == w; }
     bool accept_word(std::string_view w)   { if (at_word(w)) { eat(); return true; } return false; }
 
@@ -51,12 +51,12 @@ struct parser {
     source_loc prev_loc() const { return {toks[pos - 1].line, toks[pos - 1].col, mod}; }
 
     // Two tokens touch (no whitespace between) — bare mask cells `a|b`, `!a`
-    // are whitespace-free; a spaced `a | b` is not one cell (spec §2.5).
+    // are whitespace-free; a spaced `a | b` is not one cell (spec section 2.5).
     bool adjacent(token const& a, token const& b) const {
         return a.line == b.line && a.col + (int)a.text.size() == b.col;
     }
 
-    // ── expressions (spec §5.8; C precedence, lowest to highest) ─────────────
+    // ── expressions (spec section 5.8; C precedence, lowest to highest) ─────────────
 
     expr_ptr make_expr(expr_kind k) {
         auto e = std::make_unique<expr>();
@@ -202,7 +202,7 @@ struct parser {
             if (!expect(token_type::ident, "a tag value name")) { eat_bad(); skip_seps(); continue; }
             source_loc name_loc = prev_loc();
             std::string name = toks[pos - 1].text;
-            if (at(token_type::equals)) {   // named union: blocker = wall | door (§3)
+            if (at(token_type::equals)) {   // named union: blocker = wall | door (section 3)
                 tag_union u;
                 u.loc = name_loc;
                 u.name = std::move(name);
@@ -222,7 +222,7 @@ struct parser {
     }
 
     void parse_layers(ast_file& out) {
-        if (out.has_layers)   // §7.3 #43
+        if (out.has_layers)   // section 7.3, check 43
             error_at(peek(), "only one 'layers' block per module");
         out.layers.loc = loc();
         out.has_layers = true;
@@ -247,7 +247,7 @@ struct parser {
         expect(token_type::rbrace, "'}'");
     }
 
-    // ── params (spec §4.2) ───────────────────────────────────────────────────
+    // ── params (spec section 4.2) ───────────────────────────────────────────────────
 
     void parse_params(ast_file& out) {
         if (out.has_params)
@@ -265,7 +265,7 @@ struct parser {
                 if (!expect(token_type::kw_number, "'number'")) { skip_seps(); continue; }
                 if (accept(token_type::equals))
                     p.value = parse_expr();
-                // a missing default is §7.3 #27 — reported in sema with p.loc
+                // a missing default is section 7.3, check 27 — reported in sema with p.loc
             } else {                           // derived: name '=' expr
                 p.is_derived = true;
                 if (!expect(token_type::equals, "':' or '='")) { skip_seps(); continue; }
@@ -305,7 +305,7 @@ struct parser {
         if (accept(token_type::star)) { c.kind = cell_kind::any;   return true; }
         if (accept(token_type::dot))  { c.kind = cell_kind::empty; return true; }
         if (at(token_type::integer))  { c.kind = cell_kind::number; c.number = eat().int_val; return true; }
-        if (at(token_type::lparen)) {   // '( expr )' — computed cell (§5.8)
+        if (at(token_type::lparen)) {   // '( expr )' — computed cell (section 5.8)
             eat();
             c.kind = cell_kind::expr_cell;
             c.value = parse_expr();
@@ -333,7 +333,7 @@ struct parser {
 
     bool parse_pattern(pattern& p) {
         p.loc = loc();
-        if (at(token_type::kw_where)) {   // where pseudo-layer (§5.9)
+        if (at(token_type::kw_where)) {   // where pseudo-layer (section 5.9)
             p.is_where = true;
             eat();
         } else {
@@ -377,7 +377,7 @@ struct parser {
             r.rotation_angles.push_back(eat().int_val);
             return;
         }
-        if (accept(token_type::lbrace)) {   // rotation={a, b, …} — the §3 set brackets
+        if (accept(token_type::lbrace)) {   // rotation={a, b, …} — the section 3 set brackets
             bool got = false;
             while (at(token_type::integer)) {
                 r.rotation_angles.push_back(eat().int_val);
@@ -414,7 +414,7 @@ struct parser {
                 if (!expect(token_type::equals, "'='")) return;
                 parse_rotation_value(r);
             } else {
-                // generic `attr ::= IDENT '=' attr_value` (§5.1): parse it
+                // generic `attr ::= IDENT '=' attr_value` (section 5.1): parse it
                 // whole so an unknown name is one diagnostic, not a cascade
                 error_at(peek(), "unknown rule attribute '" + peek().text +
                          "' (expected symmetry or rotation)");
@@ -460,7 +460,7 @@ struct parser {
         return true;
     }
 
-    // ── write side: a recursive write term (spec §5.2) ───────────────────────
+    // ── write side: a recursive write term (spec section 5.2) ───────────────────────
 
     bool parse_write_term(write_term& t, bool weight_allowed) {
         t.loc = loc();
@@ -489,7 +489,7 @@ struct parser {
         if (accept(token_type::kw_all))      is_any = false;
         else if (accept(token_type::kw_any)) is_any = true;
         else {
-            if (at(token_type::kw_ordered))   // 'ordered' is body-level only (§7.3 #29)
+            if (at(token_type::kw_ordered))   // 'ordered' is body-level only (section 7.3, check 29)
                 error_at(peek(), "'ordered' is a body-level combinator; it cannot "
                          "appear on the write side");
             else
@@ -537,7 +537,7 @@ struct parser {
 
         // Body-level combinator: `rule r { all pair pair … }` — multiple
         // independent sub-rules; `ordered` makes declaration order a priority
-        // (spec §5.2). A single-pair body has no combinator.
+        // (spec section 5.2). A single-pair body has no combinator.
         if (at(token_type::kw_all) || at(token_type::kw_any) ||
             at(token_type::kw_ordered)) {
             r.body = at(token_type::kw_all)     ? body_combinator::all
@@ -567,7 +567,7 @@ struct parser {
     // ── program ──────────────────────────────────────────────────────────────
 
     // policy = snapshot | incremental | stabilize; an unknown value is
-    // recorded raw and rejected in sema (§7.3 #30).
+    // recorded raw and rejected in sema (section 7.3, check 30).
     void parse_policy_arg(program_stmt& s) {
         eat();   // 'policy'
         s.policy_given = true;
@@ -672,7 +672,7 @@ struct parser {
         expect(token_type::rparen, "')'");
     }
 
-    // statement_list (§6) - the body of `program` and of every `sequence`.
+    // statement_list (section 6) - the body of `program` and of every `sequence`.
     // `where` names the enclosing sequence for diagnostics ("" = program).
     void parse_statement_list(std::vector<program_stmt>& out, std::string const& where) {
         skip_newlines();
@@ -697,7 +697,7 @@ struct parser {
                 skip_newlines();
                 continue;
             }
-            // optional `when (expr)` guard (§6)
+            // optional `when (expr)` guard (section 6)
             if (accept(token_type::kw_when)) {
                 if (expect(token_type::lparen, "'('")) {
                     s.guard = parse_expr();
@@ -709,7 +709,7 @@ struct parser {
         }
     }
 
-    // use_decl ::= 'use' STRING   (§2.6) - only at the head of a file
+    // use_decl ::= 'use' STRING   (section 2.6) - only at the head of a file
     void parse_use(ast_file& out, bool after_decls) {
         source_loc l = loc();
         eat();   // 'use'
@@ -721,7 +721,7 @@ struct parser {
         out.uses.push_back({l, toks[pos - 1].text});
     }
 
-    // `program { ... }` was removed in 0.7 (§6). Say how to migrate, then
+    // `program { ... }` was removed in 0.7 (section 6). Say how to migrate, then
     // parse the block as `sequence main` so the rest of the file is checked.
     void parse_removed_program(ast_file& out) {
         error_at(peek(), "'program' blocks were removed in 0.7; write "
@@ -737,7 +737,7 @@ struct parser {
         out.sequences.push_back(std::move(sq));
     }
 
-    // sequence_decl ::= 'sequence' IDENT '{' statement_list '}'   (§6.10)
+    // sequence_decl ::= 'sequence' IDENT '{' statement_list '}'   (section 6.10)
     void parse_sequence(ast_file& out) {
         sequence_decl sq;
         sq.loc = loc();

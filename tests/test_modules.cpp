@@ -1,4 +1,4 @@
-// Modules and entries (spec 0.7: §2.6 modules, §6 entries, Appendix A).
+// Modules and entries (spec 0.7: section 2.6 modules, section 6 entries, Appendix A).
 // Every test resolves through an in-memory file map; a module's canonical
 // name is its path as written.
 #include "test_support.hpp"
@@ -31,7 +31,7 @@ bool has(std::string const& text, std::string const& needle) {
     return text.find(needle) != std::string::npos;
 }
 
-// The §2.6 example: dungeon.ls -> carve.ls -> schema.ls.
+// The section 2.6 example: dungeon.ls -> carve.ls -> schema.ls.
 files spec_example() {
     files f;
     f.src["schema.ls"] = "tag algo { R, W }\nlayers { level: grid of algo }\n";
@@ -45,7 +45,7 @@ files spec_example() {
 
 }  // namespace
 
-// ── §2.6: the closure, canonical order, visibility ────────────────────────────
+// ── section 2.6: the closure, canonical order, visibility ────────────────────────────
 
 TEST_CASE("modules: the spec example compiles and runs") {
     auto f = spec_example();
@@ -172,7 +172,7 @@ TEST_CASE("modules: a path predicate considers only the grids its module sees (6
     CHECK(has(f.compile("root.ls").error(), "is ambiguous"));
 }
 
-// ── §7.3 checks 9, 39-43 ──────────────────────────────────────────────────────
+// ── section 7.3, checks 9, 39-43 ──────────────────────────────────────────────────────
 
 TEST_CASE("modules: an unresolved use is check 9") {
     files f;
@@ -252,7 +252,7 @@ TEST_CASE("modules: a module compiles identically on its own (2.6)") {
     CHECK(alone.generate(alone.sequence("carve"), 1).width() == 16);
 }
 
-// ── §6 entries ────────────────────────────────────────────────────────────────
+// ── section 6 entries ────────────────────────────────────────────────────────────────
 
 static char const* two_entries = R"(
 layers { tiles: grid of number }

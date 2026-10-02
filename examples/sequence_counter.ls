@@ -1,4 +1,4 @@
-// Named sequence (§6.10): a saturating counter applied to a fixpoint.
+// Named sequence (section 6.10): a saturating counter applied to a fixpoint.
 // `all tick` iterates the body until an iteration changes nothing: the
 // counter climbs to its cap of 3, then one more (stable) iteration ends it.
 // No randomness, so this golden is identical on every platform.

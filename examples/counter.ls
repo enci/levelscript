@@ -2,7 +2,7 @@
 // Showcase (v0.3): a number grid used as a counter via a self-read expression.
 //
 // `bump` matches any cell that already holds a number and writes that value
-// plus one. Because matches read the pre-statement snapshot (§7.1), every
+// plus one. Because matches read the pre-statement snapshot (section 7.1), every
 // cell increments once per `all bump` pass. Three passes → every cell holds 3.
 //
 // @expect run-ok

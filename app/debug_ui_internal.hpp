@@ -69,9 +69,9 @@ void draw_shape(ImDrawList* dl, ImVec2 c, float r, tag_shape shape, ImU32 col);
 struct script {
     std::string path;
     generator   gen;    // execution factory -- the public API surface
-    ast_file    ast;    // display metadata only: the closure, merged (§2.6)
+    ast_file    ast;    // display metadata only: the closure, merged (section 2.6)
     compiled    meta;   // display metadata only
-    // The entry sequence a run applies (§6). The name survives reloads; the
+    // The entry sequence a run applies (section 6). The name survives reloads; the
     // id is re-resolved on each, falling back to the first sequence.
     std::string entry_name{"main"};
     int         entry{-1};
@@ -139,7 +139,7 @@ struct debug_run {
         if (done) return false;
         if (!gen.step()) { done = true; return false; }
         started = true;
-        // a new leaf statement - at top level or inside a sequence (§6.10)
+        // a new leaf statement - at top level or inside a sequence (section 6.10)
         int s = gen.statement_index();
         auto st = gen.stmt_stack();
         bool same = s == counted_stmt && st.size() == counted_stack.size();
@@ -167,7 +167,7 @@ struct debug_run {
 
     bool busy() const { return cmd != command::none; }
 
-    // Dotted statement path of the first `n` frames: "2.0.1" (§6.10 frames).
+    // Dotted statement path of the first `n` frames: "2.0.1" (section 6.10 frames).
     static std::string dotted(std::vector<stmt_frame> const& st, size_t n) {
         std::string p;
         for (size_t k = 0; k < n && k < st.size(); ++k) {

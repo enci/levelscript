@@ -7,7 +7,7 @@ namespace ls {
 
 namespace {
 
-// ── pattern transforms (spec §5.6, §10.3) ────────────────────────────────────
+// ── pattern transforms (spec section 5.6, section 10.3) ────────────────────────────────────
 //
 // Applied at compile time to expand symmetry/rotation variants. The both-axis
 // flip IS the 180° rotation, so flip_both doubles as rot180; the per-sub-rule
@@ -79,7 +79,7 @@ bool write_terms_equal(compiled_write_term const& a, compiled_write_term const& 
     return true;
 }
 
-// Variant dedup key (spec §5.6.2): two variants are duplicates iff both the
+// Variant dedup key (spec section 5.6.2): two variants are duplicates iff both the
 // match side and the write tree are structurally equal. A same-LHS variant
 // with different writes survives as its own candidate.
 bool pairs_equal(compiled_pair const& a, compiled_pair const& b) {
@@ -89,7 +89,7 @@ bool pairs_equal(compiled_pair const& a, compiled_pair const& b) {
     return write_terms_equal(a.rhs, b.rhs);
 }
 
-// Expression value kinds (§5.8).
+// Expression value kinds (section 5.8).
 enum class val_type { num, mask, boolean };
 
 struct analyzer {
@@ -103,7 +103,7 @@ struct analyzer {
     std::vector<int> tag_mod, layer_mod, param_mod;
 
     // Identifier scope for the position being compiled. Cell/where exprs are
-    // permissive; `when` guards and param exprs are restricted (§4.2/§6).
+    // permissive; `when` guards and param exprs are restricted (section 4.2/section 6).
     struct scope {
         bool allow_grids{true};
         bool allow_pos{true};      // x / y / width / height
@@ -119,7 +119,7 @@ struct analyzer {
         diags.warning(label(loc), loc.line, loc.col, std::move(msg));
     }
 
-    // §2.6 visibility: a module sees itself and the modules it uses directly.
+    // section 2.6 visibility: a module sees itself and the modules it uses directly.
     // A name declared in the closure but not seen is check 8, reported with
     // its declaring module so the fix is in the message.
     bool sees(int from, int decl) const { return mods.sees[(size_t)from][(size_t)decl] != 0; }
@@ -129,7 +129,7 @@ struct analyzer {
               "module '" + mods.names[(size_t)decl] + "', which this module does not use");
     }
 
-    // ── expressions (§5.8) ───────────────────────────────────────────────────
+    // ── expressions (section 5.8) ───────────────────────────────────────────────────
 
     int add_expr(compiled_expr e) {
         out.exprs.push_back(e);
@@ -401,7 +401,7 @@ struct analyzer {
                 error(t.loc, "duplicate tag '" + t.name + "'");
             if (t.values.empty() && t.unions.empty())
                 error(t.loc, "tagset '" + t.name + "' has no values");
-            if ((int)t.values.size() > 30)   // §3: bits 1..30; 0 = empty, 31 reserved
+            if ((int)t.values.size() > 30)   // section 3: bits 1..30; 0 = empty, 31 reserved
                 error(t.loc, "tagset '" + t.name + "' has " +
                       std::to_string(t.values.size()) + " values; the maximum is 30");
             std::vector<std::string> vals;
@@ -418,7 +418,7 @@ struct analyzer {
             out.tag_values.push_back(std::move(vals));
             tag_mod.push_back(t.loc.mod);
 
-            // Named unions (§3): resolve in declaration order; a member is a
+            // Named unions (section 3): resolve in declaration order; a member is a
             // value or an earlier union of this tagset; a union shares the
             // value namespace and consumes no bit.
             int tid = (int)out.tag_names.size() - 1;
@@ -443,7 +443,7 @@ struct analyzer {
 
         for (auto const& l : ast.layers.layers) {
             check_name(l.loc, "grid", l.name);
-            if (out.layer_id(l.name) >= 0) {   // §7.3 #42, closure-wide
+            if (out.layer_id(l.name) >= 0) {   // section 7.3, check 42, closure-wide
                 error(l.loc, "duplicate grid '" + l.name + "'");
                 continue;
             }
@@ -468,7 +468,7 @@ struct analyzer {
                 error(p.loc, "duplicate param '" + p.name + "'");
                 continue;
             }
-            // §7.3 #27: every input param must carry a default.
+            // section 7.3, check 27: every input param must carry a default.
             if (!p.is_derived && !p.value)
                 error(p.loc, "input param '" + p.name +
                       "' must have a default, e.g. '" + p.name + ": number = 0'");
@@ -477,7 +477,7 @@ struct analyzer {
         }
     }
 
-    // Param startup expressions (§4.2): derived params and input defaults share
+    // Param startup expressions (section 4.2): derived params and input defaults share
     // one discipline — earlier params only, no grids, no position/dimensions.
     void compile_params() {
         for (int i = 0; i < (int)ast.params.size(); ++i) {
@@ -497,7 +497,7 @@ struct analyzer {
     // ── rules ────────────────────────────────────────────────────────────────
 
     // Compile one pattern; `exp_rows/exp_cols` enforce the shape constraint
-    // (spec §5.4, recursive over the write tree) — 0 means "sets the reference".
+    // (spec section 5.4, recursive over the write tree) — 0 means "sets the reference".
     compiled_pattern compile_pattern(pattern const& p, int exp_rows, int exp_cols,
                                      bool is_rhs) {
         compiled_pattern cp;
@@ -505,7 +505,7 @@ struct analyzer {
         if (p.is_where) {
             cp.grid_id  = where_grid;
             cp.is_where = true;
-            if (is_rhs)   // §7.3 #11
+            if (is_rhs)   // section 7.3, check 11
                 error(p.loc, "'where' is a match-side pseudo-layer; it cannot "
                       "appear on the write side");
         } else {
@@ -550,7 +550,7 @@ struct analyzer {
                                bool is_where, bool is_rhs) {
         compiled_cell cc;
 
-        if (is_where) {   // where cells are always parenthesized booleans (§5.9)
+        if (is_where) {   // where cells are always parenthesized booleans (section 5.9)
             if (in.kind != cell_kind::expr_cell) {
                 error(in.loc, "'where' cells must be a parenthesized boolean expression");
                 cc.what = compiled_cell::kind::expr;
@@ -593,7 +593,7 @@ struct analyzer {
                     continue;
                 }
                 if (a.negate) {
-                    if (is_rhs)   // §7.3 #15: complement is match-side only
+                    if (is_rhs)   // section 7.3, check 15: complement is match-side only
                         error(a.loc, "tag complement '!" + a.name +
                               "' is not allowed on the write side");
                     mask |= full & ~m;
@@ -638,7 +638,7 @@ struct analyzer {
     }
 
     // Within one { all } write block, two items may not write the same grid at
-    // the same cell — a write-write ambiguity (spec §7.3 #31).
+    // the same cell — a write-write ambiguity (spec section 7.3, check 31).
     void check_all_no_overlap(compiled_write_term const& all_node, source_loc loc) {
         auto key = [](int g, int r, int c) {
             return ((int64_t)g << 40) | ((int64_t)r << 20) | (int64_t)c;
@@ -684,7 +684,7 @@ struct analyzer {
                 if (seen.name == r.name)
                     error(r.loc, "duplicate rule '" + r.name + "'");
 
-            // attribute validation (spec §7.3 #7/#18)
+            // attribute validation (spec section 7.3, checks 7/18)
             if (r.symmetry != "none" && r.symmetry != "horizontal" &&
                 r.symmetry != "vertical" && r.symmetry != "all")
                 error(r.loc, "invalid value '" + r.symmetry +
@@ -695,7 +695,7 @@ struct analyzer {
                           "'; allowed angles are 90, 180, 270");
 
             // symmetry=all is four variants: identity + H + V + both-axis; the
-            // both-axis/180° coincidence dedups below (spec §5.6.1, v0.6.2).
+            // both-axis/180° coincidence dedups below (spec section 5.6.1, v0.6.2).
             std::vector<transform> syms = {transform::identity};
             if (r.symmetry == "horizontal") syms.push_back(transform::flip_h);
             else if (r.symmetry == "vertical") syms.push_back(transform::flip_v);
@@ -715,7 +715,7 @@ struct analyzer {
             cr.body = r.body;
             // Expand each sub-rule into its variants; dedup by (match, write)
             // equality, scoped per sub-rule so same-LHS sub-rules both survive
-            // (§5.6.2, §10.2).
+            // (section 5.6.2, section 10.2).
             for (int bi = 0; bi < (int)r.pairs.size(); ++bi) {
                 compiled_pair base = compile_base_pair(r.pairs[bi]);
                 base.sub_rule_idx = bi;
@@ -748,7 +748,7 @@ struct analyzer {
         }
     }
 
-    // ── reductivity check (LevelScript addition; MGSL §6.9 left this to the
+    // ── reductivity check (LevelScript addition; MGSL section 6.9 left this to the
     //    author). A sub-rule *definitely* sustains the fixpoint when no write
     //    that happens on every resolution ({ any } branches don't count)
     //    overwrites one of its own LHS-constrained cells with a value that no
@@ -801,9 +801,9 @@ struct analyzer {
         }
     }
 
-    // ── program (operation table, §6.0) ──────────────────────────────────────
+    // ── program (operation table, section 6.0) ──────────────────────────────────────
 
-    // ── the operation table (§6.0): a closed set resolved by name, exactly
+    // ── the operation table (section 6.0): a closed set resolved by name, exactly
     //    like expression built-ins. Adding an operation = a row here + an
     //    executor in the machine; no grammar or keyword change. ──────────────
 
@@ -976,7 +976,7 @@ struct analyzer {
         return e;
     }
 
-    // ── argument binding + per-op compilation (§7.3 #32–36) ─────────────────
+    // ── argument binding + per-op compilation (section 7.3, check 32–36) ─────────────────
 
     bool compile_op_call(program_stmt const& s, compiled_op& op) {
         op_spec const* spec = nullptr;
@@ -1109,7 +1109,7 @@ struct analyzer {
         return true;
     }
 
-    // ── statements (§6): the program body and every sequence body ──────────
+    // ── statements (section 6): the program body and every sequence body ──────────
 
     // Levenshtein distance - did-you-mean for unknown rule/sequence names.
     static int edit_distance(std::string const& a, std::string const& b) {
@@ -1142,7 +1142,7 @@ struct analyzer {
         return best.empty() ? "" : "; did you mean " + kind + " '" + best + "'?";
     }
 
-    // Rules and sequences share one namespace (§7.3 #39). Every sequence gets
+    // Rules and sequences share one namespace (section 7.3, check 39). Every sequence gets
     // a slot, duplicates included, so out.sequences[i] is ast.sequences[i];
     // name lookups find the first declaration.
     void register_sequences() {
@@ -1203,7 +1203,7 @@ struct analyzer {
                 if (s.strat == strategy::some && !s.is_percent && s.max_count == 0)
                     error(s.loc, "'some(max=0)' applies no matches; did you mean a different strategy?");
                 if (cs.seq_id >= 0) {
-                    // §7.3 #37: a sequence application takes a count only.
+                    // section 7.3, check 37: a sequence application takes a count only.
                     if (s.policy_given)
                         error(s.loc, "'policy=' is not valid on sequence '" + s.rule_name +
                               "'; each statement inside a sequence carries its own policy");
@@ -1212,24 +1212,24 @@ struct analyzer {
                               s.rule_name + "'; use 'some(max=N)', or 'percent' on the "
                               "statements inside it");
                 } else {
-                    // §7.3 #30: unknown policy value.
+                    // section 7.3, check 30: unknown policy value.
                     if (s.bad_policy)
                         error(s.loc, "unknown policy '" + s.policy_raw +
                               "'; expected snapshot, incremental, or stabilize" + ctx);
-                    // §7.3 #28: invalid count/policy combination.
+                    // section 7.3, check 28: invalid count/policy combination.
                     if (s.is_percent && s.pol != exec_policy::snapshot)
                         error(s.loc, "'percent' requires the default 'snapshot' policy" + ctx);
                     if (s.strat == strategy::one && s.pol == exec_policy::stabilize)
                         error(s.loc, "'one' with 'policy=stabilize' is contradictory "
                               "(a single application cannot reach a sweep fixpoint)" + ctx);
-                    // Reductivity warning (§6.9 — LevelScript addition): an
+                    // Reductivity warning (section 6.9 — LevelScript addition): an
                     // `all(policy=incremental)` fixpoint over a rule whose write
                     // never invalidates its own match cannot terminate.
                     if (s.strat == strategy::all && s.pol == exec_policy::incremental)
                         check_reductive(out.rules[cs.rule_id], s.loc);
                 }
             }
-            // `when (expr)` guard (§6): boolean, params only — no grids, no
+            // `when (expr)` guard (section 6): boolean, params only — no grids, no
             // position/dimensions (there is no candidate position or committed
             // size at statement scope).
             if (s.guard) {
@@ -1244,7 +1244,7 @@ struct analyzer {
         }
     }
 
-    // §7.3 #38: a sequence that applies itself, directly or through others.
+    // section 7.3, check 38: a sequence that applies itself, directly or through others.
     void check_sequence_cycles() {
         int n = (int)out.sequences.size();
         std::vector<int> state(n, 0);   // 0 new, 1 on the DFS path, 2 done
@@ -1281,7 +1281,7 @@ struct analyzer {
     // The operation that changes the grid dimensions on every iteration of
     // sequence `sid` ("" if none is certain): an unguarded non-identity
     // upscale/pad, directly or through unguarded nested applications (every
-    // count runs at least one iteration). §6.10.
+    // count runs at least one iteration). section 6.10.
     std::string dims_changer(int sid, std::vector<char>& seen) const {
         if (seen[sid]) return "";
         seen[sid] = 1;
@@ -1298,7 +1298,7 @@ struct analyzer {
         return "";
     }
 
-    // §7.4 warning 2: `all S` where no iteration can be stable.
+    // section 7.4 warning 2: `all S` where no iteration can be stable.
     void warn_unstable_fixpoints(std::vector<compiled_stmt> const& stmts) {
         for (auto const& st : stmts) {
             if (st.what != compiled_stmt::kind::apply || st.seq_id < 0 ||

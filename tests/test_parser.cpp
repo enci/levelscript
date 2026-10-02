@@ -371,7 +371,7 @@ TEST_CASE("parser: named unions in the tag block") {
     CHECK(ast.tags[0].unions[0].members == std::vector<std::string>{"wall", "door"});
 }
 
-TEST_CASE("parser: contextual names in their grammar slots (spec §2.4)") {
+TEST_CASE("parser: contextual names in their grammar slots (spec section 2.4)") {
     auto ast = parse_ok(R"(
 rule a(symmetry=none, rotation=none) { g[.] => g[x] }
 rule b(rotation=all, symmetry=vertical) { g[.] => g[x] }
@@ -395,7 +395,7 @@ sequence main {
     CHECK(s[2].op_args[0].ident == "vertical");
 }
 
-TEST_CASE("parser: contextual names are legal declaration names (spec §2.4)") {
+TEST_CASE("parser: contextual names are legal declaration names (spec section 2.4)") {
     auto ast = parse_ok(R"(
 tag none { horizontal, vertical, symmetry, rotation }
 layers { none: grid of none }
@@ -412,7 +412,7 @@ TEST_CASE("parser: an unclosed pattern reports the missing ']' once") {
     CHECK(diags.all[0].message.find("expected ']'") != std::string::npos);
 }
 
-TEST_CASE("parser: an unknown attribute is parsed whole — one diagnostic (§5.1)") {
+TEST_CASE("parser: an unknown attribute is parsed whole — one diagnostic (section 5.1)") {
     for (char const* attrs : {"colour=red", "colour=3", "colour=all", "colour={90, 180}"}) {
         diagnostics diags;
         parse(std::string("rule r(") + attrs + ") { g[.] => g[a] }\n", "test", diags);

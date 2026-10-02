@@ -914,15 +914,15 @@ The snapshot mechanism is independent of the write-protection mask (section 6.8)
 
 ### 7.2 Determinism
 
-A LevelScript run's output is a pure function of **(entry, seed, params, implementation version)**. Entry, seed, and params are part of the runtime invocation, not the source; given the same entry, seed, and parameter values (section 4.2), a given build of the implementation produces the same output, bit for bit.
+A LevelScript run's output is a pure function of **(entry, seed, params, implementation version)**. Entry, seed, and params are part of the runtime invocation, not the source; given the same entry, seed, and parameter values (section 4.2), an implementation version produces the same output, bit for bit, **on every platform and compiler**. A seed therefore names one level everywhere the version runs, which is what curated seed pools rely on.
 
-The mechanism is a **single sequential PRNG stream** (the reference implementation uses `mt19937_64`, seeded from the invocation seed) with a **pinned draw order**: every stochastic decision - candidate shuffling, weighted `{ any }` selection, `random(...)` calls, `path` tie keys - consumes draws from that one stream at points fixed by the execution model (section 10.6). There is **no position-keyed PRNG**: one stream is deliberately kept for simplicity, accepting the relaxed cross-version claim below (a position-keyed PRNG would decouple draws from evaluation order and permit parallel matching; it remains a possible future change).
+The mechanism is a **single sequential PRNG stream** - `mt19937_64` as specified by the C++ standard, seeded with the 64-bit invocation seed - with **pinned draw primitives** (section 10.6: every mapping from the stream to a decision is integer arithmetic defined in this document, never a standard-library distribution or shuffle, whose algorithms differ between libraries) and a **pinned draw order**: every stochastic decision - candidate shuffling, weighted `{ any }` selection, `random(...)` calls, `path` tie keys - consumes draws from that one stream at points fixed by the execution model (section 10.6). There is **no position-keyed PRNG**: one stream is deliberately kept for simplicity, accepting the relaxed cross-version claim below (a position-keyed PRNG would decouple draws from evaluation order and permit parallel matching; it remains a possible future change).
 
 Consequences:
 - `when` guards and param expressions are evaluated **once** (params at startup, a guard when its statement is reached), so each is constant for the remainder of the run; a `random` there draws once, reproducibly.
 - The source of a generator is its whole closure (section 2.6). Reordering `use` declarations can change canonical order, and with it the layer order and the param evaluation order; when a param expression calls `random`, that shifts the draw sequence.
 - Changing an input param may shift the draw sequence and cascade through the rest of the run - expected in PCG, not a determinism defect (a small input change is not expected to produce a small output change).
-- Determinism is **per implementation version**: a future version may change evaluation/scan/shuffle order and remain internally deterministic; cross-version (and cross-implementation) reproducibility of specific outputs is not promised. What *is* promised across versions is the semantics of this document, not the byte-identical artifact of a given seed.
+- Determinism is **per implementation version**, not per build: every build of a version agrees, on every platform. A future version may change evaluation/scan/shuffle order and remain deterministic; cross-version (and cross-implementation) reproducibility of specific outputs is not promised. What *is* promised across versions is the semantics of this document, not the byte-identical artifact of a given seed.
 
 ### 7.3 Compile-time checks
 
@@ -1155,7 +1155,7 @@ All policies build from one structure: a vector of **candidate slots**, each a s
 **Selection per policy:**
 - `snapshot` / `stabilize` (per sweep): collect, seeded-shuffle, pull in shuffle order under the (grid, cell) write mask, stop at count. Shuffling is what gives variants equal priority.
 - `incremental`: collect, pick **one** uniformly (a single draw; under `ordered`, uniformly within the highest-priority group), apply, **re-collect** (the write changed the match set); repeat.
-- `ordered` is a **sort of the vector**, not a per-anchor short-circuit: group by sub-rule priority, shuffle within each group, then consume exactly as the shuffled vector would be by the active policy.
+- `ordered` is a **sort of the vector**, not a per-anchor short-circuit: the whole vector is shuffled (one Fisher-Yates pass, section 10.6), then **stably** sorted by sub-rule priority - so each priority group keeps its shuffled order - then consumed exactly as the shuffled vector would be by the active policy.
 
 **Parallelism (future).** The split makes the parallelizable phase explicit - independent match-testing over the candidate vector: `snapshot` matching is embarrassingly parallel (all vs one snapshot) except when the match side draws (`random` shares the one stream and serializes; a position-keyed PRNG would lift this, section 9); `stabilize` is parallel within a sweep, serial across sweeps; `incremental` is inherently sequential.
 
@@ -1178,7 +1178,18 @@ A single PRNG stream (`mt19937_64` in the reference implementation), seeded from
 
 A sequence application (section 6.10) adds no draw sites: its body statements draw per items 2-6 as each one is reached, and the stability check draws nothing.
 
-Determinism is per (seed, params, implementation version) - section 7.2.
+**Draw primitives.** Every draw site maps the stream to its decision with one of the following, in unsigned 64-bit integer arithmetic. They are part of the determinism contract (section 7.2): an implementation must reproduce them exactly, so it may not substitute library equivalents such as `std::shuffle` or `std::uniform_int_distribution`.
+
+- **Raw draw**: the stream's next 64-bit output. Used once per `path` statement for the tie key (section 6.6).
+- **`uniform(n)`**, an integer in `[0, n)` for `n >= 1`, without bias: let `t = (2^64 - n) mod n` (in 64-bit arithmetic, `(0 - n) % n`); take raw draws until one, `x`, satisfies `x >= t`; the result is `x mod n`. It may consume more than one raw draw, but it counts as one draw for the order above.
+- **Shuffle** of a vector of `k` candidates (Fisher-Yates): for `i` from `k - 1` down to `1`, swap the items at `i` and `uniform(i + 1)`.
+- **Uniform pick** of one of `k` candidates (`incremental`): the item at `uniform(k)`.
+- **Weighted `{ any }`** over items with integer weights `w1..wm` and total `W > 0`: `r = uniform(W)`; the chosen item is the first whose running weight sum exceeds `r`.
+- **`random(lo, hi)`**: `lo + uniform(hi - lo + 1)`. An empty range (`hi < lo`) still draws once, as `uniform(1)`, and yields `lo`.
+
+**Collection order.** The candidate vector that a shuffle or pick works on is built in the order of item 3: anchors in row-major order, and at each anchor every variant whose pattern fits there, in sub-rule and variant declaration order (section 5.6.2). Its order is part of the contract because the shuffle permutes positions.
+
+Determinism is per (entry, seed, params, implementation version), on every platform - section 7.2.
 
 ### 10.7 Sequence stability
 

@@ -38,7 +38,7 @@ static void print_level(ls::level const& lv, std::ostream& out) {
 int main(int argc, char* argv[]) {
     std::optional<uint64_t> seed;
     std::string path;
-    std::string entry_name = "main";   // a tool convention, not the language's (§6)
+    std::string entry_name = "main";   // a tool convention, not the language's (section 6)
     std::vector<std::pair<std::string, int>> params;
     bool inspect = false;
 

@@ -36,7 +36,7 @@ TEST_CASE("api: compile success and failure") {
     CHECK(!bad);
     CHECK(!bad.error().empty());
 
-    // a module with no sequences compiles; it just has no entry to run (§6)
+    // a module with no sequences compiles; it just has no entry to run (section 6)
     auto lib = make("tag t { a }");
     CHECK(static_cast<bool>(lib));
     CHECK(lib.sequence_count() == 0);
@@ -72,7 +72,7 @@ TEST_CASE("api: generate fills the level") {
 
 TEST_CASE("api: tag resolution") {
     auto gen = make(fill_src);
-    // tag() returns the value's bit mask (spec §3: bit 1..30 in declaration
+    // tag() returns the value's bit mask (spec section 3: bit 1..30 in declaration
     // order), not a 0-based id; 0 means unknown (not -1), so an unresolved
     // name ORed into a composite mask degrades correctly.
     CHECK(gen.tag("geo.wall") == (1 << 1));
@@ -943,4 +943,47 @@ sequence main {
         INFO("corner " << k);
         CHECK(corner_hits[k] > runs / 8);   // ~25% each
     }
+}
+
+// ── cross-platform determinism (section 7.2, section 10.6) ─────────────────────────────────
+// The draw primitives are plain 64-bit integer arithmetic over mt19937_64, so
+// these exact outputs must come out on every platform and compiler. A
+// failure here on one platform only is a portability bug, not a golden to
+// update. Each primitive is exercised: `random` (bounded draws), `one mark`
+// (the batch shuffle), `pick` (incremental uniform picks), `mix` (weighted
+// `{ any }` rolls).
+TEST_CASE("api: pinned draws give the same level on every platform") {
+    auto gen = make(R"(
+tag t { a, b, c, m }
+layers {
+    n: grid of number
+    g: grid of t
+}
+rule rnd  { n[.] => n[ (random(0, 999)) ] }
+rule mark { g[.] => g[m] }
+rule fill { g[.] => g[a] }
+rule pick { g[a] => g[b] }
+rule mix  { g[a] => { any (weight=1) g[b]  (weight=3) g[c] } }
+sequence main {
+    resize(4, 3)
+    all rnd
+    one mark
+    all fill
+    some(max=2, policy=incremental) pick
+    all mix
+}
+)");
+    REQUIRE(static_cast<bool>(gen));
+    auto render = [&](uint64_t seed) {
+        auto lv = gen.generate(gen.sequence("main"), seed);
+        std::string out;
+        for (int y = 0; y < 3; ++y)
+            for (int x = 0; x < 4; ++x) out += std::to_string(lv["n"].at(x, y)) + " ";
+        out += "| ";
+        for (int y = 0; y < 3; ++y)
+            for (int x = 0; x < 4; ++x) out += lv["g"].valueName(lv["g"].at(x, y));
+        return out;
+    };
+    CHECK(render(1)  == "783 567 169 277 180 563 833 610 188 400 307 523 | bccccbcbcmcc");
+    CHECK(render(42) == "74 406 309 392 358 609 425 392 210 662 659 351 | bcmcbcbcccbc");
 }
