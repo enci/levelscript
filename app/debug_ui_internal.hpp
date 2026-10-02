@@ -126,9 +126,12 @@ struct debug_run {
         refresh();
     }
 
+    uint64_t version{0};   // bumps whenever snap/hls change (texture caches key off it)
+
     void refresh() {
         snap = gen.snapshot();
         hls  = gen.highlights();
+        ++version;
     }
 
     // Pull one event; false when the run is finished.
@@ -283,6 +286,23 @@ void draw_grid_composite(script const& sc, debug_run const& run,
                          float cell_px);
 // Returns the height it occupied, so the caller can size the grid above it.
 float draw_layer_strip(project_config& cfg, compiled const& meta);
+
+// ── layers window: every layer drawn small, side by side ─────────────────────
+
+// One streaming texture per layer, rebuilt only when the run moves.
+struct layer_thumbs {
+    std::vector<SDL_Texture*> tex;
+    std::vector<int>          tw, th;
+    uint64_t                  version{~0ull};
+    int                       solo{-1};            // layer soloed in the viewport
+    std::vector<char>         saved_visible;       // visibility to restore
+    layer_thumbs() = default;
+    layer_thumbs(layer_thumbs const&)            = delete;
+    layer_thumbs& operator=(layer_thumbs const&) = delete;
+    ~layer_thumbs();
+};
+void draw_layers_window(script const& sc, debug_run const& run, project_config& cfg,
+                        SDL_Renderer* renderer, layer_thumbs& thumbs);
 void draw_settings_window(project_config& cfg,
                           std::unordered_map<std::string, tile_texture>& tile_textures,
                           SDL_Renderer* renderer, std::string const& ls_path);
