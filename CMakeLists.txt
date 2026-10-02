@@ -13,7 +13,7 @@ endif()
 
 include(FetchContent)
 
-# ── lsd (debugger) dependencies: SDL3 + ImGui + JSON + stb + FreeType ─────────
+# ── levelscript-debugger dependencies: SDL3 + ImGui + JSON + stb + FreeType ─────────
 set(SDL_SHARED OFF CACHE BOOL "" FORCE)
 set(SDL_STATIC ON  CACHE BOOL "" FORCE)
 set(SDL_TEST   OFF CACHE BOOL "" FORCE)

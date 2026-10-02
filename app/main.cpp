@@ -8,7 +8,7 @@
 #include <sstream>
 #include <string>
 
-// lsc — the LevelScript CLI. A thin client of the public API: everything it
+// levelscript — the LevelScript CLI. A thin client of the public API: everything it
 // does (compile, generate, read cells) a game can do the same way.
 
 static void usage(char const* argv0) {

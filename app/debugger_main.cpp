@@ -4,7 +4,7 @@
 #include <optional> 
 #include <string>
 
-// lsd -- the LevelScript debugger: an interactive ImGui frontend over the
+// levelscript-debugger -- the LevelScript debugger: an interactive ImGui frontend over the
 // public run API (compile once, step application by application).
 
 static void usage(char const* argv0) {

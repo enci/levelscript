@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <optional>
 #include <sstream>
@@ -119,11 +120,23 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
 
     // ── prefs (theme + window geometry + seed) -- SDL's per-user location ────
     SDL_Init(SDL_INIT_VIDEO);
-    char* pref_raw = SDL_GetPrefPath("levelscript", "lsd");
+    char* pref_raw = SDL_GetPrefPath("levelscript", "debugger");
     std::string pref_dir = pref_raw ? pref_raw : "";
     if (pref_raw) SDL_free(pref_raw);
-    std::string ini_path   = pref_dir + "lsd.ini";
-    std::string prefs_path = pref_dir + "lsd_prefs.json";
+    std::string ini_path   = pref_dir + "layout.ini";
+    std::string prefs_path = pref_dir + "prefs.json";
+    // The tool was called `lsd`: carry its layout and prefs over once.
+    if (!pref_dir.empty()) {
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        fs::path old_dir = fs::path(pref_dir).parent_path().parent_path() / "lsd";
+        auto carry = [&](char const* from, std::string const& to) {
+            if (!fs::exists(to, ec) && fs::exists(old_dir / from, ec))
+                fs::copy_file(old_dir / from, to, ec);
+        };
+        carry("lsd.ini", ini_path);
+        carry("lsd_prefs.json", prefs_path);
+    }
 
     int win_w = 1280, win_h = 800;
     std::optional<int> win_x, win_y;
@@ -233,7 +246,7 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
 
     auto apply_theme = [&] {
         if (dark_theme) set_dark_theme(); else set_light_theme();
-        // Tint the OS title bar / window border to blend with the app. lsd has
+        // Tint the OS title bar / window border to blend with the app. The debugger has
         // no menu bar, so match the dominant window background surface.
         const ImVec4& bg = ImGui::GetStyle().Colors[ImGuiCol_WindowBg];
         ls::platform::set_titlebar(window, bg.x, bg.y, bg.z, dark_theme);
@@ -552,7 +565,7 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
 
         // ── grid (layer strip + canvas) ─────────────────────────────────────
         // Title case; "###ID" keeps each window's id - and its saved dock
-        // position in lsd.ini - independent of the title.
+        // position in layout.ini - independent of the title.
         ImGui::Begin("Viewport###VIEWPORT");
         ImGui::BeginChild("##grid", {0.f, 0.f}, false, ImGuiWindowFlags_HorizontalScrollbar);
         draw_grid_composite(sc, run, cfg, tile_textures, cfg.cell_px());

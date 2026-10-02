@@ -1,5 +1,5 @@
 #pragma once
-// Shared internals of the lsd debugger, split across debug_ui.cpp (app state,
+// Shared internals of levelscript-debugger, split across debug_ui.cpp (app state,
 // main loop, controls) and debug_ui_views.cpp (grid composite, pattern
 // previews, inspector windows).
 //

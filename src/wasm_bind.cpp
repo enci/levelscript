@@ -41,14 +41,14 @@ struct session {
     bool          done{false};
     int           entry{-1};   // the sequence this run applies (§6)
     // Applications pulled for the statement currently being worked on — same
-    // bookkeeping as lsd's debug_run::advance() (app/debug_ui_internal.hpp),
+    // bookkeeping as the debugger's debug_run::advance() (app/debug_ui_internal.hpp),
     // recomputed as we go since a step can land mid-statement.
     int           apps_in_stmt{0};
     int           counted_stmt{-1};
 };
 
 // Pull one application/statement-boundary event, updating apps_in_stmt.
-// False once the run is finished — mirrors lsd's debug_run::advance().
+// False once the run is finished — mirrors the debugger's debug_run::advance().
 bool advance(session& s) {
     if (s.done) return false;
     if (!s.r.step()) { s.done = true; return false; }
@@ -206,7 +206,7 @@ std::string run_step(int id) {
     return state_json(s, s.r.snapshot());
 }
 
-// Advance to the next statement boundary (lsd's "Next Statement" / F11):
+// Advance to the next statement boundary:
 // pull applications until one completes a statement, or the run ends.
 std::string run_next_statement(int id) {
     auto it = g_sessions.find(id);

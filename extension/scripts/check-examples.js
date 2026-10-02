@@ -49,7 +49,7 @@ function parseExpectations(src) {
   return exp;
 }
 
-// `use` paths resolve relative to the using file (section 2.6), like lsc.
+// `use` paths resolve relative to the using file (section 2.6), like the levelscript CLI.
 function resolve(usePath, from) {
   const full = path.resolve(path.dirname(from), usePath);
   try { return { name: full, source: fs.readFileSync(full, 'utf8') }; }
