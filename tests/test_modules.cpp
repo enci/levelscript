@@ -295,3 +295,48 @@ TEST_CASE("entries: the statement stack counts from the entry's body") {
     CHECK(stacks[2][0].index == 2);
     CHECK(stacks[2][1].index == 0);
 }
+
+// ── run::stop_at_begin: stop *before* each statement (debuggers) ─────────────
+
+TEST_CASE("run: stop_at_begin also stops before every statement") {
+    auto gen = ts::make(R"(
+layers { tiles: grid of number }
+params { off: number = 0 }
+rule one_up { tiles[*] => tiles[ (tiles + 1) ] }
+sequence inner {
+    one one_up
+}
+sequence main {
+    resize(1, 1)
+    some(max=2) inner
+    pad(1)  when (off == 1)
+}
+)");
+    REQUIRE(static_cast<bool>(gen));
+    auto r = gen.run(gen.sequence("main"), 1, ls::step_mode::application, ls::observe::on);
+    r.stop_at_begin(true);
+    std::vector<std::string> events;
+    while (r.step()) {
+        std::string p;
+        for (auto const& f : r.stmt_stack())
+            p += (p.empty() ? "" : ".") + std::to_string(f.index) + "@" + std::to_string(f.iteration);
+        char k = r.at_statement_begin() ? 'B' : r.at_statement_boundary() ? 'E' : 'A';
+        if (k == 'B') CHECK(r.highlights().empty());   // nothing matched yet
+        events.push_back(std::string(1, k) + " " + p);
+    }
+    CHECK(events == std::vector<std::string>{
+        "B 0@0", "E 0@0",                      // resize: begin, done
+        "B 1@0",                               // the sequence application begins
+        "B 1@0.0@0", "A 1@0.0@0", "E 1@0.0@0", // inner, iteration 0
+        "B 1@0.0@1", "A 1@0.0@1", "E 1@0.0@1", // inner, iteration 1
+        "E 2@0",                               // pad's guard is false: no begin
+    });
+}
+
+TEST_CASE("run: begin events are off by default") {
+    auto gen = ts::make("layers { }\nsequence main { resize(1, 1)  resize(2, 2) }\n");
+    auto r = gen.run(gen.sequence("main"), 1, ls::step_mode::application, ls::observe::on);
+    int steps = 0;
+    while (r.step()) { CHECK(!r.at_statement_begin()); ++steps; }
+    CHECK(steps == 2);
+}

@@ -157,6 +157,15 @@ public:
     /// True when the last step completed a statement (vs. one application
     /// within it) — progress bars and steppers key off this.
     bool at_statement_boundary() const;
+
+    /// Also stop *before* each statement runs: step() then returns at the
+    /// begin of every statement whose guard passed (a rule application, an
+    /// operation, or a sequence application), with stmt_stack() pointing at
+    /// it and at_statement_begin() true. Off by default; a debugger turns it
+    /// on to break or step to a statement before it changes anything.
+    void stop_at_begin(bool on);
+    /// True when the last step is a statement's begin (see stop_at_begin).
+    bool at_statement_begin() const;
     /// Matched/written cells of the last application.
     std::vector<cell_highlight> highlights() const;
 

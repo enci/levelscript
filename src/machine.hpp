@@ -25,7 +25,10 @@ struct level_data {
 // One yield per rule application, one per completed statement. Granularity is
 // a filter on the puller, never a second code path.
 struct step_event {
-    enum class kind { application, statement } what{kind::statement};
+    // begin: a statement (leaf or sequence application) is about to run -
+    // yielded before it, so a debugger can stop *before* a statement.
+    // application: one rule application done. statement: a leaf finished.
+    enum class kind { begin, application, statement } what{kind::statement};
     int stmt{-1};   // statement of the entry's body (a nested sequence's applying one)
 };
 
@@ -92,6 +95,11 @@ private:
         std::vector<std::vector<int64_t>> cells;
     };
     stack_state capture() const;
+    // The begin event of the statement the frames now point at.
+    step_event begin_event(int top) {
+        if (observe_) highlights_.clear();   // nothing matched yet
+        return step_event{step_event::kind::begin, top};
+    }
     bool unchanged_since(stack_state const& s) const;
 
     void exec_op(compiled_op const& op);

@@ -1259,6 +1259,8 @@ using resolver = std::function<std::optional<module_source>(const std::string& p
 | member | meaning |
 |--------|---------|
 | `bool step()` | Advance by the granularity fixed at `begin()`; `false` when done. |
+| `void stop_at_begin(bool on)` | Also stop *before* each statement: `step()` then returns at the begin of every statement whose guard passed (a rule application, an operation, or a sequence application), with `stmt_stack()` naming it. Off by default. For debuggers: breaking or stepping to a statement before it changes anything. |
+| `bool at_statement_begin()` | Whether the last step is a statement's begin (see `stop_at_begin`). Observe channel. |
 | `level snapshot()` | Copy of the current state - committed statements plus the current batch's applications so far. |
 | `level finish()` | Drain whatever remains and return the finished level (the "skip" path). |
 | `int stmt_index()` | Index, in the entry's body, of the statement the last step worked on (`-1` before the first step). Inside a nested sequence, this is the index of the entry-body statement that applied it. Observe channel. |
