@@ -825,6 +825,129 @@ void draw_tags_window(compiled const& meta, project_config& cfg) {
     }
 }
 
+// ── layers window ─────────────────────────────────────────────────────────────
+
+static void set_sampler_nearest(ImDrawList const*, ImDrawCmd const*);   // composite grid
+static void set_sampler_linear(ImDrawList const*, ImDrawCmd const*);
+
+layer_thumbs::~layer_thumbs() {
+    for (auto* t : tex) if (t) SDL_DestroyTexture(t);
+}
+
+// Repaint every layer's texture from the snapshot: tag layers in the shared
+// tag palette (unions included, mask_to_slot), number layers as a heatmap
+// over the layer's own value range, empty cells in a neutral tone.
+static void rebuild_thumbs(script const& sc, debug_run const& run,
+                           project_config const& cfg, SDL_Renderer* renderer,
+                           layer_thumbs& th) {
+    level const& lv = run.snap;
+    int w = lv.width(), h = lv.height(), n = lv.layer_count();
+    for (int i = n; i < (int)th.tex.size(); ++i)
+        if (th.tex[(size_t)i]) SDL_DestroyTexture(th.tex[(size_t)i]);
+    th.tex.resize((size_t)n, nullptr);
+    th.tw.resize((size_t)n, 0);
+    th.th.resize((size_t)n, 0);
+    if (w <= 0 || h <= 0) return;
+
+    ImU32 empty = is_dark_theme() ? IM_COL32(48, 48, 52, 255) : IM_COL32(222, 222, 228, 255);
+    std::vector<ImU32> px((size_t)w * h);
+    for (int li = 0; li < n; ++li) {
+        grid g = lv.layer(li);
+        palette pal = layer_palette(sc.meta, cfg, sc.meta.layer_id(lv.layer_name(li)));
+        int lo = INT_MAX, hi = INT_MIN;
+        if (g.is_number())
+            for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                    if (!g.is_empty(x, y)) { lo = std::min(lo, g.at(x, y)); hi = std::max(hi, g.at(x, y)); }
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x) {
+                ImU32& c = px[(size_t)y * w + x];
+                if (g.is_empty(x, y)) { c = empty; continue; }
+                int v = g.at(x, y);
+                if (g.is_number())
+                    c = heatmap_color(hi > lo ? (float)(v - lo) / (float)(hi - lo) : 0.5f, 1.f);
+                else
+                    c = tag_color(pal.tag_id, mask_to_slot(sc.meta, pal.tag_id, v), pal.colors) |
+                        IM_COL32(0, 0, 0, 255);
+            }
+        SDL_Texture*& t = th.tex[(size_t)li];
+        if (t && (th.tw[(size_t)li] != w || th.th[(size_t)li] != h)) { SDL_DestroyTexture(t); t = nullptr; }
+        if (!t) {
+            // ImU32 (IM_COL32) is R,G,B,A in memory - SDL's RGBA32
+            t = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32,
+                                  SDL_TEXTUREACCESS_STREAMING, w, h);
+            if (!t) continue;
+            SDL_SetTextureScaleMode(t, SDL_SCALEMODE_NEAREST);
+            th.tw[(size_t)li] = w;
+            th.th[(size_t)li] = h;
+        }
+        SDL_UpdateTexture(t, nullptr, px.data(), w * (int)sizeof(ImU32));
+    }
+}
+
+// Solo `li` in the viewport (click again to restore the previous visibility).
+static void toggle_solo(project_config& cfg, layer_thumbs& th, std::string const& name, int li) {
+    if (th.solo == li) {
+        for (size_t k = 0; k < cfg.layers.size() && k < th.saved_visible.size(); ++k)
+            cfg.layers[k].visible = th.saved_visible[k] != 0;
+        th.solo = -1;
+        return;
+    }
+    if (th.solo < 0) {
+        th.saved_visible.clear();
+        for (auto const& lc : cfg.layers) th.saved_visible.push_back(lc.visible ? 1 : 0);
+    }
+    for (auto& lc : cfg.layers) lc.visible = lc.name == name;
+    th.solo = li;
+}
+
+void draw_layers_window(script const& sc, debug_run const& run, project_config& cfg,
+                        SDL_Renderer* renderer, layer_thumbs& th) {
+    level const& lv = run.snap;
+    if (lv.layer_count() == 0 || lv.width() <= 0 || lv.height() <= 0) {
+        ImGui::TextDisabled(lv.layer_count() == 0 ? "(no layers)" : "(empty - nothing resized yet)");
+        return;
+    }
+    if (th.version != run.version) {
+        rebuild_thumbs(sc, run, cfg, renderer, th);
+        th.version = run.version;
+    }
+
+    // A few pixels per cell: as large as the panel allows, 1..6 px.
+    int w = lv.width(), h = lv.height();
+    float avail = ImGui::GetContentRegionAvail().x;
+    float scale = std::clamp(std::floor(avail / (float)w), 1.f, 6.f);
+    ImVec4 accent = ImGui::GetStyleColorVec4(ImGuiCol_CheckMark);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+
+    for (int li = 0; li < lv.layer_count() && li < (int)th.tex.size(); ++li) {
+        std::string name = lv.layer_name(li);
+        ImGui::PushID(li);
+        if (th.solo == li) ImGui::TextColored(accent, "%s  (solo)", name.c_str());
+        else               ImGui::TextUnformatted(name.c_str());
+
+        ImVec2 p0 = ImGui::GetCursorScreenPos();
+        ImVec2 size = {scale * (float)w, scale * (float)h};
+        dl->AddCallback(set_sampler_nearest, nullptr);
+        ImGui::Image((ImTextureID)(intptr_t)th.tex[(size_t)li], size);
+        dl->AddCallback(set_sampler_linear, nullptr);
+        if (ImGui::IsItemClicked()) toggle_solo(cfg, th, name, li);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip(th.solo == li ? "Click to show all layers again"
+                                            : "Click to solo this layer in the viewport");
+
+        // the last step's written cells (observe channel)
+        ImU32 hl = ImGui::GetColorU32(accent);
+        for (auto const& c : run.hls) {
+            if (c.layer != li || c.what != cell_highlight::kind::write) continue;
+            ImVec2 a = {p0.x + c.x * scale, p0.y + c.y * scale};
+            dl->AddRect(a, {a.x + scale, a.y + scale}, hl, 0.f, 0, scale >= 3.f ? 1.f : 0.5f);
+        }
+        ImGui::Spacing();
+        ImGui::PopID();
+    }
+}
+
 // ── composite grid ────────────────────────────────────────────────────────────
 
 // tile_texture::sync() sets NEAREST on the SDL_Texture itself, but the

@@ -1,0 +1,45 @@
+{
+  "cell_zoom": 1.0,
+  "grid_bg_color": "282828",
+  "layers": [
+    {
+      "corner": "normal",
+      "mode": "text",
+      "name": "level",
+      "opacity": 1.0,
+      "tileset": "",
+      "visible": true
+    },
+    {
+      "corner": "normal",
+      "mode": "text",
+      "name": "tiles",
+      "opacity": 1.0,
+      "tileset": "",
+      "visible": true
+    },
+    {
+      "corner": "normal",
+      "mode": "text",
+      "name": "entities",
+      "opacity": 1.0,
+      "tileset": "",
+      "visible": true
+    },
+    {
+      "corner": "normal",
+      "mode": "text",
+      "name": "items",
+      "opacity": 1.0,
+      "tileset": "",
+      "visible": true
+    }
+  ],
+  "mini_px": 24.0,
+  "tag_colors": {
+    "entities": null,
+    "geometry": null,
+    "items": null
+  },
+  "tilesets": []
+}
