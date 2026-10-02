@@ -16,7 +16,10 @@
 
 #include <imgui.h>
 
+#include <algorithm>
+#include <chrono>
 #include <cstdint>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -72,6 +75,9 @@ struct script {
     // id is re-resolved on each, falling back to the first sequence.
     std::string entry_name{"main"};
     int         entry{-1};
+    // Breakpoints, by dotted statement path within the entry ("2.0.1"). They
+    // survive Reset and reloads; a path that no longer exists never hits.
+    std::set<std::string> breakpoints;
     std::string status;       // one-line load status for the status bar
     std::string full_error;   // full diagnostics of a failed load
     bool        ok{false};
@@ -112,6 +118,9 @@ struct debug_run {
         stmt_count = g.statement_count(entry);
         started = false;
         done = false;
+        cmd = command::none;
+        last_stack.clear();
+        paused_at.clear();
         apps_in_stmt = 0;
         counted_stmt = -1;
         refresh();
@@ -139,16 +148,112 @@ struct debug_run {
         return true;
     }
 
-    // Step (F10): one application (or the closing statement boundary).
-    void step_once() { advance(); refresh(); }
-    // Next Statement (F11): pull until a statement boundary or done.
-    void next_statement() {
-        while (advance() && !gen.at_statement_boundary()) {}
+    // ── VS Code-style stepping ────────────────────────────────────────────
+    //
+    // The run is a coroutine: it can only stop *after* an event (one rule
+    // application, or a statement finishing), never before one, and never go
+    // back. Every command below pulls events until its condition holds, a
+    // breakpoint is entered, or the run ends. Long commands are time-sliced
+    // by the caller (tick()) so the UI stays live and Pause can interrupt.
+
+    enum class command { none, step_over, step_out, cont };
+    command cmd{command::none};
+    size_t  cmd_depth{0};        // statement-stack depth the command started at
+    bool    cmd_went_deeper{false};
+    std::vector<stmt_frame> last_stack;   // stack of the previous event
+    std::string paused_at;       // "breakpoint 2.0.1" when one stopped the run
+
+    bool busy() const { return cmd != command::none; }
+
+    // Dotted statement path of the first `n` frames: "2.0.1" (§6.10 frames).
+    static std::string dotted(std::vector<stmt_frame> const& st, size_t n) {
+        std::string p;
+        for (size_t k = 0; k < n && k < st.size(); ++k) {
+            if (k) p += '.';
+            p += std::to_string(st[k].index);
+        }
+        return p;
+    }
+
+    // A breakpoint is entered when the event's stack reaches a marked
+    // statement it was not in on the previous event - so every iteration of
+    // a sequence body re-enters it, while further applications of the same
+    // statement do not.
+    std::string entered_breakpoint(std::set<std::string> const& bps,
+                                   std::vector<stmt_frame> const& st) const {
+        for (size_t n = 1; n <= st.size(); ++n) {
+            bool same = last_stack.size() >= n;
+            for (size_t k = 0; same && k < n; ++k)
+                same = last_stack[k].index == st[k].index &&
+                       last_stack[k].iteration == st[k].iteration;
+            if (same) continue;
+            std::string key = dotted(st, n);
+            if (bps.count(key)) return key;
+        }
+        return "";
+    }
+
+    // Pull one event and decide whether the active command stops on it.
+    bool advance_cmd(std::set<std::string> const& bps) {
+        if (!advance()) { cmd = command::none; return false; }
+        auto st = gen.stmt_stack();
+        size_t d = st.size();
+        bool boundary = gen.at_statement_boundary();
+        std::string bp = entered_breakpoint(bps, st);
+        last_stack = st;
+        if (!bp.empty()) {
+            paused_at = "breakpoint " + bp;
+            cmd = command::none;
+            return true;
+        }
+        switch (cmd) {
+        case command::step_over:
+            if (d > cmd_depth) cmd_went_deeper = true;
+            // left the level, finished a statement at this level, or came
+            // back from a sequence into the next statement
+            if (d < cmd_depth || (boundary && d <= cmd_depth) ||
+                (cmd_went_deeper && d == cmd_depth))
+                cmd = command::none;
+            break;
+        case command::step_out:
+            if (d < cmd_depth) cmd = command::none;
+            break;
+        default: break;
+        }
+        return true;
+    }
+
+    void begin(command c) {
+        if (done) return;
+        paused_at.clear();
+        size_t d = gen.stmt_stack().size();
+        cmd = c;
+        cmd_depth = std::max<size_t>(d, 1);
+        cmd_went_deeper = false;
+        if (c == command::step_out && cmd_depth <= 1) cmd = command::cont;   // out of the entry = run on
+    }
+
+    // Step Into (F11): exactly one event - the finest step.
+    void step_into() {
+        if (done) return;
+        paused_at.clear();
+        advance();
+        last_stack = gen.stmt_stack();
         refresh();
     }
-    // Run: drain everything.
-    void run_all() {
-        while (advance()) {}
+    // Pause (F6): stop whatever command is running.
+    void pause() { cmd = command::none; refresh(); }
+
+    // Run the active command for up to `budget_ms`; refresh once at the end.
+    void tick(std::set<std::string> const& bps, double budget_ms) {
+        if (!busy()) return;
+        auto t0 = std::chrono::steady_clock::now();
+        while (busy()) {
+            advance_cmd(bps);
+            double ms = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - t0).count();
+            if (ms >= budget_ms) break;
+        }
         refresh();
     }
 
@@ -169,7 +274,7 @@ struct debug_run {
 // ── statement display ─────────────────────────────────────────────────────────
 
 std::string stmt_desc(program_stmt const& s);
-char const* stmt_icon(program_stmt const& s);
+char const* stmt_icon(program_stmt const& s, compiled_stmt const& cs);
 
 // ── tileset texture ───────────────────────────────────────────────────────────
 
@@ -202,7 +307,7 @@ void sync_tilesets(SDL_Renderer* renderer, std::string const& ls_path,
 
 void draw_rule_window(script const& sc, debug_run const& run, float mini_px,
                       project_config const& cfg);
-void draw_program_window(script const& sc, debug_run const& run);
+void draw_program_window(script& sc, debug_run const& run);
 void draw_tags_window(compiled const& meta, project_config& cfg);
 void draw_grid_composite(script const& sc, debug_run const& run,
                          project_config const& cfg,
