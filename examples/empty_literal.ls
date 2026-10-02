@@ -19,7 +19,7 @@ rule fill  { where[ (level == .) ] => level[floor] }   // empty test
 rule scar  { level[ (if(level != ., floor, .)) ] => level[ * ] }  // non-empty test + conditional clear
 rule warm  { where[ (heat == .) ] => heat[ (heat + 1) ] }  // empty number reads as 0
 
-program {
+sequence main {
     resize(4, 4)
     all seed
     all fill

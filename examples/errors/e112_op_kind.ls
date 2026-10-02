@@ -3,4 +3,4 @@
 // @expect stderr-contains must be an integer
 tag t { a }
 layers { g: grid of t }
-program { resize(g, 2) }
+sequence main { resize(g, 2) }

@@ -24,7 +24,7 @@ rule scatter { where[ (random(1, 100) <= 30) ] => ground[rubble] }
 // Everything still empty becomes floor.
 rule fill { ground[.] => ground[floor] }
 
-program {
+sequence main {
     resize(8, 8)
     all scatter
     all fill

@@ -11,7 +11,7 @@ layers { level: grid of terrain }
 rule fill  { level[.]    => level[wall] }
 rule clear { level[wall] => level[.] }
 
-program {
+sequence main {
     resize(4, 4)
     all fill
     all clear

@@ -16,7 +16,7 @@ layers { level: grid of geo }
 
 rule fill { level[.] => level[floor] }
 
-program {
+sequence main {
     resize(3, 3)
     all fill      // solid 3×3 interior
     pad(1)        // → 5×5; interior moves to (1,1)–(3,3), border is empty

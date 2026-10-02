@@ -3,6 +3,7 @@ import * as path from 'path';
 import { InspectionResult, RunLayer, RunState } from './types';
 import { getCached } from './cache';
 import { inspectJson, runBegin, runEnd, runFinish, runLastError, runNextStatement, runState, runStep } from './wasm';
+import { editorResolver } from './resolve';
 import { anyColor, emptyColor, tagColor } from './palette';
 
 interface RenderLayer {
@@ -284,7 +285,7 @@ export function registerRunner(ctx: vscode.ExtensionContext) {
     function symbolsFor(doc: vscode.TextDocument): InspectionResult['symbols'] {
         const cached = getCached(doc.uri.toString());
         if (cached) return cached.symbols;
-        return inspectJson(doc.getText(), doc.uri.fsPath).symbols;
+        return inspectJson(doc.getText(), doc.uri.fsPath, editorResolver()).symbols;
     }
 
     function isDarkTheme(): boolean {
@@ -302,7 +303,7 @@ export function registerRunner(ctx: vscode.ExtensionContext) {
         const existing = sessions.get(uri);
         if (existing) runEnd(existing.id);
 
-        const id = runBegin(doc.getText(), doc.uri.fsPath, seed);
+        const id = runBegin(doc.getText(), doc.uri.fsPath, seed, 'main', editorResolver())   // tools run `main` (section 6);
         if (id < 0) {
             const message = runLastError();
             if (existing) {

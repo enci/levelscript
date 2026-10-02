@@ -10,6 +10,7 @@ struct parser {
     std::string_view          file;
     diagnostics&              diags;
     size_t                    pos{0};
+    int                       mod{0};   // module id stamped into every loc
 
     token const& peek(int off = 0) const {
         size_t p = pos + (size_t)off;
@@ -45,7 +46,9 @@ struct parser {
     void skip_newlines() { while (at(token_type::newline)) eat(); }
     void skip_seps()     { while (at(token_type::newline) || at(token_type::comma)) eat(); }
 
-    source_loc loc() const { return {peek().line, peek().col}; }
+    source_loc loc() const { return {peek().line, peek().col, mod}; }
+    // location of the token just consumed
+    source_loc prev_loc() const { return {toks[pos - 1].line, toks[pos - 1].col, mod}; }
 
     // Two tokens touch (no whitespace between) — bare mask cells `a|b`, `!a`
     // are whitespace-free; a spaced `a | b` is not one cell (spec §2.5).
@@ -197,7 +200,7 @@ struct parser {
         skip_seps();
         while (!at(token_type::rbrace) && !at_end()) {
             if (!expect(token_type::ident, "a tag value name")) { eat_bad(); skip_seps(); continue; }
-            source_loc name_loc = {toks[pos - 1].line, toks[pos - 1].col};
+            source_loc name_loc = prev_loc();
             std::string name = toks[pos - 1].text;
             if (at(token_type::equals)) {   // named union: blocker = wall | door (§3)
                 tag_union u;
@@ -219,6 +222,8 @@ struct parser {
     }
 
     void parse_layers(ast_file& out) {
+        if (out.has_layers)   // §7.3 #43
+            error_at(peek(), "only one 'layers' block per module");
         out.layers.loc = loc();
         out.has_layers = true;
         eat();   // 'layers'
@@ -227,7 +232,7 @@ struct parser {
         while (!at(token_type::rbrace) && !at_end()) {
             layer_decl l;
             if (!expect(token_type::ident, "a grid name")) { eat_bad(); skip_seps(); continue; }
-            l.loc = {toks[pos - 1].line, toks[pos - 1].col};
+            l.loc = prev_loc();
             l.name = toks[pos - 1].text;
             if (!expect(token_type::colon, "':'"))         { skip_seps(); continue; }
             if (!expect(token_type::kw_grid, "'grid'"))    { skip_seps(); continue; }
@@ -246,7 +251,7 @@ struct parser {
 
     void parse_params(ast_file& out) {
         if (out.has_params)
-            error_at(peek(), "only one 'params' block per file");
+            error_at(peek(), "only one 'params' block per module");
         out.has_params = true;
         eat();   // 'params'
         if (!expect(token_type::lbrace, "'{'")) return;
@@ -333,7 +338,7 @@ struct parser {
             eat();
         } else {
             if (!expect(token_type::ident, "a grid name")) return false;
-            p.grid_loc = {toks[pos - 1].line, toks[pos - 1].col};
+            p.grid_loc = prev_loc();
             p.grid = toks[pos - 1].text;
         }
         if (!expect(token_type::lbracket, "'['")) return false;
@@ -524,6 +529,7 @@ struct parser {
         r.loc = loc();
         eat();   // 'rule'
         if (!expect(token_type::ident, "a rule name")) return;
+        r.name_loc = prev_loc();
         r.name = toks[pos - 1].text;
         if (accept(token_type::lparen)) parse_rule_attrs(r);
         if (!expect(token_type::lbrace, "'{'")) return;
@@ -610,7 +616,7 @@ struct parser {
             if (!expect(token_type::rparen, "')'")) return;
         }
         if (expect(token_type::ident, "a rule name")) {
-            s.rule_name_loc = {toks[pos - 1].line, toks[pos - 1].col};
+            s.rule_name_loc = prev_loc();
             s.rule_name = toks[pos - 1].text;
         }
     }
@@ -703,13 +709,32 @@ struct parser {
         }
     }
 
-    void parse_program(ast_file& out) {
-        out.program.loc = loc();
-        out.has_program = true;
+    // use_decl ::= 'use' STRING   (§2.6) - only at the head of a file
+    void parse_use(ast_file& out, bool after_decls) {
+        source_loc l = loc();
+        eat();   // 'use'
+        if (after_decls)
+            error_at(toks[pos - 1], "'use' declarations must come before all other "
+                     "declarations of a file");
+        if (!expect(token_type::string, "a module path in quotes, e.g. use \"schema.ls\""))
+            return;
+        out.uses.push_back({l, toks[pos - 1].text});
+    }
+
+    // `program { ... }` was removed in 0.7 (§6). Say how to migrate, then
+    // parse the block as `sequence main` so the rest of the file is checked.
+    void parse_removed_program(ast_file& out) {
+        error_at(peek(), "'program' blocks were removed in 0.7; write "
+                 "'sequence main { ... }' - tools run the sequence 'main' by default");
+        sequence_decl sq;
+        sq.loc = loc();
+        sq.name_loc = loc();
+        sq.name = "main";
         eat();   // 'program'
         if (!expect(token_type::lbrace, "'{'")) return;
-        parse_statement_list(out.program.stmts, "");
+        parse_statement_list(sq.stmts, "");
         expect(token_type::rbrace, "'}'");
+        out.sequences.push_back(std::move(sq));
     }
 
     // sequence_decl ::= 'sequence' IDENT '{' statement_list '}'   (§6.10)
@@ -718,7 +743,7 @@ struct parser {
         sq.loc = loc();
         eat();   // 'sequence'
         if (!expect(token_type::ident, "a sequence name")) return;
-        sq.name_loc = {toks[pos - 1].line, toks[pos - 1].col};
+        sq.name_loc = prev_loc();
         sq.name = toks[pos - 1].text;
         if (at(token_type::lparen)) {
             error_at(peek(), "expected '{' after sequence name '" + sq.name +
@@ -743,20 +768,27 @@ struct parser {
 
     void run(ast_file& out) {
         skip_newlines();
+        bool after_decls = false;
         while (!at_end()) {
+            if (at(token_type::kw_use)) {
+                parse_use(out, after_decls);
+                skip_newlines();
+                continue;
+            }
+            after_decls = true;
             switch (peek().type) {
-            case token_type::kw_tag:     parse_tag(out);     break;
-            case token_type::kw_layers:  parse_layers(out);  break;
-            case token_type::kw_params:  parse_params(out);  break;
+            case token_type::kw_tag:      parse_tag(out);      break;
+            case token_type::kw_layers:   parse_layers(out);   break;
+            case token_type::kw_params:   parse_params(out);   break;
             case token_type::kw_rule:     parse_rule(out);     break;
             case token_type::kw_sequence: parse_sequence(out); break;
-            case token_type::kw_program:
-                if (out.has_program)
-                    error_at(peek(), "only one 'program' block per file");
-                parse_program(out);
-                break;
             default:
-                error_at(peek(), "expected a declaration (tag, layers, params, rule, sequence, program)");
+                if (at(token_type::ident) && peek().text == "program" &&
+                    peek(1).is(token_type::lbrace)) {
+                    parse_removed_program(out);
+                    break;
+                }
+                error_at(peek(), "expected a declaration (use, tag, layers, params, rule, sequence)");
                 eat_bad();
                 break;
             }
@@ -768,10 +800,11 @@ struct parser {
 }  // namespace
 
 std::optional<ast_file> parse(std::string_view source, std::string_view file,
-                              diagnostics& diags) {
+                              diagnostics& diags, int mod) {
     auto toks = lex(source, file, diags);
     ast_file out;
     parser p{toks, file, diags};
+    p.mod = mod;
     p.run(out);
     return out;
 }

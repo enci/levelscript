@@ -7,4 +7,4 @@ rule bad {
     =>
     h[a]
 }
-program { resize(1,1) }
+sequence main { resize(1,1) }

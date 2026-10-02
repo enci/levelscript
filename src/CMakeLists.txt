@@ -1,5 +1,6 @@
 add_library(ls_lib STATIC
     lexer.cpp
+    modules.cpp
     parser.cpp
     sema.cpp
     machine.cpp

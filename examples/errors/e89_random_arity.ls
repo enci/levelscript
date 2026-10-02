@@ -3,4 +3,4 @@
 // @expect stderr-contains takes
 layers { tiles: grid of number }
 rule bad { tiles[.] => tiles[ (random(3)) ] }
-program { resize(1,1) }
+sequence main { resize(1,1) }

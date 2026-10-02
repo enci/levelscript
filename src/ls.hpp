@@ -1,19 +1,22 @@
 #pragma once
 #include <cstdint>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 // LevelScript embedding API — what a game sees.
 //
-//   auto gen   = ls::generator::compile(source);        // once, at load
+//   auto gen   = ls::generator::compile(source, "dungeon.ls", resolve);  // once, at load
 //   int  wall  = gen.tag("geo.wall");                   // resolve names once
-//   auto level = gen.generate(seed);                    // pure in (seed)
+//   int  entry = gen.sequence("main");                  // any sequence can be the entry
+//   auto level = gen.generate(entry, seed);             // pure in (entry, seed, params)
 //   auto geo   = level["level"];
 //   if (geo.at(x, y) == wall) ...
 //
-// generator is a reusable factory (keep one per .ls file; share across
-// threads). level is a self-contained value: it owns its cells and outlives
+// generator is a reusable factory (keep one per root module and its closure;
+// share across threads). level is a self-contained value: it owns its cells and outlives
 // the generator. grid shares ownership of its layer, so a grid handed to a
 // GC'd scripting host can outlive the level object it came from.
 // Nothing here throws; a failed compile yields a falsy generator with
@@ -26,6 +29,22 @@ namespace internal {
 struct level_data;
 struct run_state;
 }
+
+// ── modules (spec §2.6) ──────────────────────────────────────────────────────
+
+/// A resolved module: its canonical name (identifies it within one compile
+/// and labels its diagnostics) and its source text.
+struct module_source {
+    std::string name;
+    std::string source;
+};
+
+/// Maps a `use` path, written in the module whose canonical name is `from`,
+/// to a module - or std::nullopt when it cannot (§7.3 check 9). The game
+/// owns all IO; it must return the same canonical name for every path that
+/// denotes the same module.
+using resolver = std::function<std::optional<module_source>(const std::string& path,
+                                                            const std::string& from)>;
 
 // ── grid — one layer of a generated level ────────────────────────────────────
 
@@ -72,7 +91,7 @@ public:
 
     int  layer_count() const;
     grid operator[](const std::string& layer_name) const;
-    grid layer(int index) const;              // declaration order
+    grid layer(int index) const;              // layer order (§4): canonical module order
     std::string layer_name(int index) const;
 
 private:
@@ -85,8 +104,8 @@ private:
 
 // ── run — one in-flight progressive generation ──────────────────────────────
 
-/// statement: one leaf statement (a rule application or an operation, at top
-/// level or inside a sequence) per step(); application: one rule application
+/// statement: one leaf statement (a rule application or an operation, in the
+/// entry's body or inside a nested sequence) per step(); application: one rule application
 /// per step (operations and atomic batches still advance whole). Applying a
 /// sequence is never a step of its own.
 enum class step_mode { statement, application };
@@ -102,8 +121,9 @@ struct cell_highlight {
 };
 
 /// One level of run::stmt_stack(): `index` is the statement's position in
-/// its enclosing list (the program, or a sequence body); `iteration` is the
-/// 0-based iteration of the enclosing sequence application (0 at top level).
+/// its enclosing list (the entry's body, or a nested sequence body);
+/// `iteration` is the 0-based iteration of the enclosing sequence
+/// application (always 0 for frame 0 - the entry runs once).
 struct stmt_frame {
     int index;
     int iteration;
@@ -125,14 +145,14 @@ public:
     level finish();
 
     // ── observe channel (populated only when begun with observe::on) ──
-    /// Index of the top-level program statement the last step worked on
-    /// (-1 before the first step); inside a sequence, the statement that
-    /// applied it.
+    /// Index, in the entry's body, of the statement the last step worked on
+    /// (-1 before the first step); inside a nested sequence, the entry-body
+    /// statement that applied it.
     int statement_index() const;
     /// Position of the last step through nested sequences, outermost first:
-    /// frame 0 is the top-level statement, each further frame a statement
-    /// inside the sequence the frame before applied. Empty before the first
-    /// step.
+    /// frame 0 is a statement of the entry's body, each further frame a
+    /// statement inside the sequence the frame before applied. Empty before
+    /// the first step.
     std::vector<stmt_frame> stmt_stack() const;
     /// True when the last step completed a statement (vs. one application
     /// within it) — progress bars and steppers key off this.
@@ -153,10 +173,13 @@ class generator {
 public:
     generator() = default;
 
-    /// Compile LevelScript source text. The game owns file/asset IO; `name`
-    /// labels diagnostics ("dungeon.ls:12:3: error: ...").
+    /// Compile `source` as the root module (§2.6), with canonical name
+    /// `name`. The game owns file/asset IO: each `use` is mapped to a module
+    /// by `resolve`; with no resolver every `use` is unresolved. Diagnostics
+    /// are labelled with canonical module names ("dungeon.ls:12:3: error: ...").
     static generator compile(const std::string& source,
-                             const std::string& name = "generator");
+                             const std::string& name = "generator",
+                             resolver resolve = {});
 
     explicit operator bool() const { return prog_ != nullptr; }
     /// Formatted diagnostics when compile failed; "" when it succeeded.
@@ -172,27 +195,41 @@ public:
     /// would).
     int tag(const std::string& qualified) const;
 
-    /// Run the whole program: (seed, params) -> level, deterministically.
-    /// Params override the declared defaults; unknown names are ignored.
-    level generate(uint64_t seed,
+    /// Sequence id, for use as an entry (§6); -1 if unknown. Ids are
+    /// 0 .. sequence_count() - 1 in canonical declaration order.
+    int sequence(const std::string& name) const;
+    int sequence_count() const;
+    /// Name of a sequence id ("" if out of range).
+    std::string sequence_name(int id) const;
+    /// Canonical names of the closure's modules, canonical order, root last.
+    /// After a failed compile, the modules resolved before the failure - so
+    /// a host can watch a broken file and retry (hot reload).
+    std::vector<std::string> modules() const { return modules_; }
+
+    /// Run sequence `entry` as the entry (§6): (entry, seed, params) -> level,
+    /// deterministically. Params override the declared defaults; unknown
+    /// names are ignored. An invalid entry id yields an empty level.
+    level generate(int entry, uint64_t seed,
                    std::vector<std::pair<std::string, int>> const& params = {}) const;
 
     /// Start a progressive run; pull it with run::step(). Named `class run`
     /// (not bare `run`) in the return position: this method's own name is
     /// `run`, and an unqualified `run run(...)` here would silently change
     /// which `run` the return type names (GCC: "changes meaning of 'run'").
-    class run run(uint64_t seed, step_mode mode = step_mode::statement,
+    /// With an invalid entry id, the first step() returns false.
+    class run run(int entry, uint64_t seed, step_mode mode = step_mode::statement,
                   observe obs = observe::off,
                   std::vector<std::pair<std::string, int>> const& params = {}) const;
 
-    /// Number of top-level program statements (progress denominators); a
-    /// sequence application counts as one.
-    int statement_count() const;
+    /// Number of statements in the entry's body (progress denominators); a
+    /// nested sequence application counts as one. 0 for an invalid id.
+    int statement_count(int entry) const;
 
 private:
     std::shared_ptr<compiled const> prog_;
     std::string                     error_;
     std::string                     warnings_;
+    std::vector<std::string>        modules_;
 };
 
 }  // namespace ls

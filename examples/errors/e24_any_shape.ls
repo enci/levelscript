@@ -11,4 +11,4 @@ rule bad {
       g[ b c ]
     }
 }
-program { resize(2,1) }
+sequence main { resize(2,1) }

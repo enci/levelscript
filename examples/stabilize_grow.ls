@@ -29,7 +29,7 @@ rule mid    { g[.] => g[floor] }
 // the four rotated variants never conflict on it).
 rule grow(rotation=all) { g[wall floor] => g[* wall] }
 
-program {
+sequence main {
     resize(6, 6)
     all border
     all mid

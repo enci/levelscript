@@ -40,7 +40,7 @@ rule reward {
     loot[ (clamp(if(difficulty == 0, 100 / difficulty, difficulty * 4), 0, 5)) ]
 }
 
-program {
+sequence main {
     resize(3, 3)
     all paint
     all reward

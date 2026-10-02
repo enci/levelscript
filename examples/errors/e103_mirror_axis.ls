@@ -3,4 +3,4 @@
 // @expect stderr-contains invalid mirror axis
 tag t { a }
 layers { g: grid of t }
-program { resize(2,2) mirror(diagonal) }
+sequence main { resize(2,2) mirror(diagonal) }

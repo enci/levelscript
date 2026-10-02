@@ -12,4 +12,4 @@ rule bad {
       items[chest]
     }
 }
-program { resize(1,1) }
+sequence main { resize(1,1) }

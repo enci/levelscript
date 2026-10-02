@@ -17,7 +17,6 @@ static token_type keyword_or_ident(std::string_view text) {
         {"grid", token_type::kw_grid},     {"of", token_type::kw_of},
         {"number", token_type::kw_number}, {"rule", token_type::kw_rule},
         {"sequence", token_type::kw_sequence},
-        {"program", token_type::kw_program},
         {"one", token_type::kw_one},       {"all", token_type::kw_all},
         {"some", token_type::kw_some},
         {"any", token_type::kw_any},
@@ -30,6 +29,7 @@ static token_type keyword_or_ident(std::string_view text) {
         {"params", token_type::kw_params},
         {"where", token_type::kw_where},
         {"when", token_type::kw_when},
+        {"use", token_type::kw_use},
         {"weight", token_type::kw_weight},
     };
     auto it = keywords.find(text);
@@ -71,6 +71,24 @@ std::vector<token> lex(std::string_view src, std::string_view file,
             std::string text(src.substr(s, i - s));
             token_type tt = keyword_or_ident(text);   // before the move below
             push(tt, std::move(text), tl, tc);
+            continue;
+        }
+
+        // STRING (§2.3): no escapes, single line - only the path of a `use`.
+        // The token's text is the contents, without the quotes.
+        if (c == '"') {
+            size_t s = i + 1, j = s;
+            while (j < n && src[j] != '"' && src[j] != '\n') ++j;
+            if (j >= n || src[j] != '"') {
+                diags.error(file, tl, tc, "unterminated string");
+                push(token_type::bad, std::string(src.substr(i, j - i)), tl, tc);
+                col += (int)(j - i);
+                i = j;
+                continue;
+            }
+            push(token_type::string, std::string(src.substr(s, j - s)), tl, tc);
+            col += (int)(j - i + 1);
+            i = j + 1;
             continue;
         }
 

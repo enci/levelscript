@@ -36,7 +36,7 @@ rule cave_fill { terrain[.] => terrain[cave] }
 rule room_fill { terrain[.] => terrain[room] }
 rule spawn     { actors[.]  => actors[boss] }
 
-program {
+sequence main {
     resize(3, 3)
     all cave_fill when (style == 0)
     all room_fill when (style == 1)

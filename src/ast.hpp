@@ -7,6 +7,7 @@ namespace ls {
 
 struct source_loc {
     int line{0}, col{0};
+    int mod{0};   // module id within a compile (§2.6); labels diagnostics
 };
 
 // ── expressions (spec §5.8) ──────────────────────────────────────────────────
@@ -129,6 +130,7 @@ enum class body_combinator { none, all, any, ordered };
 
 struct rule_decl {
     source_loc             loc;
+    source_loc             name_loc;
     std::string            name;
     std::string            symmetry{"none"};   // validated in sema
     std::vector<long long> rotation_angles;    // besides identity; validated in sema
@@ -185,23 +187,25 @@ struct sequence_decl {
     std::vector<program_stmt> stmts;
 };
 
-struct program_decl {
-    source_loc                loc;
-    std::vector<program_stmt> stmts;
-};
-
 // ── file ─────────────────────────────────────────────────────────────────────
 
+// `use "path"` (§2.6) - resolved by the module loader, not the analyzer.
+struct use_decl {
+    source_loc  loc;
+    std::string path;
+};
+
+// One module's declarations - or, after loading, the whole closure's,
+// merged in canonical order (each declaration's loc.mod says whose it was).
 struct ast_file {
+    std::vector<use_decl>   uses;
     std::vector<tag_decl>   tags;
     layers_decl             layers;
     std::vector<param_decl> params;
     std::vector<rule_decl>  rules;
     std::vector<sequence_decl> sequences;
-    program_decl            program;
     bool                    has_layers{false};
     bool                    has_params{false};
-    bool                    has_program{false};
 };
 
 }  // namespace ls

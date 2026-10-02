@@ -1,4 +1,5 @@
 #pragma once
+#include "ls.hpp"   // resolver
 #include <string>
 
 // Machine-readable compile report for editor tooling — one function, two
@@ -26,6 +27,9 @@
 
 namespace ls {
 
-std::string inspect_json(std::string const& source, std::string const& name);
+// `resolve` maps the file's `use` declarations (§2.6); tokens and refs cover
+// the root file only, symbol locations carry their declaring module.
+std::string inspect_json(std::string const& source, std::string const& name,
+                         resolver const& resolve = {});
 
 }  // namespace ls

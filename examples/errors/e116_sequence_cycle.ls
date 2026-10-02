@@ -4,4 +4,4 @@
 sequence a { one b }
 sequence b { some(max=2) a }
 layers { }
-program { resize(1, 1)  one a }
+sequence main { resize(1, 1)  one a }

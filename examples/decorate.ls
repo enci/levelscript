@@ -42,7 +42,7 @@ rule reward {
     }
 }
 
-program {
+sequence main {
     resize(9, 6)
     some(max=4) plant
     all spread

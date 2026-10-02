@@ -1,5 +1,7 @@
 #include "debug_ui.hpp"
 #include "debug_ui_internal.hpp"
+#include "fs_resolver.hpp"
+#include "modules.hpp"
 #include "phosphor_icons.hpp"
 #include "platform_titlebar.hpp"
 #include "parser.hpp"
@@ -33,20 +35,18 @@ static constexpr ImGuiWindowFlags k_bar_flags =
 // ── script loading ────────────────────────────────────────────────────────────
 
 bool load_script(script& sc) {
-    std::ifstream ifs(sc.path);
-    if (!ifs) {
+    std::string name = canonical_module_name(sc.path);
+    std::string src;
+    if (!read_text_file(name, src)) {
         sc.status     = "Cannot open: " + sc.path;
         sc.full_error = sc.status + "\n";
         sc.ok         = false;
         return false;
     }
-    std::ostringstream buf;
-    buf << ifs.rdbuf();
-    std::string src = buf.str();
 
     // Execution path: the public API compile. This generator is the only
     // thing that ever runs the script.
-    generator gen = generator::compile(src, sc.path);
+    generator gen = generator::compile(src, name, fs_resolver());
     if (!gen) {
         sc.full_error = gen.error();
         auto nl       = sc.full_error.find('\n');
@@ -59,10 +59,10 @@ bool load_script(script& sc) {
     // Display metadata only: a second parse+analyze over the same source
     // (statement labels, rule pattern previews, tag/layer tables). Read-only;
     // it never executes anything.
-    diagnostics diags;
-    auto        ast = parse(src, sc.path, diags);
-    compiled    meta;
-    if (!ast || !analyze(*ast, meta, diags, sc.path)) {
+    diagnostics    diags;
+    module_closure mods = load_closure(src, name, fs_resolver(), diags);
+    compiled       meta;
+    if (diags.has_errors() || !analyze(mods, meta, diags)) {
         // The public compile succeeded over the same source, so this is
         // effectively unreachable; degrade with a status line regardless.
         sc.full_error = diags.format_all();
@@ -72,8 +72,13 @@ bool load_script(script& sc) {
     }
 
     sc.gen    = std::move(gen);
-    sc.ast    = std::move(*ast);
+    sc.ast    = std::move(mods.merged);
     sc.meta   = std::move(meta);
+    sc.entry  = sc.gen.sequence(sc.entry_name);
+    if (sc.entry < 0 && sc.gen.sequence_count() > 0) {
+        sc.entry      = 0;
+        sc.entry_name = sc.gen.sequence_name(0);
+    }
     sc.status = "Loaded OK";
     sc.ok     = true;
     return true;
@@ -100,9 +105,11 @@ static void set_dark_theme();
 
 // ── entry point ───────────────────────────────────────────────────────────────
 
-int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed) {
+int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
+                 std::string const& entry) {
     script sc;
     sc.path = path;
+    sc.entry_name = entry;
     if (!load_script(sc)) {
         std::fprintf(stderr, "%s", sc.full_error.c_str());
         return 1;
@@ -167,7 +174,7 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed) {
     // The one in-flight run. Every step/snapshot/highlight below goes through
     // this public-API run; Reset constructs a fresh one via generator::run().
     debug_run run;
-    run.restart(sc.gen, seed);
+    run.restart(sc.gen, sc.entry, seed);
 
     // ── SDL3 window ───────────────────────────────────────────────────────────
     SDL_Window* window = SDL_CreateWindow(
@@ -282,7 +289,7 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed) {
         // on failure the previous compile stays live and the status bar shows
         // the first diagnostic.
         if (load_script(sc)) cfg.sync_layers(sc.layer_names());
-        run.restart(sc.gen, seed);
+        run.restart(sc.gen, sc.entry, seed);
     };
 
     // ── main loop ─────────────────────────────────────────────────────────────
@@ -424,6 +431,24 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed) {
                                        | ImGuiInputTextFlags_CharsUppercase);
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Seed, hex (used on the next Reset)");
+            ImGui::SameLine();
+
+            // Entry (§6): any sequence; choosing one restarts the run.
+            ImGui::SetNextItemWidth(160.f);
+            if (ImGui::BeginCombo("##entry", sc.entry_name.c_str())) {
+                for (int i = 0; i < sc.gen.sequence_count(); ++i) {
+                    bool sel = i == sc.entry;
+                    if (ImGui::Selectable(sc.gen.sequence_name(i).c_str(), sel) && !sel) {
+                        sc.entry      = i;
+                        sc.entry_name = sc.gen.sequence_name(i);
+                        run.restart(sc.gen, sc.entry, seed);
+                    }
+                    if (sel) ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Entry - the sequence a run applies");
             ImGui::SameLine();
 
             ImGui::Text("|");

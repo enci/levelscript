@@ -1,6 +1,6 @@
 #include "ls.hpp"
 #include "machine.hpp"
-#include "parser.hpp"
+#include "modules.hpp"
 #include "sema.hpp"
 
 namespace ls {
@@ -126,10 +126,10 @@ struct run_state {
     int                  last_stmt{-1};
     bool                 at_boundary{false};
 
-    run_state(std::shared_ptr<compiled const> prog, uint64_t seed, step_mode md,
-              observe obs,
+    run_state(std::shared_ptr<compiled const> prog, int entry, uint64_t seed,
+              step_mode md, observe obs,
               std::vector<std::pair<std::string, int>> const& params)
-        : m(std::move(prog), seed), seq(m.run()), mode(md) {
+        : m(std::move(prog), seed, entry), seq(m.run()), mode(md) {
         m.set_observe(obs == observe::on);
         for (auto const& [name, value] : params) m.set_param(name, value);
     }
@@ -192,15 +192,17 @@ level run::finish() {
 
 // ── generator ────────────────────────────────────────────────────────────────
 
-generator generator::compile(const std::string& source, const std::string& name) {
+generator generator::compile(const std::string& source, const std::string& name,
+                             resolver resolve) {
     generator g;
     diagnostics diags;
     std::string label = name.empty() ? "generator" : name;
 
-    auto ast = parse(source, label, diags);
-    if (ast && !diags.has_errors()) {
+    module_closure mods = load_closure(source, label, resolve, diags);
+    for (int id : mods.order) g.modules_.push_back(mods.names[(size_t)id]);
+    if (!diags.has_errors()) {
         auto prog = std::make_shared<compiled>();
-        if (analyze(*ast, *prog, diags, label))
+        if (analyze(mods, *prog, diags))
             g.prog_ = std::move(prog);
     }
     if (!g.prog_) g.error_ = diags.format_all();
@@ -217,24 +219,42 @@ int generator::tag(const std::string& qualified) const {
     return (int)prog_->mask_of(tid, qualified.substr(dot + 1));
 }
 
-level generator::generate(uint64_t seed,
+int generator::sequence(const std::string& name) const {
+    if (!prog_) return -1;
+    for (int i = 0; i < (int)prog_->sequences.size(); ++i)
+        if (prog_->sequences[(size_t)i].name == name) return i;
+    return -1;
+}
+
+int generator::sequence_count() const {
+    return prog_ ? (int)prog_->sequences.size() : 0;
+}
+
+std::string generator::sequence_name(int id) const {
+    if (!prog_ || id < 0 || id >= (int)prog_->sequences.size()) return "";
+    return prog_->sequences[(size_t)id].name;
+}
+
+level generator::generate(int entry, uint64_t seed,
                           std::vector<std::pair<std::string, int>> const& params) const {
-    if (!prog_) return {};
-    machine m(prog_, seed);
+    if (!prog_ || entry < 0 || entry >= sequence_count()) return {};
+    machine m(prog_, seed, entry);
     for (auto const& [name, value] : params) m.set_param(name, value);
     auto seq = m.run();
     while (seq.next()) {}
     return level{m.snapshot()};
 }
 
-class run generator::run(uint64_t seed, step_mode mode, observe obs,
+class run generator::run(int entry, uint64_t seed, step_mode mode, observe obs,
                          std::vector<std::pair<std::string, int>> const& params) const {
     if (!prog_) return ls::run{};
-    return ls::run{std::make_unique<internal::run_state>(prog_, seed, mode, obs, params)};
+    return ls::run{std::make_unique<internal::run_state>(prog_, entry, seed, mode, obs,
+                                                         params)};
 }
 
-int generator::statement_count() const {
-    return prog_ ? (int)prog_->stmts.size() : 0;
+int generator::statement_count(int entry) const {
+    if (!prog_ || entry < 0 || entry >= sequence_count()) return 0;
+    return (int)prog_->sequences[(size_t)entry].stmts.size();
 }
 
 }  // namespace ls

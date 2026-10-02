@@ -7,8 +7,8 @@
 
 namespace ls::internal {
 
-machine::machine(std::shared_ptr<compiled const> prog, uint64_t seed)
-    : prog_(std::move(prog)), rng_(seed) {
+machine::machine(std::shared_ptr<compiled const> prog, uint64_t seed, int entry)
+    : prog_(std::move(prog)), entry_(entry), rng_(seed) {
     grids_.resize(prog_->layers.size());
     for (int i = 0; i < (int)grids_.size(); ++i)
         grids_[i].is_number = prog_->layers[i].tag_id < 0;
@@ -122,11 +122,16 @@ long long machine::eval(int idx, int x, int y) {
 //
 // Yields after every application and every completed statement — pullers
 // filter to their granularity.
+// A run binds the params, then applies the entry exactly as `one S` to the
+// empty stack (§6): one iteration of its body - no guard, no draw, no
+// stability check. Its body statements are frame 0 of the statement stack.
 sequence<step_event> machine::run() {
-    bind_params();   // defaults + derived, in declaration order — first draws
+    if (entry_ < 0 || entry_ >= (int)prog_->sequences.size()) co_return;
+    bind_params();   // defaults + derived, in canonical order — first draws
 
-    for (int si = 0; si < (int)prog_->stmts.size(); ++si) {
-        auto const& st = prog_->stmts[si];
+    auto const& body = prog_->sequences[(size_t)entry_].stmts;
+    for (int si = 0; si < (int)body.size(); ++si) {
+        auto const& st = body[(size_t)si];
         frames_.assign(1, frame{si, 0});
         bool seq = st.what == compiled_stmt::kind::apply && st.seq_id >= 0;
 

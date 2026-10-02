@@ -66,8 +66,12 @@ void draw_shape(ImDrawList* dl, ImVec2 c, float r, tag_shape shape, ImU32 col);
 struct script {
     std::string path;
     generator   gen;    // execution factory -- the public API surface
-    ast_file    ast;    // display metadata only
+    ast_file    ast;    // display metadata only: the closure, merged (§2.6)
     compiled    meta;   // display metadata only
+    // The entry sequence a run applies (§6). The name survives reloads; the
+    // id is re-resolved on each, falling back to the first sequence.
+    std::string entry_name{"main"};
+    int         entry{-1};
     std::string status;       // one-line load status for the status bar
     std::string full_error;   // full diagnostics of a failed load
     bool        ok{false};
@@ -103,9 +107,9 @@ struct debug_run {
     int  counted_stmt{-1};
     std::vector<stmt_frame> counted_stack;   // leaf position apps_in_stmt counts for
 
-    void restart(generator const& g, uint64_t seed) {
-        gen = g.run(seed, step_mode::application, observe::on);
-        stmt_count = g.statement_count();
+    void restart(generator const& g, int entry, uint64_t seed) {
+        gen = g.run(entry, seed, step_mode::application, observe::on);
+        stmt_count = g.statement_count(entry);
         started = false;
         done = false;
         apps_in_stmt = 0;

@@ -3,4 +3,4 @@
 tag t { a, b }
 tag t { c, d }
 layers { g: grid of t }
-program { resize(1,1) }
+sequence main { resize(1,1) }

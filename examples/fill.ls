@@ -12,7 +12,7 @@ rule fill {
     level[floor]
 }
 
-program {
+sequence main {
     resize(8, 4)
     all fill
 }

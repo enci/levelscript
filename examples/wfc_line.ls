@@ -36,7 +36,7 @@ rule collapse { all
     line[ !b open !b ] => line[ * b * ]
 }
 
-program {
+sequence main {
     resize(9, 1)
     all init
     all seedL

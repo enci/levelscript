@@ -9,7 +9,7 @@ layers { g: grid of t }
 rule fill  { g[.] => g[a] }
 rule clear { g[a] => g[b] }
 
-program {
+sequence main {
     resize(5, 5)
     all fill
     all clear

@@ -1,4 +1,5 @@
 #include "sema.hpp"
+#include "modules.hpp"
 #include <algorithm>
 #include <unordered_set>
 
@@ -92,10 +93,14 @@ bool pairs_equal(compiled_pair const& a, compiled_pair const& b) {
 enum class val_type { num, mask, boolean };
 
 struct analyzer {
-    ast_file const&  ast;
-    compiled&        out;
-    diagnostics&     diags;
-    std::string_view file;
+    ast_file const&       ast;   // the closure's merged declarations
+    compiled&             out;
+    diagnostics&          diags;
+    module_closure const& mods;
+
+    // Declaring module of each table entry, aligned with out.tag_names,
+    // out.layers and out.param_names (rules and sequences align with the AST).
+    std::vector<int> tag_mod, layer_mod, param_mod;
 
     // Identifier scope for the position being compiled. Cell/where exprs are
     // permissive; `when` guards and param exprs are restricted (§4.2/§6).
@@ -106,8 +111,22 @@ struct analyzer {
     };
     scope scope_{};
 
+    std::string const& label(source_loc loc) const { return mods.names[(size_t)loc.mod]; }
     void error(source_loc loc, std::string msg) {
-        diags.error(file, loc.line, loc.col, std::move(msg));
+        diags.error(label(loc), loc.line, loc.col, std::move(msg));
+    }
+    void warning(source_loc loc, std::string msg) {
+        diags.warning(label(loc), loc.line, loc.col, std::move(msg));
+    }
+
+    // §2.6 visibility: a module sees itself and the modules it uses directly.
+    // A name declared in the closure but not seen is check 8, reported with
+    // its declaring module so the fix is in the message.
+    bool sees(int from, int decl) const { return mods.sees[(size_t)from][(size_t)decl] != 0; }
+    void require_visible(source_loc at, char const* kind, std::string const& name, int decl) {
+        if (sees(at.mod, decl)) return;
+        error(at, std::string(kind) + " '" + name + "' is not visible here: it is declared in "
+              "module '" + mods.names[(size_t)decl] + "', which this module does not use");
     }
 
     // ── expressions (§5.8) ───────────────────────────────────────────────────
@@ -163,6 +182,7 @@ struct analyzer {
         }
         int pid = out.param_id(name);
         if (pid >= 0) {
+            require_visible(e.loc, "param", name, param_mod[(size_t)pid]);
             if (scope_.param_limit >= 0 && pid >= scope_.param_limit) {
                 error(e.loc, "param '" + name + "' is referenced before it is declared");
                 t = val_type::num;
@@ -173,6 +193,7 @@ struct analyzer {
         }
         int gid = out.layer_id(name);
         if (gid >= 0) {
+            require_visible(e.loc, "grid", name, layer_mod[(size_t)gid]);
             if (!scope_.allow_grids) {
                 error(e.loc, "grid '" + name + "' cannot be read here "
                       "(only params are available at this scope)");
@@ -395,6 +416,7 @@ struct analyzer {
             }
             out.tag_names.push_back(t.name);
             out.tag_values.push_back(std::move(vals));
+            tag_mod.push_back(t.loc.mod);
 
             // Named unions (§3): resolve in declaration order; a member is a
             // value or an earlier union of this tagset; a union shares the
@@ -420,19 +442,22 @@ struct analyzer {
         }
 
         for (auto const& l : ast.layers.layers) {
-            check_name(ast.layers.loc, "grid", l.name);
-            if (out.layer_id(l.name) >= 0) {
-                error(ast.layers.loc, "duplicate grid '" + l.name + "'");
+            check_name(l.loc, "grid", l.name);
+            if (out.layer_id(l.name) >= 0) {   // §7.3 #42, closure-wide
+                error(l.loc, "duplicate grid '" + l.name + "'");
                 continue;
             }
             int tag = -1;
             if (l.type != "number") {
                 tag = out.tag_id(l.type);
                 if (tag < 0)
-                    error(ast.layers.loc, "grid '" + l.name +
+                    error(l.loc, "grid '" + l.name +
                           "' references undeclared tag '" + l.type + "'");
+                else
+                    require_visible(l.loc, "tagset", l.type, tag_mod[(size_t)tag]);
             }
             out.layers.push_back({l.name, tag});
+            layer_mod.push_back(l.loc.mod);
         }
 
         for (auto const& p : ast.params) {
@@ -448,6 +473,7 @@ struct analyzer {
                 error(p.loc, "input param '" + p.name +
                       "' must have a default, e.g. '" + p.name + ": number = 0'");
             out.param_names.push_back(p.name);
+            param_mod.push_back(p.loc.mod);
         }
     }
 
@@ -488,6 +514,7 @@ struct analyzer {
                 error(p.loc, "undeclared grid '" + p.grid + "'");
                 return cp;
             }
+            require_visible(p.loc, "grid", p.grid, layer_mod[(size_t)cp.grid_id]);
             tag = out.layers[cp.grid_id].tag_id;
             cp.is_number = tag < 0;
         }
@@ -752,7 +779,7 @@ struct analyzer {
                     }
             }
             if (!invalidates) {
-                diags.warning(file, loc.line, loc.col,
+                warning(loc,
                     "'all(policy=incremental)' over rule '" + rule.name +
                     "' may never terminate: a sub-rule's write leaves its own "
                     "match intact, so the fixpoint is unreachable");
@@ -833,6 +860,8 @@ struct analyzer {
         if (id < 0)
             error(a.loc, "'" + std::string(pn) + "=' of '" + op + "': '" +
                   a.ident + "' is not a declared grid");
+        else
+            require_visible(a.loc, "grid", a.ident, layer_mod[(size_t)id]);
         return id;
     }
 
@@ -846,14 +875,14 @@ struct analyzer {
             int64_t mask = 0;
             for (int li = 0; li < (int)out.layers.size(); ++li) {
                 int tid = out.layers[li].tag_id;
-                if (tid < 0) continue;
+                if (tid < 0 || !sees(a.loc.mod, layer_mod[(size_t)li])) continue;
                 int64_t m = out.mask_of(tid, a.ident);
                 if (m != 0) { ++matches; found_layer = li; mask = m; }
             }
             if (matches == 0)
                 error(a.loc, "unknown tag value '" + a.ident + "' in '" +
                       std::string(pn) + "=' of '" + op +
-                      "' (no layer's tagset declares it)");
+                      "' (no layer this module sees has a tagset declaring it)");
             else if (matches > 1)
                 error(a.loc, "predicate '" + a.ident + "' in '" + std::string(pn) +
                       "=' of '" + op + "' is ambiguous (several layers could hold "
@@ -1152,6 +1181,12 @@ struct analyzer {
                           did_you_mean(s.rule_name));
                     continue;
                 }
+                if (cs.rule_id >= 0)
+                    require_visible(s.rule_name_loc, "rule", s.rule_name,
+                                    ast.rules[(size_t)cs.rule_id].loc.mod);
+                else
+                    require_visible(s.rule_name_loc, "sequence", s.rule_name,
+                                    ast.sequences[(size_t)cs.seq_id].loc.mod);
                 if (s.strat == strategy::some && !s.is_percent && s.max_count == 0)
                     error(s.loc, "'some(max=0)' applies no matches; did you mean a different strategy?");
                 if (cs.seq_id >= 0) {
@@ -1259,7 +1294,7 @@ struct analyzer {
             std::vector<char> seen(out.sequences.size(), 0);
             std::string op = dims_changer(st.seq_id, seen);
             if (!op.empty())
-                diags.warning(file, st.loc.line, st.loc.col,
+                warning(st.loc,
                     "'all' over sequence '" + out.sequences[st.seq_id].name +
                     "' may never terminate: '" + op + "' changes the grid dimensions "
                     "on every iteration, so no iteration can be stable");
@@ -1267,9 +1302,7 @@ struct analyzer {
     }
 
     void run(bool best_effort) {
-        // §7.3 check 9 — here rather than in generator::compile so every
-        // frontend (lsc, embedding, lsc --inspect / the editor) reports it
-        if (!ast.has_program) error({1, 1}, "no 'program' block");
+        for (int id : mods.order) out.modules.push_back(mods.names[(size_t)id]);
         build_tables();
         if (!best_effort && diags.has_errors()) return;
         compile_params();
@@ -1279,19 +1312,17 @@ struct analyzer {
         register_sequences();
         for (size_t i = 0; i < ast.sequences.size(); ++i)
             compile_stmts(ast.sequences[i].stmts, out.sequences[i].stmts, ast.sequences[i].name);
-        if (ast.has_program) compile_stmts(ast.program.stmts, out.stmts, "");
         check_sequence_cycles();
         if (diags.has_errors()) return;   // the warning walks sequences: cycle-free only
-        warn_unstable_fixpoints(out.stmts);
         for (auto const& sq : out.sequences) warn_unstable_fixpoints(sq.stmts);
     }
 };
 
 }  // namespace
 
-bool analyze(ast_file const& ast, compiled& out, diagnostics& diags,
-             std::string_view file, bool best_effort) {
-    analyzer a{ast, out, diags, file};
+bool analyze(module_closure const& mods, compiled& out, diagnostics& diags,
+             bool best_effort) {
+    analyzer a{mods.merged, out, diags, mods, {}, {}, {}};
     a.run(best_effort);
     return !diags.has_errors();
 }

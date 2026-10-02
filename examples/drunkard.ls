@@ -29,7 +29,7 @@ rule finalize { all
     a[S] => level[floor]
 }
 
-program {
+sequence main {
     resize(40, 20)
     one start
     some(max=300, policy=incremental) walk

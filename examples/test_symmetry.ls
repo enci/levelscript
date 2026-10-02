@@ -26,7 +26,7 @@ rule swap(symmetry=all) {
     g[ F S ]
 }
 
-program {
+sequence main {
     resize(4, 1)
     all seed_sf
     all alt        // result: S F S F

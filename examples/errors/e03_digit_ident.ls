@@ -3,4 +3,4 @@
 // @expect stderr-contains expected a grid name
 tag t { a }
 layers { 9grid: grid of t }
-program { resize(1,1) }
+sequence main { resize(1,1) }

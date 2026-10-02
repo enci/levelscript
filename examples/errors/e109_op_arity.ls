@@ -3,4 +3,4 @@
 // @expect stderr-contains too many positional arguments
 tag t { a }
 layers { g: grid of t }
-program { resize(2, 2) pad(1, 2) }
+sequence main { resize(2, 2) pad(1, 2) }

@@ -1,40 +1,40 @@
 # LevelScript
 
-**Status**: Draft 0.5
+**Status**: Draft 0.7
 **File extension**: `.ls`
-**CLI**: `lsc [--seed N] [--param name=value ...] <file.ls>`
+**CLI**: `lsc [--seed N] [--entry name] [--param name=value ...] <file.ls>` (`--entry` defaults to `main`, a tool convention; section 6)
 **Embedding**: namespace `ls::` (see Appendix A)
 **Scope**: Core language semantics for grid-based procedural generation.
 
-LevelScript is a domain-specific language for procedural generation of grid-based content (roguelike dungeons, puzzle layouts, tile maps). A program describes how to transform a stack of correlated grids through a sequence of pattern-rewrite rules, orchestrated by a small set of built-in operations.
+LevelScript is a domain-specific language for procedural generation of grid-based content (roguelike dungeons, puzzle layouts, tile maps). A generator describes how to transform a stack of correlated grids through a sequence of pattern-rewrite rules, orchestrated by a small set of built-in operations.
 
-**Heritage.** LevelScript is the successor of MGSL (Multi Grid Scripting Language), a predecessor experiment whose reference implementation and spec (Draft v0.7) proved out the language design. LevelScript reimplements that language from scratch with the lessons applied - a single coroutine-backed execution core, a self-contained compiled artifact, an embedding-first API - plus a small number of deliberate semantic changes documented inline where they occur. LevelScript starts its version history clean; this document has no changelog. Draft 0.5 corresponds to roadmap steps 1-5 (the full language below); graph layers are the planned future.
+The reference implementation is a C++ library first and a CLI second, built around a single coroutine-backed execution core, a self-contained compiled artifact, and an embedding-first API (section 10, Appendix A). Graph layers are the planned next step (section 9). This document has no changelog.
 
 ---
 
 ## 1. Design principles
 
-1. **Declarative**: the program describes *what to match and write*, not *how to iterate*.
+1. **Declarative**: a generator describes *what to match and write*, not *how to iterate*.
 2. **Visual**: pattern bodies look like the grids they match; an editor can render them with colored backgrounds.
-3. **Minimal surface area**: a small set of orthogonal concepts (tags, grids, rules, sequences, programs, operations) covers the design space.
+3. **Minimal surface area**: a small set of orthogonal concepts (tags, grids, rules, sequences, operations, modules) covers the design space.
 4. **Predictable execution**: snapshot-based rule application; one well-defined collect-then-pick model for all strategies.
 5. **Cognitive load over terseness**: a rule should read clearly in isolation, even if that costs a few characters. Boilerplate is required only when ambiguity would otherwise exist.
 
 ---
 
-## 2. Lexical structure
+## 2. Lexical and file structure
 
 Formal grammar productions throughout this document use EBNF: `::=` defines a production; `|` separates alternatives; `?` is zero or one; `*` is zero or more; `+` is one or more; `( )` groups; quoted strings are literal terminals; `UPPER_CASE` names are lexical tokens; lowercase names are non-terminals. Whitespace and comments are skipped between tokens everywhere except inside pattern cell grids, where newlines act as row separators (section 5.3).
 
 **Grammar** - top-level structure:
 ```
-source_file ::= top_decl*
-top_decl    ::= tag_decl | layers_decl | params_decl | rule_decl | sequence_decl | program_decl
+source_file ::= use_decl* top_decl*
+top_decl    ::= tag_decl | layers_decl | params_decl | rule_decl | sequence_decl
 ```
 
 ### 2.1 Source files
 
-LevelScript source files have the extension `.ls` and are UTF-8 encoded. Identifiers are ASCII (see section 2.3); non-ASCII bytes are only valid inside comments. Unicode identifiers are deferred to a future version.
+LevelScript source files have the extension `.ls` and are UTF-8 encoded. Identifiers are ASCII (see section 2.3); non-ASCII bytes are only valid inside comments. Unicode identifiers are deferred to a future version. Each source file is a module (section 2.6).
 
 ### 2.2 Comments
 
@@ -57,14 +57,16 @@ IDENT          ::= IDENT_START IDENT_CONTINUE*
 IDENT_START    ::= [A-Za-z_]
 IDENT_CONTINUE ::= [A-Za-z0-9_]
 INTEGER        ::= [0-9]+
+STRING         ::= '"' <any chars except '"' and NEWLINE> '"'
 COMMENT        ::= '//' <any chars> NEWLINE
 ```
+A `STRING` has no escape sequences and is ASCII (section 2.1). Its only use is the module path of a `use` declaration (section 2.6).
 
 ### 2.4 Reserved keywords
 
 ```
 tag  layers  grid  of  number
-rule  sequence  program  params  where  when
+rule  sequence  params  where  when  use
 any  all  one  some  ordered
 weight
 policy  snapshot  incremental  stabilize  percent
@@ -74,7 +76,7 @@ Keywords are ASCII and match exactly.
 
 ```
 RESERVED_CHARS ::= '[' | ']' | '{' | '}' | '(' | ')' | ',' | '='
-                 | '*' | '.' | WS | NEWLINE
+                 | '*' | '.' | '"' | WS | NEWLINE
                  | <ASCII letters, digits, and '_'>
 ```
 `?` is not reserved; it is held for future syntax and lexes as an error.
@@ -105,6 +107,48 @@ A pattern cell is an **expression** (section 5.8). Cells are whitespace-separate
 A bare `*` is always the wildcard; the multiplication operator `*` occurs only inside `( ... )`. A spaced operator (e.g. `wall | floor` with spaces) is **not** a bare cell - wrap it: `(wall | floor)`, or write it whitespace-free: `wall|floor`. `?` remains reserved.
 
 A `mask_atom`'s `IDENT` (section 5.3) may be a `tag_value` or a `tag_union` (section 3); both resolve to masks and compose under `|` and `!` identically.
+
+### 2.6 Modules
+
+Every source file is a **module**. A module may begin with `use` declarations, each naming another module whose declarations it may reference:
+
+```ls
+// schema.ls
+tag algo { R, W }
+layers { level: grid of algo }
+
+// carve.ls
+use "schema.ls"
+rule seed_room { level[.] => level[R] }
+sequence carve {
+    resize(16, 7)
+    one seed_room
+}
+
+// dungeon.ls
+use "carve.ls"
+sequence main {
+    one carve
+}
+```
+
+`dungeon.ls` sees `seed_room` and `carve`, but not `level` or `algo`. Those are declared in `schema.ls`, which `dungeon.ls` does not use itself.
+
+**Grammar:**
+```
+use_decl ::= 'use' STRING
+```
+`use` declarations precede all other declarations of a file (`source_file`, section 2). `STRING` is defined in section 2.3.
+
+**Resolution.** The string is a module path. The embedder's resolver (Appendix A) maps it to a module, meaning a **canonical name** and its source text; the resolver receives the path and the canonical name of the using module. The tools resolve paths relative to the using file's directory, with `/` as the separator. Within one compile, a module is identified by its canonical name and loaded once: paths that resolve to the same canonical name denote the same module. A path the resolver cannot map is a compile error (section 7.3, check 9).
+
+**The closure.** The module passed to the compiler is the **root**. The root and every module it uses, directly or through other modules, form its **closure**, which compiles to one generator (Appendix A). The `use` graph must be acyclic (check 40), and a module may use a given module only once (check 41). The closure's declarations are merged; at run time, nothing records which module declared what.
+
+**Names.** Names are unique across the closure. Two tagsets, two grids, or two params with the same name are a compile error wherever they are declared (check 42); so are two rules or sequences (check 39). There are no qualified names (`schema.level`) and there is no selective `use`. Because a name denotes the same declaration in every module, `use` determines only which names a module may reference.
+
+**Visibility.** A module **sees** its own declarations and the declarations of the modules it uses directly. A `use` is not re-exported: in the example above, `carve.ls` sees `schema.ls` and `dungeon.ls` sees `carve.ls`, but `dungeon.ls` does not see `schema.ls`. Every tagset, grid, param, rule, and sequence name a module writes must resolve to a declaration it sees (check 8). Tag values and tag unions need no visibility of their own; they resolve through the declared tagset of the grid they are written in (sections 3 and 5.8). A module's meaning therefore depends only on its own `use` declarations. It compiles identically as the root or as a dependency, and it can be compiled on its own.
+
+**Canonical order.** The closure's modules are put in **canonical order** by a depth-first, post-order walk from the root. The walk follows each module's `use` declarations in written order and visits each module once, so every module comes after the modules it uses, and the root comes last (in the example: `schema.ls`, `carve.ls`, `dungeon.ls`). Declarations are ordered by module in canonical order, then by position in their file. Canonical order fixes the layer order (section 4), the param evaluation order (section 4.2), and the sequence ids of the embedding API (Appendix A). Everything a module sees from another module precedes it in this order.
 
 ---
 
@@ -149,7 +193,7 @@ This encoding applies to **tag grids only**. `grid of number` cells store intege
 
 ## 4. Grids and the `layers` block
 
-All grids used by a program are declared in a single `layers` block:
+Grids are declared in `layers` blocks, at most one per module (section 2.6):
 
 ```ls
 layers {
@@ -164,7 +208,9 @@ Each entry is `name: grid of <type>`, where `<type>` is either:
 - A tagset name (`grid of geometry`)
 - The keyword `number` (for numeric/scalar grids)
 
-Grids have no declared size; size is set at program runtime via `resize`. All grids share the current size at all times.
+Grids have no declared size; size is set at run time via `resize`. All grids share the current size at all times.
+
+**Layer order.** The grids of every module in the closure (section 2.6) form one stack. Its order, the **layer order**, follows canonical order: modules in canonical order, and within a module the order of its `layers` entries. The embedding API exposes layers in this order (Appendix A). Every grid of the closure is in the stack, whether or not a given module sees it; visibility governs only which grid names a module may write.
 
 **Grammar:**
 ```
@@ -212,12 +258,12 @@ derived_param    ::= IDENT '=' expr
 
 Two kinds of param, distinguished solely by the `: number` annotation:
 
-- An **input param** (`name: number = default`) may be supplied at runtime - via the embedding API's `generate(seed, params)` / `begin(...)` or the CLI's `--param name=value` - alongside the seed. The `= expr` **default is required**: it is evaluated once at startup only when the runtime does not supply the param; a supplied value overrides it and the default expression is not evaluated. Because every input is defaulted, a program always has a complete configuration from the seed alone - **there is no "missing required param" runtime failure**.
+- An **input param** (`name: number = default`) may be supplied at runtime - via the embedding API's `generate(entry, seed, params)` / `begin(...)` or the CLI's `--param name=value` - alongside the seed. The `= expr` **default is required**: it is evaluated once at startup only when the runtime does not supply the param; a supplied value overrides it and the default expression is not evaluated. Because every input is defaulted, a run always has a complete configuration from the seed alone - **there is no "missing required param" runtime failure**.
 - A **derived param** (`name = expr`) is computed once, at startup, when the input params bind. It is never settable from outside.
 
 Both kinds carry an expression under the same scope discipline: literals, input params, and **earlier-declared** params only - no grid reads, no `x`/`y`, and no `width`/`height` (dimensions change during a run, so a startup-frozen dimension would be stale; read `width`/`height` directly in a cell expression instead). References resolve in declaration order; a forward reference or any cycle is a compile error. The expression may call `random` (section 5.10), drawing once at that single evaluation. Because both kinds are fixed once inputs bind, params are run-constant and determinism (section 7.2) holds.
 
-At most one `params` block per file. A param name (input or derived) must not collide with a grid name, a reserved identifier (section 2.4), or a built-in name (section 5.10). Param values and expressions are numbers; a derived param whose expression is not a number is a compile error.
+At most one `params` block per module. Declaration order spans modules: the closure's params are ordered canonically (section 2.6), so a param expression may reference only params that are declared earlier **and** that its module sees. (A param of a directly used module is always earlier.) A param name (input or derived) must not collide with a grid name, a reserved identifier (section 2.4), or a built-in name (section 5.10). Param values and expressions are numbers; a derived param whose expression is not a number is a compile error.
 
 ---
 
@@ -254,7 +300,7 @@ pattern_pair      ::= match_side '=>' write_side
 
 **Combinator blocks are required when grouping more than one item at the same level; a single-item block is also legal.** A rule containing a single match-write pair, with a single pattern on each side, needs no combinator anywhere - but `{ all p }`, `{ any p }`, and a one-sub-rule combinator body all parse and run, with the obvious meaning. An **empty** combinator block (zero items) is a compile error.
 
-> Difference from MGSL: MGSL rejected single-item combinator blocks ("a context with exactly one item must omit the combinator"). LevelScript relaxes this - single-item blocks run with zero special-casing, which matters for generated or heavily-edited sources where an alternative list shrinks to one entry. Semantics: `{ all p }` is identical to bare `p`; a single-item `{ any p }` always picks its one item but, having no special case, **still consumes its one PRNG draw** (section 6.7) like any other `{ any }` node.
+> Single-item blocks run with zero special-casing, which matters for generated or heavily-edited sources where an alternative list shrinks to one entry. Semantics: `{ all p }` is identical to bare `p`; a single-item `{ any p }` always picks its one item but, having no special case, **still consumes its one PRNG draw** (section 6.7) like any other `{ any }` node.
 
 A combinator block is needed for:
 
@@ -547,16 +593,16 @@ Arities are fixed. `min`/`max` are binary; nest for more operands (`min(a, min(b
 
 **Reserved built-in names.** `if`, `min`, `max`, `abs`, `clamp`, `random` may not be used as tag value, grid, or param names (compile error). They are **not** keywords (they are not in section 2.4): a bare occurrence not followed by `(` does not resolve to anything and is a compile error.
 
-**`random` is impure; the others are pure.** Because `if` is eager, `if(c, random(0,9), random(0,9))` evaluates **both** branches and therefore draws **twice**, in left-to-right order, discarding the unused value. This is defined behaviour, not a fault; if exactly one draw is wanted, place the `random` outside the `if`. (Eager `if` was a reopened decision for LevelScript and was deliberately kept: totality makes the dead branch safe, and the fixed two-draw cost keeps the draw sequence trivially pinned.) `random` may appear in any expression position (match cells, `where`, write cells, `when` guards, param expressions): it reads no grid, position, or dimension, so the config-scope restrictions of sections 4.2/6 do not exclude it. It draws once each time its expression is evaluated.
+**`random` is impure; the others are pure.** Because `if` is eager, `if(c, random(0,9), random(0,9))` evaluates **both** branches and therefore draws **twice**, in left-to-right order, discarding the unused value. This is defined behaviour, not a fault; if exactly one draw is wanted, place the `random` outside the `if`. (Eager `if` is deliberate: totality makes the dead branch safe, and the fixed two-draw cost keeps the draw sequence trivially pinned.) `random` may appear in any expression position (match cells, `where`, write cells, `when` guards, param expressions): it reads no grid, position, or dimension, so the config-scope restrictions of sections 4.2/6 do not exclude it. It draws once each time its expression is evaluated.
 
 ---
 
-## 6. Programs
+## 6. Statements and entries
 
-A `program` block declares the orchestration:
+Generation is orchestrated by **statements** (operation calls, rule applications, and sequence applications), written in the bodies of sequences (section 6.10). A run applies one sequence, the **entry**, to an empty stack:
 
 ```ls
-program {
+sequence main {
     resize(60, 40)
     some(max=5)   start
     some(max=100, policy=incremental) rwalk
@@ -569,11 +615,14 @@ program {
 }
 ```
 
-Statements execute top to bottom. There is exactly one program per file (for now).
+Statements execute top to bottom.
+
+**Entries.** The embedder names the entry when it starts a run (Appendix A). Any sequence can be the entry; the language designates none. A run first binds the params (section 4.2), then applies the entry exactly as `one S` (section 6.10) to a 0 x 0 stack: one iteration of its body. Applying the entry involves no guard, no draw, and no stability check. A rule is not an entry; to run a single rule, apply it from a sequence.
+
+The tools (`lsc`, `lsd`) run the sequence named `main` unless told otherwise. That is a tool convention, not part of the language: `main` is an ordinary sequence name, and the embedding API always takes an explicit entry.
 
 **Grammar:**
 ```
-program_decl    ::= 'program' '{' statement_list '}'
 statement_list  ::= statement*
 statement       ::= (op_call | apply_stmt) guard?
 guard           ::= 'when' '(' expr ')'
@@ -594,7 +643,7 @@ count_arg       ::= 'max' '=' INTEGER | 'percent' '=' INTEGER
 policy_arg      ::= 'policy' '=' policy_name
 policy_name     ::= 'snapshot' | 'incremental' | 'stabilize'
 ```
-A program statement is either an **operation call** (`op_call` - a built-in operation applied to the grid stack, section 6.0) or an **application** (`apply_stmt` - a strategy plus a rule or sequence name). In an `op_call`, arguments are **positional first, then named**; the operation name and its arguments resolve **semantically** against the operation table (section 6.0), not by the grammar - there are no per-verb productions and no verb keywords. Newlines are permitted inside an argument list. `IDENT` after a strategy must reference a declared rule or sequence (section 6.10; semantic check; forward references are fine). Every strategy over a rule may carry `policy=`; omitted, it defaults to `snapshot`. Over a sequence, `policy=` and `percent` are errors (section 6.10). `one`/`all` take only a policy; `some` takes a count (`max` **or** `percent`, never both) and an optional policy. (`max` here is a contextual name matched by `IDENT` text, not a keyword; section 2.4.) A guard (`when`) may follow any statement.
+A statement is either an **operation call** (`op_call` - a built-in operation applied to the grid stack, section 6.0) or an **application** (`apply_stmt` - a strategy plus a rule or sequence name). In an `op_call`, arguments are **positional first, then named**; the operation name and its arguments resolve **semantically** against the operation table (section 6.0), not by the grammar - there are no per-verb productions and no verb keywords. Newlines are permitted inside an argument list. `IDENT` after a strategy must reference a rule or sequence its module sees (sections 2.6 and 6.10; semantic check; forward references are fine). Every strategy over a rule may carry `policy=`; omitted, it defaults to `snapshot`. Over a sequence, `policy=` and `percent` are errors (section 6.10). `one`/`all` take only a policy; `some` takes a count (`max` **or** `percent`, never both) and an optional policy. (`max` here is a contextual name matched by `IDENT` text, not a keyword; section 2.4.) A guard (`when`) may follow any statement.
 
 Reads:
 ```ls
@@ -605,10 +654,10 @@ some(percent=50) carve                 // half of one snapshot batch
 path(from=door, to=exit, into=site, write=road)  // structural op: carve a route
 ```
 
-A `guard` may follow any program statement. Its expression (section 5.8) is **boolean** and reads **params only** (input or derived); a grid read, `x`/`y`, or `width`/`height` in a `when` guard is a compile error (there is no candidate position or committed size at statement scope). The guard is evaluated **once**, when the statement is reached. If it is false, the statement is skipped in full - no operation, no rule application, no collection pass. If true, the statement runs exactly as it would unguarded; the guard gates *whether* the statement runs, never *which cells* within it (that is `where`, section 5.9). A guard on an operation call gates that operation the same way.
+A `guard` may follow any statement. Its expression (section 5.8) is **boolean** and reads **params only** (input or derived); a grid read, `x`/`y`, or `width`/`height` in a `when` guard is a compile error (there is no candidate position or committed size at statement scope). The guard is evaluated **once**, when the statement is reached. If it is false, the statement is skipped in full - no operation, no rule application, no collection pass. If true, the statement runs exactly as it would unguarded; the guard gates *whether* the statement runs, never *which cells* within it (that is `where`, section 5.9). A guard on an operation call gates that operation the same way.
 
 ```ls
-program {
+sequence main {
     resize(60, 40)
     some(max=5) start
     all place_bosses  when (difficulty > 3)
@@ -616,7 +665,7 @@ program {
     all room_pass     when (style == 1)
 }
 ```
-Selection among rules is expressed by complementary guards, as with `style` above. There is no `if`/`else` program block; statements stay a flat, top-to-bottom list. A sequence (section 6.10) does not change this: it is a named statement list applied by name, like a rule, not a nested block.
+Selection among rules is expressed by complementary guards, as with `style` above. There is no `if`/`else` block; statements stay a flat, top-to-bottom list. A sequence (section 6.10) does not change this: it is a named statement list applied by name, like a rule, not a nested block.
 
 ### 6.0 Built-in operations
 
@@ -669,7 +718,7 @@ Multiplies the current grid size by N in width and M in height. Every existing c
 Crops the active grids to the smallest rectangle that contains all meaningful content.
 
 ```ls
-program {
+sequence main {
     resize(60, 40)
     one start
     some(max=100, policy=incremental) rwalk
@@ -679,7 +728,7 @@ program {
 
 Semantics:
 
-- Compute the union bounding box of all cells that are non-empty *in any layer*. A cell counts as non-empty if any of the program's grids holds a value (not `.`) at that position.
+- Compute the union bounding box of all cells that are non-empty *in any layer*. A cell counts as non-empty if any grid of the stack holds a value (not `.`) at that position.
 - Crop every layer to that bounding box. The new active size becomes the bounding-box dimensions.
 - Cells inside the bounding box keep their values; cells outside are discarded.
 - The bounding box is shifted to origin (0, 0); coordinates of remaining cells are translated accordingly.
@@ -698,7 +747,7 @@ Folds the grid across its centre axis, copying the origin-side half onto the far
 - `mirror(horizontal)` - reflect across the vertical centre axis: the **left** half is copied onto the right, mirrored. For odd width W, the middle column (index floor(W/2)) is on the axis and unchanged. For even width, the left floor(W/2) columns reflect onto the right floor(W/2) (no fixed middle).
 - `mirror(vertical)` - reflect across the horizontal centre axis: the **top** half is copied onto the bottom, mirrored. For odd height, the middle row is unchanged.
 
-The origin-side half (left / top) is the source and is never modified; the far half is overwritten with the reflection. Operating per (grid, cell) across all layers keeps co-registered layers aligned. `mirror` takes one axis; there is no `mirror(both)` (compose horizontal then vertical for quadrant symmetry) and no per-axis value (asymmetric/partial mirroring is out of scope - keep the grid small instead). `mirror` is the program-level counterpart of the `symmetry` rule attribute (section 5.6.1) and reuses its axis vocabulary.
+The origin-side half (left / top) is the source and is never modified; the far half is overwritten with the reflection. Operating per (grid, cell) across all layers keeps co-registered layers aligned. `mirror` takes one axis; there is no `mirror(both)` (compose horizontal then vertical for quadrant symmetry) and no per-axis value (asymmetric/partial mirroring is out of scope - keep the grid small instead). `mirror` is the statement-level counterpart of the `symmetry` rule attribute (section 5.6.1) and reuses its axis vocabulary.
 
 ### 6.5 `pad(N)`
 
@@ -722,7 +771,7 @@ Parameters (section 6.0):
 
 Semantics: the route is the minimum-total-cost sequence of adjacent traversable cells from a `from` cell to the nearest `to` cell, **overwriting** `into` on the route cells. Ties break deterministically by seed (section 7.2). If no `to` is reachable (including an empty `from` or `to` set), `path` is a **no-op and emits a warning** (like `trim` on empty content, section 7.4), not an error. It writes only the route and exposes no distance field. Because a grid is an implicit graph, `path` also underlies connectivity guarantees, corridor carving, and room-linking; it generalizes to explicit graphs through `over`.
 
-**Predicate resolution.** A **bare tag** (or named union) as a `pred` reads **the unique tag layer whose tagset declares that name**, with pattern-cell overlap semantics (`(stored & mask) != 0`, section 4.1); if no layer's tagset declares it, or **more than one** layer could hold it, that is a compile error (section 7.3, check 35) - use the expression form and name the grid (e.g. `passable=(level == floor)`). An expression `pred` is any boolean expression over same-position reads, `x`/`y`/`width`/`height`, and params. The **default `passable`** - "any non-empty cell" - means non-empty in **at least one layer**, the same union-of-layers content notion `trim` uses (section 6.3). Note that expressions have no mask-overlap operator, so the expr form tests exact `==` while the bare-tag form is pattern-style any-overlap.
+**Predicate resolution.** A **bare tag** (or named union) as a `pred` reads **the unique tag layer whose tagset declares that name**, among the grids its module sees (section 2.6), with pattern-cell overlap semantics (`(stored & mask) != 0`, section 4.1); if no seen layer's tagset declares it, or **more than one** seen layer could hold it, that is a compile error (section 7.3, check 35) - use the expression form and name the grid (e.g. `passable=(level == floor)`). An expression `pred` is any boolean expression over same-position reads, `x`/`y`/`width`/`height`, and params. The **default `passable`** - "any non-empty cell" - means non-empty in **at least one layer**, the same union-of-layers content notion `trim` uses (section 6.3). Note that expressions have no mask-overlap operator, so the expr form tests exact `==` while the bare-tag form is pattern-style any-overlap.
 
 **The draw contract.** `path` pins its evaluation and PRNG behaviour exactly, so that the output is a pure function of (seed, params) regardless of how the search is implemented:
 
@@ -731,7 +780,7 @@ Semantics: the route is the minimum-total-cost sequence of adjacent traversable 
 3. Tie-breaking consumes **exactly one stream draw per `path` statement**. Per-cell tie keys are derived from that single draw by hashing it with the cell index (splitmix64) - there are **no per-discovery draws**, so the number of draws a `path` statement consumes never depends on grid content or search order.
 4. The route is a **pure function of the distance field** the fixed weights induce. The nearest goal is the reachable `to` cell minimizing (distance, tie key) lexicographically. The route is derived by walking backward from that goal, at each step choosing the minimum-tie-key predecessor among those on an optimal (shortest) path. The route is then stamped **start -> goal**: if `write` is an expression, it evaluates once per route cell in that order.
 
-Consequence, stated normatively: **the search algorithm is unobservable.** Any correct shortest-path implementation - BFS at uniform cost, Dijkstra, A* with an admissible heuristic - produces the identical distance field and hence the identical route, draw count, and output. (This is a deliberate departure from MGSL, whose per-discovery tie draws made the search's discovery order part of the observable contract.)
+Consequence, stated normatively: **the search algorithm is unobservable.** Any correct shortest-path implementation - BFS at uniform cost, Dijkstra, A* with an admissible heuristic - produces the identical distance field and hence the identical route, draw count, and output.
 
 ### 6.7 Rule application semantics
 
@@ -793,7 +842,7 @@ The mask is the only conflict mechanism; the runtime special-cases no other "con
 
 The language does not verify reductivity in general - a fixpoint strategy is a loop with a computed exit, like `while (...)`: the construct is provided, and not writing a divergent rule is the author's responsibility. This is a deliberate, scoped weakening of universal termination: bounded strategies keep it; fixpoint strategies trade it for expressive iteration.
 
-**The reductivity warning.** The compiler does, however, flag the *guaranteed*-divergent case (a LevelScript addition over MGSL, which left this entirely to the author). For an `all(policy=incremental)` statement, consider each sub-rule's **unconditional** writes - the write leaves that occur on every resolution of the write tree; leaves under an `{ any }` do **not** count, since the pick may avoid them. If some sub-rule has no unconditional write that **invalidates its own LHS** - i.e. no write that overwrites an LHS-constrained cell of the same grid with a value that no longer matches that cell's requirement - then an applied anchor re-matches forever and the fixpoint is unreachable: the compiler emits the warning *"'all(policy=incremental)' over rule '<name>' may never terminate: a sub-rule's write leaves its own match intact, so the fixpoint is unreachable."*
+**The reductivity warning.** The compiler does, however, flag the *guaranteed*-divergent case. For an `all(policy=incremental)` statement, consider each sub-rule's **unconditional** writes - the write leaves that occur on every resolution of the write tree; leaves under an `{ any }` do **not** count, since the pick may avoid them. If some sub-rule has no unconditional write that **invalidates its own LHS** - i.e. no write that overwrites an LHS-constrained cell of the same grid with a value that no longer matches that cell's requirement - then an applied anchor re-matches forever and the fixpoint is unreachable: the compiler emits the warning *"'all(policy=incremental)' over rule '<name>' may never terminate: a sub-rule's write leaves its own match intact, so the fixpoint is unreachable."*
 
 The analysis is conservative in both directions:
 - **Uncertainty suppresses the warning.** A computed (expression) match or write cell, and any `where` guard, make the invalidation question undecidable at compile time; such a sub-rule is assumed to invalidate and produces no warning. Only the statically certain case warns.
@@ -815,7 +864,7 @@ sequence smooth {
     all grow
 }
 
-program {
+sequence main {
     resize(40, 25)
     all fill
     some(max=4) smooth    // up to 4 iterations of the body
@@ -827,9 +876,9 @@ program {
 ```
 sequence_decl ::= 'sequence' IDENT '{' statement_list '}'
 ```
-The body is the program's `statement_list` (section 6), unchanged: rule applications, sequence applications, and operation calls, each with an optional `when` guard. There are no inline rules. Rules and sequences share one namespace; an `apply_stmt`'s `IDENT` resolves to either one (section 7.3, check 39). A sequence may apply other sequences. A sequence that applies itself, directly or through others, is a compile error (check 38). Declaration order does not matter, and an unapplied sequence is legal, like an unused rule. An empty body is legal; every iteration of it is stable.
+The body is a `statement_list` (section 6): rule applications, sequence applications, and operation calls, each with an optional `when` guard. There are no inline rules. Rules and sequences share one namespace; an `apply_stmt`'s `IDENT` resolves to either one (section 7.3, check 39). A sequence may apply other sequences. A sequence that applies itself, directly or through others, is a compile error (check 38). Declaration order does not matter, and an unapplied sequence is legal, like an unused rule. An empty body is legal; every iteration of it is stable.
 
-**Iteration.** Applying a sequence runs its body from top to bottom; one run of the body is an **iteration**. Each body statement executes exactly as it would in `program`, with its own count, policy, and guard, and sees every prior write. A sequence adds no snapshot, write mask, or pass of its own.
+**Iteration.** Applying a sequence runs its body from top to bottom; one run of the body is an **iteration**. Each body statement executes as sections 6.0-6.9 specify, with its own count, policy, and guard, and sees every prior write. A sequence adds no snapshot, write mask, or pass of its own.
 
 **Stability.** An iteration is **stable** iff the grid stack at its end equals the stack at its start: the same dimensions, and every cell of every layer holding the same value. Stability compares states, not writes. Writing an unchanged value does not count as a change, and neither does a cell changed and changed back within the iteration. Stability is judged on the iteration just run. A stable iteration ends the statement even if a further iteration could have changed the stack through different draws (`random`, `{ any }`, `path` ties); the same holds for `stabilize` sweeps (section 6.7).
 
@@ -865,12 +914,13 @@ The snapshot mechanism is independent of the write-protection mask (section 6.8)
 
 ### 7.2 Determinism
 
-A LevelScript run's output is a pure function of **(seed, params, implementation version)**. Seed and params are part of the runtime invocation, not the program source; given the same seed and the same parameter values (section 4.2), a given build of the implementation produces the same output, bit for bit.
+A LevelScript run's output is a pure function of **(entry, seed, params, implementation version)**. Entry, seed, and params are part of the runtime invocation, not the source; given the same entry, seed, and parameter values (section 4.2), a given build of the implementation produces the same output, bit for bit.
 
-The mechanism is a **single sequential PRNG stream** (the reference implementation uses `mt19937_64`, seeded from the invocation seed) with a **pinned draw order**: every stochastic decision - candidate shuffling, weighted `{ any }` selection, `random(...)` calls, `path` tie keys - consumes draws from that one stream at points fixed by the execution model (section 10.6). There is **no position-keyed PRNG**: this was a reopened decision for LevelScript and one stream was deliberately kept for simplicity, accepting the relaxed cross-version claim below (a position-keyed PRNG would decouple draws from evaluation order and permit parallel matching; it remains a possible future change).
+The mechanism is a **single sequential PRNG stream** (the reference implementation uses `mt19937_64`, seeded from the invocation seed) with a **pinned draw order**: every stochastic decision - candidate shuffling, weighted `{ any }` selection, `random(...)` calls, `path` tie keys - consumes draws from that one stream at points fixed by the execution model (section 10.6). There is **no position-keyed PRNG**: one stream is deliberately kept for simplicity, accepting the relaxed cross-version claim below (a position-keyed PRNG would decouple draws from evaluation order and permit parallel matching; it remains a possible future change).
 
 Consequences:
 - `when` guards and param expressions are evaluated **once** (params at startup, a guard when its statement is reached), so each is constant for the remainder of the run; a `random` there draws once, reproducibly.
+- The source of a generator is its whole closure (section 2.6). Reordering `use` declarations can change canonical order, and with it the layer order and the param evaluation order; when a param expression calls `random`, that shifts the draw sequence.
 - Changing an input param may shift the draw sequence and cascade through the rest of the run - expected in PCG, not a determinism defect (a small input change is not expected to produce a small output change).
 - Determinism is **per implementation version**: a future version may change evaluation/scan/shuffle order and remain internally deterministic; cross-version (and cross-implementation) reproducibility of specific outputs is not promised. What *is* promised across versions is the semantics of this document, not the byte-identical artifact of a given seed.
 
@@ -885,8 +935,8 @@ The compiler must reject:
 5. **Weight scope.** `(weight=N)` is rejected inside `{ all ... }` blocks and on bare patterns (parse error).
 6. **Tag/grid resolution.** Every identifier in a pattern cell must resolve per section 5.8 (for a bare mask literal: a tag value or union of the grid's declared tagset).
 7. **Attribute validation.** Attribute names and values must be in the table of section 5.6.
-8. **Reference resolution.** Grid names, tag names, rule names, and sequence names must be declared somewhere in the file. (Forward references in the program block are allowed; declaration order does not matter.)
-9. **Single program per file.** Exactly one `program_decl` per source file.
+8. **Reference resolution.** Every tagset, grid, param, rule, and sequence name must resolve to a declaration the referencing module sees (section 2.6). A name declared in the closure but not seen is reported as not visible, naming its declaring module. Rules and sequences may be referenced before they are declared; declaration order does not matter for them.
+9. **Unresolved module.** A `use` path that the resolver cannot map to a module (section 2.6, Appendix A).
 10. **Tagset over cap.** A tagset with more than 30 values.
 11. **`where` on RHS.** A `where` pattern on the write side.
 12. **Reserved-name collision.** A tag value, grid, or param named `x`, `y`, `width`, or `height`; or a param colliding with a grid name.
@@ -894,7 +944,7 @@ The compiler must reject:
 14. **Expression type errors.** An operator applied to the wrong value kind; an expression in a real cell not evaluating to the grid's type; comparing across distinct tagsets; a `.` with no inferable type.
 15. **Complement write.** `!`tag used on the RHS (complement is match-side only).
 16. **Unknown function.** A call to a name that is not a section 5.10 built-in.
-17. **Duplicate params block.** More than one `params` block per file.
+17. **Duplicate params block.** More than one `params` block per module.
 18. **Invalid transform value.** A `rotation=` value that is not `none`/`all`, a bare `90`/`180`/`270`, or a set `{...}` of those angles; a `symmetry=` value other than `none`/`horizontal`/`vertical`/`all`; or an angle set containing a value other than 90/180/270. (An empty set `{}` and a `symmetry` set are also errors.)
 19. **Function arity.** A built-in call with the wrong number of arguments.
 20. **Function argument type.** A built-in argument of the wrong kind (e.g. `abs` of a tag); or `if` whose two branches differ in type; or `if` whose condition is not bool.
@@ -912,11 +962,15 @@ The compiler must reject:
 32. **Unknown operation.** An `op_call` (section 6.0) whose name is not in the operation table.
 33. **Operation argument arity/binding.** More positional arguments than the operation's positional parameters; a named-only parameter supplied positionally; a named argument preceding a positional one; or a parameter supplied both positionally and by name.
 34. **Missing required operation argument.** A required parameter not supplied.
-35. **Operation argument kind / enum.** An argument whose kind does not match the parameter (e.g. `grid` given a non-grid); an `enum` value outside its set (`mirror` axis not in {horizontal, vertical}; `connectivity` not in {4, 8}); or an ambiguous bare-tag `pred` (no layer, or more than one layer, could hold the tag - section 6.6).
+35. **Operation argument kind / enum.** An argument whose kind does not match the parameter (e.g. `grid` given a non-grid); an `enum` value outside its set (`mirror` axis not in {horizontal, vertical}; `connectivity` not in {4, 8}); or an ambiguous bare-tag `pred` (no layer the module sees, or more than one, could hold the tag - section 6.6).
 36. **Operation value constraint.** `resize`/`upscale` dimensions must be positive; a `pad` margin must be non-negative. (Value checks applied after kind resolution.)
 37. **Invalid sequence count.** `policy=` on a sequence application (any policy, including an explicit `snapshot`), or `some(percent=P)` of a sequence (section 6.10).
 38. **Sequence cycle.** A sequence that applies itself, directly or through other sequences.
-39. **Duplicate rule or sequence name.** Rules and sequences share one namespace: two declarations with the same name, whether both are rules, both are sequences, or one of each.
+39. **Duplicate rule or sequence name.** Rules and sequences share one namespace: two declarations with the same name anywhere in the closure (section 2.6), whether both are rules, both are sequences, or one of each.
+40. **Module cycle.** A module that uses itself, directly or through other modules (section 2.6).
+41. **Duplicate use.** A module with two `use` declarations that resolve to the same canonical name.
+42. **Duplicate tagset, grid, or param name.** Two tagsets, two grids, or two params with the same name anywhere in the closure, in one module or in different ones (section 2.6).
+43. **Duplicate layers block.** More than one `layers` block in a module.
 
 ### 7.4 Warnings
 
@@ -936,7 +990,7 @@ Warnings never stop compilation or execution; the runtime degrades with a warnin
 
 ## 8. Worked example
 
-A complete fill-and-carve dungeon generator (see `examples/` for this and smaller single-feature programs):
+A complete fill-and-carve dungeon generator (see `examples/` for this and smaller single-feature examples):
 
 ```ls
 tag items     { chest, heart, potion, sword, shield }
@@ -1022,7 +1076,7 @@ rule decorate { all
     level[wall]  => tiles[2]
 }
 
-program {
+sequence main {
     resize(60, 40)
     some(max=5)   start
     some(max=100, policy=incremental) rwalk
@@ -1035,7 +1089,7 @@ program {
 }
 ```
 
-Reading the program: `start` seeds up to five `S` markers into one snapshot batch; `rwalk` under `policy=incremental` grows a drunkard's walk from them, each step seeing the last (the `rotation=all` variants walk in all four directions); `upscale` doubles the resolution; `reduce` erodes 2x2 seed blocks; then a cascade of snapshot batches converts the `algo` sketch into geometry, rewards, enemies, and tile indices.
+Reading `main`: `start` seeds up to five `S` markers into one snapshot batch; `rwalk` under `policy=incremental` grows a drunkard's walk from them, each step seeing the last (the `rotation=all` variants walk in all four directions); `upscale` doubles the resolution; `reduce` erodes 2x2 seed blocks; then a cascade of snapshot batches converts the `algo` sketch into geometry, rewards, enemies, and tile indices.
 
 A structural-operation companion (`examples/corridor.ls`): scatter a numeric cost field, place a door and an exit with `where`-pinned rules, then
 
@@ -1050,19 +1104,19 @@ carves the cheapest corridor; equal-cost routes vary by seed, reproducibly (sect
 
 ## 9. Future directions
 
-Draft 0.5 covers roadmap steps 1-5 of the implementation. Deferred, in rough priority order:
+Deferred, in rough priority order:
 
 **Graphs.** The reason for the language's forward-looking design (and its name making room for more than grids): graph layers alongside grid layers, with rewrite semantics over nodes/edges and integration with grid-derived graphs. `path`'s `over=` parameter (section 6.6) is the prepared seam - a graph reference there routes over its edges, the same operation with one swapped input.
 
 **The structural-operation family.** `path` is the first of a family conforming to the section 6.0 envelope (predicate/grid arguments in, result written into a grid, seeded, table-resolved): BSP subdivision, flood-fill regions, MST/room-linking, Voronoi, a full distance field. The graph-generalizable members - `path`, MST, distance - share the `over` seam; BSP and Voronoi are grid-native. Each is a table row plus an executor; none needs a grammar change.
 
-**Templates and imports.** Named constant grids stamped by rules (`template Vault3x3 { ... }`), and `use "path/file.ls"` to share templates and tag declarations across files (Spelunky-style chunk libraries). Deferred together; imports are only compelling once templates exist.
+**Templates.** Named constant grids stamped by rules (`template Vault3x3 { ... }`). Modules (section 2.6) are their distribution mechanism: a Spelunky-style chunk library is a module of templates.
 
-**Inline rules.** Anonymous rules in statement position (in `program` and `sequence` bodies alike, never in only one of them). Open costs: diagnostics and the observe channel identify rules by name, so an inline rule would need a synthesized one (`smooth#2`); rule attributes would have to mix with the statement's count options; `all { all ... }` stacks the count and the body combinator on one word; and design principle 5 favours rules that read in isolation. Parked, not rejected.
+**Inline rules.** Anonymous rules in statement position (in sequence bodies). Open costs: diagnostics and the observe channel identify rules by name, so an inline rule would need a synthesized one (`smooth#2`); rule attributes would have to mix with the statement's count options; `all { all ... }` stacks the count and the body combinator on one word; and design principle 5 favours rules that read in isolation. Parked, not rejected.
 
 **Applicability-driven sequences.** The planned answer to data-dependent `if`, in the MarkovJunior style: a statement **succeeds** if it made any change, and an `ordered` sequence runs its first item that succeeds, then restarts from the top. This gives `else if` over grid state with no condition expressions and no aggregate queries (those belong to graph layers). Parameter-driven branching is already served by `when` guards on sequence applications. Parked.
 
-**Multiple programs per file.** Currently one program per file; multiple named programs (a file as a library of generators) is a likely future need.
+**Staged runs.** `run(level, entry)`: apply an entry to an existing level instead of an empty stack, so a host can generate in stages and inspect the level between them (carve, assess, then decorate or regenerate). Open: whether a level carries its run state (PRNG stream and bound params), which would make staged runs bit-identical to one sequence applying the stages in order, or whether each stage takes a fresh seed. Parked.
 
 **Position-keyed PRNG.** Rejected for 0.5 (section 7.2) but recorded: hashing (seed, x, y) instead of drawing from one stream would decouple match-side `random` from evaluation order and restore parallel matching (section 10.4). It would change every seeded output; if ever adopted, it is a major-version change.
 
@@ -1077,9 +1131,9 @@ This section is non-normative; it records how the reference implementation is bu
 ### 10.1 Architecture
 
 - **One execution core.** The interpreter is a single C++20 coroutine that yields step events at application and statement boundaries. Batch generation (`generator::generate`), progressive generation (`generation::step`, with granularity a filter on the event puller), and any debug/visualization UI all pull the same coroutine. There is never a second interpreter to drift from the first.
-- **The compiled artifact is self-contained.** Semantic analysis copies everything the runtime and the embedding API need - names, tables, compiled rules, the operation schedule - into one immutable object shared by reference counting; the AST is discarded after analysis. Generated levels are likewise self-contained values that outlive their generator (Appendix A).
+- **The compiled artifact is self-contained.** Semantic analysis copies everything the runtime and the embedding API need for the whole module closure (section 2.6) - names, tables, compiled rules, the operation schedule - into one immutable object shared by reference counting; the AST is discarded after analysis. Generated levels are likewise self-contained values that outlive their generator (Appendix A).
 - **Ids over strings.** Grids, tag values, and rules are integer indices into vectors; names resolve once at the API boundary. Conflict masks are hashed sets keyed by a packed (grid id, flat cell index).
-- **Tables over keyword grammar.** Operations (section 6.0) and expression built-ins (section 5.10) resolve by name against schema tables; each layer has one generic call production (`IDENT '(' arg_list? ')'` in expressions, `op_call` in programs), and adding an entry is a table row plus an executor.
+- **Tables over keyword grammar.** Operations (section 6.0) and expression built-ins (section 5.10) resolve by name against schema tables; each layer has one generic call production (`IDENT '(' arg_list? ')'` in expressions, `op_call` in statements), and adding an entry is a table row plus an executor.
 - **No faults.** Compilation collects diagnostics; execution degrades with a warning and continues (section 7.4). The embedding API never throws.
 
 ### 10.2 Symmetry expansion
@@ -1113,10 +1167,10 @@ When a `where` or match cell contains `random`, the matcher's cell-test order, v
 
 ### 10.6 Random seeding and draw order
 
-A single PRNG stream (`mt19937_64` in the reference implementation), seeded from the invocation seed, drives all stochastic decisions. Every draw site is ordered by the execution model, so the sequence is fixed per (seed, params):
+A single PRNG stream (`mt19937_64` in the reference implementation), seeded from the invocation seed, drives all stochastic decisions. Every draw site is ordered by the execution model, so the sequence is fixed per (entry, seed, params):
 
-1. **Param expressions** (section 4.2) evaluate once at startup, in declaration order (an input's default only when the param was not supplied) - their draws come first.
-2. A **`when` guard** (section 6) evaluates once when its statement is reached, in program order.
+1. **Param expressions** (section 4.2) evaluate once at startup, in canonical declaration order (section 2.6), an input's default only when the param was not supplied - their draws come first.
+2. A **`when` guard** (section 6) evaluates once when its statement is reached, in statement order.
 3. **Match-cell and `where`-cell** expressions evaluate during the collection scan, in row-major anchor order and, within an anchor, in sub-rule/variant declaration order; cells test in row-major order, short-circuiting on first mismatch - a `random` in a cell not reached does not draw.
 4. **Candidate ordering** draws next: the pass's seeded shuffle (batch family) or the single uniform pick (`incremental`), per section 10.4.
 5. **At application**: one draw per `{ any }` node on the resolved write path, outer before inner, earlier sibling first (a single-item `{ any }` still draws, section 5.2); then write-cell expressions, row-major per resolved leaf.
@@ -1128,7 +1182,15 @@ Determinism is per (seed, params, implementation version) - section 7.2.
 
 ### 10.7 Sequence stability
 
-The reference approach copies the grid stack at the start of an iteration and compares it at the end. That costs one extra stack, the same order of cost as the snapshot double buffer (section 10.3). A cheaper equivalent keeps a per-(grid, cell) set of cells written during the iteration, and compares only those against their start values, plus the dimensions. It must still compare values, because a cell written back to its original value is not a change (section 6.10). Both approaches are unobservable. `one S` never needs the comparison.
+The reference approach copies the grid stack at the start of an iteration and compares it at the end. That costs one extra stack, the same order of cost as the snapshot double buffer (section 10.3). A cheaper equivalent keeps a per-(grid, cell) set of cells written during the iteration, and compares only those against their start values, plus the dimensions. It must still compare values, because a cell written back to its original value is not a change (section 6.10). Both approaches are unobservable. `one S` never needs the comparison, and neither does applying the entry (section 6).
+
+### 10.8 Module loading
+
+The reference compiler loads the closure in one depth-first walk from the root. Each `use` calls the resolver with the path and the using module's canonical name. Results are cached by canonical name, so each module is read and parsed once. A module is marked in progress while its own `use` declarations are walked: a `use` that reaches an in-progress module is a cycle (check 40). Appending each module when its walk completes yields the canonical order (section 2.6) with no separate sort.
+
+Names go into closure-wide tables built in canonical order. That one pass assigns layer indices, the param evaluation order, and sequence ids. Visibility is checked after resolution: each module keeps the set of modules it sees (itself plus its direct uses). A name whose declaring module is outside that set is reported as not visible, and the diagnostic names the declaring module, so the fix (`use "..."`) is in the message.
+
+The compiled artifact stays self-contained (section 10.1). It holds the merged closure, the canonical name of each module, and a (module, line) source location for each statement and rule, so diagnostics and a debugger can map steps back to the right file after the AST is discarded. `generator::modules()` lists the closure for hot reload: when any listed module changes, recompile from the root. A failed compile still lists the modules it resolved, so a host can watch a broken file and retry once it is fixed.
 
 ---
 
@@ -1137,27 +1199,41 @@ The reference approach copies the grid stack at the start of an iteration and co
 The reference implementation is a C++ library first and a CLI second. A game embeds `ls.hpp` and sees exactly four types - `generator`, `level`, `grid`, `generation` - in namespace `ls`. Nothing throws: a failed compile yields a falsy `generator` carrying `error()`, and every query on an invalid object reads as empty.
 
 ```cpp
-auto gen   = ls::generator::compile(source);        // once, at load
+auto gen   = ls::generator::compile(source, "dungeon.ls", resolve);  // once, at load
 int  wall  = gen.tag("geometry.wall");              // resolve names once
-auto level = gen.generate(seed);                    // pure in (seed, params)
+int  entry = gen.sequence("main");                  // any sequence can be the entry
+auto level = gen.generate(entry, seed);             // pure in (entry, seed, params)
 auto geo   = level["level"];
 if (geo.at(x, y) == wall) ...
 ```
 
-**The factory-vs-value split.** A `generator` is a **stateless, reusable factory**: one per `.ls` file, shareable across threads; each `generate`/`begin` call is independent and carries its own run state. A `level` is a **self-contained owned value**: it owns its cells and outlives the generator that made it. A `grid` **shares ownership** of the level data it views, so a grid handed to a garbage-collected scripting host can outlive the `level` object it came from. Internally, one coroutine-backed execution core (section 10.1) serves both `generate` (drain to completion) and `begin`/`step` (pull incrementally); they cannot diverge.
+**The factory-vs-value split.** A `generator` is a **stateless, reusable factory**: one per root module and its closure (section 2.6), shareable across threads; each `generate`/`begin` call names its entry, is independent, and carries its own run state. A `level` is a **self-contained owned value**: it owns its cells and outlives the generator that made it. A `grid` **shares ownership** of the level data it views, so a grid handed to a garbage-collected scripting host can outlive the `level` object it came from. Internally, one coroutine-backed execution core (section 10.1) serves both `generate` (drain to completion) and `begin`/`step` (pull incrementally); they cannot diverge.
 
-### `generator` - one compiled program
+### `generator` - one compiled module closure
 
 | member | meaning |
 |--------|---------|
-| `static generator compile(const std::string& source, const std::string& name = "generator")` | Compile source text. The game owns file/asset IO; `name` labels diagnostics (`"dungeon.ls:12:3: error: ..."`). |
+| `static generator compile(const std::string& source, const std::string& name = "generator", resolver resolve = {})` | Compile `source` as the root module (section 2.6), with canonical name `name`. The game owns file/asset IO: each `use` is mapped to a module by `resolve` (see Module resolution below); with no resolver, every `use` is an unresolved module (section 7.3, check 9). Diagnostics are labelled with canonical module names (`"dungeon.ls:12:3: error: ..."`). |
 | `explicit operator bool()` | True iff compilation succeeded. |
 | `std::string error()` | Formatted diagnostics when compile failed; `""` on success. |
 | `std::string warnings()` | Formatted warnings of a successful compile (e.g. the reductivity warning, section 7.4); `""` when none. |
 | `int tag(const std::string& qualified)` | Tag value id, qualified by tagset: `tag("geometry.wall")`. Ids are per tagset, valid for every layer of that tagset. `-1` if unknown. |
-| `level generate(uint64_t seed, const std::vector<std::pair<std::string, int>>& params = {})` | Run the whole program: (seed, params) -> `level`, deterministically (section 7.2). Params override declared defaults; unknown names are ignored. |
-| `generation begin(uint64_t seed, step_mode mode = step_mode::statement, observe obs = observe::off, const std::vector<std::pair<std::string, int>>& params = {})` | Start a progressive run; pull it with `generation::step()`. |
-| `int statement_count()` | Number of top-level program statements (progress denominators). Statements inside sequences are not counted; a sequence application counts as one. |
+| `int sequence(const std::string& name)` | Sequence id, for use as an entry (section 6). `-1` if unknown. Ids are `0 .. sequence_count() - 1` in canonical declaration order (section 2.6). |
+| `int sequence_count()` | Number of sequences in the closure. |
+| `std::string sequence_name(int id)` | Name of a sequence id (`""` if out of range). |
+| `std::vector<std::string> modules()` | Canonical names of the closure's modules in canonical order, root last (section 2.6). After a failed compile, the modules resolved before the failure. For hot reload. |
+| `level generate(int entry, uint64_t seed, const std::vector<std::pair<std::string, int>>& params = {})` | Run sequence `entry` as the entry (section 6): (entry, seed, params) -> `level`, deterministically (section 7.2). Params override declared defaults; unknown names are ignored. An invalid entry id yields an empty level. |
+| `generation begin(int entry, uint64_t seed, step_mode mode = step_mode::statement, observe obs = observe::off, const std::vector<std::pair<std::string, int>>& params = {})` | Start a progressive run of `entry`; pull it with `generation::step()`. With an invalid entry id, the first `step()` returns `false`. |
+| `int statement_count(int entry)` | Number of statements in the entry's body (progress denominators). Statements inside nested sequences are not counted; a sequence application counts as one. `0` for an invalid id. |
+
+**Module resolution.** `compile` maps each `use` (section 2.6) through a host callback:
+
+```cpp
+struct module_source { std::string name; std::string source; };
+using resolver = std::function<std::optional<module_source>(const std::string& path, const std::string& from)>;
+```
+
+`path` is the string written in the `use`; `from` is the canonical name of the using module (the root's is `compile`'s `name`). The resolver returns the module's canonical name and source text, or `std::nullopt` when it cannot resolve the path (check 9). The canonical name identifies the module within the compile and labels its diagnostics, so the resolver must return the same name for every path that denotes the same file. The CLI's resolver reads the filesystem, relative to the directory of `from`.
 
 ### `level` - one generated outcome: the stack of co-registered grids
 
@@ -1166,7 +1242,7 @@ if (geo.at(x, y) == wall) ...
 | `int width()`, `int height()` | Final dimensions. |
 | `int layer_count()` | Number of declared layers. |
 | `grid operator[](const std::string& layer_name)` | Layer by name. |
-| `grid layer(int index)` | Layer by declaration order. |
+| `grid layer(int index)` | Layer by layer order (section 4). |
 | `std::string layer_name(int index)` | Name of the layer at `index`. |
 
 ### `grid` - one layer of a generated level
@@ -1185,15 +1261,15 @@ if (geo.at(x, y) == wall) ...
 | `bool step()` | Advance by the granularity fixed at `begin()`; `false` when done. |
 | `level snapshot()` | Copy of the current state - committed statements plus the current batch's applications so far. |
 | `level finish()` | Drain whatever remains and return the finished level (the "skip" path). |
-| `int stmt_index()` | Index of the top-level program statement the last step worked on (`-1` before the first step). Inside a sequence, this is the index of the top-level statement that applied it. Observe channel. |
-| `std::vector<stmt_frame> stmt_stack()` | Position of the last step through nested sequences, outermost first. Frame 0 is the top-level statement (its `index` equals `stmt_index()`); each further frame is a statement inside the sequence applied by the frame before it. Empty before the first step. Observe channel. |
+| `int stmt_index()` | Index, in the entry's body, of the statement the last step worked on (`-1` before the first step). Inside a nested sequence, this is the index of the entry-body statement that applied it. Observe channel. |
+| `std::vector<stmt_frame> stmt_stack()` | Position of the last step through nested sequences, outermost first. Frame 0 is a statement of the entry's body (its `index` equals `stmt_index()`); each further frame is a statement inside the sequence applied by the frame before it. Empty before the first step. Observe channel. |
 | `std::vector<cell_highlight> highlights()` | Matched/written cells of the last application. Observe channel; populated only when begun with `observe::on`. |
 
 Supporting types:
 
-- `enum class step_mode { statement, application }` - the pull granularity: one **leaf** statement per `step()`, or one rule application per `step()` (operations and atomic batches still advance whole). A leaf statement is a rule application or an operation, at top level or inside a sequence. Applying a sequence is not itself a step, and neither is its stability check.
+- `enum class step_mode { statement, application }` - the pull granularity: one **leaf** statement per `step()`, or one rule application per `step()` (operations and atomic batches still advance whole). A leaf statement is a rule application or an operation, in the entry's body or inside a nested sequence. Applying a sequence is not itself a step, and neither is its stability check.
 - `enum class observe { off, on }` - whether the run records the observe channel (`stmt_index`, `stmt_stack`, `highlights`); off costs nothing.
-- `struct stmt_frame { int index; int iteration; }` - one level of the statement stack. `index` is the statement's position in its enclosing list (the program, or a sequence body). `iteration` is the 0-based iteration of the enclosing sequence application (always 0 for the top-level frame).
+- `struct stmt_frame { int index; int iteration; }` - one level of the statement stack. `index` is the statement's position in its enclosing list (the entry's body, or a nested sequence body). `iteration` is the 0-based iteration of the enclosing sequence application (always 0 for frame 0, since the entry runs once).
 - `struct cell_highlight { enum class kind { match, write }; int layer; int x, y; kind what; }` - one highlighted cell: which layer/cell the last application matched or wrote.
 
 `generation` is move-only (it owns the in-flight coroutine state). Dropping it mid-run is safe; `finish()` is the explicit skip-to-end.

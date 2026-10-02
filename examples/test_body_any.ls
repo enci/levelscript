@@ -9,7 +9,7 @@ rule choose { any
     g[a] => g[b]
     g[a] => g[c]
 }
-program {
+sequence main {
     resize(3, 3)
     all fill
     one choose

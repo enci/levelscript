@@ -3,4 +3,4 @@
 // @expect stderr-contains must have a default
 params { difficulty: number }
 layers { g: grid of number }
-program { resize(1,1) }
+sequence main { resize(1,1) }

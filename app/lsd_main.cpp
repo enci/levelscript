@@ -8,17 +8,21 @@
 // public run API (compile once, step application by application).
 
 static void usage(char const* argv0) {
-    std::cerr << "Usage: " << argv0 << " [--seed N] <file.ls>\n";
+    std::cerr << "Usage: " << argv0 << " [--seed N] [--entry name] <file.ls>\n"
+              << "  --entry  the sequence to run (default: main)\n";
 }
 
 int main(int argc, char* argv[]) {
     std::optional<uint64_t> seed;
     std::string path;
+    std::string entry = "main";   // a tool convention (§6), changeable in the UI
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--seed" && i + 1 < argc) {
             seed = (uint64_t)std::strtoull(argv[++i], nullptr, 10);
+        } else if (arg == "--entry" && i + 1 < argc) {
+            entry = argv[++i];
         } else if (arg == "--help" || arg == "-h") {
             usage(argv[0]);
             return 0;
@@ -35,5 +39,5 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    return ls::run_debug_ui(path, seed);
+    return ls::run_debug_ui(path, seed, entry);
 }

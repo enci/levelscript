@@ -433,8 +433,11 @@ static std::pair<program_stmt const*, compiled_stmt const*>
 shown_leaf(script const& sc, debug_run const& run, std::string& trail) {
     auto frames = run.gen.stmt_stack();
     if (frames.empty()) return {nullptr, nullptr};
-    auto const* ast_list  = &sc.ast.program.stmts;
-    auto const* meta_list = &sc.meta.stmts;
+    if (sc.entry < 0 || sc.entry >= (int)sc.ast.sequences.size() ||
+        sc.entry >= (int)sc.meta.sequences.size())
+        return {nullptr, nullptr};
+    auto const* ast_list  = &sc.ast.sequences[(size_t)sc.entry].stmts;
+    auto const* meta_list = &sc.meta.sequences[(size_t)sc.entry].stmts;
     for (size_t k = 0; k < frames.size(); ++k) {
         int idx = frames[k].index;
         if (idx < 0 || idx >= (int)ast_list->size() || idx >= (int)meta_list->size())
@@ -514,9 +517,11 @@ void draw_rule_window(script const& sc, debug_run const& run, float mini_px,
 // ── program window ────────────────────────────────────────────────────────────
 
 void draw_program_window(script const& sc, debug_run const& run) {
-    auto const& stmts = sc.ast.program.stmts;
+    static std::vector<program_stmt> const none;
+    auto const& stmts = sc.entry >= 0 && sc.entry < (int)sc.ast.sequences.size()
+                      ? sc.ast.sequences[(size_t)sc.entry].stmts : none;
     if (stmts.empty()) {
-        ImGui::TextDisabled("(empty program)");
+        ImGui::TextDisabled("(empty entry)");
         return;
     }
 

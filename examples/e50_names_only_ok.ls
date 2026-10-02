@@ -5,7 +5,7 @@
 tag t { wall, floor }
 layers { g: grid of t }
 rule fill { g[.] => g[wall] }
-program {
+sequence main {
     resize(2, 2)
     all fill
 }

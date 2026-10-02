@@ -2,4 +2,4 @@
 // T14: Empty layers block is valid.
 // @expect run-ok
 layers { }
-program { resize(8, 8) }
+sequence main { resize(8, 8) }

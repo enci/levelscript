@@ -42,7 +42,7 @@ rule grow(symmetry=all, rotation=all) {
         wall wall wall ]
 }
 
-program {
+sequence main {
     resize(60, 25)
     all fill
     all erode

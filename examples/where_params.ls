@@ -34,7 +34,7 @@ rule flood {
 // Everything left becomes grass.
 rule land { map[.] => map[grass] }
 
-program {
+sequence main {
     resize(4, 4)
     all flood
     all land

@@ -10,7 +10,7 @@ tag t { S, F }
 layers { g: grid of t }
 rule fill { g[.] => g[S] }
 rule pair(rotation=all) { g[ S S ] => g[ F F ] }
-program {
+sequence main {
     resize(4, 4)
     all fill
     all pair

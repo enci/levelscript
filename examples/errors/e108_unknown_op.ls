@@ -3,4 +3,4 @@
 // @expect stderr-contains unknown operation
 tag t { a }
 layers { g: grid of t }
-program { carve(3, 3) }
+sequence main { carve(3, 3) }

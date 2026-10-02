@@ -3,6 +3,8 @@ import { applyDecorations, clearAll } from './decorations';
 import { setCached, deleteCached } from './cache';
 import { definitionProvider, hoverProvider, completionProvider } from './providers';
 import { initWasm, inspectJson } from './wasm';
+import { editorResolver } from './resolve';
+import * as path from 'path';
 import { registerRunner } from './runner';
 
 const LS_LANG = 'levelscript';
@@ -56,10 +58,19 @@ export function deactivate() {
 
 function analyse(doc: vscode.TextDocument) {
   try {
-    const result = inspectJson(doc.getText(), doc.uri.fsPath);
+    const result = inspectJson(doc.getText(), doc.uri.fsPath, editorResolver());
     setCached(doc.uri.toString(), result);
 
     const vsDiags = result.diagnostics.map(d => {
+      // A diagnostic in another module of the closure (section 2.6) has no
+      // position in this file: pin it to the top, naming where it is.
+      if (d.module && d.module !== doc.uri.fsPath) {
+        const severity = d.severity === 'error'
+          ? vscode.DiagnosticSeverity.Error
+          : vscode.DiagnosticSeverity.Warning;
+        return new vscode.Diagnostic(new vscode.Range(0, 0, 0, 1),
+          `${path.basename(d.module)}:${d.line}:${d.col}: ${d.message}`, severity);
+      }
       // JSON lines are 1-based, columns are 1-based
       const line = Math.max(0, d.line - 1);
       const col = Math.max(0, d.col - 1);

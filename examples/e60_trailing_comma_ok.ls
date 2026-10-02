@@ -5,4 +5,4 @@
 tag t { a, b, c, }
 layers { g: grid of t }
 rule fill { g[.] => g[a] }
-program { resize(2, 2) all fill }
+sequence main { resize(2, 2) all fill }

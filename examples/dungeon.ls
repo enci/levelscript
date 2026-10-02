@@ -82,7 +82,7 @@ rule hack {
     tiles[.] => tiles[58]
 }
 
-program {
+sequence main {
     resize(5, 5)
     all init
     upscale(6, 4)

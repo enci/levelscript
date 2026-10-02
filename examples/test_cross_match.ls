@@ -18,7 +18,7 @@ rule place {
     =>
     b[mark]
 }
-program {
+sequence main {
     resize(3, 3)
     all fill_a
     all place

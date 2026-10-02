@@ -2,7 +2,7 @@
 // @expect error
 // @expect stderr-contains dimensions must be positive
 layers { }
-program {
+sequence main {
     resize(2, 2)
     upscale(0, 1)
 }

@@ -15,7 +15,7 @@ rule mix {
     }
 }
 
-program {
+sequence main {
     resize(12, 8)
     all mix
 }

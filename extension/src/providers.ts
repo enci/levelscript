@@ -13,7 +13,10 @@ function findTokenAt(tokens: any[], line: number, col: number) {
     return null;
 }
 
-function spanToLocation(uri: vscode.Uri, loc: { line: number, col: number, len: number }): vscode.Location {
+// A symbol may be declared in another module of the closure (section 2.6);
+// its loc then names that module's file.
+function spanToLocation(uri: vscode.Uri, loc: { line: number, col: number, len: number, module?: string }): vscode.Location {
+    if (loc.module && loc.module !== uri.fsPath) uri = vscode.Uri.file(loc.module);
     const start = new vscode.Position(loc.line - 1, loc.col - 1);
     const end = new vscode.Position(loc.line - 1, loc.col - 1 + loc.len);
     return new vscode.Location(uri, new vscode.Range(start, end));
@@ -144,12 +147,12 @@ export const completionProvider: vscode.CompletionItemProvider = {
 
         switch (ctx.kind) {
         case 'top':
+            snippet('use', 'use "${1:module.ls}"', K.Keyword, 'use another module (head of the file)');
             snippet('tag', 'tag ${1:name} { ${0} }', K.Keyword);
             snippet('layers', 'layers {\n\t$0\n}', K.Keyword);
             snippet('params', 'params {\n\t$0\n}', K.Keyword);
             snippet('rule', 'rule ${1:name} {\n\t$0\n}', K.Keyword);
             snippet('sequence', 'sequence ${1:name} {\n\t$0\n}', K.Keyword);
-            snippet('program', 'program {\n\t$0\n}', K.Keyword);
             break;
         case 'unionMember':
             sym?.tags.find(t => t.name === ctx.tag)?.values.forEach(v => word(v.name, K.EnumMember));

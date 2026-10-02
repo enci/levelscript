@@ -4,4 +4,4 @@
 tag t { a }
 layers { g: grid of t }
 rule unused { g[.] => g[a] }
-program { resize(2, 2) }
+sequence main { resize(2, 2) }

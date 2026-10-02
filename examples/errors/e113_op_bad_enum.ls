@@ -4,4 +4,4 @@
 // @expect stderr-contains invalid connectivity
 tag t { start, goal, route }
 layers { g: grid of t }
-program { resize(2, 2) path(from=start, to=goal, into=g, write=route, connectivity=6) }
+sequence main { resize(2, 2) path(from=start, to=goal, into=g, write=route, connectivity=6) }

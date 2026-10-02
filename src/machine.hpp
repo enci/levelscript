@@ -26,7 +26,7 @@ struct level_data {
 // a filter on the puller, never a second code path.
 struct step_event {
     enum class kind { application, statement } what{kind::statement};
-    int stmt{-1};   // top-level program statement (a sequence's applying one)
+    int stmt{-1};   // statement of the entry's body (a nested sequence's applying one)
 };
 
 // One level of the statement stack (spec §6.10, Appendix A stmt_stack):
@@ -56,7 +56,8 @@ struct highlight {
 // and exactly one implementation of the execution model.
 class machine {
 public:
-    machine(std::shared_ptr<compiled const> prog, uint64_t seed);
+    // `entry`: the sequence a run applies (§6); an invalid id runs nothing.
+    machine(std::shared_ptr<compiled const> prog, uint64_t seed, int entry);
 
     // Supply an input param before run(); unknown names are ignored.
     void set_param(std::string const& name, long long value);
@@ -135,6 +136,7 @@ private:
     }
 
     std::shared_ptr<compiled const> prog_;
+    int                             entry_{-1};
     std::mt19937_64                 rng_;
     std::vector<grid_state>         grids_;    // indexed by grid id
     // The stack's dimensions - kept apart from the layers so a layer-less

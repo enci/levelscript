@@ -1,11 +1,11 @@
-// Showcase (v0.7): the `ordered` combinator vs. program-level sequencing.
+// Showcase (v0.7): the `ordered` combinator vs. statement-level sequencing.
 //
 // `ordered` gives the sub-rules a PRIORITY (declaration order) applied as an
 // ordering key on the candidate vector (§5.2). Under the default `snapshot`
 // policy, higher-priority candidates pull first under the write-protection
 // mask — so where two sub-rules write the SAME cell, the higher one claims it
 // and the lower one is skipped. It is NOT "apply s1 everywhere, then s2 as a
-// second pass" — that global sequencing is a program-level concern (separate
+// second pass" — that global sequencing is a statement-level concern (separate
 // statements), and a later statement CAN overwrite an earlier one.
 //
 // The two grids below are seeded identically (a diagonal of `seed`, the rest
@@ -53,7 +53,7 @@ rule classify { ordered
 rule toGold  { global[seed] => global[gold] }
 rule toPlain { global[*]    => global[plain] }
 
-program {
+sequence main {
     resize(3, 3)
     all sowA
     all sowB

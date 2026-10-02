@@ -74,7 +74,7 @@ rule peak(symmetry=all, rotation=all) {
         * highland * ]
 }
 
-program {
+sequence main {
     resize(80, 40)
     all init
     some(max=30) seed

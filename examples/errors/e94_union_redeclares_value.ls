@@ -3,4 +3,4 @@
 // @expect stderr-contains redeclares
 tag geometry { wall, floor, wall = wall | floor }
 layers { level: grid of geometry }
-program { resize(1,1) }
+sequence main { resize(1,1) }

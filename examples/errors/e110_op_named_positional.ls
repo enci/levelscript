@@ -4,4 +4,4 @@
 // @expect stderr-contains named-only
 tag t { a }
 layers { g: grid of t }
-program { resize(2, 2) path(g) }
+sequence main { resize(2, 2) path(g) }

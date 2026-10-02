@@ -20,7 +20,7 @@ rule grow(rotation=all) {
     algo[* S]
 }
 
-program {
+sequence main {
     resize(13, 9)
     one plant
     some(max=45, policy=incremental) grow

@@ -1,14 +1,15 @@
 #pragma once
 #include "diagnostic.hpp"
 #include "ls.hpp"
+#include "modules.hpp"
 #include "parser.hpp"
 #include "sema.hpp"
 #include <string>
 
 namespace ts {
 
-// Parse + analyze a source fragment, keeping the diagnostics inspectable.
-// The one test harness (the MGSL repo grew four divergent copies of this).
+// Parse + analyze a source fragment as a lone module, keeping the
+// diagnostics inspectable. The one test harness.
 struct compile_result {
     ls::diagnostics diags;
     ls::compiled    prog;
@@ -17,7 +18,7 @@ struct compile_result {
     explicit compile_result(std::string const& src) {
         auto ast = ls::parse(src, "test", diags);
         if (ast && !diags.has_errors())
-            ok = ls::analyze(*ast, prog, diags, "test");
+            ok = ls::analyze(ls::single_module(std::move(*ast), "test"), prog, diags);
     }
 
     bool has_error(std::string const& needle) const {

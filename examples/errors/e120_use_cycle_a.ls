@@ -1,0 +1,4 @@
+// E120: a module that uses itself through another module (§7.3 #40).
+// @expect error
+// @expect stderr-contains module cycle
+use "e120_use_cycle_b.ls"

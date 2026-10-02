@@ -3,4 +3,4 @@
 // @expect stderr-contains built-in function name
 tag t { a }
 layers { random: grid of t }
-program { resize(1,1) }
+sequence main { resize(1,1) }
