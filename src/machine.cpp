@@ -142,6 +142,7 @@ sequence<step_event> machine::run() {
             if (!seq) co_yield step_event{step_event::kind::statement, si};
             continue;
         }
+        co_yield begin_event(si);
         if (seq) {
             auto sub = run_sequence(st, si);
             while (sub.next()) co_yield sub.value();
@@ -237,6 +238,7 @@ sequence<step_event> machine::run_sequence(compiled_stmt const& st, int top) {
                 if (!seq) co_yield step_event{step_event::kind::statement, top};
                 continue;
             }
+            co_yield begin_event(top);
             if (seq) {
                 auto sub = run_sequence(bs, top);
                 while (sub.next()) co_yield sub.value();

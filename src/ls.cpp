@@ -125,6 +125,8 @@ struct run_state {
     bool                 done{false};
     int                  last_stmt{-1};
     bool                 at_boundary{false};
+    bool                 at_begin{false};
+    bool                 stop_at_begin{false};
 
     run_state(std::shared_ptr<compiled const> prog, int entry, uint64_t seed,
               step_mode md, observe obs,
@@ -146,8 +148,11 @@ bool run::step() {
     if (!s_ || s_->done) return false;
     while (s_->seq.next()) {
         auto const& e = s_->seq.value();
+        if (e.what == step_event::kind::begin && !s_->stop_at_begin) continue;
         s_->last_stmt = e.stmt;
         s_->at_boundary = e.what == step_event::kind::statement;
+        s_->at_begin = e.what == step_event::kind::begin;
+        if (s_->at_begin) return true;
         if (s_->mode == step_mode::application ||
             e.what == step_event::kind::statement)
             return true;
@@ -162,6 +167,14 @@ int run::statement_index() const {
 
 bool run::at_statement_boundary() const {
     return s_ && s_->at_boundary;
+}
+
+void run::stop_at_begin(bool on) {
+    if (s_) s_->stop_at_begin = on;
+}
+
+bool run::at_statement_begin() const {
+    return s_ && s_->at_begin;
 }
 
 std::vector<stmt_frame> run::stmt_stack() const {

@@ -115,11 +115,11 @@ struct debug_run {
 
     void restart(generator const& g, int entry, uint64_t seed) {
         gen = g.run(entry, seed, step_mode::application, observe::on);
+        gen.stop_at_begin(true);   // stop before statements, not only after
         stmt_count = g.statement_count(entry);
         started = false;
         done = false;
         cmd = command::none;
-        last_stack.clear();
         paused_at.clear();
         apps_in_stmt = 0;
         counted_stmt = -1;
@@ -144,23 +144,22 @@ struct debug_run {
             same = st[k].index == counted_stack[k].index &&
                    st[k].iteration == counted_stack[k].iteration;
         if (!same) { counted_stmt = s; counted_stack = std::move(st); apps_in_stmt = 0; }
-        if (!gen.at_statement_boundary()) apps_in_stmt++;
+        if (!gen.at_statement_boundary() && !gen.at_statement_begin()) apps_in_stmt++;
         return true;
     }
 
     // ── VS Code-style stepping ────────────────────────────────────────────
     //
-    // The run is a coroutine: it can only stop *after* an event (one rule
-    // application, or a statement finishing), never before one, and never go
-    // back. Every command below pulls events until its condition holds, a
-    // breakpoint is entered, or the run ends. Long commands are time-sliced
-    // by the caller (tick()) so the UI stays live and Pause can interrupt.
+    // The run is a coroutine: it cannot go back, but with stop_at_begin it
+    // stops *before* each statement as well as after each application and
+    // each finished statement. Commands pull events until their condition
+    // holds, a breakpoint's statement is about to run, or the run ends. Long
+    // commands are time-sliced by the caller (tick()) so the UI stays live
+    // and Pause can interrupt.
 
     enum class command { none, step_over, step_out, cont };
-    command cmd{command::none};
-    size_t  cmd_depth{0};        // statement-stack depth the command started at
-    bool    cmd_went_deeper{false};
-    std::vector<stmt_frame> last_stack;   // stack of the previous event
+    command     cmd{command::none};
+    size_t      cmd_depth{0};    // statement-stack depth the command started at
     std::string paused_at;       // "breakpoint 2.0.1" when one stopped the run
 
     bool busy() const { return cmd != command::none; }
@@ -175,70 +174,39 @@ struct debug_run {
         return p;
     }
 
-    // A breakpoint is entered when the event's stack reaches a marked
-    // statement it was not in on the previous event - so every iteration of
-    // a sequence body re-enters it, while further applications of the same
-    // statement do not.
-    std::string entered_breakpoint(std::set<std::string> const& bps,
-                                   std::vector<stmt_frame> const& st) const {
-        for (size_t n = 1; n <= st.size(); ++n) {
-            bool same = last_stack.size() >= n;
-            for (size_t k = 0; same && k < n; ++k)
-                same = last_stack[k].index == st[k].index &&
-                       last_stack[k].iteration == st[k].iteration;
-            if (same) continue;
-            std::string key = dotted(st, n);
-            if (bps.count(key)) return key;
-        }
-        return "";
-    }
-
     // Pull one event and decide whether the active command stops on it.
+    // Every stop is a statement's begin: nothing of it has run yet.
     bool advance_cmd(std::set<std::string> const& bps) {
         if (!advance()) { cmd = command::none; return false; }
+        if (!gen.at_statement_begin()) return true;
         auto st = gen.stmt_stack();
-        size_t d = st.size();
-        bool boundary = gen.at_statement_boundary();
-        std::string bp = entered_breakpoint(bps, st);
-        last_stack = st;
-        if (!bp.empty()) {
-            paused_at = "breakpoint " + bp;
+        std::string key = dotted(st, st.size());
+        if (bps.count(key)) {   // every iteration re-begins a body statement
+            paused_at = "breakpoint " + key;
             cmd = command::none;
             return true;
         }
-        switch (cmd) {
-        case command::step_over:
-            if (d > cmd_depth) cmd_went_deeper = true;
-            // left the level, finished a statement at this level, or came
-            // back from a sequence into the next statement
-            if (d < cmd_depth || (boundary && d <= cmd_depth) ||
-                (cmd_went_deeper && d == cmd_depth))
-                cmd = command::none;
-            break;
-        case command::step_out:
-            if (d < cmd_depth) cmd = command::none;
-            break;
-        default: break;
-        }
+        size_t d = st.size();
+        if ((cmd == command::step_over && d <= cmd_depth) ||   // the next statement here
+            (cmd == command::step_out  && d <  cmd_depth))     // back in the enclosing list
+            cmd = command::none;
         return true;
     }
 
     void begin(command c) {
         if (done) return;
         paused_at.clear();
-        size_t d = gen.stmt_stack().size();
         cmd = c;
-        cmd_depth = std::max<size_t>(d, 1);
-        cmd_went_deeper = false;
+        cmd_depth = std::max<size_t>(gen.stmt_stack().size(), 1);
         if (c == command::step_out && cmd_depth <= 1) cmd = command::cont;   // out of the entry = run on
     }
 
-    // Step Into (F11): exactly one event - the finest step.
+    // Step Into (F11): exactly one event - a statement's begin, one rule
+    // application, or a statement finishing.
     void step_into() {
         if (done) return;
         paused_at.clear();
         advance();
-        last_stack = gen.stmt_stack();
         refresh();
     }
     // Pause (F6): stop whatever command is running.
