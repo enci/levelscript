@@ -35,7 +35,7 @@ static constexpr ImU32 k_palette_light[12] = {
     IM_COL32(255, 173, 214, 255), IM_COL32(255, 209, 158, 255),
 };
 
-// lsd has no theme flag threaded through the view code; read it back off
+// The debugger has no theme flag threaded through the view code; read it back off
 // the style, the same way the app already probes ImGuiCol_WindowBg for the
 // title bar tint and clear color (debug_ui.cpp).
 static bool is_dark_theme() {

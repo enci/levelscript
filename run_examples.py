@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Golden-output example runner — the determinism gate.
 
-Runs every examples/*.ls through lsc with its pinned seed (a `// @seed N`
+Runs every examples/*.ls through the levelscript CLI with its pinned seed (a `// @seed N`
 comment, default 42) and compares stdout against the .expected file next to
 it. Any change to shuffle order or draw sequence fails loudly here.
 
@@ -16,22 +16,22 @@ from pathlib import Path
 ROOT = Path(__file__).parent
 
 
-def find_lsc() -> Path:
+def find_cli() -> Path:
     candidates = [
         ROOT / "build" / sub / "app" / cfg / exe
         for sub in (".", "clion")
         for cfg in ("Debug", "Release", ".")
-        for exe in ("lsc.exe", "lsc")
+        for exe in ("levelscript.exe", "levelscript")
     ]
     for c in candidates:
         if c.is_file():
             return c
-    sys.exit("lsc not found — build first (cmake --build build)")
+    sys.exit("levelscript not found — build first (cmake --build build)")
 
 
 def main() -> None:
     update = "--update" in sys.argv
-    lsc = find_lsc()
+    cli = find_cli()
     examples = sorted((ROOT / "examples").glob("*.ls"))
     error_examples = sorted((ROOT / "examples" / "errors").glob("*.ls"))
     if not examples and not error_examples:
@@ -41,7 +41,7 @@ def main() -> None:
 
     # examples/errors/*.ls must FAIL to compile (exit != 0, diagnostics on stderr)
     for ex in error_examples:
-        run = subprocess.run([str(lsc), "--seed", "1", str(ex)],
+        run = subprocess.run([str(cli), "--seed", "1", str(ex)],
                              capture_output=True, text=True)
         if run.returncode == 0:
             print(f"FAIL errors/{ex.name}: compiled but should not")
@@ -58,7 +58,7 @@ def main() -> None:
         seed = m.group(1) if m else "42"
 
         run = subprocess.run(
-            [str(lsc), "--seed", seed, str(ex)],
+            [str(cli), "--seed", seed, str(ex)],
             capture_output=True, text=True,
         )
         if run.returncode != 0:

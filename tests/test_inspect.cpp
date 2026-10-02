@@ -3,7 +3,7 @@
 #include <string>
 
 // The inspect JSON is the contract between the compiler and the editor
-// tooling (lsc --inspect and the WASM module share this one function).
+// tooling (levelscript --inspect and the WASM module share this one function).
 // Substring assertions keep the tests honest without a JSON parser.
 
 static bool has(std::string const& json, std::string const& needle) {

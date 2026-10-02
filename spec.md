@@ -2,7 +2,7 @@
 
 **Status**: Draft 0.7
 **File extension**: `.ls`
-**CLI**: `lsc [--seed N] [--entry name] [--param name=value ...] <file.ls>` (`--entry` defaults to `main`, a tool convention; section 6)
+**CLI**: `levelscript [--seed N] [--entry name] [--param name=value ...] <file.ls>` (`--entry` defaults to `main`, a tool convention; section 6)
 **Embedding**: namespace `ls::` (see Appendix A)
 **Scope**: Core language semantics for grid-based procedural generation.
 
@@ -619,7 +619,7 @@ Statements execute top to bottom.
 
 **Entries.** The embedder names the entry when it starts a run (Appendix A). Any sequence can be the entry; the language designates none. A run first binds the params (section 4.2), then applies the entry exactly as `one S` (section 6.10) to a 0 x 0 stack: one iteration of its body. Applying the entry involves no guard, no draw, and no stability check. A rule is not an entry; to run a single rule, apply it from a sequence.
 
-The tools (`lsc`, `lsd`) run the sequence named `main` unless told otherwise. That is a tool convention, not part of the language: `main` is an ordinary sequence name, and the embedding API always takes an explicit entry.
+The tools (the `levelscript` CLI and `levelscript-debugger`) run the sequence named `main` unless told otherwise. That is a tool convention, not part of the language: `main` is an ordinary sequence name, and the embedding API always takes an explicit entry.
 
 **Grammar:**
 ```
