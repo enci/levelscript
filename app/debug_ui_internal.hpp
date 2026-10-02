@@ -285,7 +285,6 @@ void draw_grid_composite(script const& sc, debug_run const& run,
                          std::unordered_map<std::string, tile_texture> const& tile_textures,
                          float cell_px);
 // Returns the height it occupied, so the caller can size the grid above it.
-float draw_layer_strip(project_config& cfg, compiled const& meta);
 
 // ── layers window: every layer drawn small, side by side ─────────────────────
 

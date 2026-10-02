@@ -129,7 +129,6 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
     std::optional<int> win_x, win_y;
     std::string theme_str        = "system";
     float       pref_play_fps    = 4.f;
-    bool        pref_show_layers = true;
     uint64_t    pref_seed        = 0;
     bool        pref_seed_locked = false;
     {
@@ -149,7 +148,6 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
                 win_w         = (int)getn("win_w", 1280);
                 win_h         = (int)getn("win_h", 800);
                 pref_play_fps = (float)getn("play_fps", 4.0);
-                pref_show_layers = getn("show_layers", 1.0) != 0.0;
                 pref_seed     = (uint64_t)getn("seed", 0.0);
                 if (auto it = j.find("seed_locked"); it != j.end() && it->is_boolean())
                     pref_seed_locked = *it;
@@ -255,8 +253,7 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
     };
 
     float play_fps = pref_play_fps;
-    bool  show_layers = pref_show_layers;   // the LAYERS panel (toolbar toggle)
-    layer_thumbs thumbs;
+    layer_thumbs thumbs;   // the Layers panel's textures
 
     // Captures live window geometry at save time, so it's current whether
     // called right after a theme toggle or at shutdown.
@@ -267,7 +264,6 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
         else if (cur_theme_mode == theme_mode::dark)  mode = "dark";
         j["theme"]       = mode;
         j["play_fps"]    = play_fps;
-        j["show_layers"] = show_layers ? 1 : 0;
         j["seed"]        = seed;
         j["seed_locked"] = seed_locked;
         int w, h, x, y;
@@ -450,7 +446,9 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
             if (run.busy()) {
                 if (dbgbtn(phosphor::PH_PAUSE, "Pause (F6)", dbg_blue, true)) action_pause();
             } else {
-                if (dbgbtn(phosphor::PH_PLAY, "Continue (F5) - run to the next breakpoint",
+                if (dbgbtn(phosphor::PH_PLAY,
+                           run.started ? "Continue (F5) - run to the next breakpoint"
+                                       : "Run (F5) - run to the first breakpoint",
                            dbg_blue, !run.done))
                     action_continue();
             }
@@ -515,13 +513,7 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
             ImGui::SameLine();
             ImGui::SetNextItemWidth(100.f);
             ImGui::SliderFloat("##fps", &play_fps, 0.5f, 30.f, "%.1f fps");
-            ImGui::SameLine();
-            ImGui::Text("|");
-            ImGui::SameLine();
-            if (toolbtn(phosphor::PH_SQUARES_FOUR,
-                        show_layers ? "Hide the LAYERS panel" : "Show the LAYERS panel - every layer, small",
-                        show_layers))
-                show_layers = !show_layers;
+
 #ifdef LS_ENABLE_IMGUI_DEMO
             ImGui::SameLine();
             ImGui::Text("|");
@@ -559,47 +551,36 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
         }
 
         // ── grid (layer strip + canvas) ─────────────────────────────────────
-        ImGui::Begin("VIEWPORT");
-        {
-            // Leave room at the bottom for the layer strip; its height (wrapped
-            // rows) is measured each frame and applied on the next.
-            static float strip_h = 30.f;
-            ImGui::BeginChild("##grid", {0.f, -(strip_h + ImGui::GetStyle().ItemSpacing.y)},
-                              false, ImGuiWindowFlags_HorizontalScrollbar);
-            draw_grid_composite(sc, run, cfg, tile_textures, cfg.cell_px());
-            ImGui::EndChild();
-
-            ImGui::BeginChild("##layer_strip", {0.f, 0.f}, false,
-                              ImGuiWindowFlags_NoScrollbar);
-            strip_h = draw_layer_strip(cfg, sc.meta);
-            ImGui::EndChild();
-        }
+        // Title case; "###ID" keeps each window's id - and its saved dock
+        // position in lsd.ini - independent of the title.
+        ImGui::Begin("Viewport###VIEWPORT");
+        ImGui::BeginChild("##grid", {0.f, 0.f}, false, ImGuiWindowFlags_HorizontalScrollbar);
+        draw_grid_composite(sc, run, cfg, tile_textures, cfg.cell_px());
+        ImGui::EndChild();
         ImGui::End();
 
 #ifdef LS_ENABLE_IMGUI_DEMO
         if (show_demo) ImGui::ShowDemoWindow(&show_demo);
 #endif
 
-        ImGui::Begin("TAGS");
+        ImGui::Begin("Tags###TAGS");
         draw_tags_window(sc.meta, cfg);
         ImGui::End();
 
-        ImGui::Begin("RULE");
+        ImGui::Begin("Rule###RULE", nullptr, ImGuiWindowFlags_HorizontalScrollbar);
         draw_rule_window(sc, run, cfg.mini_px, cfg);
         ImGui::End();
 
-        ImGui::Begin("PROGRAM");
+        ImGui::Begin("Program###PROGRAM");
         draw_program_window(sc, run);
         ImGui::End();
 
-        if (show_layers) {
-            ImGui::SetNextWindowSize({260.f, 420.f}, ImGuiCond_FirstUseEver);
-            if (ImGui::Begin("LAYERS", &show_layers))
-                draw_layers_window(sc, run, cfg, renderer, thumbs);
-            ImGui::End();
-        }
+        ImGui::SetNextWindowSize({260.f, 420.f}, ImGuiCond_FirstUseEver);
+        ImGui::Begin("Layers###LAYERS");
+        draw_layers_window(sc, run, cfg, renderer, thumbs);
+        ImGui::End();
 
-        ImGui::Begin("SETTINGS");
+        ImGui::Begin("Settings###SETTINGS");
         draw_settings_window(cfg, tile_textures, renderer, path);
         ImGui::End();
 

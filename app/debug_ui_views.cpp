@@ -6,6 +6,8 @@
 #include <stb_image.h>
 
 #include <algorithm>
+#include <cfloat>
+#include <cstdio>
 #include <cmath>
 #include <climits>
 
@@ -361,71 +363,93 @@ static void draw_pattern_group(compiled const& meta, compiled_pattern const& pat
     ImGui::EndGroup();
 }
 
-static void draw_lhs_group(compiled const& meta, compiled_pair const& pair,
-                           float mini_px, project_config const& cfg) {
-    for (size_t gi = 0; gi < pair.lhs.size(); ++gi) {
-        if (gi > 0) ImGui::SameLine(0.f, 8.f);
-        draw_pattern_group(meta, pair.lhs[gi], mini_px, cfg);
-    }
+// "rot 90", "flip h", "rot 90 + flip v" - "" for the identity variant.
+static std::string variant_label(compiled_pair const& pr) {
+    using mirror = compiled_pair::mirror;
+    std::string r = pr.rotation ? "rot " + std::to_string(pr.rotation) : "";
+    std::string f = pr.flip == mirror::h    ? "flip h"
+                  : pr.flip == mirror::v    ? "flip v"
+                  : pr.flip == mirror::both ? "flip h+v" : "";
+    return r.empty() ? f : f.empty() ? r : r + " + " + f;
 }
 
-static void draw_rhs_group(compiled const& meta, compiled_pair const& pair,
-                           float mini_px, project_config const& cfg) {
-    // The write side is a (possibly nested) tree; preview every leaf pattern
-    // it may write, flattened (all { any } branches shown side by side).
-    std::vector<compiled_pattern const*> leaves;
-    collect_write_leaves(pair.rhs, leaves);
-    for (size_t i = 0; i < leaves.size(); ++i) {
-        if (i > 0) {
-            ImGui::SameLine(0.f, 10.f);
-            ImGui::BeginGroup();
-            ImGui::Dummy({0.f, 0.f});
-            ImGui::TextDisabled(phosphor::PH_ARROWS_LEFT_RIGHT);
-            ImGui::EndGroup();
-            ImGui::SameLine(0.f, 10.f);
-        }
-        draw_pattern_group(meta, *leaves[i], mini_px, cfg);
-    }
+// Width of draw_pattern_group: the grid-name label or the mini-grid.
+static float pattern_group_width(compiled const& meta, compiled_pattern const& pat,
+                                 float mini_px) {
+    float grid_w = pat.cols * (mini_px + 1.f) - 1.f;
+    return std::max(grid_w, ImGui::CalcTextSize(pattern_grid_name(meta, pat).c_str()).x);
 }
 
-// One LHS-group -> icon-arrow -> RHS-group row, vertically centered on the arrow.
+// One variant as a flow of pieces - its match patterns, the arrow, each write
+// alternative (separated by an alternatives mark) - packed into lines that
+// fit the panel, each line centred vertically. A small rule reads as one
+// row; a big one wraps instead of running off the right edge.
 static void draw_rule_variant(compiled const& meta, compiled_pair const& pair,
                               float mini_px, project_config const& cfg) {
     std::vector<compiled_pattern const*> rhs_leaves;
     collect_write_leaves(pair.rhs, rhs_leaves);
     if (pair.lhs.empty() && rhs_leaves.empty()) return;
 
-    float lhs_h = 0.f;
-    for (auto const& lpat : pair.lhs)
-        lhs_h = std::max(lhs_h, pattern_group_height(lpat, mini_px));
-    float rhs_h = 0.f;
-    for (auto const* rpat : rhs_leaves)
-        rhs_h = std::max(rhs_h, pattern_group_height(*rpat, mini_px));
-    float row_h = std::max(lhs_h, rhs_h);
-
-    ImGui::BeginGroup();
-
-    ImGui::BeginGroup();
-    if (row_h > lhs_h) ImGui::Dummy({0.f, (row_h - lhs_h) * 0.5f});
-    draw_lhs_group(meta, pair, mini_px, cfg);
-    ImGui::EndGroup();
-
-    ImGui::SameLine(0.f, 20.f);
-    ImGui::BeginGroup();
+    enum class piece_kind { pattern, arrow, alt };
+    struct piece { piece_kind kind; compiled_pattern const* pat; float w, h, gap; };
+    std::vector<piece> pieces;
+    float icon_w = ImGui::CalcTextSize(phosphor::PH_ARROW_RIGHT).x;
     float icon_h = ImGui::GetTextLineHeight();
-    if (row_h > icon_h) ImGui::Dummy({0.f, (row_h - icon_h) * 0.5f});
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.40f, 0.68f, 0.98f, 1.f));
-    ImGui::TextUnformatted(phosphor::PH_ARROW_RIGHT);
-    ImGui::PopStyleColor();
-    ImGui::EndGroup();
+    auto add_pat = [&](compiled_pattern const& p, float gap) {
+        pieces.push_back({piece_kind::pattern, &p, pattern_group_width(meta, p, mini_px),
+                          pattern_group_height(p, mini_px), gap});
+    };
+    for (size_t k = 0; k < pair.lhs.size(); ++k) add_pat(pair.lhs[k], k ? 8.f : 0.f);
+    pieces.push_back({piece_kind::arrow, nullptr, icon_w, icon_h, 20.f});
+    for (size_t k = 0; k < rhs_leaves.size(); ++k) {
+        if (k) pieces.push_back({piece_kind::alt, nullptr, icon_w, icon_h, 10.f});
+        add_pat(*rhs_leaves[k], k ? 10.f : 20.f);
+    }
 
-    ImGui::SameLine(0.f, 20.f);
-    ImGui::BeginGroup();
-    if (row_h > rhs_h) ImGui::Dummy({0.f, (row_h - rhs_h) * 0.5f});
-    draw_rhs_group(meta, pair, mini_px, cfg);
-    ImGui::EndGroup();
+    // pass 1: pack into lines
+    float avail = std::max(ImGui::GetContentRegionAvail().x, 1.f);
+    std::vector<std::pair<size_t, size_t>> lines;   // [begin, end)
+    float x = 0.f;
+    size_t begin = 0;
+    for (size_t k = 0; k < pieces.size(); ++k) {
+        float need = (k == begin ? 0.f : pieces[k].gap) + pieces[k].w;
+        // a separator (arrow, alternatives mark) travels with the pattern
+        // after it, so no line ends on one
+        bool sep = pieces[k].kind != piece_kind::pattern;
+        float with_next = need + (sep && k + 1 < pieces.size()
+                                  ? pieces[k + 1].gap + pieces[k + 1].w : 0.f);
+        if (k > begin && x + with_next > avail) {
+            lines.push_back({begin, k});
+            begin = k;
+            x = pieces[k].w;
+        } else {
+            x += need;
+        }
+    }
+    lines.push_back({begin, pieces.size()});
 
-    ImGui::EndGroup();
+    // pass 2: draw, each line centred on its tallest piece
+    ImVec4 arrow_col(0.40f, 0.68f, 0.98f, 1.f);
+    for (auto [b, e] : lines) {
+        float line_h = 0.f;
+        for (size_t k = b; k < e; ++k) line_h = std::max(line_h, pieces[k].h);
+        for (size_t k = b; k < e; ++k) {
+            auto const& pc = pieces[k];
+            if (k > b) ImGui::SameLine(0.f, pc.gap);
+            ImGui::BeginGroup();
+            if (line_h > pc.h) ImGui::Dummy({0.f, (line_h - pc.h) * 0.5f});
+            if (pc.kind == piece_kind::pattern) {
+                draw_pattern_group(meta, *pc.pat, mini_px, cfg);
+            } else if (pc.kind == piece_kind::arrow) {
+                ImGui::PushStyleColor(ImGuiCol_Text, arrow_col);
+                ImGui::TextUnformatted(phosphor::PH_ARROW_RIGHT);
+                ImGui::PopStyleColor();
+            } else {
+                ImGui::TextDisabled("%s", phosphor::PH_ARROWS_LEFT_RIGHT);
+            }
+            ImGui::EndGroup();
+        }
+    }
 }
 
 // The leaf statement the last step worked on, followed down the statement
@@ -504,8 +528,16 @@ void draw_rule_window(script const& sc, debug_run const& run, float mini_px,
     int n = (int)cr.pairs.size();
     for (int pi = 0; pi < n; ++pi) {
         ImGui::PushID(pi);
-        if (n > 1)
-            ImGui::TextDisabled("%s %d / %d", phosphor::PH_STACK, pi + 1, n);
+        // which sub-rule, and which rotation/flip of it (§5.6), this is
+        auto const& pr = cr.pairs[(size_t)pi];
+        std::string tag;
+        if (cr.body != body_combinator::none)
+            tag += "sub-rule " + std::to_string(pr.sub_rule_idx + 1);
+        std::string variant = variant_label(pr);
+        if (!variant.empty()) tag += (tag.empty() ? "" : " · ") + variant;
+        if (n > 1 || !tag.empty())
+            ImGui::TextDisabled("%s %d / %d%s%s", phosphor::PH_STACK, pi + 1, n,
+                                tag.empty() ? "" : "  ·  ", tag.c_str());
         draw_rule_variant(sc.meta, cr.pairs[(size_t)pi], mini_px, cfg);
         if (pi + 1 < n) {
             ImGui::Spacing();
@@ -828,6 +860,9 @@ void draw_tags_window(compiled const& meta, project_config& cfg) {
 // ── layers window ─────────────────────────────────────────────────────────────
 
 static void set_sampler_nearest(ImDrawList const*, ImDrawCmd const*);   // composite grid
+static void draw_mode_combo(layer_mode& mode, bool numeric);              // layer controls
+static void draw_tileset_combo(std::string& name, std::vector<tileset_config> const& tilesets);
+static void draw_corner_size_combo(corner_size& size);
 static void set_sampler_linear(ImDrawList const*, ImDrawCmd const*);
 
 layer_thumbs::~layer_thumbs() {
@@ -923,8 +958,29 @@ void draw_layers_window(script const& sc, debug_run const& run, project_config& 
     for (int li = 0; li < lv.layer_count() && li < (int)th.tex.size(); ++li) {
         std::string name = lv.layer_name(li);
         ImGui::PushID(li);
+        // the layer's view controls (visibility, draw mode, tileset/corner)
+        layer_config* lc = nullptr;
+        for (auto& c : cfg.layers) if (c.name == name) lc = &c;
+        if (lc) {
+            ImGui::Checkbox("##vis", &lc->visible);
+            ImGui::SameLine();
+        }
         if (th.solo == li) ImGui::TextColored(accent, "%s  (solo)", name.c_str());
         else               ImGui::TextUnformatted(name.c_str());
+        if (lc) {
+            int lid = sc.meta.layer_id(name);
+            bool numeric = lid < 0 || sc.meta.layers[(size_t)lid].tag_id < 0;
+            ImGui::SameLine();
+            draw_mode_combo(lc->mode, numeric);
+            if (lc->mode == layer_mode::tile) {
+                ImGui::SameLine();
+                draw_tileset_combo(lc->tileset, cfg.tilesets);
+            }
+            if (lc->mode == layer_mode::corner) {
+                ImGui::SameLine();
+                draw_corner_size_combo(lc->corner);
+            }
+        }
 
         ImVec2 p0 = ImGui::GetCursorScreenPos();
         ImVec2 size = {scale * (float)w, scale * (float)h};
@@ -1289,64 +1345,20 @@ static void draw_corner_size_combo(corner_size& size) {
     }
 }
 
-float draw_layer_strip(project_config& cfg, compiled const& meta) {
-    // Chips flow left to right and wrap onto new rows instead of scrolling.
-    // A chip's width is only known after it is drawn, so wrapping uses the
-    // widths measured on the previous frame (the redraw cooldown settles it).
-    static std::vector<float> widths;
-    widths.resize(cfg.layers.size(), 0.f);
-
-    ImGuiStyle const& st = ImGui::GetStyle();
-    float const start_y  = ImGui::GetCursorPosY();
-    float const right    = ImGui::GetWindowContentRegionMax().x;
-
-    // Tighter than the default: the strip is secondary to the grid.
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, { 4.f, 2.f });
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,   { 4.f, 2.f });
-    for (int i = 0; i < (int)cfg.layers.size(); ++i) {
-        auto& lc = cfg.layers[(size_t)i];
-        ImGui::PushID(i);
-        if (i > 0) {
-            float x = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x
-                    + ImGui::GetScrollX();
-            if (x + st.ItemSpacing.x + widths[(size_t)i] <= right) ImGui::SameLine();
-        }
-
-        ImGui::BeginChild("##layer_chip", { 0.f, 0.f },
-                          ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeX
-                          | ImGuiChildFlags_AutoResizeY);
-
-        ImGui::Checkbox("##vis", &lc.visible);
-        ImGui::SameLine();
-        ImGui::TextUnformatted(lc.name.c_str());
-        int lid = meta.layer_id(lc.name);
-        bool numeric = (lid < 0) || (meta.layers[(size_t)lid].tag_id < 0);
-        draw_mode_combo(lc.mode, numeric);
-        if (lc.mode == layer_mode::tile)
-            draw_tileset_combo(lc.tileset, cfg.tilesets);
-        if (lc.mode == layer_mode::corner)
-            draw_corner_size_combo(lc.corner);
-
-        widths[(size_t)i] = ImGui::GetWindowWidth();
-        ImGui::EndChild();
-        ImGui::PopID();
-    }
-    ImGui::PopStyleVar(2);
-    return ImGui::GetCursorPosY() - start_y;
-}
-
 // ── settings window ───────────────────────────────────────────────────────────
 // Things set once per project and rarely touched again while it's running.
 
 void draw_settings_window(project_config& cfg,
                           std::unordered_map<std::string, tile_texture>& tile_textures,
                           SDL_Renderer* renderer, std::string const& ls_path) {
-    ImGui::SetNextItemWidth(160.f);
-    ImGui::DragFloat("Viewport Zoom", &cfg.cell_zoom, 0.05f, 0.25f, 8.f, "%.2fx");
-    ImGui::SameLine();
-    ImGui::TextDisabled("(%.0f px/cell)", cfg.cell_px());
+    // Fields stretch with the panel, leaving room for the longest label.
+    float label_w = ImGui::CalcTextSize("Rule Cell Size").x + ImGui::GetStyle().ItemInnerSpacing.x;
+    char zoom_fmt[48];
+    std::snprintf(zoom_fmt, sizeof zoom_fmt, "%%.2fx  (%.0f px/cell)", cfg.cell_px());
+    ImGui::SetNextItemWidth(-label_w);
+    ImGui::DragFloat("Viewport Zoom", &cfg.cell_zoom, 0.05f, 0.25f, 8.f, zoom_fmt);
 
-    ImGui::SetNextItemWidth(160.f);
+    ImGui::SetNextItemWidth(-label_w);
     ImGui::DragFloat("Rule Cell Size", &cfg.mini_px, 0.25f, 4.f, 48.f, "%.0f px");
 
     float col[3];
@@ -1361,9 +1373,9 @@ void draw_settings_window(project_config& cfg,
     for (int i = 0; i < (int)cfg.tilesets.size(); ++i) {
         auto& ts = cfg.tilesets[(size_t)i];
         ImGui::PushID(i);
+        // full panel width; the fields inside stretch with it
         ImGui::BeginChild("##ts_chip", { 0.f, 0.f },
-                          ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeX
-                          | ImGuiChildFlags_AutoResizeY);
+                          ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY);
 
         std::string old_name = ts.name;
         char name_buf[128];
@@ -1371,7 +1383,7 @@ void draw_settings_window(project_config& cfg,
                                                            : sizeof(name_buf) - 1;
         ts.name.copy(name_buf, nn);
         name_buf[nn] = '\0';
-        ImGui::SetNextItemWidth(120.f);
+        ImGui::SetNextItemWidth(-(ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x));
         if (ImGui::InputText("##name", name_buf, sizeof(name_buf))) {
             ts.name = name_buf;
             // Layers reference a tileset by name (see project_config.hpp) --
@@ -1387,14 +1399,16 @@ void draw_settings_window(project_config& cfg,
                                                          : sizeof(path_buf) - 1;
         ts.path.copy(path_buf, n);
         path_buf[n] = '\0';
-        ImGui::SetNextItemWidth(260.f);
+        ImGui::SetNextItemWidth(-FLT_MIN);
         if (ImGui::InputText("##path", path_buf, sizeof(path_buf)))
             ts.path = path_buf;
         // step=0 disables the +/- buttons -- not used as integer UI anywhere else.
-        ImGui::SetNextItemWidth(70.f);
+        float half = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f
+                   - ImGui::CalcTextSize("W").x - ImGui::GetStyle().ItemInnerSpacing.x;
+        ImGui::SetNextItemWidth(std::max(half, 30.f));
         ImGui::InputInt("W##tw", &ts.tile_w, 0, 0);
         ImGui::SameLine();
-        ImGui::SetNextItemWidth(70.f);
+        ImGui::SetNextItemWidth(std::max(half, 30.f));
         ImGui::InputInt("H##th", &ts.tile_h, 0, 0);
 
         std::string abs = resolve_path(ls_path, ts.path);
