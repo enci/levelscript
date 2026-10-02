@@ -34,6 +34,65 @@ int  wall  = gen.tag("geo.wall");
 if (geo.at(x, y) == wall) ...
 ```
 
+## Install (Windows)
+
+`python packaging/build_installer.py` builds a per-user installer (needs
+[Inno Setup](https://jrsoftware.org/isinfo.php) 6.3+) at
+`dist/LevelScript-setup-<version>-x64.exe`. It installs `levelscript` and
+`levelscript-debugger` and adds them to your PATH; open a new terminal
+afterwards.
+
+## Compiler / runner: `levelscript`
+
+Compiles a `.ls` file, runs one sequence and prints every layer as text.
+
+```
+levelscript [--seed N] [--entry name] [--param name=value ...] [--inspect] <file.ls>
+```
+
+| Option | Meaning |
+|---|---|
+| `--seed N` | Seed for the run. The output is a pure function of (seed, params); omitted, a random seed is used. |
+| `--entry name` | Sequence to run (default `main`). If it doesn't exist, the available sequences are listed. |
+| `--param name=value` | Set an integer parameter; repeatable. |
+| `--inspect` | Don't run; print a JSON report (diagnostics, symbols) for editor tooling. |
+
+```
+levelscript --seed 42 examples/dungeon.ls
+levelscript --seed 7 --param difficulty=2 examples/arena.ls
+```
+
+Compile errors and warnings go to stderr; a compile error exits with 1.
+`use` paths are resolved relative to the importing file.
+
+## Debugger: `levelscript-debugger`
+
+An interactive window over the same program: step through the generation one
+rule application at a time and watch the layers change.
+
+```
+levelscript-debugger [--seed N] [--entry name] <file.ls>
+```
+
+Breakpoints are set by clicking the gutter next to a statement in the code
+view (red dot). Keys follow VS Code:
+
+| Key | Action |
+|---|---|
+| `F5` | Run / continue to the next breakpoint |
+| `F6` | Pause |
+| `F10` | Step over: finish the statement, called sequences included |
+| `F11` | Step into: one rule application |
+| `Shift+F11` | Step out: finish the current sequence |
+| `Ctrl+Shift+F5`, `R` | Restart |
+| `Space` | Toggle timed playback |
+| `Q` | Quit |
+
+Per-layer display settings (text or tileset, opacity, visibility, zoom,
+background colour) are saved next to the script as `<file>.ls.json`
+(see `examples/dungeon.ls.json`). The theme, window geometry and seed are
+remembered per user.
+
 ## Build & test
 
 ```
