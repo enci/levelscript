@@ -544,3 +544,17 @@ TEST_CASE("sema: a module needs no entry - an empty file compiles (0.7)") {
     CHECK(compile_result(prelude).ok);
     CHECK(compile_result("").ok);
 }
+
+TEST_CASE("sema: variants record the rotation and flip that produced them (5.6)") {
+    using mirror = ls::compiled_pair::mirror;
+    // an asymmetric 1x2: symmetry=all keeps identity and the H flip (the V flip
+    // of one row is the identity); rotation=90 adds its rotated variants
+    compile_result r(prelude +
+        "rule r(symmetry=all, rotation=90) { level[wall floor] => level[floor wall] }\n"
+        "sequence main { }\n");
+    REQUIRE(r.ok);
+    std::vector<std::pair<int, mirror>> got;
+    for (auto const& p : r.prog.rules[0].pairs) got.push_back({p.rotation, p.flip});
+    CHECK(got == std::vector<std::pair<int, mirror>>{
+        {0, mirror::none}, {0, mirror::h}, {90, mirror::none}, {90, mirror::v}});
+}

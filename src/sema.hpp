@@ -98,6 +98,12 @@ struct compiled_pair {
     std::vector<compiled_pattern> lhs;
     compiled_write_term           rhs;
     int                           sub_rule_idx{0};
+    // Which transform of the declared sub-rule this variant is (§5.6), as the
+    // attributes produced it: rotation= then symmetry=. Identity is 0 / none.
+    // Display and tooling only; the runtime never reads them.
+    enum class mirror : uint8_t { none, h, v, both };
+    int16_t                       rotation{0};   // 0, 90, 180, 270
+    mirror                        flip{mirror::none};
 };
 
 struct compiled_rule {

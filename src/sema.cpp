@@ -720,10 +720,23 @@ struct analyzer {
                 compiled_pair base = compile_base_pair(r.pairs[bi]);
                 base.sub_rule_idx = bi;
                 std::vector<compiled_pair> variants;
+                using mirror = compiled_pair::mirror;
+                auto rot_deg = [](transform k) -> int16_t {   // flip_both doubles as rot180
+                    return k == transform::rot90     ? 90
+                         : k == transform::flip_both ? 180
+                         : k == transform::rot270    ? 270 : 0;
+                };
+                auto sym_of = [](transform k) {
+                    return k == transform::flip_h    ? mirror::h
+                         : k == transform::flip_v    ? mirror::v
+                         : k == transform::flip_both ? mirror::both : mirror::none;
+                };
                 for (auto rk : rots)
                     for (auto sk : syms) {
                         compiled_pair cand = transform_pair(sk, transform_pair(rk, base));
                         cand.sub_rule_idx = bi;
+                        cand.rotation = rot_deg(rk);
+                        cand.flip = sym_of(sk);
                         bool dup = false;
                         for (auto const& v : variants)
                             if (pairs_equal(v, cand)) { dup = true; break; }
