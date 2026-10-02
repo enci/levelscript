@@ -1,7 +1,7 @@
 // Showcase (v0.5.2): named tag unions.
 //
 // `blocker = wall | door` names a mask over the tagset's own members. Matching
-// is the ordinary any-overlap rule (§4.1), so `level[blocker]` hits a cell that
+// is the ordinary any-overlap rule (section 4.1), so `level[blocker]` hits a cell that
 // is wall OR door. A union costs no bit and does not count toward the 30-value
 // cap — it is a pure alias for the `wall|door` mask.
 //

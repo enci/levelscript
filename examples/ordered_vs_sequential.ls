@@ -1,7 +1,7 @@
 // Showcase (v0.7): the `ordered` combinator vs. statement-level sequencing.
 //
 // `ordered` gives the sub-rules a PRIORITY (declaration order) applied as an
-// ordering key on the candidate vector (§5.2). Under the default `snapshot`
+// ordering key on the candidate vector (section 5.2). Under the default `snapshot`
 // policy, higher-priority candidates pull first under the write-protection
 // mask — so where two sub-rules write the SAME cell, the higher one claims it
 // and the lower one is skipped. It is NOT "apply s1 everywhere, then s2 as a

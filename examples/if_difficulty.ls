@@ -2,7 +2,7 @@
 // Showcase (v0.4): built-in functions — conditional writes with `if`.
 //
 // A `difficulty` param drives what fills the map. `if(cond, a, b)` is eager and
-// total (§5.8/§5.10): both branches are always evaluated but only one is kept,
+// total (section 5.8/section 5.10): both branches are always evaluated but only one is kept,
 // and integer ops never fault (e.g. `/ 0 == 0`), so a dead branch is always safe.
 //
 //   terrain: high difficulty (> 3) floods the map with lava, else grass.

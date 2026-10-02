@@ -1,4 +1,4 @@
-// E-op-8 (v0.7): an enum argument outside its set (§7.3 #35) —
+// E-op-8 (v0.7): an enum argument outside its set (section 7.3, check 35) —
 // connectivity must be 4 or 8.
 // @expect error
 // @expect stderr-contains invalid connectivity

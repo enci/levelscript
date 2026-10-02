@@ -1,6 +1,6 @@
 // @seed 42
 // 1x2 pattern: every pair [S S] becomes [F F].
-// On a 1x6 row of S, `all` applies matches in a seeded-shuffle order (§6.5);
+// On a 1x6 row of S, `all` applies matches in a seeded-shuffle order (section 6.5);
 // which non-overlapping pairs win varies, but the row is fully covered and
 // every fired pair produces two F's. So: no empties, and F is a positive
 // even count.

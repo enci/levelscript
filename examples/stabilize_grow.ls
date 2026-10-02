@@ -2,7 +2,7 @@
 // Showcase (v0.6): the `stabilize` policy — a synchronous cellular automaton.
 //
 // `all(policy=stabilize)` runs full `snapshot` sweeps back-to-back, re-snapshotting
-// between them, until a sweep changes nothing (a fixpoint, §6.4/§6.6). Each sweep
+// between them, until a sweep changes nothing (a fixpoint, section 6.4/section 6.6). Each sweep
 // updates every cell against the *previous* generation (synchronous), unlike
 // `incremental` which sees each write immediately.
 //

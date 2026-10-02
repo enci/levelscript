@@ -74,7 +74,7 @@ std::vector<token> lex(std::string_view src, std::string_view file,
             continue;
         }
 
-        // STRING (§2.3): no escapes, single line - only the path of a `use`.
+        // STRING (section 2.3): no escapes, single line - only the path of a `use`.
         // The token's text is the contents, without the quotes.
         if (c == '"') {
             size_t s = i + 1, j = s;

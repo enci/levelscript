@@ -1,5 +1,5 @@
 // E104 (v0.6.4): weight stays illegal inside { all }, including when nested
-// (§7.3 #5). Weights only bias the items of an { any }.
+// (section 7.3, check 5). Weights only bias the items of an { any }.
 // @expect error
 // @expect stderr-contains weight
 tag geometry { floor }

@@ -129,7 +129,7 @@ void emit_write_term_refs(std::string& o, comma_list& cl, write_term const& t) {
     for (auto const& it : t.items) emit_write_term_refs(o, cl, it);
 }
 
-// `,"loc":{...}` with the declaring module's canonical name (§2.6), so an
+// `,"loc":{...}` with the declaring module's canonical name (section 2.6), so an
 // editor can jump into the file that declares a name.
 void emit_loc(std::string& o, module_closure const& mods, source_loc l, size_t len) {
     o += ",\"loc\":{\"line\":" + std::to_string(l.line) +

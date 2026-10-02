@@ -1,4 +1,4 @@
-// E116: sequences may not apply themselves, directly or through others (§7.3 #38).
+// E116: sequences may not apply themselves, directly or through others (section 7.3, check 38).
 // @expect error
 // @expect stderr-contains sequence cycle: 'a' -> 'b' -> 'a'
 sequence a { one b }

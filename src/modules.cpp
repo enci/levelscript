@@ -37,7 +37,7 @@ struct loader {
             };
             std::optional<module_source> src;
             if (resolve) src = resolve(u.path, name);
-            if (!src) {   // §7.3 #9
+            if (!src) {   // section 7.3, check 9
                 loc_err("cannot resolve module \"" + u.path + "\"");
                 continue;
             }
@@ -46,7 +46,7 @@ struct loader {
                 loc_err("module '" + src->name + "' is already used by this module");   // #41
                 continue;
             }
-            if (dep >= 0 && state[dep] == 0) {   // §7.3 #40: on the walk = a cycle
+            if (dep >= 0 && state[dep] == 0) {   // section 7.3, check 40: on the walk = a cycle
                 std::string chain;
                 auto from = std::find(path.begin(), path.end(), dep);
                 for (auto it = from; it != path.end(); ++it)

@@ -11,7 +11,7 @@
 //                 move together (shown commented below: floor⇔chest / wall⇔empty).
 //
 // Each { any } node contributes exactly one PRNG draw per application, in
-// declaration order (§10.7) — deterministic per seed.
+// declaration order (section 10.7) — deterministic per seed.
 //
 // @seed 1
 // @expect run-ok

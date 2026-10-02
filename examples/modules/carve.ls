@@ -1,4 +1,4 @@
-// Module (§2.6): rules and a sequence over the schema's grid. It uses
+// Module (section 2.6): rules and a sequence over the schema's grid. It uses
 // schema.ls directly, so it sees `level` and `algo`.
 use "schema.ls"
 

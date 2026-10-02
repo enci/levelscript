@@ -10,7 +10,7 @@ using internal::machine;
 using internal::sequence;
 using internal::step_event;
 
-// Tag cells store a 32-bit mask (spec §3/§4.1): bit 0 = empty, values occupy
+// Tag cells store a 32-bit mask (spec section 3/section 4.1): bit 0 = empty, values occupy
 // bits 1..30 in declaration order, bit 31 reserved. `value_mask` isolates the
 // value bits from a raw cell.
 constexpr int64_t value_mask = 0x7FFFFFFE;

@@ -1,4 +1,4 @@
-// E-ord-1: `ordered` is body-level only, not a write-side combinator (§7.3 #29).
+// E-ord-1: `ordered` is body-level only, not a write-side combinator (section 7.3, check 29).
 // @expect error
 // @expect stderr-contains cannot appear on the write side
 tag t { a, b }

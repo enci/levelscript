@@ -1,4 +1,4 @@
-// E-op-6 (v0.7): a required operation parameter not supplied (§7.3 #34).
+// E-op-6 (v0.7): a required operation parameter not supplied (section 7.3, check 34).
 // @expect error
 // @expect stderr-contains requires argument 'write='
 tag t { start, goal, route }

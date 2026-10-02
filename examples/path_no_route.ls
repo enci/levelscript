@@ -1,4 +1,4 @@
-// Showcase (v0.7): an unreachable `path` goal is a WARNING and a no-op (§6.6),
+// Showcase (v0.7): an unreachable `path` goal is a WARNING and a no-op (section 6.6),
 // never an error — like `trim` on an entirely empty stack.
 //
 // The wall column has no gap and `passable=floor`, so no route exists; the

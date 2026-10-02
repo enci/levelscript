@@ -8,7 +8,7 @@
 
 namespace ls {
 
-// One compile's module closure (spec §2.6), loaded and merged.
+// One compile's module closure (spec section 2.6), loaded and merged.
 //
 // Module ids are load order (what every source_loc::mod refers to); `order`
 // is the canonical order, a depth-first post-order walk from the root (root
@@ -24,7 +24,7 @@ struct module_closure {
 };
 
 // Load the root and everything it uses, through `resolve` (may be empty: then
-// every `use` is unresolved, §7.3 #9). Reports checks 9, 40 and 41.
+// every `use` is unresolved, section 7.3, check 9). Reports checks 9, 40 and 41.
 module_closure load_closure(std::string_view root_source, std::string const& root_name,
                             resolver const& resolve, diagnostics& diags);
 

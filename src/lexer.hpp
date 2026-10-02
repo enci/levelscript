@@ -8,7 +8,7 @@ namespace ls {
 
 enum class token_type {
     ident, integer, string, newline, end, bad,
-    // keywords (spec §2.4); contextual names such as `max`, `symmetry`, or
+    // keywords (spec section 2.4); contextual names such as `max`, `symmetry`, or
     // `horizontal` lex as ident and are matched by text in the parser
     kw_tag, kw_layers, kw_grid, kw_of, kw_number, kw_rule, kw_sequence,
     kw_one, kw_all, kw_some, kw_any, kw_ordered, kw_weight,
@@ -17,12 +17,12 @@ enum class token_type {
     // punctuation
     lbrace, rbrace, lbracket, rbracket, lparen, rparen,
     comma, colon, equals, arrow, star, dot,
-    // expression operators (§5.8)
+    // expression operators (section 5.8)
     plus, minus, slash, pipe, bang,
     eq_eq, bang_eq, lt, le, gt, ge, amp_amp, pipe_pipe,
 };
 
-// Reserved words (spec §2.4) - the kw_* block above.
+// Reserved words (spec section 2.4) - the kw_* block above.
 inline bool is_keyword(token_type t) {
     return t >= token_type::kw_tag && t <= token_type::kw_use;
 }

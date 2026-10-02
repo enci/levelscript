@@ -30,7 +30,7 @@ void machine::bind_params() {
     }
 }
 
-// ── expression evaluation (§5.8) — total, deterministic per seed ─────────────
+// ── expression evaluation (section 5.8) — total, deterministic per seed ─────────────
 
 long long machine::eval(int idx, int x, int y) {
     auto const& e = prog_->exprs[idx];
@@ -85,7 +85,7 @@ long long machine::eval(int idx, int x, int y) {
     case ce_kind::or_:  return (eval(e.a, x, y) != 0 || eval(e.b, x, y) != 0) ? 1 : 0;
     case ce_kind::bit_or: return eval(e.a, x, y) | eval(e.b, x, y);
     case ce_kind::if_:   // eager: both branches evaluate (a random in the dead
-                         // branch still draws — defined behaviour, §5.10)
+                         // branch still draws — defined behaviour, section 5.10)
         return eval(e.a, x, y) != 0 ? eval(e.b, x, y) : eval(e.c, x, y);
     case ce_kind::min_: { auto a = eval(e.a, x, y), b = eval(e.b, x, y); return a < b ? a : b; }
     case ce_kind::max_: { auto a = eval(e.a, x, y), b = eval(e.b, x, y); return a > b ? a : b; }
@@ -97,23 +97,22 @@ long long machine::eval(int idx, int x, int y) {
     }
     case ce_kind::random_: {   // inclusive [lo, hi]; exactly one draw per call
         auto lo = eval(e.a, x, y), hi = eval(e.b, x, y);
-        uint64_t draw = rng_();
-        if (hi < lo) return lo;
-        uint64_t range = (uint64_t)(hi - lo) + 1;
-        return w32(lo + (long long)(draw % range));
+        // an empty range still draws once (uniform(1)) and yields lo (section 5.10)
+        uint64_t range = hi < lo ? 1 : (uint64_t)(hi - lo) + 1;
+        return w32(lo + (long long)uniform(range));
     }
     }
     return 0;
 }
 
-// The one execution core (spec §6.7). Statements run top to bottom; the
+// The one execution core (spec section 6.7). Statements run top to bottom; the
 // count × policy algebra lives here and only here — batch generate(),
 // progressive stepping, and observation all pull this coroutine.
 //
 //   snapshot    — one frozen pass: collect, seeded-shuffle (+ `ordered`
 //                 priority sort), apply non-conflicting matches to the back
-//                 buffer under the write mask (§6.8), swap. `percent` first
-//                 sizes the applied set a full pass would make (§6.7) and
+//                 buffer under the write mask (section 6.8), swap. `percent` first
+//                 sizes the applied set a full pass would make (section 6.7) and
 //                 keeps its prefix.
 //   incremental — re-collect each application; each sees all prior writes.
 //                 No mask. `all` runs to the fixpoint.
@@ -123,7 +122,7 @@ long long machine::eval(int idx, int x, int y) {
 // Yields after every application and every completed statement — pullers
 // filter to their granularity.
 // A run binds the params, then applies the entry exactly as `one S` to the
-// empty stack (§6): one iteration of its body - no guard, no draw, no
+// empty stack (section 6): one iteration of its body - no guard, no draw, no
 // stability check. Its body statements are frame 0 of the statement stack.
 sequence<step_event> machine::run() {
     if (entry_ < 0 || entry_ >= (int)prog_->sequences.size()) co_return;
@@ -135,7 +134,7 @@ sequence<step_event> machine::run() {
         frames_.assign(1, frame{si, 0});
         bool seq = st.what == compiled_stmt::kind::apply && st.seq_id >= 0;
 
-        // A false `when` guard skips the statement in full (§6). A skipped
+        // A false `when` guard skips the statement in full (section 6). A skipped
         // leaf still yields its boundary so progress advances; applying a
         // sequence is never a step of its own (Appendix A).
         if (st.guard >= 0 && eval(st.guard, 0, 0) == 0) {
@@ -216,7 +215,7 @@ sequence<step_event> machine::run_leaf(compiled_stmt const& st, int top) {
 
 }
 
-// §6.10: `one` = 1 iteration; `some(max=N)` = up to N, stopping after a
+// section 6.10: `one` = 1 iteration; `some(max=N)` = up to N, stopping after a
 // stable one; `all` = until one is stable. Body statements run exactly as in
 // the program; the frames record where each step happened.
 sequence<step_event> machine::run_sequence(compiled_stmt const& st, int top) {
@@ -226,7 +225,7 @@ sequence<step_event> machine::run_sequence(compiled_stmt const& st, int top) {
             : -1;
     size_t depth = frames_.size();
     for (int it = 0; cap < 0 || it < cap; ++it) {
-        bool check = cap != 1;   // `one S` never needs the comparison (§10.7)
+        bool check = cap != 1;   // `one S` never needs the comparison (section 10.7)
         stack_state start;
         if (check) start = capture();
         for (int j = 0; j < (int)body.size(); ++j) {
@@ -261,7 +260,7 @@ machine::stack_state machine::capture() const {
 }
 
 // Stability compares states, not writes: dimensions plus every cell of every
-// layer. A cell written back to its old value is no change (§6.10).
+// layer. A cell written back to its old value is no change (section 6.10).
 bool machine::unchanged_since(stack_state const& s) const {
     if (s.rows != rows_ || s.cols != cols_) return false;
     for (size_t i = 0; i < grids_.size(); ++i)
@@ -270,7 +269,7 @@ bool machine::unchanged_since(stack_state const& s) const {
 }
 
 void machine::order_candidates(compiled_rule const& rule, std::vector<match>& ms) {
-    std::shuffle(ms.begin(), ms.end(), rng_);
+    shuffle(ms);
     if (rule.body == body_combinator::ordered)
         std::stable_sort(ms.begin(), ms.end(), [&rule](match const& a, match const& b) {
             return rule.pairs[a.pair].sub_rule_idx < rule.pairs[b.pair].sub_rule_idx;
@@ -286,9 +285,9 @@ machine::match machine::pick_candidate(compiled_rule const& rule,
         std::vector<match> pool;
         for (auto const& m : ms)
             if (rule.pairs[m.pair].sub_rule_idx == best) pool.push_back(m);
-        return pool[std::uniform_int_distribution<size_t>(0, pool.size() - 1)(rng_)];
+        return pool[(size_t)uniform(pool.size())];
     }
-    return ms[std::uniform_int_distribution<size_t>(0, ms.size() - 1)(rng_)];
+    return ms[(size_t)uniform(ms.size())];
 }
 
 std::vector<machine::match> machine::applicable_prefix(
@@ -367,7 +366,7 @@ static void rebuild(grid_state& g, int nr, int nc, F&& src) {
 void machine::exec_op(compiled_op const& op) {
     switch (op.kind) {
 
-    case op_kind::resize:   // content-preserving, top-left anchored (§6.1)
+    case op_kind::resize:   // content-preserving, top-left anchored (section 6.1)
         rows_ = op.h;
         cols_ = op.w;
         for (auto& g : grids_)
@@ -376,7 +375,7 @@ void machine::exec_op(compiled_op const& op) {
             });
         return;
 
-    case op_kind::upscale:  // duplicate every cell into an n x m block (§6.2)
+    case op_kind::upscale:  // duplicate every cell into an n x m block (section 6.2)
         rows_ *= op.h;
         cols_ *= op.w;
         for (auto& g : grids_)
@@ -385,7 +384,7 @@ void machine::exec_op(compiled_op const& op) {
             });
         return;
 
-    case op_kind::pad: {    // uniform empty border on all sides (§6.5)
+    case op_kind::pad: {    // uniform empty border on all sides (section 6.5)
         int n = op.w;
         if (n <= 0) return;
         rows_ += 2 * n;
@@ -398,7 +397,7 @@ void machine::exec_op(compiled_op const& op) {
         return;
     }
 
-    case op_kind::trim: {   // crop all layers to the union content box (§6.3)
+    case op_kind::trim: {   // crop all layers to the union content box (section 6.3)
         bool found = false;
         int min_r = 0, min_c = 0, max_r = 0, max_c = 0;
         for (auto const& g : grids_)
@@ -426,7 +425,7 @@ void machine::exec_op(compiled_op const& op) {
         return;
     }
 
-    case op_kind::mirror:   // fold the origin-side half onto the far side (§6.4)
+    case op_kind::mirror:   // fold the origin-side half onto the far side (section 6.4)
         for (auto& g : grids_) {
             if (op.w == 1) {   // horizontal: left half onto the right, reflected
                 for (int r = 0; r < g.rows; ++r)
@@ -455,7 +454,7 @@ static uint64_t mix64(uint64_t v) {
     return v ^ (v >> 31);
 }
 
-// path(...) (§6.6): stamp a minimum-cost route from any `from` cell to the
+// path(...) (section 6.6): stamp a minimum-cost route from any `from` cell to the
 // nearest `to` cell over the traversable cells, endpoints included.
 //
 // Draw contract (the algorithm-unobservable design): predicate passes and
@@ -478,7 +477,7 @@ void machine::run_path(compiled_op const& op) {
         return (grids_[p.grid_id].get(y, x) & p.mask) != 0;
     };
     auto default_passable = [&](int x, int y) -> bool {
-        for (auto const& g : grids_)   // non-empty in at least one layer (§6.3)
+        for (auto const& g : grids_)   // non-empty in at least one layer (section 6.3)
             if (g.get(y, x) != g.empty_raw()) return true;
         return false;
     };
@@ -585,26 +584,34 @@ void machine::run_path(compiled_op const& op) {
     g.back = g.front;
 }
 
+uint64_t machine::uniform(uint64_t n) {
+    uint64_t threshold = (0 - n) % n;   // 2^64 mod n, in 64-bit arithmetic
+    for (;;) {
+        uint64_t x = rng_();
+        if (x >= threshold) return x % n;
+    }
+}
+
+// Candidates in the pinned collection order (section 10.6 item 3): anchors
+// row-major, and at each anchor every variant whose pattern fits there, in
+// declaration order. Match-side `random` draws fire in exactly this order.
 std::vector<machine::match> machine::collect(compiled_rule const& rule) {
     std::vector<match> out;
-    if (grids_.empty()) return out;
-    grid_state const& ref = grids_[0];   // all layers share one size
-
-    for (int pi = 0; pi < (int)rule.pairs.size(); ++pi) {
-        auto const& pair = rule.pairs[pi];
-        if (pair.lhs.empty()) continue;
-        int pr = pair.lhs[0].rows, pc = pair.lhs[0].cols;
-        for (int r = 0; r + pr <= ref.rows; ++r)
-            for (int c = 0; c + pc <= ref.cols; ++c)
-                if (match_at(pair, r, c))
-                    out.push_back({pi, r, c});
-    }
+    if (rows_ <= 0 || cols_ <= 0) return out;
+    for (int r = 0; r < rows_; ++r)
+        for (int c = 0; c < cols_; ++c)
+            for (int pi = 0; pi < (int)rule.pairs.size(); ++pi) {
+                auto const& pair = rule.pairs[pi];
+                if (pair.lhs.empty()) continue;
+                if (r + pair.lhs[0].rows > rows_ || c + pair.lhs[0].cols > cols_) continue;
+                if (match_at(pair, r, c)) out.push_back({pi, r, c});
+            }
     return out;
 }
 
 bool machine::match_at(compiled_pair const& pair, int row, int col) {
     for (auto const& pat : pair.lhs) {
-        if (pat.is_where) {   // §5.9: every cell's boolean must hold
+        if (pat.is_where) {   // section 5.9: every cell's boolean must hold
             for (int r = 0; r < pat.rows; ++r)
                 for (int c = 0; c < pat.cols; ++c) {
                     auto const& cell = pat.at(r, c);
@@ -627,7 +634,7 @@ bool machine::match_at(compiled_pair const& pair, int row, int col) {
                 if (pat.is_number) {
                     if (stored != want) return false;          // by value
                 } else {
-                    if ((stored & want) == 0) return false;    // mask overlap (§4.1)
+                    if ((stored & want) == 0) return false;    // mask overlap (section 4.1)
                 }
             }
     }
@@ -635,8 +642,8 @@ bool machine::match_at(compiled_pair const& pair, int row, int col) {
 }
 
 // The write footprint is every non-wildcard cell of every write-tree leaf —
-// conservative across { any } branches (spec §5.7); the mask is (grid,
-// cell)-keyed and write-only (§6.8).
+// conservative across { any } branches (spec section 5.7); the mask is (grid,
+// cell)-keyed and write-only (section 6.8).
 bool machine::conflicts(compiled_pair const& pair, match const& m,
                         std::unordered_set<uint64_t> const& written) const {
     if (written.empty()) return false;
@@ -671,7 +678,7 @@ void machine::resolve_write(compiled_write_term const& t,
         for (auto const& it : t.items) total += it.weight;
         int chosen = 0;
         if (total > 0) {
-            int roll = (int)std::uniform_int_distribution<int>(0, total - 1)(rng_);
+            int roll = (int)uniform((uint64_t)total);
             int acc = 0;   // the node's one draw, before recursing (outer-first)
             for (int i = 0; i < (int)t.items.size(); ++i) {
                 acc += t.items[i].weight;

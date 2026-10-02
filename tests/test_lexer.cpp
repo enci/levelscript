@@ -58,7 +58,7 @@ TEST_CASE("lexer: unexpected character is an error") {
     CHECK(t[1].is(token_type::bad));
 }
 
-TEST_CASE("lexer: contextual names lex as identifiers (spec §2.4)") {
+TEST_CASE("lexer: contextual names lex as identifiers (spec section 2.4)") {
     auto t = lex_ok("max symmetry rotation horizontal vertical none");
     REQUIRE(t.size() == 7);
     for (int i = 0; i < 6; ++i) CHECK(t[i].is(token_type::ident));

@@ -142,7 +142,7 @@ std::string cell_glyph(compiled const& meta, int tag_id, int v) {
 }
 
 // grid::at() returns a value MASK for a tag layer (bit 1..30 - a single bit
-// for a normal cell, spec §3), but tag_color()/cell_glyph() and the tag-color
+// for a normal cell, spec section 3), but tag_color()/cell_glyph() and the tag-color
 // config's vmap all still key by the 0-based value id. Converts a mask back
 // to that id (the lowest set value bit); -1 (the public API's empty/invalid
 // sentinel) passes through unchanged.
@@ -283,7 +283,7 @@ std::string stmt_desc(program_stmt const& s) {
 
 char const* stmt_icon(program_stmt const& s, compiled_stmt const& cs) {
     if (s.what == program_stmt::kind::apply)
-        return cs.seq_id >= 0 ? phosphor::PH_LIST_NUMBERS   // a sequence (§6.10)
+        return cs.seq_id >= 0 ? phosphor::PH_LIST_NUMBERS   // a sequence (section 6.10)
                               : phosphor::PH_LIGHTNING;     // a rule
     // Operation calls (spec section 6.0): icon per operation name.
     if (s.op_name == "resize")  return phosphor::PH_FRAME_CORNERS;
@@ -453,7 +453,7 @@ static void draw_rule_variant(compiled const& meta, compiled_pair const& pair,
 }
 
 // The leaf statement the last step worked on, followed down the statement
-// stack through nested sequences (§6.10). `trail` collects "in <sequence>
+// stack through nested sequences (section 6.10). `trail` collects "in <sequence>
 // (iteration k)" for each level. Null when there is no step yet.
 static std::pair<program_stmt const*, compiled_stmt const*>
 shown_leaf(script const& sc, debug_run const& run, std::string& trail) {
@@ -528,7 +528,7 @@ void draw_rule_window(script const& sc, debug_run const& run, float mini_px,
     int n = (int)cr.pairs.size();
     for (int pi = 0; pi < n; ++pi) {
         ImGui::PushID(pi);
-        // which sub-rule, and which rotation/flip of it (§5.6), this is
+        // which sub-rule, and which rotation/flip of it (section 5.6), this is
         auto const& pr = cr.pairs[(size_t)pi];
         std::string tag;
         if (cr.body != body_combinator::none)
@@ -551,7 +551,7 @@ void draw_rule_window(script const& sc, debug_run const& run, float mini_px,
 // ── program window ────────────────────────────────────────────────────────────
 
 // One statement list - the entry's body, or a sequence's - as tree rows.
-// Sequence applications are tree nodes unfolding into their bodies (§6.10;
+// Sequence applications are tree nodes unfolding into their bodies (section 6.10;
 // the compiler rejects cycles, so the tree is finite). `cur` is the row the
 // run is on in this list (-1: none); `all_past` dims a body whose applying
 // statement already finished. `path` is the run's statement stack: the rows
@@ -1110,7 +1110,7 @@ void draw_grid_composite(script const& sc, debug_run const& run,
                 int v = g.at(x, y);
                 if (v == -1) continue;   // empty (public API sentinel)
                 // tag_color()/cell_glyph() key by 0-based value id; v is a
-                // mask for a tag layer (spec §3) but the real number as-is
+                // mask for a tag layer (spec section 3) but the real number as-is
                 // for a numeric one (tile/heatmap modes are numeric-only or
                 // numeric-semantics, so they keep using v directly).
                 int vid = g.is_number() ? v : mask_to_slot(sc.meta, pal.tag_id, v);
