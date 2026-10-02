@@ -8,4 +8,4 @@ layers {
     g1: grid of t
     g2: grid of t
 }
-program { resize(2, 2) path(from=start, to=goal, into=g1, write=route) }
+sequence main { resize(2, 2) path(from=start, to=goal, into=g1, write=route) }

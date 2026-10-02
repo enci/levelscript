@@ -29,7 +29,7 @@ rule ground  { level[.] => level[floor] }
 rule dd { where[ (x == 1 && y == 1) ] => marks[door] }
 rule ee { where[ (x == 9 && y == 1) ] => marks[exit] }
 
-program {
+sequence main {
     resize(11, 7)
     all barrier
     all ground

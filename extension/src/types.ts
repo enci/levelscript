@@ -2,6 +2,7 @@ export interface Location {
     line: number;
     col: number;
     len: number;
+    module?: string;   // declaring module's canonical name (an absolute path here)
 }
 
 // tag >= 0: index into symbols.tags, value = palette slot (the tag's values
@@ -15,6 +16,7 @@ export interface DecorationSpan extends Location {
 export interface InspectorDiagnostic {
     line: number;
     col: number;
+    module?: string;   // the module the position is in
     severity: 'error' | 'warning';
     message: string;
 }
@@ -30,6 +32,7 @@ export interface InspectionResult {
     tokens: DecorationSpan[];
     refs?: RefSpan[];
     symbols: {
+        modules?: string[];
         tags: { name: string, values: { name: string, loc?: Location }[], unions: { name: string, loc?: Location }[] }[];
         layers: { name: string, type: string, loc?: Location }[];
         params: { name: string, derived: boolean }[];

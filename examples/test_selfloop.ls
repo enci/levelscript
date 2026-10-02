@@ -6,7 +6,7 @@ tag t { a }
 layers { g: grid of t }
 rule fill { g[.] => g[a] }
 rule loop { g[a] => g[a] }
-program {
+sequence main {
     resize(3, 3)
     all fill
     all loop

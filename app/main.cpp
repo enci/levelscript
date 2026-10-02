@@ -1,3 +1,4 @@
+#include "fs_resolver.hpp"
 #include "inspect.hpp"
 #include "ls.hpp"
 #include <chrono>
@@ -12,7 +13,8 @@
 
 static void usage(char const* argv0) {
     std::cerr << "Usage: " << argv0
-              << " [--seed N] [--param name=value ...] [--inspect] <file.ls>\n";
+              << " [--seed N] [--entry name] [--param name=value ...] [--inspect] <file.ls>\n"
+              << "  --entry  the sequence to run (default: main)\n";
 }
 
 static void print_level(ls::level const& lv, std::ostream& out) {
@@ -36,6 +38,7 @@ static void print_level(ls::level const& lv, std::ostream& out) {
 int main(int argc, char* argv[]) {
     std::optional<uint64_t> seed;
     std::string path;
+    std::string entry_name = "main";   // a tool convention, not the language's (§6)
     std::vector<std::pair<std::string, int>> params;
     bool inspect = false;
 
@@ -45,6 +48,8 @@ int main(int argc, char* argv[]) {
             inspect = true;
         } else if (arg == "--seed" && i + 1 < argc) {
             seed = (uint64_t)std::stoull(argv[++i]);
+        } else if (arg == "--entry" && i + 1 < argc) {
+            entry_name = argv[++i];
         } else if (arg == "--param" && i + 1 < argc) {
             std::string kv = argv[++i];
             auto eq = kv.find('=');
@@ -66,28 +71,41 @@ int main(int argc, char* argv[]) {
     }
     if (path.empty()) { usage(argv[0]); return 1; }
 
-    std::ifstream ifs(path);
-    if (!ifs) {
+    std::string name = canonical_module_name(path);
+    std::string source;
+    if (!read_text_file(name, source)) {
         std::cerr << "Error: cannot open '" << path << "'\n";
         return 1;
     }
-    std::ostringstream buf;
-    buf << ifs.rdbuf();
 
     if (inspect) {   // editor tooling: JSON report, exit 0 (diagnostics inside)
-        std::cout << ls::inspect_json(buf.str(), path) << '\n';
+        std::cout << ls::inspect_json(source, name, fs_resolver()) << '\n';
         return 0;
     }
 
-    auto gen = ls::generator::compile(buf.str(), path);
+    auto gen = ls::generator::compile(source, name, fs_resolver());
     if (!gen) {
         std::cerr << gen.error();
         return 1;
     }
     if (!gen.warnings().empty()) std::cerr << gen.warnings();
 
+    int entry = gen.sequence(entry_name);
+    if (entry < 0) {
+        std::cerr << name << ": error: no sequence '" << entry_name << "' to run";
+        if (gen.sequence_count() == 0) {
+            std::cerr << " (the file declares no sequences)\n";
+        } else {
+            std::cerr << "; pick one with --entry:";
+            for (int i = 0; i < gen.sequence_count(); ++i)
+                std::cerr << (i ? ", " : " ") << gen.sequence_name(i);
+            std::cerr << '\n';
+        }
+        return 1;
+    }
+
     uint64_t s = seed.value_or((uint64_t)
         std::chrono::high_resolution_clock::now().time_since_epoch().count());
-    print_level(gen.generate(s, params), std::cout);
+    print_level(gen.generate(entry, s, params), std::cout);
     return 0;
 }

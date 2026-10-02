@@ -20,15 +20,15 @@ rule fill {
     level[floor]
 }
 
-program {
+sequence main {
     resize(8, 4)
     all fill
 }
 ```
 
 ```cpp
-auto gen   = ls::generator::compile(source);
-auto level = gen.generate(seed);
+auto gen   = ls::generator::compile(source, "dungeon.ls", resolve);  // resolve maps `use` paths
+auto level = gen.generate(gen.sequence("main"), seed);
 auto geo   = level["level"];
 int  wall  = gen.tag("geo.wall");
 if (geo.at(x, y) == wall) ...

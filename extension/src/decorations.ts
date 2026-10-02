@@ -63,14 +63,19 @@ export function applyDecorations(editor: vscode.TextEditor, tokens: DecorationSp
         addRange(map, color, t.line, t.col, cellLen(editor.document, t, sorted[k + 1]));
     });
 
+    // the legend is only the declarations in this file (section 2.6: tags
+    // may be declared in another module of the closure)
+    const here = (loc?: { module?: string }) =>
+        !!loc && (!loc.module || loc.module === editor.document.uri.fsPath);
     tags.forEach((tag, tagIdx) => {
         tag.values.forEach((v, valueIdx) => {
+            if (!here(v.loc)) return;
             if (!v.loc) return;
             const color = tagColor(valueIdx + tagIdx * 12, isDark);
             addRange(map, color, v.loc.line, v.loc.col, v.loc.len);
         });
         tag.unions.forEach((u, unionIdx) => {
-            if (!u.loc) return;
+            if (!here(u.loc) || !u.loc) return;
             const color = tagColor(tag.values.length + unionIdx + tagIdx * 12, isDark);
             addRange(map, color, u.loc.line, u.loc.col, u.loc.len);
         });

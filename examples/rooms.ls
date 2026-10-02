@@ -42,7 +42,7 @@ rule finalize { all
     a[seed] => level[floor]
 }
 
-program {
+sequence main {
     resize(60, 30)
     all init_bg
     some(max=15) plant

@@ -3,4 +3,4 @@
 // @expect stderr-contains expected 'of'
 tag t { a }
 layers { g: grid t }
-program { resize(1,1) }
+sequence main { resize(1,1) }

@@ -13,7 +13,7 @@ rule inc {
     tiles[ (tiles + 1) ]
 }
 sequence tick { all inc }
-program {
+sequence main {
     resize(3, 2)
     all tick
 }

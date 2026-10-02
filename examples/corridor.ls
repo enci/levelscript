@@ -27,7 +27,7 @@ rule place_exit {
     site[exit]
 }
 
-program {
+sequence main {
     resize(16, 9)
     all scatter_rocks
     all place_door

@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { InspectionResult, RunState } from './types';
+import { Resolver } from './resolve';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const createLsModule = require('../../ls_wasm.js');
@@ -12,17 +13,18 @@ export async function initWasm() {
     }
 }
 
-export function inspectJson(source: string, name: string): InspectionResult {
+export function inspectJson(source: string, name: string, resolve?: Resolver): InspectionResult {
     if (!wasmModule) throw new Error("WASM not initialized");
-    const resultStr = wasmModule.inspect_json(source, name);
+    const resultStr = wasmModule.inspect_json(source, name, resolve);
     return JSON.parse(resultStr) as InspectionResult;
 }
 
-// Compile + start a progressive run; returns a session id, or -1 on a
-// compile error (call runLastError() to get the diagnostics text).
-export function runBegin(source: string, name: string, seed: number): number {
+// Compile + start a progressive run of sequence `entry`; returns a session
+// id, or -1 on a compile error or unknown entry (runLastError() has the text).
+export function runBegin(source: string, name: string, seed: number,
+                         entry: string, resolve?: Resolver): number {
     if (!wasmModule) throw new Error("WASM not initialized");
-    return wasmModule.run_begin(source, name, seed >>> 0);
+    return wasmModule.run_begin(source, name, seed >>> 0, entry, resolve);
 }
 
 export function runLastError(): string {

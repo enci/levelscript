@@ -14,4 +14,4 @@ rule bad {
       h[x]
     }
 }
-program { resize(2,2) }
+sequence main { resize(2,2) }

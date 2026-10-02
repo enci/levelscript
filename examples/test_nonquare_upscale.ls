@@ -5,7 +5,7 @@
 tag t { W }
 layers { g: grid of t }
 rule fill { g[.] => g[W] }
-program {
+sequence main {
     resize(2, 1)
     all fill
     upscale(3, 2)

@@ -20,7 +20,7 @@ rule sprout(rotation=all) {
     algo[* S]
 }
 
-program {
+sequence main {
     resize(11, 7)
     some(max=3) plant
     all sprout

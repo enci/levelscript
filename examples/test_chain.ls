@@ -11,7 +11,7 @@ rule step1 { g[.] => g[X] }
 rule step2 { g[X] => g[Y] }
 rule step3 { g[Y] => g[Z] }
 
-program {
+sequence main {
     resize(3, 4)
     all step1
     all step2

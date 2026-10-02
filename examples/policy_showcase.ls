@@ -20,7 +20,7 @@ rule recolor {
     g[a] => g[c]
 }
 
-program {
+sequence main {
     resize(6, 6)
     all seed
     all(policy=stabilize) spread       // sweep to fixpoint

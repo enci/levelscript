@@ -20,7 +20,7 @@ rule both {
     }
 }
 
-program {
+sequence main {
     resize(3, 3)
     all both
 }

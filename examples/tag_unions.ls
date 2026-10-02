@@ -22,7 +22,7 @@ rule scatter { where[ (random(0, 1) == 0) ] => level[wall] }
 rule doors   { level[.] => level[door] }
 rule breach  { level[blocker] => level[open] }
 
-program {
+sequence main {
     resize(4, 4)
     all scatter   // ~half become wall
     all doors     // the rest become door

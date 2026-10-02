@@ -1,4 +1,4 @@
-// Showcase (v0.5.3): param defaults — this program runs seed-only.
+// Showcase (v0.5.3): param defaults — this generator runs seed-only.
 //
 // An input param may carry a default (`difficulty: number = 3`), evaluated once
 // at startup only when the runtime doesn't supply it. A later param's default
@@ -23,7 +23,7 @@ layers {
 
 rule fill { loot[.] => loot[ (budget) ] }
 
-program {
+sequence main {
     resize(2, 2)
     all fill
 }

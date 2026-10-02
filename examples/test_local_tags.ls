@@ -10,4 +10,4 @@ layers {
     gb: grid of tb
 }
 rule r { ga[.] => ga[X] }
-program { resize(2, 2) all r }
+sequence main { resize(2, 2) all r }

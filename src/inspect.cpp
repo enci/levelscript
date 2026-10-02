@@ -1,4 +1,5 @@
 #include "inspect.hpp"
+#include "modules.hpp"
 #include "parser.hpp"
 #include "sema.hpp"
 #include <cstdio>
@@ -128,15 +129,27 @@ void emit_write_term_refs(std::string& o, comma_list& cl, write_term const& t) {
     for (auto const& it : t.items) emit_write_term_refs(o, cl, it);
 }
 
+// `,"loc":{...}` with the declaring module's canonical name (§2.6), so an
+// editor can jump into the file that declares a name.
+void emit_loc(std::string& o, module_closure const& mods, source_loc l, size_t len) {
+    o += ",\"loc\":{\"line\":" + std::to_string(l.line) +
+         ",\"col\":" + std::to_string(l.col) +
+         ",\"len\":" + std::to_string(len) + ",\"module\":";
+    js(o, mods.names[(size_t)l.mod]);
+    o += "}";
+}
+
 }  // namespace
 
-std::string inspect_json(std::string const& source, std::string const& name) {
+std::string inspect_json(std::string const& source, std::string const& name,
+                         resolver const& resolve) {
     diagnostics diags;
-    auto ast = parse(source, name, diags);
+    module_closure mods = load_closure(source, name, resolve, diags);
     compiled prog;
-    bool ok = false;
-    if (ast)
-        ok = analyze(*ast, prog, diags, name, /*best_effort=*/true);
+    bool ok = analyze(mods, prog, diags, /*best_effort=*/true) && !diags.has_errors();
+    ast_file const* ast = &mods.merged;
+    // tokens and refs are positions in the edited file: the root module only
+    auto in_root = [&](source_loc l) { return l.mod == mods.root; };
 
     std::string o = "{\"ok\":";
     o += ok ? "true" : "false";
@@ -147,8 +160,9 @@ std::string inspect_json(std::string const& source, std::string const& name) {
         for (auto const& d : diags.all) {
             cl.next();
             o += "{\"line\":" + std::to_string(d.line) +
-                 ",\"col\":" + std::to_string(d.col) +
-                 ",\"severity\":";
+                 ",\"col\":" + std::to_string(d.col) + ",\"module\":";
+            js(o, d.file);
+            o += ",\"severity\":";
             o += d.is_error ? "\"error\"" : "\"warning\"";
             o += ",\"message\":";
             js(o, d.message);
@@ -158,9 +172,10 @@ std::string inspect_json(std::string const& source, std::string const& name) {
     o += "]";
 
     o += ",\"tokens\":[";
-    if (ast) {
+    {
         comma_list cl{o};
         for (auto const& r : ast->rules)
+            if (in_root(r.loc))
             for (auto const& pr : r.pairs) {
                 for (auto const& lp : pr.lhs)
                     emit_pattern_tokens(o, cl, prog, lp);
@@ -170,7 +185,7 @@ std::string inspect_json(std::string const& source, std::string const& name) {
     o += "]";
 
     o += ",\"refs\":[";
-    if (ast) {
+    {
         comma_list cl{o};
         // Rule / sequence references in program and sequence statements
         auto stmt_refs = [&](std::vector<program_stmt> const& stmts) {
@@ -190,10 +205,11 @@ std::string inspect_json(std::string const& source, std::string const& name) {
                 o += "}";
             }
         };
-        if (ast->has_program) stmt_refs(ast->program.stmts);
-        for (auto const& sq : ast->sequences) stmt_refs(sq.stmts);
+        for (auto const& sq : ast->sequences)
+            if (in_root(sq.loc)) stmt_refs(sq.stmts);
         // Grid references in Rule patterns
         for (auto const& r : ast->rules) {
+            if (!in_root(r.loc)) continue;
             for (auto const& pr : r.pairs) {
                 for (auto const& lp : pr.lhs) emit_pattern_refs(o, cl, lp);
                 emit_write_term_refs(o, cl, pr.rhs);
@@ -202,25 +218,28 @@ std::string inspect_json(std::string const& source, std::string const& name) {
     }
     o += "]";
 
-    o += ",\"symbols\":{\"tags\":[";
+    o += ",\"symbols\":{\"modules\":[";
+    {
+        comma_list cl{o};
+        for (int id : mods.order) { cl.next(); js(o, mods.names[(size_t)id]); }
+    }
+    o += "],\"tags\":[";
     {
         comma_list cl{o};
         for (int ti = 0; ti < (int)prog.tag_names.size(); ++ti) {
+            tag_decl const* td = ti < (int)ast->tags.size() ? &ast->tags[(size_t)ti] : nullptr;
             cl.next();
             o += "{\"name\":";
             js(o, prog.tag_names[ti]);
+            if (td) emit_loc(o, mods, td->loc, 0);
             o += ",\"values\":[";
             comma_list vl{o};
-            for (int i = 0; i < (int)prog.tag_values[ti].size(); ++i) { 
-                vl.next(); 
+            for (int i = 0; i < (int)prog.tag_values[ti].size(); ++i) {
+                vl.next();
                 o += "{\"name\":";
                 js(o, prog.tag_values[ti][i]);
-                if (ast && ast->has_layers && ti < (int)ast->tags.size() && i < (int)ast->tags[ti].values.size()) {
-                    auto const& ast_val = ast->tags[ti].values[i];
-                    o += ",\"loc\":{\"line\":" + std::to_string(ast_val.loc.line) + 
-                         ",\"col\":" + std::to_string(ast_val.loc.col) + 
-                         ",\"len\":" + std::to_string(ast_val.name.size()) + "}";
-                }
+                if (td && i < (int)td->values.size())
+                    emit_loc(o, mods, td->values[(size_t)i].loc, td->values[(size_t)i].name.size());
                 o += "}";
             }
             o += "],\"unions\":[";
@@ -231,12 +250,9 @@ std::string inspect_json(std::string const& source, std::string const& name) {
                     ul.next();
                     o += "{\"name\":";
                     js(o, uname);
-                    if (ast && ti < (int)ast->tags.size())
-                        for (auto const& au : ast->tags[ti].unions)
-                            if (au.name == uname)
-                                o += ",\"loc\":{\"line\":" + std::to_string(au.loc.line) +
-                                     ",\"col\":" + std::to_string(au.loc.col) +
-                                     ",\"len\":" + std::to_string(au.name.size()) + "}";
+                    if (td)
+                        for (auto const& au : td->unions)
+                            if (au.name == uname) { emit_loc(o, mods, au.loc, au.name.size()); break; }
                     o += "}";
                 }
             o += "]}";
@@ -245,22 +261,14 @@ std::string inspect_json(std::string const& source, std::string const& name) {
     o += "],\"layers\":[";
     {
         comma_list cl{o};
-        for (int i = 0; i < (int)prog.layers.size(); ++i) {
-            auto const& l = prog.layers[i];
+        for (auto const& l : prog.layers) {
             cl.next();
             o += "{\"name\":";
             js(o, l.name);
             o += ",\"type\":";
-            js(o, l.tag_id >= 0 ? prog.tag_names[l.tag_id] : "number");
-            
-            // Output definition location if we have it in AST
-            if (ast && ast->has_layers && i < (int)ast->layers.layers.size()) {
-                auto const& ast_l = ast->layers.layers[i];
-                o += ",\"loc\":{\"line\":" + std::to_string(ast_l.loc.line) + 
-                     ",\"col\":" + std::to_string(ast_l.loc.col) + 
-                     ",\"len\":" + std::to_string(ast_l.name.size()) + "}";
-            }
-            
+            js(o, l.tag_id >= 0 ? prog.tag_names[(size_t)l.tag_id] : "number");
+            for (auto const& al : ast->layers.layers)   // first declaration wins
+                if (al.name == l.name) { emit_loc(o, mods, al.loc, al.name.size()); break; }
             o += "}";
         }
     }
@@ -273,39 +281,37 @@ std::string inspect_json(std::string const& source, std::string const& name) {
                 if (se.param == pi && !se.is_default) derived = true;
             cl.next();
             o += "{\"name\":";
-            js(o, prog.param_names[pi]);
+            js(o, prog.param_names[(size_t)pi]);
             o += ",\"derived\":";
             o += derived ? "true" : "false";
+            for (auto const& ap : ast->params)
+                if (ap.name == prog.param_names[(size_t)pi]) {
+                    emit_loc(o, mods, ap.loc, ap.name.size());
+                    break;
+                }
             o += "}";
         }
     }
     o += "],\"rules\":[";
     {
         comma_list cl{o};
-        for (int i = 0; i < (int)prog.rules.size(); ++i) { 
-            cl.next(); 
+        for (auto const& r : ast->rules) {
+            cl.next();
             o += "{\"name\":";
-            js(o, prog.rules[i].name);
-            
-            if (ast && i < (int)ast->rules.size()) {
-                auto const& ast_r = ast->rules[i];
-                o += ",\"loc\":{\"line\":" + std::to_string(ast_r.loc.line) + 
-                     ",\"col\":" + std::to_string(ast_r.loc.col) + 
-                     ",\"len\":" + std::to_string(ast_r.name.size()) + "}";
-            }
+            js(o, r.name);
+            emit_loc(o, mods, r.name_loc, r.name.size());
             o += "}";
         }
     }
     o += "],\"sequences\":[";
-    if (ast) {
+    {
         comma_list cl{o};
         for (auto const& sq : ast->sequences) {
             cl.next();
             o += "{\"name\":";
             js(o, sq.name);
-            o += ",\"loc\":{\"line\":" + std::to_string(sq.name_loc.line) +
-                 ",\"col\":" + std::to_string(sq.name_loc.col) +
-                 ",\"len\":" + std::to_string(sq.name.size()) + "}}";
+            emit_loc(o, mods, sq.name_loc, sq.name.size());
+            o += "}";
         }
     }
     // completion vocabulary — kept in sync with the sema tables by the tests

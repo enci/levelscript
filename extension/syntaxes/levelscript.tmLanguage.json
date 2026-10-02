@@ -4,6 +4,7 @@
   "scopeName": "source.levelscript",
   "patterns": [
     { "include": "#comment" },
+    { "include": "#string" },
     { "include": "#keyword" },
     { "include": "#pattern-body" },
     { "include": "#operator" },
@@ -11,13 +12,17 @@
     { "include": "#identifier" }
   ],
   "repository": {
+    "string": {
+      "name": "string.quoted.double.levelscript",
+      "match": "\"[^\"\\n]*\"?"
+    },
     "comment": {
       "name": "comment.line.double-slash.levelscript",
       "match": "//.*$"
     },
     "keyword": {
       "name": "keyword.control.levelscript",
-      "match": "\\b(tag|layers|grid|of|number|rule|sequence|program|params|where|when|any|all|one|some|ordered|symmetry|rotation|weight|max|percent|policy|snapshot|incremental|stabilize|none|horizontal|vertical|ordered)\\b"
+      "match": "\\b(use|tag|layers|grid|of|number|rule|sequence|params|where|when|any|all|one|some|ordered|symmetry|rotation|weight|max|percent|policy|snapshot|incremental|stabilize|none|horizontal|vertical|ordered)\\b"
     },
     "operator": {
       "name": "keyword.operator.levelscript",

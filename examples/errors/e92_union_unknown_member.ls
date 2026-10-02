@@ -3,4 +3,4 @@
 // @expect stderr-contains not a value or earlier union
 tag geometry { wall, floor, blocker = wall | nope }
 layers { level: grid of geometry }
-program { resize(1,1) }
+sequence main { resize(1,1) }

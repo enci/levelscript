@@ -28,7 +28,7 @@ rule flow(rotation=all) {
     level[* water]
 }
 
-program {
+sequence main {
     resize(15, 9)
     all scatter_rocks
     one spring

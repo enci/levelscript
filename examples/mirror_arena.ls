@@ -25,7 +25,7 @@ rule frame {
     level[wall]
 }
 
-program {
+sequence main {
     resize(6, 4)
     all carve
     mirror(horizontal)

@@ -21,7 +21,7 @@ params {
     budget = difficulty * 2
 }
 rule fill { level[.] => level[floor] }
-program {
+sequence main {
     resize(4, 4)
     all fill
 }
@@ -33,11 +33,12 @@ TEST_CASE("inspect: healthy file emits ok, symbols, and no diagnostics") {
     CHECK(has(j, "\"diagnostics\":[]"));
     CHECK(has(j, "\"name\":\"geo\""));
     CHECK(has(j, "\"values\":[{\"name\":\"wall\",\"loc\":"));
-    CHECK(has(j, "\"unions\":[{\"name\":\"blocker\",\"loc\":{\"line\":2,\"col\":24,\"len\":7}}]"));
+    CHECK(has(j, "\"unions\":[{\"name\":\"blocker\",\"loc\":{\"line\":2,\"col\":24,\"len\":7,"
+                 "\"module\":\"test.ls\"}}]"));
     CHECK(has(j, "{\"name\":\"level\",\"type\":\"geo\",\"loc\":"));
     CHECK(has(j, "{\"name\":\"tiles\",\"type\":\"number\",\"loc\":"));
-    CHECK(has(j, "{\"name\":\"difficulty\",\"derived\":false}"));
-    CHECK(has(j, "{\"name\":\"budget\",\"derived\":true}"));
+    CHECK(has(j, "{\"name\":\"difficulty\",\"derived\":false,\"loc\":"));
+    CHECK(has(j, "{\"name\":\"budget\",\"derived\":true,\"loc\":"));
     CHECK(has(j, "\"rules\":[{\"name\":\"fill\",\"loc\":"));
     CHECK(has(j, "\"ops\":[\"resize\""));
     CHECK(has(j, "\"builtins\":[\"if\""));
@@ -58,7 +59,7 @@ tag geo { wall, floor }
 layers { level: grid of geo }
 rule bad  { level[lava] => level[wall] }
 rule good { level[.] => level[floor] }
-program { all good }
+sequence main { all good }
 )";
     std::string j = ls::inspect_json(src, "test.ls");
     CHECK(has(j, "\"ok\":false"));
@@ -86,7 +87,7 @@ layers2: grid of geo
 tag geo { floor }
 layers { level: grid of geo  tiles: grid of number }
 rule mark { level[floor] => tiles[1] }
-program { all(policy=incremental) mark }
+sequence main { all(policy=incremental) mark }
 )";
     std::string j = ls::inspect_json(wsrc, "test.ls");
     CHECK(has(j, "\"ok\":true"));
@@ -96,9 +97,9 @@ program { all(policy=incremental) mark }
 }
 
 TEST_CASE("inspect: message strings are JSON-escaped") {
-    // messages contain single quotes routinely; ensure double quotes inside
-    // identifiers don't break the JSON (lexer rejects them, message quotes them)
-    std::string j = ls::inspect_json("tag \"x\" { a }", "test.ls");
+    // messages contain single quotes routinely; an unresolved `use` quotes
+    // its path in double quotes, which must not break the JSON
+    std::string j = ls::inspect_json("use \"nope.ls\"\n", "test.ls");
     CHECK(has(j, "\"ok\":false"));
     CHECK(has(j, "\\\""));   // escaped quote inside a message
 }
@@ -110,7 +111,7 @@ layers {
     n: grid of number
 }
 rule r { { all g[* D]  n[* 12] } => { all g[F D]  n[. 3] } }
-program { }
+sequence main { }
 )", "test.ls");
     CHECK(has(j, "\"diagnostics\":[]"));
     // union D takes the slot after its tag's values (F=0, W=1 -> D=2)

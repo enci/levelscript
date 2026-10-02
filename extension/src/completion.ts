@@ -10,7 +10,7 @@
 
 export type CompletionContext =
     | { kind: 'none' }
-    | { kind: 'top' }                                   // tag / layers / params / rule / sequence / program
+    | { kind: 'top' }                                   // use / tag / layers / params / rule / sequence
     | { kind: 'unionMember'; tag: string }              // tag t { ..., D = F | _ }
     | { kind: 'gridOf' }                                // layers { g: _ }
     | { kind: 'of' }                                    // layers { g: grid _ }
@@ -23,8 +23,8 @@ export type CompletionContext =
     | { kind: 'combinator' }                            // { _   (all / any)
     | { kind: 'weight' }                                // { any (_ ) g[...] }
     | { kind: 'cell'; grid: string }                    // g[ _ ]
-    | { kind: 'statement'; guard: boolean }             // program { _ }, sequence s { _ }
-    | { kind: 'ruleName' }                              // program { one _ } - rules and sequences
+    | { kind: 'statement'; guard: boolean }             // sequence s { _ }
+    | { kind: 'ruleName' }                              // sequence s { one _ } - rules and sequences
     | { kind: 'strategyArg'; strategy: string }         // some(_)
     | { kind: 'policyValue' }                           // one(policy=_)
     | { kind: 'opArg'; op: string; index: number; used: string[] }  // path(_)
@@ -60,11 +60,12 @@ export const OPS: { name: string; params: OpParam[]; snippet: string }[] = [
 interface Tok { t: string; owner?: string }   // t: text; owner set on synthetic closers
 interface Frame {
     open: '{' | '[' | '(' | '';
-    owner: string;       // what opened it: 'top' 'tag:t' 'layers' 'params' 'rule' 'program' 'combinator' 'set' 'grid:g' 'where' 'attrs' 'strategy:one' 'op:path' 'when' 'weight' 'expr'
+    owner: string;       // what opened it: 'top' 'tag:t' 'layers' 'params' 'rule' 'statements' 'combinator' 'set' 'grid:g' 'where' 'attrs' 'strategy:one' 'op:path' 'when' 'weight' 'expr'
     scope: 'full' | 'restricted' | '';   // expression scope inherited by '(' frames
     toks: Tok[];
 }
 
+const STRING = '<string>';   // token text for any string literal
 const OPERATORS = new Set(['+', '-', '*', '/', '==', '!=', '<', '<=', '>', '>=', '&&', '||', '|', '!']);
 const STRATEGIES = new Set(['one', 'all', 'some']);
 
@@ -89,6 +90,14 @@ export function completionContext(text: string, offset: number): CompletionConte
             continue;
         }
         if (/\s/.test(c)) { i++; continue; }
+        if (c === '"') {   // a `use` path (section 2.6): one token, no escapes
+            let j = i + 1;
+            while (j < text.length && text[j] !== '"' && text[j] !== '\n') j++;
+            if (j >= offset || text[j] !== '"') return { kind: 'none' };   // typing a path
+            top().toks.push({ t: STRING });
+            i = j + 1;
+            continue;
+        }
         if (isIdentStart(c) || /[0-9]/.test(c)) {
             let j = i + 1;
             while (j < wordStart && isIdent(text[j])) j++;
@@ -137,8 +146,8 @@ function openFrame(c: '{' | '[' | '(', stack: Frame[]): Frame {
             const decl = currentDecl(toks);
             const kw = decl[0]?.t;
             if (kw === 'tag') return frame('tag:' + (decl[1]?.t ?? ''));
-            if (kw === 'layers' || kw === 'params' || kw === 'program') return frame(kw);
-            if (kw === 'sequence') return frame('program');   // same statement_list (§6.10)
+            if (kw === 'layers' || kw === 'params') return frame(kw);
+            if (kw === 'sequence') return frame('statements');   // a statement_list (section 6)
             if (kw === 'rule') return frame('rule');
             return frame('other');
         }
@@ -153,7 +162,7 @@ function openFrame(c: '{' | '[' | '(', stack: Frame[]): Frame {
     }
     // '('
     if (parent.owner === 'top' && currentDecl(toks)[0]?.t === 'rule') return frame('attrs');
-    if (parent.owner === 'program') {
+    if (parent.owner === 'statements') {
         if (prev && STRATEGIES.has(prev)) return frame('strategy:' + prev);
         if (prev === 'when') return frame('when', 'restricted');
         if (prev && isIdentStart(prev[0])) return frame('op:' + prev, 'full');
@@ -181,8 +190,11 @@ function classify(stack: Frame[]): CompletionContext {
 
     switch (f.owner) {
     case 'top':
-        // between declarations only - after `tag`, `rule` etc. a name is being declared
-        return prev === undefined || (prev === '}' && last.owner !== undefined) ? { kind: 'top' } : none;
+        // between declarations only - after `tag`, `rule` etc. a name is being
+        // declared; a finished `use "path"` is a complete declaration too
+        return prev === undefined || (prev === '}' && last.owner !== undefined) ||
+               (prev === STRING && prev2 === 'use')
+            ? { kind: 'top' } : none;
     case 'layers':
         if (prev === ':') return { kind: 'gridOf' };
         if (prev === 'grid') return { kind: 'of' };
@@ -208,7 +220,7 @@ function classify(stack: Frame[]): CompletionContext {
     }
     case 'weight':
         return prev === undefined ? { kind: 'weight' } : none;
-    case 'program': {
+    case 'statements': {
         if (prev === undefined) return { kind: 'statement', guard: false };
         if (prev === 'one' || prev === 'all' || (prev === ')' && last.owner?.startsWith('strategy:')))
             return { kind: 'ruleName' };

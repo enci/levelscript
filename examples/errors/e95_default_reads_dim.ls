@@ -3,4 +3,4 @@
 // @expect stderr-contains cannot be read here
 params { size: number = width / 2 }
 layers { g: grid of number }
-program { resize(4,4) }
+sequence main { resize(4,4) }

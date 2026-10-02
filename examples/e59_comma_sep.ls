@@ -6,7 +6,7 @@ rule r { all
     g[a] => g[b], g[b] => g[c]
 }
 rule seed_a { g[.] => g[a] }
-program {
+sequence main {
     resize(1, 1)
     all seed_a
     all r

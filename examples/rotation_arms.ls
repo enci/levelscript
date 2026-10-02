@@ -44,7 +44,7 @@ rule grow(rotation={90, 270}) {
     g[*    arm]
 }
 
-program {
+sequence main {
     resize(5, 5)
     all seed
     all grow

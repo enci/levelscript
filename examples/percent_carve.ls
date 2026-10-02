@@ -21,7 +21,7 @@ layers {
 rule solid { g[.] => g[rock] }
 rule carve { g[rock] => g[floor] }
 
-program {
+sequence main {
     resize(10, 10)
     all solid
     some(percent=40) carve

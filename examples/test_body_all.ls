@@ -12,7 +12,7 @@ rule cycle { all
     g[a] => g[b]
     g[b] => g[c]
 }
-program {
+sequence main {
     resize(3, 3)
     all seed
     all cycle

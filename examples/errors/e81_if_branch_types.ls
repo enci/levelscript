@@ -4,4 +4,4 @@
 tag geometry { wall, floor }
 layers { level: grid of geometry }
 rule bad { level[.] => level[ (if(width > 1, wall, 3)) ] }
-program { resize(1,1) }
+sequence main { resize(1,1) }

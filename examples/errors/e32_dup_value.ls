@@ -2,4 +2,4 @@
 // @expect stderr-contains duplicate tag value
 tag t { a, b, a }
 layers { g: grid of t }
-program { resize(1,1) }
+sequence main { resize(1,1) }

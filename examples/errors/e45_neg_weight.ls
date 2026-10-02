@@ -11,4 +11,4 @@ rule r {
       g[b]
     }
 }
-program { resize(1,1) }
+sequence main { resize(1,1) }

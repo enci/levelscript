@@ -22,7 +22,7 @@ rule place {
       actors[troll]
     }
 }
-program {
+sequence main {
     resize(3, 3)
     all fill_floor
     all place

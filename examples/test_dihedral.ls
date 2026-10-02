@@ -28,7 +28,7 @@ rule spread(symmetry=all, rotation=all) {
         F *
         * F ]
 }
-program {
+sequence main {
     resize(5, 5)
     all fill
     one seed_one

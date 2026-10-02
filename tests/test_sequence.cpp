@@ -23,7 +23,7 @@ struct trace {
 trace run_trace(ls::generator const& gen, uint64_t seed,
                 ls::step_mode mode = ls::step_mode::statement) {
     trace t;
-    auto r = gen.run(seed, mode, ls::observe::on);
+    auto r = gen.run(gen.sequence("main"), seed, mode, ls::observe::on);
     while (r.step()) {
         t.stacks.push_back(r.stmt_stack());
         t.index.push_back(r.statement_index());
@@ -68,7 +68,7 @@ void check_equivalent(std::string const& a_src, std::string const& b_src) {
     REQUIRE(static_cast<bool>(b));
     for (uint64_t seed = 1; seed <= 20; ++seed) {
         INFO("seed " << seed);
-        CHECK(levels_equal(a.generate(seed), b.generate(seed)));
+        CHECK(levels_equal(a.generate(a.sequence("main"), seed), b.generate(b.sequence("main"), seed)));
     }
 }
 
@@ -115,14 +115,14 @@ rule fill { g[.] => g[a] }
 sequence s {
     all fill
 }
-program {
+sequence main {
     resize(4, 4)
     one s
 }
 )");
     INFO(gen.error());
     REQUIRE(static_cast<bool>(gen));
-    auto lv = gen.generate(1);
+    auto lv = gen.generate(gen.sequence("main"), 1);
     int a = gen.tag("t.a");
     for (int y = 0; y < 4; ++y)
         for (int x = 0; x < 4; ++x) CHECK(lv["g"].at(x, y) == a);
@@ -132,7 +132,7 @@ TEST_CASE("sequence Q02: forward references") {
     compile_result r(R"(
 tag t { a }
 layers { g: grid of t }
-program {
+sequence main {
     resize(2, 2)
     one s
 }
@@ -151,7 +151,7 @@ tag t { a }
 layers { g: grid of t }
 rule fill { g[.] => g[a] }
 sequence unused { all fill }
-program { resize(2, 2) }
+sequence main { resize(2, 2) }
 )");
     INFO(r.diags.format_all());
     CHECK(r.ok);
@@ -174,7 +174,7 @@ sequence outer {
     pad(1)                  when (big == 1)
     resize(8, 8)
 }
-program {
+sequence main {
     resize(4, 4)
     one outer
 }
@@ -190,7 +190,7 @@ layers { g: grid of t }
 rule fill { g[.] => g[a] }
 rule flip { g[a] => g[b] }
 sequence s { all fill all flip }
-program { resize(2, 2) one s }
+sequence main { resize(2, 2) one s }
 )", R"(
 tag t { a, b }
 layers { g: grid of t }
@@ -200,7 +200,7 @@ sequence s {
     all fill
     all flip
 }
-program {
+sequence main {
     resize(2, 2)
     one s
 }
@@ -220,7 +220,7 @@ sequence flip {
     all a_to_b
     all b_to_a
 }
-program {
+sequence main {
     resize(4, 4)
     all fill
     all flip
@@ -241,7 +241,7 @@ layers { g: grid of t }
 rule fill { g[.] => g[a] }
 rule same { g[a] => g[a] }
 sequence s { all same }
-program {
+sequence main {
     resize(3, 3)
     all fill
     all s
@@ -257,7 +257,7 @@ tag t { a }
 layers { g: grid of t }
 rule seed { g[.] => g[a] }
 sequence crop { trim() }
-program {
+sequence main {
     resize(5, 5)
     one seed
     all crop
@@ -275,7 +275,7 @@ TEST_CASE("sequence Q09: resize inside a fixpoint stabilises") {
     compile_result r(R"(
 layers { }
 sequence r { resize(6, 4) }
-program {
+sequence main {
     resize(5, 5)
     all r
 }
@@ -284,7 +284,7 @@ program {
     auto gen = make(R"(
 layers { }
 sequence r { resize(6, 4) }
-program {
+sequence main {
     resize(5, 5)
     all r
 }
@@ -300,7 +300,7 @@ TEST_CASE("sequence Q10: an empty body is stable and contributes no steps") {
     auto gen = make(R"(
 layers { }
 sequence nothing { }
-program {
+sequence main {
     resize(2, 2)
     all nothing
 }
@@ -321,7 +321,7 @@ rule poke { tiles[*] => tiles[ (tiles + 100) ] }
 sequence maybe {
     one poke  when (random(0, 1) == 0)
 }
-program {
+sequence main {
     resize(4, 4)
     all zero
     some(max=50) maybe
@@ -341,7 +341,7 @@ program {
 // ── 3. Counts ─────────────────────────────────────────────────────────────────
 
 TEST_CASE("sequence Q12: one S runs exactly one iteration") {
-    auto gen = make(counter(3) + "sequence tick { all inc }\nprogram {\n resize(1, 1)\n one tick\n}\n");
+    auto gen = make(counter(3) + "sequence tick { all inc }\nsequence main {\n resize(1, 1)\n one tick\n}\n");
     REQUIRE(static_cast<bool>(gen));
     auto t = run_trace(gen, 1);
     CHECK(iterations(t, {1}) == 1);
@@ -349,7 +349,7 @@ TEST_CASE("sequence Q12: one S runs exactly one iteration") {
 }
 
 TEST_CASE("sequence Q13: some(max=N) stops early after a stable iteration") {
-    auto gen = make(counter(3) + "sequence tick { all inc }\nprogram {\n resize(1, 1)\n some(max=10) tick\n}\n");
+    auto gen = make(counter(3) + "sequence tick { all inc }\nsequence main {\n resize(1, 1)\n some(max=10) tick\n}\n");
     REQUIRE(static_cast<bool>(gen));
     auto t = run_trace(gen, 1);
     CHECK(iterations(t, {1}) == 4);
@@ -357,7 +357,7 @@ TEST_CASE("sequence Q13: some(max=N) stops early after a stable iteration") {
 }
 
 TEST_CASE("sequence Q14: some(max=N) runs all N iterations when each changes something") {
-    auto gen = make(counter(100) + "sequence tick { all inc }\nprogram {\n resize(1, 1)\n some(max=5) tick\n}\n");
+    auto gen = make(counter(100) + "sequence tick { all inc }\nsequence main {\n resize(1, 1)\n some(max=5) tick\n}\n");
     REQUIRE(static_cast<bool>(gen));
     auto t = run_trace(gen, 1);
     CHECK(iterations(t, {1}) == 5);
@@ -365,7 +365,7 @@ TEST_CASE("sequence Q14: some(max=N) runs all N iterations when each changes som
 }
 
 TEST_CASE("sequence Q15: all S is a fixpoint") {
-    auto gen = make(counter(3) + "sequence tick { all inc }\nprogram {\n resize(1, 1)\n all tick\n}\n");
+    auto gen = make(counter(3) + "sequence tick { all inc }\nsequence main {\n resize(1, 1)\n all tick\n}\n");
     REQUIRE(static_cast<bool>(gen));
     auto t = run_trace(gen, 1);
     CHECK(iterations(t, {1}) == 4);
@@ -378,7 +378,7 @@ tag t { a }
 layers { g: grid of t }
 rule fill { g[.] => g[a] }
 sequence widen { upscale(2, 1) }
-program {
+sequence main {
     resize(1, 1)
     all fill
     some(max=3) widen
@@ -396,7 +396,7 @@ program {
 static std::string const q17 = counter(100) + R"(
 sequence inner { all inc }
 sequence outer { some(max=2) inner }
-program {
+sequence main {
     resize(1, 1)
     some(max=3) outer
 }
@@ -429,13 +429,13 @@ sequence s {
     all noise
     one poke
 }
-program {
+sequence main {
     resize(8, 8)
     some(max=3) s
     all noise
 }
 )", noise_poke + R"(
-program {
+sequence main {
     resize(8, 8)
     all noise
     one poke
@@ -454,13 +454,13 @@ sequence s {
     some(max=5, policy=incremental) poke
     some(max=2, policy=stabilize) noise
 }
-program {
+sequence main {
     resize(6, 6)
     some(max=2) s
     all noise
 }
 )", noise_poke + R"(
-program {
+sequence main {
     resize(6, 6)
     some(max=5, policy=incremental) poke
     some(max=2, policy=stabilize) noise
@@ -477,13 +477,13 @@ sequence s {
     one poke
     one poke  when (random(0, 1) == 0)
 }
-program {
+sequence main {
     resize(4, 4)
     some(max=4) s
     all noise
 }
 )", noise_poke + R"(
-program {
+sequence main {
     resize(4, 4)
     one poke
     one poke  when (random(0, 1) == 0)
@@ -504,7 +504,7 @@ layers { tiles: grid of number }
 params { enabled: number = 0 }
 rule noise { tiles[*] => tiles[ (random(0, 9)) ] }
 sequence s { all noise }
-program {
+sequence main {
     resize(4, 4)
     some(max=3) s  when (enabled == 1)
     all noise
@@ -513,7 +513,7 @@ program {
 layers { tiles: grid of number }
 params { enabled: number = 0 }
 rule noise { tiles[*] => tiles[ (random(0, 9)) ] }
-program {
+sequence main {
     resize(4, 4)
     all noise
 }
@@ -523,13 +523,13 @@ program {
 TEST_CASE("sequence Q22: an application guard is evaluated once") {
     check_equivalent(noise_poke + R"(
 sequence s { one poke }
-program {
+sequence main {
     resize(4, 4)
     some(max=3) s  when (random(0, 0) == 0)
     all noise
 }
 )", noise_poke + R"(
-program {
+sequence main {
     resize(4, 4)
     one poke  when (random(0, 0) == 0)
     one poke
@@ -551,84 +551,84 @@ TEST_CASE("sequence Q23-Q26: a sequence application takes a count only (check 37
     for (char const* stmt : {"all(policy=incremental) s", "one(policy=snapshot) s",
                              "some(max=3, policy=stabilize) s"}) {
         INFO(stmt);
-        CHECK(compile_result(fill_decls + "sequence s { all fill }\nprogram { resize(2, 2)  " +
+        CHECK(compile_result(fill_decls + "sequence s { all fill }\nsequence main { resize(2, 2)  " +
                              stmt + " }\n")
               .has_error("'policy=' is not valid on sequence 's'"));
     }
     CHECK(compile_result(fill_decls + "sequence s { all fill }\n"
-                         "program { resize(2, 2)  some(percent=50) s }\n")
+                         "sequence main { resize(2, 2)  some(percent=50) s }\n")
           .has_error("'some(percent=...)' is not valid on sequence 's'"));
 }
 
 TEST_CASE("sequence Q27: a direct cycle is rejected even when never applied (check 38)") {
-    CHECK(compile_result("sequence s { one s }\nlayers { }\nprogram { resize(1, 1) }\n")
+    CHECK(compile_result("sequence s { one s }\nlayers { }\nsequence main { resize(1, 1) }\n")
           .has_error("sequence 's' applies itself"));
 }
 
 TEST_CASE("sequence Q28: an indirect cycle (check 38)") {
     CHECK(compile_result("sequence a { one b }\nsequence b { some(max=2) a }\n"
-                         "layers { }\nprogram { resize(1, 1)  one a }\n")
+                         "layers { }\nsequence main { resize(1, 1)  one a }\n")
           .has_error("sequence cycle: 'a' -> 'b' -> 'a'"));
 }
 
 TEST_CASE("sequence Q29-Q30: rules and sequences share one namespace (check 39)") {
-    CHECK(compile_result(fill_decls + "sequence fill { resize(1, 1) }\nprogram { resize(1, 1) }\n")
+    CHECK(compile_result(fill_decls + "sequence fill { resize(1, 1) }\nsequence main { resize(1, 1) }\n")
           .has_error("already declared as a rule on line 4"));
     CHECK(compile_result(fill_decls + "sequence s { all fill }\nsequence s { one fill }\n"
-                         "program { resize(1, 1) }\n")
+                         "sequence main { resize(1, 1) }\n")
           .has_error("duplicate sequence 's'"));
 }
 
 TEST_CASE("sequence Q31: unknown name, with a suggestion across both kinds (check 8)") {
     CHECK(compile_result(fill_decls + "sequence smooth { all fill }\n"
-                         "program { resize(2, 2)  all smoth }\n")
+                         "sequence main { resize(2, 2)  all smoth }\n")
           .has_error("undeclared rule or sequence 'smoth'; did you mean sequence 'smooth'?"));
 }
 
 TEST_CASE("sequence Q32: 'sequence' is a keyword") {
-    CHECK(compile_result("tag t { a }\nlayers { sequence: grid of t }\nprogram { resize(1, 1) }\n")
+    CHECK(compile_result("tag t { a }\nlayers { sequence: grid of t }\nsequence main { resize(1, 1) }\n")
           .has_error("'sequence' - a reserved keyword cannot be used as a name"));
 }
 
 TEST_CASE("sequence Q33: no inline rules in a body") {
     compile_result r("tag t { a }\nlayers { g: grid of t }\nsequence s {\n    g[.] => g[a]\n}\n"
-                     "program { resize(1, 1)  one s }\n");
+                     "sequence main { resize(1, 1)  one s }\n");
     CHECK(r.has_error("expected a statement in sequence 's'; rules are declared with 'rule'"));
     CHECK(r.diags.all.size() == 1);   // one diagnostic for the bad line
 }
 
 TEST_CASE("sequence Q34: sequences take no attributes") {
     CHECK(compile_result(fill_decls + "sequence s(rotation=all) { all fill }\n"
-                         "program { resize(1, 1)  one s }\n")
+                         "sequence main { resize(1, 1)  one s }\n")
           .has_error("expected '{' after sequence name 's'; sequences take no attributes"));
 }
 
 TEST_CASE("sequence Q35: rule-level checks still apply inside a body (check 28)") {
     CHECK(compile_result(fill_decls + "sequence s { one(policy=stabilize) fill }\n"
-                         "program { resize(1, 1)  one s }\n")
+                         "sequence main { resize(1, 1)  one s }\n")
           .has_error("contradictory (a single application cannot reach a sweep fixpoint) (sequence 's')"));
 }
 
 // ── 6. The dimension warning (compile-only) ───────────────────────────────────
 
 TEST_CASE("sequence Q36-Q38: all over a dimension-changing sequence warns") {
-    compile_result q36("layers { }\nsequence grow { upscale(2, 2) }\nprogram { resize(1, 1)  all grow }\n");
+    compile_result q36("layers { }\nsequence grow { upscale(2, 2) }\nsequence main { resize(1, 1)  all grow }\n");
     CHECK(q36.ok);
     CHECK(has_warning(q36, "'all' over sequence 'grow' may never terminate: 'upscale' changes "
                            "the grid dimensions on every iteration, so no iteration can be stable"));
 
-    compile_result q37("layers { }\nsequence frame { pad(1) }\nprogram { resize(1, 1)  all frame }\n");
+    compile_result q37("layers { }\nsequence frame { pad(1) }\nsequence main { resize(1, 1)  all frame }\n");
     CHECK(has_warning(q37, "'all' over sequence 'frame' may never terminate: 'pad'"));
 
     compile_result q38("layers { }\nsequence inner { upscale(2, 1) }\nsequence outer { one inner }\n"
-                       "program { resize(1, 1)  all outer }\n");
+                       "sequence main { resize(1, 1)  all outer }\n");
     CHECK(has_warning(q38, "'all' over sequence 'outer' may never terminate: 'upscale'"));
     CHECK(!has_warning(q38, "sequence 'inner'"));
 }
 
 TEST_CASE("sequence Q39: identity factors and a zero margin do not warn") {
     std::string src = "layers { }\nsequence s {\n    upscale(1, 1)\n    pad(0)\n}\n"
-                      "program { resize(2, 2)  all s }\n";
+                      "sequence main { resize(2, 2)  all s }\n";
     compile_result r(src);
     CHECK(r.ok);
     CHECK(!has_warning(r));
@@ -638,13 +638,13 @@ TEST_CASE("sequence Q39: identity factors and a zero margin do not warn") {
 TEST_CASE("sequence Q40-Q41: a guard suppresses the warning") {
     compile_result q40("layers { }\nparams { big: number = 0 }\n"
                        "sequence s { upscale(2, 2)  when (big == 1) }\n"
-                       "program { resize(1, 1)  all s }\n");
+                       "sequence main { resize(1, 1)  all s }\n");
     CHECK(q40.ok);
     CHECK(!has_warning(q40));
     compile_result q41("layers { }\nparams { big: number = 0 }\n"
                        "sequence inner { upscale(2, 2) }\n"
                        "sequence outer { one inner  when (big == 1) }\n"
-                       "program { resize(1, 1)  all outer }\n");
+                       "sequence main { resize(1, 1)  all outer }\n");
     CHECK(q41.ok);
     CHECK(!has_warning(q41));
 }
@@ -652,13 +652,13 @@ TEST_CASE("sequence Q40-Q41: a guard suppresses the warning") {
 // Q42 removed from the suite: some(max=0) is a compile error (check 28).
 TEST_CASE("sequence Q42 (replaced): some(max=0) of a sequence is rejected") {
     CHECK(compile_result("layers { }\nsequence s { resize(1, 1) }\n"
-                         "program { resize(1, 1)  some(max=0) s }\n")
+                         "sequence main { resize(1, 1)  some(max=0) s }\n")
           .has_error("'some(max=0)'"));
 }
 
 TEST_CASE("sequence Q43: bounded counts are never warned") {
     compile_result r("layers { }\nsequence grow { upscale(2, 2) }\n"
-                     "program {\n    resize(1, 1)\n    one grow\n    some(max=3) grow\n}\n");
+                     "sequence main {\n    resize(1, 1)\n    one grow\n    some(max=3) grow\n}\n");
     CHECK(r.ok);
     CHECK(!has_warning(r));
 }
@@ -676,14 +676,14 @@ sequence s {
     all flip
     all fill
 }
-program {
+sequence main {
     resize(2, 2)
     some(max=3) s
     all flip
 }
 )");
     REQUIRE(static_cast<bool>(gen));
-    CHECK(gen.statement_count() == 3);
+    CHECK(gen.statement_count(gen.sequence("main")) == 3);
 }
 
 static std::string const q45 = counter(100) + R"(
@@ -691,7 +691,7 @@ sequence s {
     all inc
     all inc
 }
-program {
+sequence main {
     resize(1, 1)
     some(max=2) s
 }
@@ -704,7 +704,7 @@ TEST_CASE("sequence Q45: step_mode::statement steps over leaf statements only") 
 
 TEST_CASE("sequence Q46: stmt_stack() before the first step, and at top level") {
     auto gen = make(q45);
-    auto r = gen.run(1, ls::step_mode::statement, ls::observe::on);
+    auto r = gen.run(gen.sequence("main"), 1, ls::step_mode::statement, ls::observe::on);
     CHECK(r.stmt_stack().empty());
     CHECK(r.statement_index() == -1);
     REQUIRE(r.step());
@@ -731,7 +731,7 @@ TEST_CASE("sequence Q47: stmt_stack() through two levels of nesting") {
 TEST_CASE("sequence Q48: step_mode::application inside a sequence") {
     auto t = run_trace(make(counter(100) + R"(
 sequence s { some(max=3, policy=incremental) inc }
-program {
+sequence main {
     resize(1, 1)
     some(max=2) s
 }
@@ -792,7 +792,7 @@ sequence smooth {
     all erode
     all grow
 }
-program {
+sequence main {
     resize(40, 25)
     all fill
     all smooth
@@ -821,14 +821,14 @@ program {
 TEST_CASE("sequence Q50: an early stop is unobservable when nothing follows") {
     std::string a = cave_decls + R"(
 sequence smooth { all erode  all grow }
-program {
+sequence main {
     resize(40, 25)
     all fill
     some(max=3) smooth
 }
 )";
     check_equivalent(a, cave_decls + R"(
-program {
+sequence main {
     resize(40, 25)  all fill  all erode  all grow  all erode  all grow  all erode  all grow
 }
 )");

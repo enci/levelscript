@@ -13,7 +13,7 @@ rule snake(rotation=all) { ordered
     algo[.]      => algo[head]
 }
 
-program {
+sequence main {
     resize(12, 8)
     some(max=40, policy=incremental) snake
 }

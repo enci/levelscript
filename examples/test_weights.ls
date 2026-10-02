@@ -13,4 +13,4 @@ rule fill {
       (weight=1) g[b]
     }
 }
-program { resize(10, 10) all fill }
+sequence main { resize(10, 10) all fill }

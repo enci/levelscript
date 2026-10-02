@@ -10,7 +10,8 @@ const path = require('path');
 const { completionContext, OPS } = require('../out/src/completion.js');
 const createLsModule = require('../ls_wasm.js');
 
-const decls = `tag t { F, W, D = F | W }
+const decls = `use "lib.ls"
+tag t { F, W, D = F | W }
 layers {
     g: grid of t
     n: grid of number
@@ -66,7 +67,12 @@ const cases = [
     ['rule r { { all g[.] where[ (x == ▮', { kind: 'expr', grids: true, pos: true }],
     ['rule r { { all g[.] where[ ▮', { kind: 'none' }],
 
-    // sequences (§6.10): same statement list as the program
+    // modules (section 2.6)
+    ['use "schema.ls"\n▮', { kind: 'top' }],
+    ['use "sche▮', { kind: 'none' }],                     // typing a path
+    ['use ▮', { kind: 'none' }],
+
+    // sequences (section 6.10)
     ['sequence ▮', { kind: 'none' }],
     ['sequence s(▮', { kind: 'none' }],
     ['sequence s {\n    ▮', { kind: 'statement', guard: false }],
@@ -74,24 +80,24 @@ const cases = [
     ['sequence s {\n    some(max=2) ▮', { kind: 'ruleName' }],
     [decls + 'sequence s { all r }\n\n▮', { kind: 'top' }],
 
-    // program
-    ['program {\n    ▮', { kind: 'statement', guard: false }],
-    ['program {\n    resize(4, 4)\n    ▮', { kind: 'statement', guard: true }],
-    ['program {\n    one r\n    ▮', { kind: 'statement', guard: true }],
-    ['program {\n    some(max=3) r\n    ▮', { kind: 'statement', guard: true }],
-    ['program {\n    mirror(horizontal) when (k > 1)\n    ▮', { kind: 'statement', guard: false }],
-    ['program {\n    one ▮', { kind: 'ruleName' }],
-    ['program {\n    all(policy=incremental) ▮', { kind: 'ruleName' }],
-    ['program {\n    some(max=2) ▮', { kind: 'ruleName' }],
-    ['program {\n    some(▮', { kind: 'strategyArg', strategy: 'some' }],
-    ['program {\n    one(policy=▮', { kind: 'policyValue' }],
-    ['program {\n    mirror(▮', { kind: 'opArg', op: 'mirror', index: 0, used: [] }],
-    ['program {\n    path(from=a, ▮', { kind: 'opArg', op: 'path', index: 1, used: ['from'] }],
-    ['program {\n    path(into=▮', { kind: 'opValue', op: 'path', param: 'into' }],
-    ['program {\n    path(cost=(▮', { kind: 'expr', grids: true, pos: true }],
-    ['program {\n    resize(4, 4) when (▮', { kind: 'expr', grids: false, pos: false }],
-    ['program {\n    resize(4, 4) when ▮', { kind: 'none' }],
-    ['program {\n    resize ▮', { kind: 'none' }],
+    // statements (the body of a sequence)
+    ['sequence main {\n    ▮', { kind: 'statement', guard: false }],
+    ['sequence main {\n    resize(4, 4)\n    ▮', { kind: 'statement', guard: true }],
+    ['sequence main {\n    one r\n    ▮', { kind: 'statement', guard: true }],
+    ['sequence main {\n    some(max=3) r\n    ▮', { kind: 'statement', guard: true }],
+    ['sequence main {\n    mirror(horizontal) when (k > 1)\n    ▮', { kind: 'statement', guard: false }],
+    ['sequence main {\n    one ▮', { kind: 'ruleName' }],
+    ['sequence main {\n    all(policy=incremental) ▮', { kind: 'ruleName' }],
+    ['sequence main {\n    some(max=2) ▮', { kind: 'ruleName' }],
+    ['sequence main {\n    some(▮', { kind: 'strategyArg', strategy: 'some' }],
+    ['sequence main {\n    one(policy=▮', { kind: 'policyValue' }],
+    ['sequence main {\n    mirror(▮', { kind: 'opArg', op: 'mirror', index: 0, used: [] }],
+    ['sequence main {\n    path(from=a, ▮', { kind: 'opArg', op: 'path', index: 1, used: ['from'] }],
+    ['sequence main {\n    path(into=▮', { kind: 'opValue', op: 'path', param: 'into' }],
+    ['sequence main {\n    path(cost=(▮', { kind: 'expr', grids: true, pos: true }],
+    ['sequence main {\n    resize(4, 4) when (▮', { kind: 'expr', grids: false, pos: false }],
+    ['sequence main {\n    resize(4, 4) when ▮', { kind: 'none' }],
+    ['sequence main {\n    resize ▮', { kind: 'none' }],
 ];
 
 let fail = 0;
@@ -107,7 +113,7 @@ for (const [marked, want] of cases) {
 
 (async () => {
     const wasm = await createLsModule();
-    const ops = JSON.parse(wasm.inspect_json('program { }', 'x.ls')).symbols.ops;
+    const ops = JSON.parse(wasm.inspect_json('sequence main { }', 'x.ls')).symbols.ops;
     const mine = OPS.map(o => o.name);
     if (JSON.stringify(ops) !== JSON.stringify(mine)) {
         fail++;

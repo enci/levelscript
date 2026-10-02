@@ -4,4 +4,4 @@
 tag t { a }
 layers { g: grid of t }
 rule bad { where[ (abs > 0) ] => g[a] }
-program { resize(1,1) }
+sequence main { resize(1,1) }

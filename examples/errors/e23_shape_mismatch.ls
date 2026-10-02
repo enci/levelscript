@@ -7,4 +7,4 @@ rule bad {
     =>
     g[b b b]
 }
-program { resize(3,1) }
+sequence main { resize(3,1) }

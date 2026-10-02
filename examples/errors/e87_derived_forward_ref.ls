@@ -6,4 +6,4 @@ params {
     b: number = 0
 }
 layers { g: grid of number }
-program { resize(1,1) }
+sequence main { resize(1,1) }

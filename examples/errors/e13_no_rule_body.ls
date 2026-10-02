@@ -4,4 +4,4 @@
 tag t { a }
 layers { g: grid of t }
 rule r
-program { resize(1,1) }
+sequence main { resize(1,1) }

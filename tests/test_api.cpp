@@ -11,7 +11,7 @@ layers {
     tiles: grid of number
 }
 rule fill { level[.] => level[floor] }
-program {
+sequence main {
     resize(8, 4)
     all fill
 }
@@ -21,7 +21,7 @@ static const std::string scatter_src = R"(
 tag algo { S }
 layers { algo: grid of algo }
 rule plant { algo[.] => algo[S] }
-program {
+sequence main {
     resize(10, 6)
     some(max=5) plant
 }
@@ -32,20 +32,24 @@ TEST_CASE("api: compile success and failure") {
     CHECK(static_cast<bool>(ok));
     CHECK(ok.error().empty());
 
-    auto bad = make("rule r { g[.] => g[wall] }");   // no layers, no program
+    auto bad = make("rule r { g[.] => g[wall] }");   // no layers
     CHECK(!bad);
     CHECK(!bad.error().empty());
 
-    auto no_prog = make("tag t { a }");
-    CHECK(!no_prog);
-    CHECK(no_prog.error().find("no 'program' block") != std::string::npos);
+    // a module with no sequences compiles; it just has no entry to run (§6)
+    auto lib = make("tag t { a }");
+    CHECK(static_cast<bool>(lib));
+    CHECK(lib.sequence_count() == 0);
+    CHECK(lib.sequence("main") == -1);
+    CHECK(lib.generate(-1, 1).width() == 0);   // invalid entry: empty level
+    CHECK(!lib.run(-1, 1).step());             // invalid entry: nothing to step
 }
 
 TEST_CASE("api: generate fills the level") {
     auto gen = make(fill_src);
     REQUIRE(static_cast<bool>(gen));
 
-    ls::level lv = gen.generate(42);
+    ls::level lv = gen.generate(gen.sequence("main"), 42);
     CHECK(lv.width() == 8);
     CHECK(lv.height() == 4);
     CHECK(lv.layer_count() == 2);
@@ -80,13 +84,13 @@ TEST_CASE("api: tag resolution") {
 
 TEST_CASE("api: queries are total") {
     auto gen = make(fill_src);
-    ls::level lv = gen.generate(1);
+    ls::level lv = gen.generate(gen.sequence("main"), 1);
     CHECK(lv["nope"].at(0, 0) == -1);          // unknown layer
     CHECK(lv["level"].at(-1, 0) == -1);        // out of range
     CHECK(lv["level"].at(0, 99) == -1);
     CHECK(ls::level{}.width() == 0);           // default level
     CHECK(ls::grid{}.at(0, 0) == -1);          // default grid
-    CHECK(ls::generator{}.generate(1).layer_count() == 0);
+    CHECK(ls::generator{}.generate(0, 1).layer_count() == 0);
 }
 
 static std::vector<int> dump(ls::level const& lv, char const* layer) {
@@ -102,13 +106,13 @@ TEST_CASE("api: some(max=N) applies exactly N, deterministically per seed") {
     auto gen = make(scatter_src);
     REQUIRE(static_cast<bool>(gen));
 
-    ls::level a = gen.generate(7);
+    ls::level a = gen.generate(gen.sequence("main"), 7);
     int planted = 0;
     for (int v : dump(a, "algo"))
         if (v >= 0) ++planted;
     CHECK(planted == 5);
 
-    ls::level b = gen.generate(7);
+    ls::level b = gen.generate(gen.sequence("main"), 7);
     CHECK(dump(a, "algo") == dump(b, "algo"));   // same seed, same level
 
     // results are independent values; both remain readable
@@ -121,13 +125,13 @@ TEST_CASE("api: one applies exactly one") {
 tag algo { S }
 layers { algo: grid of algo }
 rule plant { algo[.] => algo[S] }
-program {
+sequence main {
     resize(4, 4)
     one plant
 }
 )");
     int planted = 0;
-    for (int v : dump(gen.generate(3), "algo"))
+    for (int v : dump(gen.generate(gen.sequence("main"), 3), "algo"))
         if (v >= 0) ++planted;
     CHECK(planted == 1);
 }
@@ -138,36 +142,36 @@ tag geo { wall, floor }
 layers { level: grid of geo }
 rule fill  { level[.] => level[floor] }
 rule strip { level[floor] => level[.] }
-program {
+sequence main {
     resize(3, 3)
     all fill
     all strip
 }
 )");
-    ls::level lv = gen.generate(1);
+    ls::level lv = gen.generate(gen.sequence("main"), 1);
     for (int v : dump(lv, "level")) CHECK(v == -1);
 }
 
 TEST_CASE("api: stepping matches batch generation") {
     auto gen = make(scatter_src);
 
-    // statement granularity: one step per program statement
-    auto g1 = gen.run(7, ls::step_mode::statement);
+    // statement granularity: one step per statement of the entry's body
+    auto g1 = gen.run(gen.sequence("main"), 7, ls::step_mode::statement);
     int stmts = 0;
     while (g1.step()) ++stmts;
     CHECK(stmts == 2);   // resize + some(max=5)
 
     // application granularity: resize stops once, each application once
-    auto g2 = gen.run(7, ls::step_mode::application);
+    auto g2 = gen.run(gen.sequence("main"), 7, ls::step_mode::application);
     int steps = 0;
     while (g2.step()) ++steps;
     CHECK(steps == 2 + 5);   // resize stmt + 5 applications + apply stmt boundary
                              // (the batch's own statement boundary is the 7th)
 
     // finish() == generate() for the same seed
-    auto g3 = gen.run(7);
+    auto g3 = gen.run(gen.sequence("main"), 7);
     ls::level via_steps = g3.finish();
-    ls::level via_batch = gen.generate(7);
+    ls::level via_batch = gen.generate(gen.sequence("main"), 7);
     CHECK(dump(via_steps, "algo") == dump(via_batch, "algo"));
 }
 
@@ -186,14 +190,14 @@ rule fill_geo { all
     algo[S] => level[floor]
     algo[.] => level[wall]
 }
-program {
+sequence main {
     resize(6, 4)
     some(max=4) plant
     all fill_geo
 }
 )");
     REQUIRE(static_cast<bool>(gen));
-    ls::level lv = gen.generate(11);
+    ls::level lv = gen.generate(gen.sequence("main"), 11);
     ls::grid algo = lv["algo"], geo = lv["level"];
     int s = gen.tag("algo.S"), floor = gen.tag("geo.floor"), wall = gen.tag("geo.wall");
     for (int y = 0; y < lv.height(); ++y)
@@ -214,14 +218,14 @@ rule mix {
       (weight=1) level[wall]
     }
 }
-program {
+sequence main {
     resize(12, 8)
     all mix
 }
 )");
     REQUIRE(static_cast<bool>(gen));
-    ls::level a = gen.generate(5);
-    ls::level b = gen.generate(5);
+    ls::level a = gen.generate(gen.sequence("main"), 5);
+    ls::level b = gen.generate(gen.sequence("main"), 5);
     CHECK(dump(a, "level") == dump(b, "level"));
 
     int walls = 0, floors = 0;
@@ -246,14 +250,14 @@ rule mark(rotation=all) {
     =>
     algo[S W]
 }
-program {
+sequence main {
     resize(1, 2)
     one seed_top
     one mark
 }
 )");
     REQUIRE(static_cast<bool>(gen));
-    ls::level lv = gen.generate(3);
+    ls::level lv = gen.generate(gen.sequence("main"), 3);
     int s = gen.tag("algo.S"), w = gen.tag("algo.W");
     // exactly one S and one W, vertically adjacent
     int count_s = 0, count_w = 0;
@@ -285,14 +289,14 @@ rule decorate {
       }
     }
 }
-program {
+sequence main {
     resize(4, 4)
     all pave
     all decorate
 }
 )");
     REQUIRE(static_cast<bool>(gen));
-    ls::level lv = gen.generate(9);
+    ls::level lv = gen.generate(gen.sequence("main"), 9);
     ls::grid loot = lv["loot"];
     for (int y = 0; y < 4; ++y)
         for (int x = 0; x < 4; ++x)
@@ -317,7 +321,7 @@ rule grow(rotation=all) {
     =>
     algo[* S]
 }
-program {
+sequence main {
     resize(9, 9)
     one plant
     some(max=20, policy=incremental) grow
@@ -329,7 +333,7 @@ TEST_CASE("api: incremental sees prior writes; snapshot does not") {
     // each step re-collects, so growth feeds on its own writes.
     auto inc = make(grow_src);
     REQUIRE(static_cast<bool>(inc));
-    ls::level lv = inc.generate(4);
+    ls::level lv = inc.generate(inc.sequence("main"), 4);
     CHECK(count_val(lv, "algo", inc.tag("algo.S")) == 21);
 
     // The same rule under (default) snapshot can only fill the frozen
@@ -339,7 +343,7 @@ TEST_CASE("api: incremental sees prior writes; snapshot does not") {
     snap_src.erase(pos, std::string(", policy=incremental").size());
     auto snap = make(snap_src);
     REQUIRE(static_cast<bool>(snap));
-    ls::level sv = snap.generate(4);
+    ls::level sv = snap.generate(snap.sequence("main"), 4);
     CHECK(count_val(sv, "algo", snap.tag("algo.S")) <= 5);
 }
 
@@ -348,13 +352,13 @@ TEST_CASE("api: all(policy=incremental) runs to the fixpoint") {
 tag geo { floor }
 layers { level: grid of geo }
 rule fill { level[.] => level[floor] }
-program {
+sequence main {
     resize(6, 5)
     all(policy=incremental) fill
 }
 )");
     REQUIRE(static_cast<bool>(gen));
-    ls::level lv = gen.generate(2);
+    ls::level lv = gen.generate(gen.sequence("main"), 2);
     CHECK(count_val(lv, "level", gen.tag("geo.floor")) == 30);
 }
 
@@ -370,14 +374,14 @@ rule flood(rotation=all) {
     =>
     algo[* S]
 }
-program {
+sequence main {
     resize(7, 7)
     one plant
     all(policy=stabilize) flood
 }
 )");
     REQUIRE(static_cast<bool>(gen));
-    ls::level lv = gen.generate(3);
+    ls::level lv = gen.generate(gen.sequence("main"), 3);
     CHECK(count_val(lv, "algo", gen.tag("algo.S")) == 49);
 }
 
@@ -392,7 +396,7 @@ rule flood(rotation=all) {
     =>
     algo[* S]
 }
-program {
+sequence main {
     resize(9, 9)
     one plant
     some(max=2, policy=stabilize) flood
@@ -400,7 +404,7 @@ program {
 )");
     REQUIRE(static_cast<bool>(gen));
     int s = gen.tag("algo.S");
-    int n = count_val(gen.generate(3), "algo", s);
+    int n = count_val(gen.generate(gen.sequence("main"), 3), "algo", s);
     CHECK(n >= 6);    // a 2-ring diamond, clipped by edges: 6..13 cells
     CHECK(n <= 13);
 }
@@ -410,18 +414,18 @@ TEST_CASE("api: some(percent=P) applies the exact fraction of the applied set") 
         return "tag geo { floor }\n"
                "layers { level: grid of geo }\n"
                "rule paint { level[.] => level[floor] }\n"
-               "program {\n    resize(10, 10)\n    some(percent=" +
+               "sequence main {\n    resize(10, 10)\n    some(percent=" +
                std::to_string(pct) + ") paint\n}\n";
     };
     auto half = make(src(50));
     REQUIRE(static_cast<bool>(half));
-    CHECK(count_val(half.generate(1), "level", half.tag("geo.floor")) == 50);
+    CHECK(count_val(half.generate(half.sequence("main"), 1), "level", half.tag("geo.floor")) == 50);
 
     auto none = make(src(0));
-    CHECK(count_val(none.generate(1), "level", none.tag("geo.floor")) == 0);
+    CHECK(count_val(none.generate(none.sequence("main"), 1), "level", none.tag("geo.floor")) == 0);
 
     auto full = make(src(100));
-    CHECK(count_val(full.generate(1), "level", full.tag("geo.floor")) == 100);
+    CHECK(count_val(full.generate(full.sequence("main"), 1), "level", full.tag("geo.floor")) == 100);
 }
 
 TEST_CASE("api: ordered claims in priority order under snapshot") {
@@ -434,13 +438,13 @@ rule paint { ordered
     level[.] => level[wall]
     level[.] => level[floor]
 }
-program {
+sequence main {
     resize(6, 6)
     all paint
 }
 )");
     REQUIRE(static_cast<bool>(gen));
-    ls::level lv = gen.generate(8);
+    ls::level lv = gen.generate(gen.sequence("main"), 8);
     CHECK(count_val(lv, "level", gen.tag("geo.wall")) == 36);
     CHECK(count_val(lv, "level", gen.tag("geo.floor")) == 0);
 }
@@ -455,21 +459,21 @@ rule tick { ordered
     g[A] => g[B]
     g[.] => g[A]
 }
-program {
+sequence main {
     resize(3, 3)
     all(policy=incremental) tick
 }
 )");
     REQUIRE(static_cast<bool>(gen));
-    ls::level lv = gen.generate(6);
+    ls::level lv = gen.generate(gen.sequence("main"), 6);
     CHECK(count_val(lv, "g", gen.tag("t.B")) == 9);
     CHECK(count_val(lv, "g", gen.tag("t.A")) == 0);
 }
 
 TEST_CASE("api: observe channel reports highlights and statement index") {
     auto gen = make(fill_src);
-    auto g = gen.run(42, ls::step_mode::application, ls::observe::on);
-    CHECK(gen.statement_count() == 2);
+    auto g = gen.run(gen.sequence("main"), 42, ls::step_mode::application, ls::observe::on);
+    CHECK(gen.statement_count(gen.sequence("main")) == 2);
     CHECK(g.statement_index() == -1);
 
     REQUIRE(g.step());               // resize (statement boundary, no highlights)
@@ -492,14 +496,14 @@ TEST_CASE("api: observe channel reports highlights and statement index") {
     g.finish();
 
     // observe off: no highlights recorded
-    auto g2 = gen.run(42, ls::step_mode::application);
+    auto g2 = gen.run(gen.sequence("main"), 42, ls::step_mode::application);
     g2.step(); g2.step();
     CHECK(g2.highlights().empty());
 }
 
 TEST_CASE("api: mid-batch snapshot shows the accumulating writes") {
     auto gen = make(fill_src);   // 8x4 all-fill = 32 applications
-    auto g = gen.run(42, ls::step_mode::application);
+    auto g = gen.run(gen.sequence("main"), 42, ls::step_mode::application);
     REQUIRE(g.step());   // resize done
     int floor = gen.tag("geo.floor");
     for (int k = 1; k <= 3; ++k) {
@@ -522,7 +526,7 @@ params {
 }
 rule paint { level[.] => level[ (if(difficulty > 3, wall, floor)) ] }
 rule strip { level[wall] => level[.] }
-program {
+sequence main {
     resize(4, 4)
     all paint
     all strip  when (extra > 10)
@@ -532,15 +536,15 @@ program {
     REQUIRE(static_cast<bool>(gen));
 
     // default difficulty 0 → all floor
-    ls::level a = gen.generate(1);
+    ls::level a = gen.generate(gen.sequence("main"), 1);
     CHECK(count_val(a, "level", gen.tag("geo.floor")) == 16);
 
     // difficulty 5 → all wall, and the guard (extra=10 > 10 false) leaves them
-    ls::level b = gen.generate(1, {{"difficulty", 5}});
+    ls::level b = gen.generate(gen.sequence("main"), 1, {{"difficulty", 5}});
     CHECK(count_val(b, "level", gen.tag("geo.wall")) == 16);
 
     // difficulty 6 → extra=12 → guard true → walls stripped
-    ls::level c = gen.generate(1, {{"difficulty", 6}});
+    ls::level c = gen.generate(gen.sequence("main"), 1, {{"difficulty", 6}});
     CHECK(count_val(c, "level", gen.tag("geo.wall")) == 0);
 }
 
@@ -557,7 +561,7 @@ rule frame {
     =>
     level[wall]
 }
-program {
+sequence main {
     resize(6, 5)
     all pave
     all frame
@@ -565,7 +569,7 @@ program {
 )");
     INFO(gen.error());
     REQUIRE(static_cast<bool>(gen));
-    ls::level lv = gen.generate(1);
+    ls::level lv = gen.generate(gen.sequence("main"), 1);
     int wall = gen.tag("geo.wall"), floor = gen.tag("geo.floor");
     for (int y = 0; y < 5; ++y)
         for (int x = 0; x < 6; ++x) {
@@ -579,15 +583,15 @@ TEST_CASE("api: random cells are deterministic per seed and in range") {
 tag geo { floor }
 layers { tiles: grid of number }
 rule roll { tiles[.] => tiles[ (random(3, 7)) ] }
-program {
+sequence main {
     resize(8, 8)
     all roll
 }
 )");
     INFO(gen.error());
     REQUIRE(static_cast<bool>(gen));
-    ls::level a = gen.generate(9);
-    ls::level b = gen.generate(9);
+    ls::level a = gen.generate(gen.sequence("main"), 9);
+    ls::level b = gen.generate(gen.sequence("main"), 9);
     CHECK(dump(a, "tiles") == dump(b, "tiles"));
     for (int v : dump(a, "tiles")) {
         CHECK(v >= 3);
@@ -600,14 +604,14 @@ TEST_CASE("api: totality — division by zero yields zero") {
 layers { tiles: grid of number }
 params { n: number = 0 }
 rule f { tiles[.] => tiles[ (if(n == 0, 0, 100 / n)) ] }
-program {
+sequence main {
     resize(2, 2)
     all f
 }
 )");
     INFO(gen.error());
     REQUIRE(static_cast<bool>(gen));
-    for (int v : dump(gen.generate(1), "tiles")) CHECK(v == 0);
+    for (int v : dump(gen.generate(gen.sequence("main"), 1), "tiles")) CHECK(v == 0);
 }
 
 TEST_CASE("api: empty tests distinguish empty from stored zero") {
@@ -626,7 +630,7 @@ rule mark_empty {
     =>
     flags[mark]
 }
-program {
+sequence main {
     resize(4, 1)
     some(max=2) zero_some
     all mark_empty
@@ -634,7 +638,7 @@ program {
 )");
     INFO(gen.error());
     REQUIRE(static_cast<bool>(gen));
-    ls::level lv = gen.generate(5);
+    ls::level lv = gen.generate(gen.sequence("main"), 5);
     // exactly the two cells holding a stored 0 get marked; empty cells (which
     // also read as 0 in arithmetic) do not
     CHECK(count_val(lv, "flags", gen.tag("geo.mark")) == 2);
@@ -654,7 +658,7 @@ rule mix {
     }
 }
 rule clear_blockers { level[blocker] => level[floor] }
-program {
+sequence main {
     resize(6, 6)
     all mix
     all clear_blockers
@@ -662,7 +666,7 @@ program {
 )");
     INFO(gen.error());
     REQUIRE(static_cast<bool>(gen));
-    ls::level lv = gen.generate(7);
+    ls::level lv = gen.generate(gen.sequence("main"), 7);
     CHECK(count_val(lv, "level", gen.tag("geo.floor")) == 36);
 }
 
@@ -680,7 +684,7 @@ rule seed_corner {
     =>
     level[wall]
 }
-program {
+sequence main {
     resize(2, 2)
     all seed_corner
     upscale(2, 2)
@@ -690,7 +694,7 @@ program {
 )");
     INFO(gen.error());
     REQUIRE(static_cast<bool>(gen));
-    ls::level lv = gen.generate(1);
+    ls::level lv = gen.generate(gen.sequence("main"), 1);
     // 2x2 -> upscale(2,2) -> 4x4 -> pad(1) -> 6x6
     CHECK(lv.width() == 6);
     CHECK(lv.height() == 6);
@@ -717,7 +721,7 @@ rule mark {
     =>
     level[wall]
 }
-program {
+sequence main {
     resize(8, 6)
     all mark
     trim()
@@ -725,7 +729,7 @@ program {
 )");
     INFO(gen.error());
     REQUIRE(static_cast<bool>(gen));
-    ls::level lv = gen.generate(1);
+    ls::level lv = gen.generate(gen.sequence("main"), 1);
     CHECK(lv.width() == 3);
     CHECK(lv.height() == 3);
     CHECK(count_val(lv, "level", gen.tag("geo.wall")) == 9);
@@ -750,7 +754,7 @@ rule place_goal {
     =>
     algo[goal]
 }
-program {
+sequence main {
     resize(7, 5)
     all place_start
     all place_goal
@@ -763,7 +767,7 @@ TEST_CASE("api: path carves a connected shortest route") {
     auto gen = make(corridor_src);
     INFO(gen.error());
     REQUIRE(static_cast<bool>(gen));
-    ls::level lv = gen.generate(11);
+    ls::level lv = gen.generate(gen.sequence("main"), 11);
     int road = gen.tag("algo.road");
 
     // endpoints included/overwritten: (0,0) and (6,4) are road now
@@ -773,7 +777,7 @@ TEST_CASE("api: path carves a connected shortest route") {
     CHECK(count_val(lv, "algo", road) == 6 + 4 + 1);
 
     // deterministic per seed; different seeds may carve different routes
-    CHECK(dump(gen.generate(11), "algo") == dump(lv, "algo"));
+    CHECK(dump(gen.generate(gen.sequence("main"), 11), "algo") == dump(lv, "algo"));
 }
 
 TEST_CASE("api: path over weighted cost prefers the cheap terrain") {
@@ -801,7 +805,7 @@ rule place_goal {
     =>
     algo[goal]
 }
-program {
+sequence main {
     resize(5, 3)
     all mark_swamp
     all place_start
@@ -812,7 +816,7 @@ program {
 )");
     INFO(gen.error());
     REQUIRE(static_cast<bool>(gen));
-    ls::level lv = gen.generate(3);
+    ls::level lv = gen.generate(gen.sequence("main"), 3);
     int road = gen.tag("algo.road");
     // the straight top row costs 1+10+10+10+1; the detour around costs 7 —
     // the route must dip below the swamp row
@@ -836,7 +840,7 @@ rule place_goal {
     =>
     algo[goal]
 }
-program {
+sequence main {
     resize(5, 5)
     all place_start
     all place_goal
@@ -846,7 +850,7 @@ program {
 )");
     INFO(gen.error());
     REQUIRE(static_cast<bool>(gen));
-    ls::level lv = gen.generate(1);   // start/goal isolated: nothing passable between
+    ls::level lv = gen.generate(gen.sequence("main"), 1);   // start/goal isolated: nothing passable between
     CHECK(count_val(lv, "algo", gen.tag("algo.road")) == 0);
     CHECK(lv["algo"].at(0, 0) == gen.tag("algo.start"));
     CHECK(lv["algo"].at(4, 4) == gen.tag("algo.goal"));
@@ -854,7 +858,7 @@ program {
 
 TEST_CASE("api: snapshot mid-run sees committed statements only") {
     auto gen = make(scatter_src);
-    auto g = gen.run(7, ls::step_mode::statement);
+    auto g = gen.run(gen.sequence("main"), 7, ls::step_mode::statement);
 
     REQUIRE(g.step());               // resize done
     ls::level after_resize = g.snapshot();
@@ -877,7 +881,7 @@ tag t { a, b, c }
 layers { g: grid of t }
 rule fill { g[.] => g[a] }
 rule pair(symmetry=horizontal) { g[a a] => g[b c] }
-program {
+sequence main {
     resize(2, 1)
     all fill
     one pair
@@ -889,7 +893,7 @@ program {
     int bc = 0, cb = 0;
     const int runs = 400;
     for (int seed = 1; seed <= runs; ++seed) {
-        ls::level lv = gen.generate(seed);
+        ls::level lv = gen.generate(gen.sequence("main"), seed);
         ls::grid g = lv["g"];
         if (g.at(0, 0) == b && g.at(1, 0) == c) ++bc;
         else if (g.at(0, 0) == c && g.at(1, 0) == b) ++cb;
@@ -914,7 +918,7 @@ rule reduce(rotation=all) {
         s f
         f f ]
 }
-program {
+sequence main {
     resize(2, 2)
     all fill
     one reduce
@@ -926,7 +930,7 @@ program {
     int corner_hits[4] = {0, 0, 0, 0};
     const int runs = 400;
     for (int seed = 1; seed <= runs; ++seed) {
-        ls::level lv = gen.generate(seed);
+        ls::level lv = gen.generate(gen.sequence("main"), seed);
         ls::grid g = lv["g"];
         int count = 0, where = -1;
         for (int y = 0; y < 2; ++y)

@@ -3,4 +3,4 @@
 // @expect stderr-contains invalid pad argument
 tag t { a }
 layers { g: grid of t }
-program { resize(2,2) pad(-1) }
+sequence main { resize(2,2) pad(-1) }

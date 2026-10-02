@@ -15,7 +15,7 @@ layers {
 rule zero { n[.] => n[0] }
 rule bump { n[ (n) ] => n[ (n + 1) ] }
 
-program {
+sequence main {
     resize(2, 2)
     all zero
     all bump

@@ -36,7 +36,7 @@ rule hazards {
     }
 }
 
-program {
+sequence main {
     resize(12, 7)
     all pave
     all frame

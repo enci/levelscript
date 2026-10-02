@@ -176,8 +176,8 @@ struct compiled {
     std::vector<std::vector<std::pair<std::string, int64_t>>> tag_unions;
     std::vector<compiled_layer>           layers;
     std::vector<compiled_rule>            rules;
-    std::vector<compiled_sequence>        sequences;
-    std::vector<compiled_stmt>            stmts;   // the program's (top level)
+    std::vector<compiled_sequence>        sequences;   // canonical order = API ids
+    std::vector<std::string>              modules;     // canonical names, canonical order (§2.6)
     std::vector<compiled_expr>            exprs;   // the expression arena
 
     // params (§4.2): startup_exprs run once, in declaration order, when the
@@ -220,11 +220,14 @@ struct compiled {
     }
 };
 
-// Analyze a parsed file into a self-contained compiled program.
-// Returns false (with diagnostics) on any error. `best_effort` keeps going
-// through later phases despite errors — editor tooling wants every table the
-// file still supports (plus the extra diagnostics), not a first-phase bail.
-bool analyze(ast_file const& ast, compiled& out, diagnostics& diags,
-             std::string_view file, bool best_effort = false);
+struct module_closure;
+
+// Analyze a loaded module closure (§2.6) into a self-contained compiled
+// artifact. Returns false (with diagnostics) on any error. `best_effort`
+// keeps going through later phases despite errors — editor tooling wants
+// every table the closure still supports (plus the extra diagnostics), not a
+// first-phase bail.
+bool analyze(module_closure const& mods, compiled& out, diagnostics& diags,
+             bool best_effort = false);
 
 }  // namespace ls

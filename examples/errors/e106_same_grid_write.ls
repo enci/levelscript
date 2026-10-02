@@ -8,4 +8,4 @@ rule bad {
     =>
     { all level[wall] level[floor] }
 }
-program { resize(1,1) }
+sequence main { resize(1,1) }

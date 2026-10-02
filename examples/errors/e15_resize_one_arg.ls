@@ -3,6 +3,6 @@
 // @expect error
 // @expect stderr-contains requires argument
 layers { }
-program {
+sequence main {
     resize(10)
 }

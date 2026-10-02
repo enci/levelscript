@@ -39,7 +39,7 @@ rule furnish {
     }
 }
 
-program {
+sequence main {
     resize(8, 8)
     all furnish
 }

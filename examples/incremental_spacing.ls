@@ -29,7 +29,7 @@ rule init  { g[.] => g[open] }
 rule plant { g[ !tree open !tree ] => g[ * tree * ] }
 rule fill  { g[open] => g[ground] }
 
-program {
+sequence main {
     resize(11, 1)
     all init
     all(policy=incremental) plant

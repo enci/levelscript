@@ -12,7 +12,7 @@ rule plant {
     algo[S]
 }
 
-program {
+sequence main {
     resize(10, 6)
     some(max=5) plant
 }

@@ -20,7 +20,7 @@ rule classify { all
     { all land[.] where[ (depth > 6) ] }                => land[rock]
 }
 
-program {
+sequence main {
     resize(14, 8)
     all roll
     all classify

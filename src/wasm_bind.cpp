@@ -39,6 +39,7 @@ struct session {
     ls::run       r;
     unsigned int  seed{0};
     bool          done{false};
+    int           entry{-1};   // the sequence this run applies (§6)
     // Applications pulled for the statement currently being worked on — same
     // bookkeeping as lsd's debug_run::advance() (app/debug_ui_internal.hpp),
     // recomputed as we go since a step can land mid-statement.
@@ -55,6 +56,23 @@ bool advance(session& s) {
     if (idx != s.counted_stmt) { s.counted_stmt = idx; s.apps_in_stmt = 0; }
     if (!s.r.at_statement_boundary()) s.apps_in_stmt++;
     return true;
+}
+
+// A JS resolver (path, from) => {name, source} | null, as an ls::resolver
+// (§2.6). Called synchronously during compile; `undefined` means no `use`
+// resolves.
+ls::resolver js_resolver(val resolve) {
+    if (resolve.isUndefined() || resolve.isNull()) return {};
+    return [resolve](std::string const& path, std::string const& from)
+               -> std::optional<ls::module_source> {
+        val r = resolve(path, from);
+        if (r.isUndefined() || r.isNull()) return std::nullopt;
+        return ls::module_source{r["name"].as<std::string>(), r["source"].as<std::string>()};
+    };
+}
+
+std::string inspect_with(std::string const& source, std::string const& name, val resolve) {
+    return ls::inspect_json(source, name, js_resolver(resolve));
 }
 
 std::unordered_map<int, session> g_sessions;
@@ -125,7 +143,7 @@ std::string state_json(session const& s, ls::level const& lvl) {
     o += s.done ? "true" : "false";
     o += ",\"seed\":" + std::to_string(s.seed);
     o += ",\"statementIndex\":" + std::to_string(s.r.statement_index());
-    o += ",\"statementCount\":" + std::to_string(s.gen.statement_count());
+    o += ",\"statementCount\":" + std::to_string(s.gen.statement_count(s.entry));
     o += ",\"atStatementBoundary\":";
     o += s.r.at_statement_boundary() ? "true" : "false";
     o += ",\"appsInStatement\":" + std::to_string(s.apps_in_stmt);
@@ -139,17 +157,32 @@ std::string state_json(session const& s, ls::level const& lvl) {
 
 }  // namespace
 
-// Compile + start a progressive run (application granularity, observe on).
-// Returns a session id, or -1 on a compile error (see run_last_error()).
-int run_begin(std::string const& source, std::string const& name, unsigned int seed) {
-    ls::generator gen = ls::generator::compile(source, name);
+// Compile + start a progressive run of sequence `entry` (application
+// granularity, observe on). Returns a session id, or -1 on a compile error
+// or an unknown entry (see run_last_error()).
+int run_begin(std::string const& source, std::string const& name, unsigned int seed,
+              std::string const& entry, val resolve) {
+    ls::generator gen = ls::generator::compile(source, name, js_resolver(resolve));
     if (!gen) {
         g_last_error = gen.error();
         return -1;
     }
-    ls::run r = gen.run(seed, ls::step_mode::application, ls::observe::on);
+    int eid = gen.sequence(entry);
+    if (eid < 0) {
+        g_last_error = name + ": error: no sequence '" + entry + "' to run";
+        if (gen.sequence_count() == 0) {
+            g_last_error += " (the file declares no sequences)";
+        } else {
+            g_last_error += "; declared sequences:";
+            for (int i = 0; i < gen.sequence_count(); ++i)
+                g_last_error += (i ? ", " : " ") + gen.sequence_name(i);
+        }
+        g_last_error += "\n";
+        return -1;
+    }
+    ls::run r = gen.run(eid, seed, ls::step_mode::application, ls::observe::on);
     int id = g_next_id++;
-    g_sessions.emplace(id, session{std::move(gen), std::move(r), seed, false});
+    g_sessions.emplace(id, session{std::move(gen), std::move(r), seed, false, eid});
     return id;
 }
 
@@ -197,7 +230,7 @@ void run_end(int id) {
 }
 
 EMSCRIPTEN_BINDINGS(ls_module) {
-    function("inspect_json", &ls::inspect_json);
+    function("inspect_json", &inspect_with);
     function("run_begin", &run_begin);
     function("run_last_error", &run_last_error);
     function("run_state", &run_state);

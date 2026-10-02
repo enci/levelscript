@@ -35,7 +35,7 @@ rule finalize { all
     a[head]  => level[floor]
 }
 
-program {
+sequence main {
     resize(60, 30)
     all init_bg
     all seed

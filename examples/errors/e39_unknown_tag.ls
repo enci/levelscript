@@ -1,4 +1,4 @@
 // @expect error
 // @expect stderr-contains undeclared tag
 layers { g: grid of unknown }
-program { resize(1,1) }
+sequence main { resize(1,1) }

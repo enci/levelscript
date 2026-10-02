@@ -13,7 +13,7 @@ layers { g: grid of t }
 rule fill { g[.] => g[S] }
 rule pair { g[ S S ] => g[ F F ] }
 
-program {
+sequence main {
     resize(6, 1)
     all fill
     all pair

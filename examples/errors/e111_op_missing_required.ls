@@ -3,4 +3,4 @@
 // @expect stderr-contains requires argument 'write='
 tag t { start, goal, route }
 layers { g: grid of t }
-program { resize(2, 2) path(from=start, to=goal, into=g) }
+sequence main { resize(2, 2) path(from=start, to=goal, into=g) }

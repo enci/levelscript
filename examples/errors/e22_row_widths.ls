@@ -11,4 +11,4 @@ rule bad {
         b b b
         b b ]
 }
-program { resize(3,2) }
+sequence main { resize(3,2) }

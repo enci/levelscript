@@ -6,4 +6,4 @@ layers {
     g: grid of t
     h: grid of g
 }
-program { resize(1,1) }
+sequence main { resize(1,1) }

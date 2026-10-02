@@ -49,10 +49,17 @@ function parseExpectations(src) {
   return exp;
 }
 
+// `use` paths resolve relative to the using file (section 2.6), like lsc.
+function resolve(usePath, from) {
+  const full = path.resolve(path.dirname(from), usePath);
+  try { return { name: full, source: fs.readFileSync(full, 'utf8') }; }
+  catch { return null; }
+}
+
 function analyse(src, filename) {
   let all;
   try {
-    const res = JSON.parse(wasmModule.inspect_json(src, filename));
+    const res = JSON.parse(wasmModule.inspect_json(src, filename, resolve));
     all = res.diagnostics || [];
   } catch (e) {
     return { errors: [{ message: 'analysis threw: ' + e.message, line: 0, col: 0 }], all: [] };
@@ -78,7 +85,7 @@ for (const file of files) {
   const code = src.replace(/\/\/[^\n]*/g, '').replace(/\s+/g, '');
   if (!hasDirectives && code === '') { stubs++; if (VERBOSE) console.log(`  skip [STUB ] ${rel}`); continue; }
 
-  const { errors, all } = analyse(src, path.basename(file));
+  const { errors, all } = analyse(src, file);
   const msgs = errors.map(e => e.message);
 
   // Decide expectation: error-expecting wins; else run-ok/clean.

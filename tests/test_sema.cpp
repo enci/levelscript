@@ -14,7 +14,7 @@ layers {
 TEST_CASE("sema: skeleton compiles into tables") {
     compile_result r(prelude + R"(
 rule fill { level[.] => level[floor] }
-program { resize(4, 3)  all fill }
+sequence main { resize(4, 3)  all fill }
 )");
     INFO(r.diags.format_all());
     REQUIRE(r.ok);
@@ -23,37 +23,38 @@ program { resize(4, 3)  all fill }
     CHECK(r.prog.layers[1].tag_id == -1);
     CHECK(r.prog.value_id(0, "floor") == 1);
     REQUIRE(r.prog.rules.size() == 1);
-    REQUIRE(r.prog.stmts.size() == 2);
+    REQUIRE(r.prog.sequences.size() == 1);
+    REQUIRE(r.prog.sequences[0].stmts.size() == 2);
 }
 
 TEST_CASE("sema: duplicate declarations") {
-    CHECK(compile_result("tag a { x }\ntag a { y }\nprogram { }").has_error("duplicate tag"));
-    CHECK(compile_result("tag a { x, x }\nprogram { }").has_error("duplicate tag value"));
+    CHECK(compile_result("tag a { x }\ntag a { y }\nsequence main { }").has_error("duplicate tag"));
+    CHECK(compile_result("tag a { x, x }\nsequence main { }").has_error("duplicate tag value"));
     CHECK(compile_result(prelude +
-        "rule r { level[.] => level[wall] }\nrule r { level[.] => level[wall] }\nprogram { }")
+        "rule r { level[.] => level[wall] }\nrule r { level[.] => level[wall] }\nsequence main { }")
         .has_error("duplicate rule"));
 }
 
 TEST_CASE("sema: unknown references") {
-    CHECK(compile_result("layers { g: grid of nope }\nprogram { }")
+    CHECK(compile_result("layers { g: grid of nope }\nsequence main { }")
           .has_error("undeclared tag"));
-    CHECK(compile_result(prelude + "rule r { nope[.] => nope[.] }\nprogram { }")
+    CHECK(compile_result(prelude + "rule r { nope[.] => nope[.] }\nsequence main { }")
           .has_error("undeclared grid"));
-    CHECK(compile_result(prelude + "rule r { level[lava] => level[wall] }\nprogram { }")
+    CHECK(compile_result(prelude + "rule r { level[lava] => level[wall] }\nsequence main { }")
           .has_error("unknown tag value"));
-    CHECK(compile_result(prelude + "rule r { level[.] => level[wall] }\nprogram { all nope }")
+    CHECK(compile_result(prelude + "rule r { level[.] => level[wall] }\nsequence main { all nope }")
           .has_error("undeclared rule"));
 }
 
 TEST_CASE("sema: cell/grid type mismatches") {
-    CHECK(compile_result(prelude + "rule r { level[3] => level[wall] }\nprogram { }")
+    CHECK(compile_result(prelude + "rule r { level[3] => level[wall] }\nsequence main { }")
           .has_error("integer cell in a tag grid"));
-    CHECK(compile_result(prelude + "rule r { tiles[wall] => tiles[1] }\nprogram { }")
+    CHECK(compile_result(prelude + "rule r { tiles[wall] => tiles[1] }\nsequence main { }")
           .has_error("number' grid cell"));
 }
 
 TEST_CASE("sema: shape mismatch") {
-    CHECK(compile_result(prelude + "rule r { level[. .] => level[wall] }\nprogram { }")
+    CHECK(compile_result(prelude + "rule r { level[. .] => level[wall] }\nsequence main { }")
           .has_error("dimension mismatch"));
 }
 
@@ -68,20 +69,20 @@ rule r {
         wall wall
         wall ]
 }
-program { }
+sequence main { }
 )");
     CHECK(r.has_error("inconsistent row widths"));
 }
 
 TEST_CASE("sema: operation table") {
-    CHECK(compile_result(prelude + "program { warp(3, 3) }").has_error("unknown operation"));
-    CHECK(compile_result(prelude + "program { resize(3) }").has_error("requires argument 'h'"));
-    CHECK(compile_result(prelude + "program { resize(0, 5) }").has_error("must be positive"));
+    CHECK(compile_result(prelude + "sequence main { warp(3, 3) }").has_error("unknown operation"));
+    CHECK(compile_result(prelude + "sequence main { resize(3) }").has_error("requires argument 'h'"));
+    CHECK(compile_result(prelude + "sequence main { resize(0, 5) }").has_error("must be positive"));
 }
 
 TEST_CASE("sema: some(max=0) is rejected") {
     CHECK(compile_result(prelude +
-        "rule r { level[.] => level[wall] }\nprogram { some(max=0) r }")
+        "rule r { level[.] => level[wall] }\nsequence main { some(max=0) r }")
         .has_error("some(max=0)"));
 }
 
@@ -97,7 +98,7 @@ rule r {
       level[floor]
     }
 }
-program { }
+sequence main { }
 )").has_error("written twice at the same cell"));
 }
 
@@ -111,7 +112,7 @@ rule r {
       tiles[1]
     }
 }
-program { }
+sequence main { }
 )");
     INFO(r.diags.format_all());
     CHECK(r.ok);
@@ -127,16 +128,16 @@ rule r {
       level[floor]
     }
 }
-program { }
+sequence main { }
 )").has_error("dimension mismatch"));
 }
 
 TEST_CASE("sema: invalid attribute values") {
     CHECK(compile_result(prelude +
-        "rule r(symmetry=diagonal) { level[.] => level[wall] }\nprogram { }")
+        "rule r(symmetry=diagonal) { level[.] => level[wall] }\nsequence main { }")
         .has_error("invalid value 'diagonal'"));
     CHECK(compile_result(prelude +
-        "rule r(rotation=45) { level[.] => level[wall] }\nprogram { }")
+        "rule r(rotation=45) { level[.] => level[wall] }\nsequence main { }")
         .has_error("invalid rotation angle"));
 }
 
@@ -148,13 +149,13 @@ layers { q: grid of t4 }
 TEST_CASE("sema: variant expansion counts") {
     SECTION("rotation=all on an asymmetric 1x2 gives 4 variants") {
         compile_result r(prelude +
-            "rule r(rotation=all) { level[wall floor] => level[floor wall] }\nprogram { }");
+            "rule r(rotation=all) { level[wall floor] => level[floor wall] }\nsequence main { }");
         REQUIRE(r.ok);
         CHECK(r.prog.rules[0].pairs.size() == 4);
     }
     SECTION("symmetry=all on a 1x2 gives 2 (vertical flip is identity)") {
         compile_result r(prelude +
-            "rule r(symmetry=all) { level[wall floor] => level[floor wall] }\nprogram { }");
+            "rule r(symmetry=all) { level[wall floor] => level[floor wall] }\nsequence main { }");
         REQUIRE(r.ok);
         CHECK(r.prog.rules[0].pairs.size() == 2);
     }
@@ -169,7 +170,7 @@ rule r(symmetry=all, rotation=180) {
         d c
         b a ]
 }
-program { }
+sequence main { }
 )");
         REQUIRE(r.ok);
         CHECK(r.prog.rules[0].pairs.size() == 4);
@@ -185,14 +186,14 @@ rule r(symmetry=all, rotation=all) {
         d c
         b a ]
 }
-program { }
+sequence main { }
 )");
         REQUIRE(r.ok);
         CHECK(r.prog.rules[0].pairs.size() == 8);
     }
     SECTION("a symmetric pattern collapses to 1 variant") {
         compile_result r(prelude +
-            "rule r(symmetry=all, rotation=all) { level[wall] => level[floor] }\nprogram { }");
+            "rule r(symmetry=all, rotation=all) { level[wall] => level[floor] }\nsequence main { }");
         REQUIRE(r.ok);
         CHECK(r.prog.rules[0].pairs.size() == 1);
     }
@@ -204,7 +205,7 @@ rule fill_geo { all
     level[wall]  => tiles[2]
     level[floor] => tiles[1]
 }
-program { }
+sequence main { }
 )");
     REQUIRE(r.ok);
     REQUIRE(r.prog.rules[0].pairs.size() == 2);
@@ -218,15 +219,15 @@ static const std::string rfill =
     "rule fill { level[.] => level[floor] }\n";
 
 TEST_CASE("sema: count/policy combinations") {
-    CHECK(compile_result(prelude + rfill + "program { all(policy=ranked) fill }")
+    CHECK(compile_result(prelude + rfill + "sequence main { all(policy=ranked) fill }")
           .has_error("unknown policy 'ranked'"));
     CHECK(compile_result(prelude + rfill +
-          "program { some(percent=50, policy=incremental) fill }")
+          "sequence main { some(percent=50, policy=incremental) fill }")
           .has_error("'percent' requires the default 'snapshot' policy"));
-    CHECK(compile_result(prelude + rfill + "program { one(policy=stabilize) fill }")
+    CHECK(compile_result(prelude + rfill + "sequence main { one(policy=stabilize) fill }")
           .has_error("contradictory"));
     compile_result ok(prelude + rfill + R"(
-program {
+sequence main {
     resize(4, 4)
     some(max=3, policy=stabilize) fill
     all(policy=incremental) fill
@@ -247,21 +248,21 @@ TEST_CASE("sema: reductivity warning for a self-sustaining fixpoint") {
     // The write never touches the matched cell ??? the anchor re-matches forever.
     compile_result bad(prelude + R"(
 rule mark { level[floor] => tiles[1] }
-program { all(policy=incremental) mark }
+sequence main { all(policy=incremental) mark }
 )");
     REQUIRE(bad.ok);   // a warning, not an error
     CHECK(has_warning(bad, "may never terminate"));
 
     // The write invalidates its own match ??? reductive, no warning.
     compile_result good(prelude + rfill +
-        "program { all(policy=incremental) fill }");
+        "sequence main { all(policy=incremental) fill }");
     REQUIRE(good.ok);
     CHECK(!has_warning(good, "may never terminate"));
 
     // Bounded counts never warn, even for the self-sustaining rule.
     compile_result bounded(prelude + R"(
 rule mark { level[floor] => tiles[1] }
-program { some(max=5, policy=incremental) mark }
+sequence main { some(max=5, policy=incremental) mark }
 )");
     REQUIRE(bounded.ok);
     CHECK(!has_warning(bounded, "may never terminate"));
@@ -269,7 +270,7 @@ program { some(max=5, policy=incremental) mark }
 
 // -- step 4: expression types, scopes, params, unions --
 
-static const std::string rprog = "program { }\n";
+static const std::string rprog = "sequence main { }\n";
 
 TEST_CASE("sema: expression type errors") {
     CHECK(compile_result(prelude + "rule r { level[ (wall + 1) ] => level[floor] }\n" + rprog)
@@ -350,13 +351,13 @@ TEST_CASE("sema: param scopes") {
 TEST_CASE("sema: when guard discipline") {
     std::string pre = prelude + rfill + "params { d: number = 0 }\n";
     CHECK(compile_result(prelude + rfill +
-          "params { d: number = 0 }\nprogram { all fill when (d + 1) }")
+          "params { d: number = 0 }\nsequence main { all fill when (d + 1) }")
           .has_error("must be a boolean expression"));
     CHECK(compile_result(prelude + rfill +
-          "program { all fill when ((level == floor)) }")
+          "sequence main { all fill when ((level == floor)) }")
           .has_error("cannot be read here"));
     CHECK(compile_result(prelude + rfill +
-          "program { all fill when (x > 0) }")
+          "sequence main { all fill when (x > 0) }")
           .has_error("cannot be read here"));
 }
 
@@ -365,7 +366,7 @@ TEST_CASE("sema: named unions") {
 tag geo { wall, door, floor, blocker = wall | door, solid = blocker | floor }
 layers { level: grid of geo }
 rule r { level[blocker] => level[floor] }
-program { }
+sequence main { }
 )");
     INFO(ok.diags.format_all());
     REQUIRE(ok.ok);
@@ -395,48 +396,48 @@ layers {
 
 TEST_CASE("sema: operation argument binding") {
     // positional may also be supplied by name; named-only rejects positional
-    compile_result named_ok(prelude + "program { resize(w=4, h=3) }");
+    compile_result named_ok(prelude + "sequence main { resize(w=4, h=3) }");
     INFO(named_ok.diags.format_all());
     CHECK(named_ok.ok);
-    CHECK(compile_result(prelude + "program { resize(4, w=3) }")
+    CHECK(compile_result(prelude + "sequence main { resize(4, w=3) }")
           .has_error("supplied twice"));
-    CHECK(compile_result(prelude + "program { resize(w=4, 3) }")
+    CHECK(compile_result(prelude + "sequence main { resize(w=4, 3) }")
           .has_error("positional argument after a named argument"));
-    CHECK(compile_result(prelude + "program { resize(4, 3, 2) }")
+    CHECK(compile_result(prelude + "sequence main { resize(4, 3, 2) }")
           .has_error("too many positional arguments"));
-    CHECK(compile_result(prelude + "program { resize(4, depth=3) }")
+    CHECK(compile_result(prelude + "sequence main { resize(4, depth=3) }")
           .has_error("unknown parameter 'depth'"));
-    CHECK(compile_result(prelude + "program { trim(3) }")
+    CHECK(compile_result(prelude + "sequence main { trim(3) }")
           .has_error("takes no arguments"));
-    CHECK(compile_result(path_pre + "program { path(door, exit) }")
+    CHECK(compile_result(path_pre + "sequence main { path(door, exit) }")
           .has_error("named-only"));
-    CHECK(compile_result(path_pre + "program { path(from=door, to=exit, into=algo) }")
+    CHECK(compile_result(path_pre + "sequence main { path(from=door, to=exit, into=algo) }")
           .has_error("requires argument 'write='"));
 }
 
 TEST_CASE("sema: operation argument kinds and constraints") {
-    CHECK(compile_result(prelude + "program { mirror(diagonal) }")
+    CHECK(compile_result(prelude + "sequence main { mirror(diagonal) }")
           .has_error("invalid mirror axis"));
-    CHECK(compile_result(prelude + "program { mirror(3) }")
+    CHECK(compile_result(prelude + "sequence main { mirror(3) }")
           .has_error("invalid mirror axis '3'"));
-    CHECK(compile_result(prelude + "program { pad(-1) }")
+    CHECK(compile_result(prelude + "sequence main { pad(-1) }")
           .has_error("must be non-negative"));
-    CHECK(compile_result(prelude + "program { upscale(0, 2) }")
+    CHECK(compile_result(prelude + "sequence main { upscale(0, 2) }")
           .has_error("must be positive"));
     CHECK(compile_result(path_pre +
-          "program { path(from=door, to=exit, into=nope, write=road) }")
+          "sequence main { path(from=door, to=exit, into=nope, write=road) }")
           .has_error("not a declared grid"));
     CHECK(compile_result(path_pre +
-          "program { path(from=lava, to=exit, into=algo, write=road) }")
+          "sequence main { path(from=lava, to=exit, into=algo, write=road) }")
           .has_error("unknown tag value 'lava'"));
     CHECK(compile_result(path_pre +
-          "program { path(from=door, to=exit, into=algo, write=road, connectivity=5) }")
+          "sequence main { path(from=door, to=exit, into=algo, write=road, connectivity=5) }")
           .has_error("invalid connectivity"));
     CHECK(compile_result(path_pre +
-          "program { path(from=door, to=exit, into=tiles, write=road) }")
+          "sequence main { path(from=door, to=exit, into=tiles, write=road) }")
           .has_error("expected an integer"));   // number grid wants a number write
     compile_result ok(path_pre + R"(
-program {
+sequence main {
     resize(8, 8)
     path(from=door, to=exit, into=algo, write=road,
          passable=((tiles > 0)), connectivity=8, cost=(1 + tiles))
@@ -454,14 +455,14 @@ layers {
     g1: grid of a
     g2: grid of b
 }
-program { path(from=door, to=road, into=g2, write=road) }
+sequence main { path(from=door, to=road, into=g2, write=road) }
 )").has_error("ambiguous"));
 }
 
 TEST_CASE("sema: tagset over the 30-value cap") {
     std::string big = "tag t { ";
     for (int i = 0; i < 31; ++i) big += "v" + std::to_string(i) + ", ";
-    big += "}\nprogram { }";
+    big += "}\nsequence main { }";
     CHECK(compile_result(big).has_error("maximum is 30"));
 }
 
@@ -519,7 +520,7 @@ tag none { horizontal, vertical }
 layers { symmetry: grid of none }
 params { rotation: number = 1 }
 rule r(symmetry=horizontal) { symmetry[horizontal vertical] => symmetry[vertical horizontal] }
-program { mirror(horizontal) }
+sequence main { mirror(horizontal) }
 )");
         INFO(r.diags.format_all());
         CHECK(r.ok);
@@ -535,12 +536,11 @@ program { mirror(horizontal) }
     SECTION("attribute and axis values are still validated") {
         CHECK(compile_result(trio + "rule r(symmetry=rotation) { g[.] => g[a] }\n" + rprog)
               .has_error("invalid value 'rotation'"));
-        CHECK(compile_result(trio + "program { mirror(none) }\n").has_error("none"));
+        CHECK(compile_result(trio + "sequence main { mirror(none) }\n").has_error("none"));
     }
 }
 
-TEST_CASE("sema: a missing program block is reported by analyze (check 9)") {
-    // in sema, not generator::compile, so the editor's inspect path sees it
-    CHECK(compile_result(prelude).has_error("no 'program' block"));
-    CHECK(compile_result("").has_error("no 'program' block"));
+TEST_CASE("sema: a module needs no entry - an empty file compiles (0.7)") {
+    CHECK(compile_result(prelude).ok);
+    CHECK(compile_result("").ok);
 }

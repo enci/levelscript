@@ -12,4 +12,4 @@ rule bad {
       { any h[a] h[a a a] }
     }
 }
-program { resize(3,1) }
+sequence main { resize(3,1) }

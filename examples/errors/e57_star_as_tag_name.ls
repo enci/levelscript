@@ -3,4 +3,4 @@
 // @expect stderr-contains expected a tag value name
 tag t { * }
 layers { g: grid of t }
-program { resize(1,1) }
+sequence main { resize(1,1) }
