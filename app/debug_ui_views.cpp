@@ -279,8 +279,10 @@ std::string stmt_desc(program_stmt const& s) {
     return p;
 }
 
-char const* stmt_icon(program_stmt const& s) {
-    if (s.what == program_stmt::kind::apply) return phosphor::PH_LIGHTNING;
+char const* stmt_icon(program_stmt const& s, compiled_stmt const& cs) {
+    if (s.what == program_stmt::kind::apply)
+        return cs.seq_id >= 0 ? phosphor::PH_LIST_NUMBERS   // a sequence (§6.10)
+                              : phosphor::PH_LIGHTNING;     // a rule
     // Operation calls (spec section 6.0): icon per operation name.
     if (s.op_name == "resize")  return phosphor::PH_FRAME_CORNERS;
     if (s.op_name == "upscale") return phosphor::PH_MAGNIFYING_GLASS_PLUS;
@@ -516,61 +518,147 @@ void draw_rule_window(script const& sc, debug_run const& run, float mini_px,
 
 // ── program window ────────────────────────────────────────────────────────────
 
-void draw_program_window(script const& sc, debug_run const& run) {
-    static std::vector<program_stmt> const none;
-    auto const& stmts = sc.entry >= 0 && sc.entry < (int)sc.ast.sequences.size()
-                      ? sc.ast.sequences[(size_t)sc.entry].stmts : none;
-    if (stmts.empty()) {
-        ImGui::TextDisabled("(empty entry)");
-        return;
-    }
+// One statement list - the entry's body, or a sequence's - as tree rows.
+// Sequence applications are tree nodes unfolding into their bodies (§6.10;
+// the compiler rejects cycles, so the tree is finite). `cur` is the row the
+// run is on in this list (-1: none); `all_past` dims a body whose applying
+// statement already finished. `path` is the run's statement stack: the rows
+// it names, level by level, are the ones being executed.
+struct program_tree {
+    script&                        sc;   // breakpoints are toggled here
+    std::vector<stmt_frame> const& path;
+    bool                           follow;   // the step moved: open + reveal its path
+    ImVec4                         accent;
 
-    int current = run.current_stmt();
-    ImVec4 accent = ImGui::GetStyleColorVec4(ImGuiCol_CheckMark);
-
-    ImGui::BeginChild("##program_list", {0.f, 0.f}, ImGuiChildFlags_Borders);
-    // A real table keeps the index/icon/description columns aligned once
-    // line numbers stop being all the same width (single vs. multi-digit).
-    if (ImGui::BeginTable("##program_table", 3, ImGuiTableFlags_SizingFixedFit)) {
-        ImGui::TableSetupColumn("#",    ImGuiTableColumnFlags_WidthFixed);
-        ImGui::TableSetupColumn("icon", ImGuiTableColumnFlags_WidthFixed);
-        ImGui::TableSetupColumn("desc", ImGuiTableColumnFlags_WidthStretch);
-
-        // Right-align the index within a stable 3-digit gutter.
-        float num_gutter = ImGui::CalcTextSize("000").x;
-
-        for (int i = 0; i < (int)stmts.size(); ++i) {
-            auto const& stmt = stmts[(size_t)i];
-            bool is_current = (i == current);
-            bool is_past    = (i < current);
+    // `prefix`: the dotted path of the applying statements ("2.0."), so a row
+    // reads as its full stmt_stack position - 2.0.1 = body item 1 of the
+    // sequence at 2.0.
+    void list(std::vector<program_stmt> const& ast_list,
+              std::vector<compiled_stmt> const& meta_list,
+              int depth, int cur, bool all_past, std::string const& prefix) {
+        int n = (int)std::min(ast_list.size(), meta_list.size());
+        for (int i = 0; i < n; ++i) {
+            auto const& stmt = ast_list[(size_t)i];
+            auto const& cs   = meta_list[(size_t)i];
+            bool is_current = i == cur;
+            bool is_past    = all_past || (cur >= 0 && i < cur);
+            int  sid        = cs.what == compiled_stmt::kind::apply ? cs.seq_id : -1;
+            bool is_seq     = sid >= 0 && sid < (int)sc.ast.sequences.size() &&
+                              sid < (int)sc.meta.sequences.size() && depth < 64;
+            // the run is inside this sequence: the stack reaches below this row
+            bool inside = is_current && is_seq && (int)path.size() > depth + 1 &&
+                          path[(size_t)depth].index == i;
 
             ImGui::TableNextRow();
             if (is_current)
                 ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0,
                                        ImGui::GetColorU32(ImGuiCol_Header));
-
             ImGui::PushID(i);
             if (is_current)   ImGui::PushStyleColor(ImGuiCol_Text, accent);
             else if (is_past) ImGui::PushStyleColor(ImGuiCol_Text,
                                   ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
 
+            std::string num = prefix + std::to_string(i);
+
+            // breakpoint gutter (VS Code): a red dot; a faint one on hover;
+            // click toggles. Keyed by the dotted path, so a breakpoint in a
+            // sequence body hits on every iteration.
             ImGui::TableNextColumn();
-            std::string num = std::to_string(i);
-            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + num_gutter
-                                 - ImGui::CalcTextSize(num.c_str()).x);
+            {
+                float h = ImGui::GetTextLineHeight();
+                ImVec2 p0 = ImGui::GetCursorScreenPos();
+                bool set = sc.breakpoints.count(num) != 0;
+                if (ImGui::InvisibleButton("##bp", {h, h})) {
+                    if (set) sc.breakpoints.erase(num); else sc.breakpoints.insert(num);
+                    set = !set;
+                }
+                bool hover = ImGui::IsItemHovered();
+                if (hover) ImGui::SetTooltip(set ? "Remove breakpoint" : "Add breakpoint");
+                if (set || hover) {
+                    ImU32 red = set ? IM_COL32(229, 20, 0, 255)    // #E51400
+                                    : IM_COL32(229, 20, 0, 90);
+                    ImGui::GetWindowDrawList()->AddCircleFilled(
+                        {p0.x + h * 0.5f, p0.y + h * 0.5f}, h * 0.32f, red, 16);
+                }
+            }
+
+            // dotted position: one stmt_stack frame index per level
+            ImGui::TableNextColumn();
             ImGui::TextUnformatted(num.c_str());
 
             ImGui::TableNextColumn();
-            ImGui::TextUnformatted(stmt_icon(stmt));
-
-            ImGui::TableNextColumn();
-            ImGui::TextUnformatted(stmt_desc(stmt).c_str());
-            if (is_current && ImGui::IsWindowAppearing())
+            std::string label = std::string(stmt_icon(stmt, cs)) + "  " + stmt_desc(stmt);
+            // Indent this cell only: a tree push would indent the whole row,
+            // shifting the index column too. Children nest under PushID(i).
+            ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth |
+                                       ImGuiTreeNodeFlags_NoTreePushOnOpen;
+            if (is_seq) flags |= ImGuiTreeNodeFlags_DefaultOpen;   // unfolded
+            else        flags |= ImGuiTreeNodeFlags_Leaf;
+            float indent = depth * ImGui::GetStyle().IndentSpacing;
+            if (indent > 0.f) ImGui::Indent(indent);
+            if (is_seq && follow && inside) ImGui::SetNextItemOpen(true);
+            bool open = ImGui::TreeNodeEx("##stmt", flags, "%s", label.c_str());
+            if (inside) {   // which iteration of this sequence is running
+                int it = path[(size_t)depth + 1].iteration + 1;
+                ImGui::SameLine();
+                if (cs.strat == strategy::some)
+                    ImGui::TextDisabled("iteration %d / %d", it, cs.max_count);
+                else
+                    ImGui::TextDisabled("iteration %d", it);
+            }
+            if (indent > 0.f) ImGui::Unindent(indent);
+            bool leaf_here = is_current && !inside;
+            if (leaf_here && (ImGui::IsWindowAppearing() || (follow && !ImGui::IsItemVisible())))
                 ImGui::SetScrollHereY(0.25f);
 
             if (is_current || is_past) ImGui::PopStyleColor();
+
+            if (is_seq && open) {
+                int child_cur = inside ? path[(size_t)depth + 1].index : -1;
+                list(sc.ast.sequences[(size_t)sid].stmts, sc.meta.sequences[(size_t)sid].stmts,
+                     depth + 1, child_cur, is_past, num + ".");
+            }
             ImGui::PopID();
         }
+    }
+};
+
+void draw_program_window(script& sc, debug_run const& run) {
+    if (sc.entry < 0 || sc.entry >= (int)sc.ast.sequences.size() ||
+        sc.entry >= (int)sc.meta.sequences.size() ||
+        sc.ast.sequences[(size_t)sc.entry].stmts.empty()) {
+        ImGui::TextDisabled("(empty entry)");
+        return;
+    }
+    auto const& body      = sc.ast.sequences[(size_t)sc.entry].stmts;
+    auto const& meta_body = sc.meta.sequences[(size_t)sc.entry].stmts;
+
+    // Follow the run: when the step moves, open and reveal its path. Between
+    // moves the user may fold anything, the running sequence included.
+    std::vector<stmt_frame> path = run.started ? run.gen.stmt_stack()
+                                               : std::vector<stmt_frame>{};
+    static std::vector<stmt_frame> last_path;
+    bool follow = path.size() != last_path.size();
+    for (size_t k = 0; !follow && k < path.size(); ++k)
+        follow = path[k].index != last_path[k].index ||
+                 path[k].iteration != last_path[k].iteration;
+    last_path = path;
+
+    // Depth 0 keeps the run's own marker: a finished top-level statement
+    // moves it to the next one; a step inside a sequence leaves it on the
+    // statement that applied the sequence (debug_run::current_stmt).
+    int current = run.current_stmt();
+    if (!path.empty() && path[0].index != current) path.clear();   // a stale stack
+
+    ImGui::BeginChild("##program_list", {0.f, 0.f}, ImGuiChildFlags_Borders);
+    // A real table keeps the tree column aligned however wide the dotted
+    // numbers get.
+    if (ImGui::BeginTable("##program_table", 3, ImGuiTableFlags_SizingFixedFit)) {
+        ImGui::TableSetupColumn("bp",   ImGuiTableColumnFlags_WidthFixed);
+        ImGui::TableSetupColumn("#",    ImGuiTableColumnFlags_WidthFixed);
+        ImGui::TableSetupColumn("stmt", ImGuiTableColumnFlags_WidthStretch);
+        program_tree tree{sc, path, follow, ImGui::GetStyleColorVec4(ImGuiCol_CheckMark)};
+        tree.list(body, meta_body, 0, current, false, "");
         ImGui::EndTable();
     }
     ImGui::EndChild();

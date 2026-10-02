@@ -278,11 +278,14 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
     apply_theme();
 
     // ── actions ───────────────────────────────────────────────────────────────
-    // Step and Next Statement are genuinely distinct on the new API:
-    // one pulled application event vs. looping to the statement boundary.
-    auto action_step      = [&] { run.step_once(); };
-    auto action_next_stmt = [&] { run.next_statement(); };
-    auto action_run       = [&] { run.run_all(); };
+    // VS Code's debug toolbar: Continue / Pause, Step Over, Step Into, Step
+    // Out, Restart. Multi-event commands run time-sliced in the main loop
+    // (debug_run::tick) and stop at the next breakpoint.
+    auto action_continue  = [&] { run.begin(debug_run::command::cont); };
+    auto action_pause     = [&] { run.pause(); };
+    auto action_step_over = [&] { run.begin(debug_run::command::step_over); };
+    auto action_step_into = [&] { run.step_into(); };
+    auto action_step_out  = [&] { run.begin(debug_run::command::step_out); };
     auto action_reset     = [&] {
         if (!seed_locked) seed = make_seed();
         // Reload from disk so edits made in an external editor are picked up;
@@ -320,9 +323,18 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
             }
         }
         if (ev.type == SDL_EVENT_KEY_DOWN && !io.WantCaptureKeyboard) {
-            switch (ev.key.scancode) {
-                case SDL_SCANCODE_F10: action_step();      break;
-                case SDL_SCANCODE_F11: action_next_stmt(); break;
+            bool shift = (ev.key.mod & SDL_KMOD_SHIFT) != 0;
+            bool cmd   = (ev.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) != 0;
+            switch (ev.key.scancode) {   // VS Code's debug keys
+                case SDL_SCANCODE_F5:
+                    if (cmd && shift)      action_reset();
+                    else if (!run.busy())  action_continue();
+                    break;
+                case SDL_SCANCODE_F6:  action_pause();     break;
+                case SDL_SCANCODE_F10: action_step_over(); break;
+                case SDL_SCANCODE_F11:
+                    if (shift) action_step_out(); else action_step_into();
+                    break;
                 case SDL_SCANCODE_R:   action_reset();     break;
                 case SDL_SCANCODE_Q:   running = false;    break;
                 case SDL_SCANCODE_SPACE:
@@ -340,7 +352,7 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
         // Otherwise block until the next event.
         bool had_event = false;
         SDL_Event ev;
-        if (playing || redraw_frames > 0) {
+        if (playing || run.busy() || redraw_frames > 0) {
             while (SDL_PollEvent(&ev)) { handle_event(ev); had_event = true; }
         } else if (SDL_WaitEvent(&ev)) {
             handle_event(ev);
@@ -350,15 +362,24 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
         if (had_event) redraw_frames = k_cooldown_frames;
         else if (redraw_frames > 0) redraw_frames--;
 
-        // Timed playback -- advance one application per tick at play_fps.
-        if (playing) {
-            if (run.done) {
-                playing = false;
-            } else {
+        // A running debug command: a few ms of events per frame, so the
+        // viewport updates live and Pause (F6) can interrupt.
+        if (run.busy()) {
+            run.tick(sc.breakpoints, 8.0);
+            redraw_frames = k_cooldown_frames;
+        }
+
+        // Timed playback -- advance one application per tick at play_fps;
+        // a breakpoint stops it like any other command.
+        if (playing && run.done) playing = false;
+        if (playing && !run.busy()) {
+            {
                 auto now = clock::now();
                 float elapsed = std::chrono::duration<float>(now - last_advance).count();
                 if (elapsed >= 1.f / play_fps) {
-                    action_step();
+                    run.advance_cmd(sc.breakpoints);
+                    run.refresh();
+                    if (!run.paused_at.empty()) playing = false;
                     last_advance = now;
                 }
             }
@@ -405,17 +426,44 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
                 return clicked;
             };
 
-            if (toolbtn(phosphor::PH_CARET_RIGHT, "Step (F10) - one application"))
-                action_step();
-            ImGui::SameLine();
-            if (toolbtn(phosphor::PH_SKIP_FORWARD, "Next Statement (F11)"))
-                action_next_stmt();
-            ImGui::SameLine();
-            if (toolbtn(phosphor::PH_FAST_FORWARD, "Run"))
-                action_run();
-            ImGui::SameLine();
-            if (toolbtn(phosphor::PH_ARROW_COUNTER_CLOCKWISE, "Reset (R)"))
+            // VS Code's debug toolbar: same order, names, keys and colors -
+            // blue stepping icons, a green restart.
+            ImVec4 dbg_blue  = dark_theme ? ImVec4(0.459f, 0.745f, 1.000f, 1.f)    // #75BEFF
+                                          : ImVec4(0.000f, 0.478f, 0.800f, 1.f);   // #007ACC
+            ImVec4 dbg_green = dark_theme ? ImVec4(0.537f, 0.820f, 0.522f, 1.f)    // #89D185
+                                          : ImVec4(0.220f, 0.541f, 0.204f, 1.f);   // #388A34
+            auto dbgbtn = [&](char const* icon, char const* tip, ImVec4 col, bool enabled) {
+                ImGui::BeginDisabled(!enabled);
+                ImGui::PushStyleColor(ImGuiCol_Text, col);
+                bool clicked = toolbtn(icon, tip);
+                ImGui::PopStyleColor();
+                ImGui::EndDisabled();
+                ImGui::SameLine();
+                return clicked;
+            };
+            bool can_step = !run.done && !run.busy();
+            if (run.busy()) {
+                if (dbgbtn(phosphor::PH_PAUSE, "Pause (F6)", dbg_blue, true)) action_pause();
+            } else {
+                if (dbgbtn(phosphor::PH_PLAY, "Continue (F5) - run to the next breakpoint",
+                           dbg_blue, !run.done))
+                    action_continue();
+            }
+            if (dbgbtn(phosphor::PH_ARROW_ARC_RIGHT,
+                       "Step Over (F10) - finish the statement, sequences included",
+                       dbg_blue, can_step))
+                action_step_over();
+            if (dbgbtn(phosphor::PH_ARROW_LINE_DOWN,
+                       "Step Into (F11) - one rule application", dbg_blue, can_step))
+                action_step_into();
+            if (dbgbtn(phosphor::PH_ARROW_LINE_UP,
+                       "Step Out (Shift+F11) - finish the current sequence",
+                       dbg_blue, can_step))
+                action_step_out();
+            if (dbgbtn(phosphor::PH_ARROW_CLOCKWISE, "Restart (Ctrl+Shift+F5, R)",
+                       dbg_green, true))
                 action_reset();
+            ImGui::Text("|");
             ImGui::SameLine();
 
             if (toolbtn(seed_locked ? phosphor::PH_LOCK : phosphor::PH_LOCK_OPEN,
@@ -453,8 +501,9 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
 
             ImGui::Text("|");
             ImGui::SameLine();
-            if (toolbtn(playing ? phosphor::PH_PAUSE : phosphor::PH_PLAY,
-                        playing ? "Pause (Space)" : "Play (Space)", playing)) {
+            if (toolbtn(playing ? phosphor::PH_PAUSE_CIRCLE : phosphor::PH_PLAY_CIRCLE,
+                        playing ? "Stop animating (Space)"
+                                : "Animate (Space) - one application per tick", playing)) {
                 playing = !playing;
                 last_advance = clock::now();
             }
@@ -570,6 +619,10 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
                 status += "   apps=" + std::to_string(run.apps_in_stmt);
             ImGui::TextUnformatted(status.c_str());
             if (run.done) { ImGui::SameLine(); ImGui::TextUnformatted("[done]"); }
+            if (!run.paused_at.empty()) {
+                ImGui::SameLine(0.f, 24.f);
+                ImGui::Text("%s Paused on %s", phosphor::PH_CIRCLE, run.paused_at.c_str());
+            }
 
             ImGui::SameLine(0.f, 24.f);
             ImGui::TextUnformatted(phosphor::PH_DICE_FIVE);
