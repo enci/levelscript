@@ -5,7 +5,7 @@ import { definitionProvider, hoverProvider, completionProvider } from './provide
 import { initWasm, inspectJson } from './wasm';
 import { editorResolver } from './resolve';
 import * as path from 'path';
-import { registerRunner } from './runner';
+import { registerDebugger } from './debugger';
 
 const LS_LANG = 'levelscript';
 let diagnosticCollection: vscode.DiagnosticCollection;
@@ -45,7 +45,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
     ),
   );
 
-  registerRunner(ctx);
+  registerDebugger(ctx);
 
   if (vscode.window.activeTextEditor?.document.languageId === LS_LANG) {
     analyse(vscode.window.activeTextEditor.document);

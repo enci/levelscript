@@ -32,3 +32,11 @@ if(APPLE)
 elseif(WIN32)
     target_link_libraries(levelscript-debugger PRIVATE dwmapi)
 endif()
+
+# The debugger looks for fonts at <exe dir>/resources (the installed layout), so
+# it works from any working directory -- e.g. when the VS Code extension launches
+# it next to the script. Mirror that layout in the build tree.
+add_custom_command(TARGET levelscript-debugger POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_SOURCE_DIR}/resources $<TARGET_FILE_DIR:levelscript-debugger>/resources
+    COMMENT "Copying debugger resources next to the executable")

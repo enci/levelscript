@@ -2,7 +2,7 @@
   "name": "levelscript",
   "displayName": "LevelScript",
   "description": "Syntax highlighting, diagnostics, tag-value coloring, hover, go-to-definition, and completion for .ls files",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "publisher": "BojanEndrovski",
   "license": "UNLICENSED",
   "icon": "icon.png",
@@ -40,10 +40,25 @@
     "commands": [
       {
         "command": "levelscript.run",
-        "title": "LevelScript: Run",
-        "icon": "$(play)"
+        "title": "LevelScript: Debug",
+        "icon": "$(debug-alt)"
+      },
+      {
+        "command": "levelscript.locateDebugger",
+        "title": "LevelScript: Locate Debugger"
       }
     ],
+    "configuration": {
+      "title": "LevelScript",
+      "properties": {
+        "levelscript.debuggerPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Path to the native `levelscript-debugger` executable. Left empty, the extension searches PATH and the usual install locations and fills this in."
+        }
+      }
+    },
     "menus": {
       "editor/title": [
         {
@@ -75,8 +90,5 @@
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^3.6.2",
     "typescript": "^5.3.0"
-  },
-  "dependencies": {
-    "@vscode/codicons": "0.0.46-24"
   }
 }
