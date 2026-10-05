@@ -2,8 +2,6 @@
 src/**
 scripts/**
 node_modules/**
-!node_modules/@vscode/codicons/dist/codicon.css
-!node_modules/@vscode/codicons/dist/codicon.ttf
 tsconfig.json
 package-lock.json
 .gitignore
