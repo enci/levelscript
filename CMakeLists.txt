@@ -51,9 +51,33 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(sdl3 imgui nlohmann_json stb freetype)
 
+# Opt-in patch to ImGui's docking branch: stock ImGui only rounds the corners
+# of a docked pane that touch the dock host's outer edge, so inner panes stay
+# square regardless of WindowRounding. The patch rounds every docked pane.
+# Applied at configure time and kept in sync with the option (idempotent).
+option(LS_IMGUI_ROUND_DOCKED "Patch ImGui so docked panes get rounded corners" OFF)
+set(_ls_imgui_patch ${CMAKE_CURRENT_SOURCE_DIR}/cmake/imgui-round-docked.patch)
+find_package(Git QUIET)
+if(GIT_FOUND)
+    execute_process(COMMAND ${GIT_EXECUTABLE} apply --check --reverse ${_ls_imgui_patch}
+        WORKING_DIRECTORY ${imgui_SOURCE_DIR} RESULT_VARIABLE _ls_patched ERROR_QUIET OUTPUT_QUIET)
+    if(LS_IMGUI_ROUND_DOCKED AND NOT _ls_patched EQUAL 0)
+        execute_process(COMMAND ${GIT_EXECUTABLE} apply ${_ls_imgui_patch}
+            WORKING_DIRECTORY ${imgui_SOURCE_DIR} RESULT_VARIABLE _ls_rc)
+        if(NOT _ls_rc EQUAL 0)
+            message(FATAL_ERROR "LS_IMGUI_ROUND_DOCKED: patch does not apply to this ImGui revision")
+        endif()
+    elseif(NOT LS_IMGUI_ROUND_DOCKED AND _ls_patched EQUAL 0)
+        execute_process(COMMAND ${GIT_EXECUTABLE} apply --reverse ${_ls_imgui_patch}
+            WORKING_DIRECTORY ${imgui_SOURCE_DIR})
+    endif()
+elseif(LS_IMGUI_ROUND_DOCKED)
+    message(FATAL_ERROR "LS_IMGUI_ROUND_DOCKED needs git to apply the ImGui patch")
+endif()
+
 # Off by default: imgui_demo.cpp (and the debugger's "Demo" toggle) are a dev
 # tool for exploring ImGui widgets, not something normal builds should ship.
-option(LS_ENABLE_IMGUI_DEMO "Build in ImGui's demo window (dev tool)" OFF)
+option(LS_ENABLE_IMGUI_DEMO "Build in ImGui's demo window (dev tool)" ON)
 
 add_library(imgui_lib STATIC
     ${imgui_SOURCE_DIR}/imgui.cpp

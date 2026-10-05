@@ -101,6 +101,9 @@ static std::string find_resource(char const* rel) {
 
 // ── themes (defined below run_debug_ui) ──────────────────────────────────────
 
+// Color of the gaps between docked panes (the dock host's background).
+static ImVec4 g_dock_gap;
+static void set_style_metrics();
 static void set_light_theme();
 static void set_dark_theme();
 
@@ -219,7 +222,7 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
     std::string text_font = find_resource("resources/Roboto-Regular.ttf");
     std::string icon_font = find_resource("resources/Phosphor-Bold.woff");
     if (!text_font.empty())
-        io.Fonts->AddFontFromFileTTF(text_font.c_str(), 14.0f, nullptr, nullptr);
+        io.Fonts->AddFontFromFileTTF(text_font.c_str(), 15.0f, nullptr, nullptr);
     else
         io.Fonts->AddFontDefault();
     if (!icon_font.empty()) {
@@ -232,6 +235,12 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
         io.Fonts->AddFontFromFileTTF(icon_font.c_str(), 14.0f, &icon_cfg,
                                      phosphor_ranges);
     }
+    // Docked tab labels use their own face/size (nullptr -> fall back to the UI font).
+    // Must come AFTER the icon merge above: MergeMode merges into the last font added.
+    constexpr float k_tab_font_size = 16.0f;
+    std::string tab_font_path = find_resource("resources/Roboto-Bold.ttf");
+    ImFont* tab_font = tab_font_path.empty() ? nullptr
+        : io.Fonts->AddFontFromFileTTF(tab_font_path.c_str(), k_tab_font_size, nullptr, nullptr);
     // Do NOT call ScaleAllSizes here -- SDL_SetRenderScale already maps logical
     // pixels to physical pixels, so ScaleAllSizes would double-scale everything.
     ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
@@ -245,11 +254,11 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
     bool dark_theme = true;
 
     auto apply_theme = [&] {
+        set_style_metrics();
         if (dark_theme) set_dark_theme(); else set_light_theme();
         // Tint the OS title bar / window border to blend with the app. The debugger has
         // no menu bar, so match the dominant window background surface.
-        const ImVec4& bg = ImGui::GetStyle().Colors[ImGuiCol_WindowBg];
-        ls::platform::set_titlebar(window, bg.x, bg.y, bg.z, dark_theme);
+        ls::platform::set_titlebar(window, g_dock_gap.x, g_dock_gap.y, g_dock_gap.z, dark_theme);
     };
 
     auto resolve_theme = [&] {
@@ -312,6 +321,7 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
     // ── main loop ─────────────────────────────────────────────────────────────
 #ifdef LS_ENABLE_IMGUI_DEMO
     bool show_demo = false;
+    bool show_style = false;
 #endif
     bool running = true;
     bool playing = false;
@@ -410,19 +420,55 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
         // A fixed-height, no-scrollbar window clips its content unless the
         // height also covers ImGui's own window padding (top + bottom).
         float bar_pad      = ImGui::GetStyle().WindowPadding.y * 2.f;
-        const float status_pad_y = 3.f;   // slimmer than the control bar
+        const float status_pad_y = 5.f;   // slimmer than the control bar
         float statusbar_h  = ImGui::GetTextLineHeight() + status_pad_y * 2.f;
         float controlbar_h = ImGui::GetFrameHeight() + bar_pad;
         viewport->WorkPos.y  += controlbar_h;   // reserve a top strip for the control bar
         viewport->WorkSize.y -= controlbar_h + statusbar_h;   // + a bottom strip for the status bar
-        ImGui::DockSpaceOverViewport(0, viewport);
+        {
+            // Inset the dock area by one gap on every side so the separator also
+            // frames the outer edges of the panes (the cleared backdrop shows through).
+            const float gap = ImGui::GetStyle().DockingSeparatorSize;
+            viewport->WorkPos.x  += gap;
+            viewport->WorkPos.y  += gap;
+            viewport->WorkSize.x -= gap * 2.f;
+            viewport->WorkSize.y -= gap * 2.f;
+        }
+        {
+            // Same as ImGui::DockSpaceOverViewport (same window label and ids, so saved
+            // layouts still load) but with NoBackground, so the gaps between panes and
+            // the inset frame show the g_dock_gap clear color. (The Passthru dock flag
+            // is no good here: it paints a WindowBg fill over the whole dockspace.)
+            char label[32];
+            std::snprintf(label, sizeof label, "WindowOverViewport_%08X", viewport->ID);
+            ImGui::SetNextWindowPos(viewport->WorkPos);
+            ImGui::SetNextWindowSize(viewport->WorkSize);
+            ImGui::SetNextWindowViewport(viewport->ID);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.f);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.f);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, { 0.f, 0.f });
+            ImGui::Begin(label, nullptr,
+                ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse
+                | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove
+                | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoBringToFrontOnFocus
+                | ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoBackground);
+            ImGui::PopStyleVar(3);
+            // Fonts are a global stack, so this applies to the tab bars the dock
+            // host draws here, while pane contents (separate windows) keep the UI font.
+            if (tab_font) ImGui::PushFont(tab_font, k_tab_font_size);
+            ImGui::DockSpace(ImGui::GetID("DockSpace"), { 0.f, 0.f });
+            if (tab_font) ImGui::PopFont();
+            ImGui::End();
+        }
 
         // ── control bar (pinned to the top, like the status bar at the bottom) ──
         {
             ImGui::SetNextWindowPos(viewport->Pos);
             ImGui::SetNextWindowSize({ viewport->Size.x, controlbar_h });
             ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.f);   // pinned chrome stays square
+            ImGui::PushStyleColor(ImGuiCol_WindowBg, g_dock_gap);     // top band = frame color
             ImGui::Begin("##ControlBar", nullptr, k_bar_flags);
+            ImGui::PopStyleColor();
             ImGui::PopStyleVar();
 
             // Icon button with a hover tooltip carrying the full label and
@@ -532,6 +578,8 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
             ImGui::Text("|");
             ImGui::SameLine();
             ImGui::Checkbox("Demo", &show_demo);
+            ImGui::SameLine();
+            ImGui::Checkbox("Style", &show_style);
 #endif
             {
                 // Order matches enum theme_mode { system, light, dark }.
@@ -574,6 +622,13 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
 
 #ifdef LS_ENABLE_IMGUI_DEMO
         if (show_demo) ImGui::ShowDemoWindow(&show_demo);
+        if (show_style) {
+            if (ImGui::Begin("Style Editor", &show_style)) {
+                ImGui::ColorEdit4("Dock gap", &g_dock_gap.x);
+                ImGui::ShowStyleEditor();
+            }
+            ImGui::End();
+        }
 #endif
 
         ImGui::Begin("Tags###TAGS");
@@ -683,7 +738,7 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
         ImGui::Render();
         SDL_SetRenderScale(renderer, io.DisplayFramebufferScale.x,
                            io.DisplayFramebufferScale.y);
-        const auto& bg = ImGui::GetStyle().Colors[ImGuiCol_WindowBg];
+        const auto& bg = g_dock_gap;   // backdrop = gap color, so it frames the dock area
         SDL_SetRenderDrawColor(renderer,
             (Uint8)(bg.x * 255), (Uint8)(bg.y * 255), (Uint8)(bg.z * 255), 255);
         SDL_RenderClear(renderer);
@@ -704,80 +759,102 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
     return 0;
 }
 
-// ── theme palettes ────────────────────────────────────────────────────────────
+// ── style metrics (shared by every theme) ─────────────────────────────────────
 
-static void set_light_theme() {
+static void set_style_metrics() {
     auto& style = ImGui::GetStyle();
     style.FrameRounding = 5.0f;
     style.ChildRounding = 5.0f;
     style.PopupRounding = 5.0f;
     style.WindowRounding = 5.0f;   // tooltips use this, not PopupRounding
     style.GrabRounding  = 5.0f;
-    ImVec4* c = style.Colors;
-    c[ImGuiCol_Text]                 = ImVec4(0.15f, 0.15f, 0.15f, 1.00f);
-    c[ImGuiCol_TextDisabled]         = ImVec4(0.50f, 0.50f, 0.50f, 1.00f);
-    c[ImGuiCol_WindowBg]             = ImVec4(0.95f, 0.95f, 0.96f, 1.00f);
-    c[ImGuiCol_ChildBg]              = ImVec4(0.00f, 0.00f, 0.00f, 0.05f);
-    c[ImGuiCol_PopupBg]              = ImVec4(0.95f, 0.95f, 0.96f, 0.98f);
-    c[ImGuiCol_Border]               = ImVec4(0.70f, 0.70f, 0.72f, 0.40f);
-    c[ImGuiCol_BorderShadow]         = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
-    c[ImGuiCol_FrameBg]              = ImVec4(0.87f, 0.87f, 0.88f, 1.00f);
-    c[ImGuiCol_FrameBgHovered]       = ImVec4(0.75f, 0.75f, 0.77f, 1.00f);
-    c[ImGuiCol_FrameBgActive]        = ImVec4(0.68f, 0.68f, 0.70f, 1.00f);
-    c[ImGuiCol_TitleBg]              = ImVec4(0.87f, 0.87f, 0.88f, 1.00f);
-    c[ImGuiCol_TitleBgActive]        = ImVec4(0.75f, 0.75f, 0.77f, 1.00f);
-    c[ImGuiCol_TitleBgCollapsed]     = ImVec4(0.95f, 0.95f, 0.96f, 0.75f);
-    c[ImGuiCol_MenuBarBg]            = ImVec4(0.91f, 0.91f, 0.92f, 1.00f);
-    c[ImGuiCol_ScrollbarBg]          = ImVec4(0.91f, 0.91f, 0.92f, 1.00f);
-    c[ImGuiCol_ScrollbarGrab]        = ImVec4(0.70f, 0.70f, 0.72f, 1.00f);
-    c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.60f, 0.60f, 0.62f, 1.00f);
-    c[ImGuiCol_ScrollbarGrabActive]  = ImVec4(0.50f, 0.50f, 0.52f, 1.00f);
-    c[ImGuiCol_CheckMark]            = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
-    c[ImGuiCol_SliderGrab]           = ImVec4(0.55f, 0.55f, 0.57f, 1.00f);
-    c[ImGuiCol_SliderGrabActive]     = ImVec4(0.45f, 0.45f, 0.47f, 1.00f);
-    c[ImGuiCol_Button]               = ImVec4(0.83f, 0.83f, 0.85f, 1.00f);
-    c[ImGuiCol_ButtonHovered]        = ImVec4(0.70f, 0.70f, 0.72f, 1.00f);
-    c[ImGuiCol_ButtonActive]         = ImVec4(0.62f, 0.62f, 0.64f, 1.00f);
-    c[ImGuiCol_Header]               = ImVec4(0.26f, 0.59f, 0.98f, 0.25f);
-    c[ImGuiCol_HeaderHovered]        = ImVec4(0.26f, 0.59f, 0.98f, 0.50f);
-    c[ImGuiCol_HeaderActive]         = ImVec4(0.26f, 0.59f, 0.98f, 0.70f);
-    c[ImGuiCol_Separator]            = ImVec4(0.70f, 0.70f, 0.72f, 0.50f);
-    c[ImGuiCol_SeparatorHovered]     = ImVec4(0.26f, 0.59f, 0.98f, 0.60f);
-    c[ImGuiCol_SeparatorActive]      = ImVec4(0.26f, 0.59f, 0.98f, 0.80f);
-    c[ImGuiCol_ResizeGrip]           = ImVec4(0.26f, 0.59f, 0.98f, 0.20f);
-    c[ImGuiCol_ResizeGripHovered]    = ImVec4(0.26f, 0.59f, 0.98f, 0.50f);
-    c[ImGuiCol_ResizeGripActive]     = ImVec4(0.26f, 0.59f, 0.98f, 0.80f);
-    c[ImGuiCol_TabHovered]           = ImVec4(0.26f, 0.59f, 0.98f, 0.60f);
-    c[ImGuiCol_Tab]                  = ImVec4(0.78f, 0.78f, 0.80f, 0.86f);
-    c[ImGuiCol_TabSelected]          = ImVec4(0.70f, 0.70f, 0.72f, 1.00f);
-    c[ImGuiCol_TabSelectedOverline]  = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
-    c[ImGuiCol_TabDimmed]            = ImVec4(0.86f, 0.86f, 0.87f, 0.97f);
-    c[ImGuiCol_TabDimmedSelected]    = ImVec4(0.78f, 0.78f, 0.80f, 1.00f);
-    c[ImGuiCol_PlotLines]            = ImVec4(0.39f, 0.39f, 0.39f, 1.00f);
-    c[ImGuiCol_PlotLinesHovered]     = ImVec4(1.00f, 0.43f, 0.35f, 1.00f);
-    c[ImGuiCol_PlotHistogram]        = ImVec4(0.90f, 0.70f, 0.00f, 1.00f);
-    c[ImGuiCol_PlotHistogramHovered] = ImVec4(1.00f, 0.60f, 0.00f, 1.00f);
-    c[ImGuiCol_TableHeaderBg]        = ImVec4(0.78f, 0.78f, 0.80f, 1.00f);
-    c[ImGuiCol_TableBorderStrong]    = ImVec4(0.70f, 0.70f, 0.72f, 1.00f);
-    c[ImGuiCol_TableBorderLight]     = ImVec4(0.78f, 0.78f, 0.80f, 1.00f);
-    c[ImGuiCol_TableRowBg]           = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
-    c[ImGuiCol_TableRowBgAlt]        = ImVec4(0.00f, 0.00f, 0.00f, 0.04f);
-    c[ImGuiCol_TextSelectedBg]       = ImVec4(0.26f, 0.59f, 0.98f, 0.25f);
-    c[ImGuiCol_DragDropTarget]       = ImVec4(1.00f, 1.00f, 0.00f, 0.90f);
-    c[ImGuiCol_NavCursor]            = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
-    c[ImGuiCol_NavWindowingHighlight]= ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
-    c[ImGuiCol_NavWindowingDimBg]    = ImVec4(0.80f, 0.80f, 0.80f, 0.20f);
-    c[ImGuiCol_ModalWindowDimBg]     = ImVec4(0.20f, 0.20f, 0.20f, 0.35f);
+    style.DockingSeparatorSize = 6.0f;   // visible gap between docked panes
+
+    // No borders: panes are separated by the dock gap instead.
+    style.WindowBorderSize = 0.0f;
+    style.ChildBorderSize  = 0.0f;
+    style.PopupBorderSize  = 0.0f;
+    style.FrameBorderSize  = 0.0f;
+    style.TabBorderSize    = 0.0f;
+    style.WindowMenuButtonPosition = ImGuiDir_None;   // no dropdown button on docked tab bars
+    style.TabRounding      = 0.0f;
+    style.TabBarOverlineSize = 0.0f;
+}
+
+// ── theme palettes (colors only) ──────────────────────────────────────────────
+
+static void set_light_theme() {
+    g_dock_gap = ImVec4(0xE5 / 255.f, 0xE5 / 255.f, 0xE5 / 255.f, 1.00f);   // #E5E5E5
+
+    ImVec4* colors = ImGui::GetStyle().Colors;
+    colors[ImGuiCol_Text]                   = ImVec4(0.15f, 0.15f, 0.15f, 1.00f);
+    colors[ImGuiCol_TextDisabled]           = ImVec4(0.50f, 0.50f, 0.50f, 1.00f);
+    colors[ImGuiCol_WindowBg]               = ImVec4(0.96f, 0.96f, 0.96f, 1.00f);
+    colors[ImGuiCol_ChildBg]                = ImVec4(0.00f, 0.00f, 0.00f, 0.03f);
+    colors[ImGuiCol_PopupBg]                = ImVec4(0.95f, 0.95f, 0.96f, 0.98f);
+    colors[ImGuiCol_Border]                 = ImVec4(0.90f, 0.90f, 0.90f, 1.00f);
+    colors[ImGuiCol_BorderShadow]           = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+    colors[ImGuiCol_FrameBg]                = ImVec4(0.87f, 0.87f, 0.88f, 1.00f);
+    colors[ImGuiCol_FrameBgHovered]         = ImVec4(0.75f, 0.75f, 0.77f, 1.00f);
+    colors[ImGuiCol_FrameBgActive]          = ImVec4(0.68f, 0.68f, 0.70f, 1.00f);
+    colors[ImGuiCol_TitleBg]                = ImVec4(0.96f, 0.96f, 0.96f, 1.00f);
+    colors[ImGuiCol_TitleBgActive]          = ImVec4(0.96f, 0.96f, 0.96f, 1.00f);
+    colors[ImGuiCol_TitleBgCollapsed]       = ImVec4(0.95f, 0.95f, 0.96f, 0.75f);
+    colors[ImGuiCol_MenuBarBg]              = ImVec4(0.91f, 0.91f, 0.92f, 1.00f);
+    colors[ImGuiCol_ScrollbarBg]            = ImVec4(0.91f, 0.91f, 0.92f, 0.00f);
+    colors[ImGuiCol_ScrollbarGrab]          = ImVec4(0.70f, 0.70f, 0.72f, 1.00f);
+    colors[ImGuiCol_ScrollbarGrabHovered]   = ImVec4(0.60f, 0.60f, 0.62f, 1.00f);
+    colors[ImGuiCol_ScrollbarGrabActive]    = ImVec4(0.50f, 0.50f, 0.52f, 1.00f);
+    colors[ImGuiCol_CheckMark]              = ImVec4(0.50f, 0.50f, 0.52f, 1.00f);
+    colors[ImGuiCol_CheckboxSelectedBg]     = ImVec4(0.83f, 0.83f, 0.85f, 0.42f);
+    colors[ImGuiCol_SliderGrab]             = ImVec4(0.55f, 0.55f, 0.57f, 1.00f);
+    colors[ImGuiCol_SliderGrabActive]       = ImVec4(0.45f, 0.45f, 0.47f, 1.00f);
+    colors[ImGuiCol_Button]                 = ImVec4(0.83f, 0.83f, 0.85f, 1.00f);
+    colors[ImGuiCol_ButtonHovered]          = ImVec4(0.70f, 0.70f, 0.72f, 1.00f);
+    colors[ImGuiCol_ButtonActive]           = ImVec4(0.62f, 0.62f, 0.64f, 1.00f);
+    colors[ImGuiCol_Header]                 = ImVec4(0.53f, 0.53f, 0.53f, 0.25f);
+    colors[ImGuiCol_HeaderHovered]          = ImVec4(0.53f, 0.53f, 0.53f, 0.25f);
+    colors[ImGuiCol_HeaderActive]           = ImVec4(0.53f, 0.53f, 0.53f, 0.38f);
+    colors[ImGuiCol_Separator]              = ImVec4(0.70f, 0.70f, 0.72f, 0.50f);
+    colors[ImGuiCol_SeparatorHovered]       = ImVec4(0.26f, 0.59f, 0.98f, 0.60f);
+    colors[ImGuiCol_SeparatorActive]        = ImVec4(0.26f, 0.59f, 0.98f, 0.80f);
+    colors[ImGuiCol_ResizeGrip]             = ImVec4(0.26f, 0.59f, 0.98f, 0.20f);
+    colors[ImGuiCol_ResizeGripHovered]      = ImVec4(0.26f, 0.59f, 0.98f, 0.50f);
+    colors[ImGuiCol_ResizeGripActive]       = ImVec4(0.26f, 0.59f, 0.98f, 0.80f);
+    colors[ImGuiCol_InputTextCursor]        = ImVec4(1.00f, 1.00f, 1.00f, 1.00f);
+    colors[ImGuiCol_TabHovered]             = ImVec4(0.53f, 0.53f, 0.53f, 0.32f);
+    colors[ImGuiCol_Tab]                    = ImVec4(0.78f, 0.78f, 0.80f, 0.00f);
+    colors[ImGuiCol_TabSelected]            = ImVec4(0.70f, 0.70f, 0.72f, 0.00f);
+    colors[ImGuiCol_TabSelectedOverline]    = ImVec4(0.26f, 0.59f, 0.98f, 0.00f);
+    colors[ImGuiCol_TabDimmed]              = ImVec4(0.78f, 0.78f, 0.80f, 0.00f);
+    colors[ImGuiCol_TabDimmedSelected]      = ImVec4(0.78f, 0.78f, 0.80f, 0.00f);
+    colors[ImGuiCol_TabDimmedSelectedOverline]  = ImVec4(0.50f, 0.50f, 0.50f, 0.00f);
+    colors[ImGuiCol_DockingPreview]         = ImVec4(0.38f, 0.38f, 0.38f, 0.70f);
+    colors[ImGuiCol_DockingEmptyBg]         = ImVec4(0.20f, 0.20f, 0.20f, 1.00f);
+    colors[ImGuiCol_PlotLines]              = ImVec4(0.39f, 0.39f, 0.39f, 1.00f);
+    colors[ImGuiCol_PlotLinesHovered]       = ImVec4(1.00f, 0.43f, 0.35f, 1.00f);
+    colors[ImGuiCol_PlotHistogram]          = ImVec4(0.90f, 0.70f, 0.00f, 1.00f);
+    colors[ImGuiCol_PlotHistogramHovered]   = ImVec4(1.00f, 0.60f, 0.00f, 1.00f);
+    colors[ImGuiCol_TableHeaderBg]          = ImVec4(0.78f, 0.78f, 0.80f, 1.00f);
+    colors[ImGuiCol_TableBorderStrong]      = ImVec4(0.70f, 0.70f, 0.72f, 1.00f);
+    colors[ImGuiCol_TableBorderLight]       = ImVec4(0.78f, 0.78f, 0.80f, 1.00f);
+    colors[ImGuiCol_TableRowBg]             = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+    colors[ImGuiCol_TableRowBgAlt]          = ImVec4(0.00f, 0.00f, 0.00f, 0.04f);
+    colors[ImGuiCol_TextLink]               = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
+    colors[ImGuiCol_TextSelectedBg]         = ImVec4(0.26f, 0.59f, 0.98f, 0.25f);
+    colors[ImGuiCol_TreeLines]              = ImVec4(0.43f, 0.43f, 0.50f, 0.50f);
+    colors[ImGuiCol_DragDropTarget]         = ImVec4(1.00f, 1.00f, 0.00f, 0.90f);
+    colors[ImGuiCol_DragDropTargetBg]       = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+    colors[ImGuiCol_UnsavedMarker]          = ImVec4(1.00f, 1.00f, 1.00f, 1.00f);
+    colors[ImGuiCol_NavCursor]              = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
+    colors[ImGuiCol_NavWindowingHighlight]  = ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
+    colors[ImGuiCol_NavWindowingDimBg]      = ImVec4(0.80f, 0.80f, 0.80f, 0.20f);
+    colors[ImGuiCol_ModalWindowDimBg]       = ImVec4(0.20f, 0.20f, 0.20f, 0.35f);
 }
 
 static void set_dark_theme() {
-    auto& style = ImGui::GetStyle();
-    style.FrameRounding = 5.0f;
-    style.ChildRounding = 5.0f;
-    style.PopupRounding = 5.0f;
-    style.WindowRounding = 5.0f;   // tooltips use this, not PopupRounding
-    style.GrabRounding  = 5.0f;
-    ImVec4* c = style.Colors;
+    g_dock_gap = ImVec4(0.10f, 0.10f, 0.11f, 1.00f);
+    ImVec4* c = ImGui::GetStyle().Colors;
     c[ImGuiCol_Text]                 = ImVec4(0.85f, 0.85f, 0.85f, 1.00f);
     c[ImGuiCol_TextDisabled]         = ImVec4(0.50f, 0.50f, 0.50f, 1.00f);
     c[ImGuiCol_WindowBg]             = ImVec4(0.16f, 0.16f, 0.17f, 1.00f);
