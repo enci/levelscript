@@ -948,26 +948,40 @@ void draw_layers_window(script const& sc, debug_run const& run, project_config& 
         th.version = run.version;
     }
 
-    // A few pixels per cell: as large as the panel allows, 1..6 px.
     int w = lv.width(), h = lv.height();
-    float avail = ImGui::GetContentRegionAvail().x;
-    float scale = std::clamp(std::floor(avail / (float)w), 1.f, 6.f);
     ImVec4 accent = ImGui::GetStyleColorVec4(ImGuiCol_CheckMark);
-    ImDrawList* dl = ImGui::GetWindowDrawList();
 
     for (int li = 0; li < lv.layer_count() && li < (int)th.tex.size(); ++li) {
         std::string name = lv.layer_name(li);
         ImGui::PushID(li);
-        // the layer's view controls (visibility, draw mode, tileset/corner)
+        // Each layer is its own rounded card: header (name; then visibility toggle +
+        // view options), then the thumbnail.
+        ImGui::BeginChild("##layer", { 0.f, 0.f },
+                          ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysUseWindowPadding);
+        // A few pixels per cell: as large as the card allows, 1..6 px.
+        ImDrawList* dl = ImGui::GetWindowDrawList();   // the card's own draw list
+        float avail = ImGui::GetContentRegionAvail().x;
+        float scale = std::clamp(std::floor(avail / (float)w), 1.f, 6.f);
         layer_config* lc = nullptr;
         for (auto& c : cfg.layers) if (c.name == name) lc = &c;
-        if (lc) {
-            ImGui::Checkbox("##vis", &lc->visible);
-            ImGui::SameLine();
-        }
+        // Header: the name on its own line, then a row with the visibility
+        // toggle followed by the view options.
         if (th.solo == li) ImGui::TextColored(accent, "%s  (solo)", name.c_str());
         else               ImGui::TextUnformatted(name.c_str());
         if (lc) {
+            // Icon toggle: eye when shown, dimmed eye-slash when hidden. Latch the
+            // state: the click flips lc->visible, and the push/pop must stay paired.
+            const bool shown = lc->visible;
+            if (!shown)
+                ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+            const bool toggled = ImGui::Button(shown ? phosphor::PH_EYE : phosphor::PH_EYE_SLASH,
+                                               { 28.f, 0.f });
+            if (!shown) ImGui::PopStyleColor();
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip(shown ? "Hide this layer in the viewport"
+                                        : "Show this layer in the viewport");
+            if (toggled) lc->visible = !shown;
+
             int lid = sc.meta.layer_id(name);
             bool numeric = lid < 0 || sc.meta.layers[(size_t)lid].tag_id < 0;
             ImGui::SameLine();
@@ -999,7 +1013,7 @@ void draw_layers_window(script const& sc, debug_run const& run, project_config& 
             ImVec2 a = {p0.x + c.x * scale, p0.y + c.y * scale};
             dl->AddRect(a, {a.x + scale, a.y + scale}, hl, 0.f, 0, scale >= 3.f ? 1.f : 0.5f);
         }
-        ImGui::Spacing();
+        ImGui::EndChild();
         ImGui::PopID();
     }
 }
