@@ -6,7 +6,7 @@ and wraps it in a per-user Inno Setup installer that puts bin\\ on the user PATH
 
 Requires CMake, a C++ toolchain, and Inno Setup 6.3+ (ISCC.exe).
 
-    python packaging/build_installer.py [--version 0.8.0] [--skip-build]
+    python packaging/build_installer.py [--version 0.7.0] [--skip-build]
 
 Output: dist/LevelScript-setup-<version>-x64.exe
 """
@@ -14,7 +14,7 @@ Output: dist/LevelScript-setup-<version>-x64.exe
 from __future__ import annotations
 
 import argparse
-import json
+import re
 import os
 import shutil
 import subprocess
@@ -30,7 +30,10 @@ TARGETS = ("levelscript", "levelscript-debugger")
 
 
 def default_version() -> str:
-    return json.loads((ROOT / "extension" / "package.json").read_text("utf-8"))["version"]
+    text = (ROOT / "src" / "version.hpp").read_text("utf-8")
+    parts = [re.search(rf"#define\s+LS_VERSION_{k}\s+(\d+)", text).group(1)
+             for k in ("MAJOR", "MINOR", "PATCH")]
+    return ".".join(parts)
 
 
 def find_iscc() -> Path:

@@ -1,6 +1,6 @@
 # LevelScript
 
-**Status**: Draft 0.7
+**Status**: Draft 0.7 (implementation version `0.7.x`, see `ls-versioning.md`)
 **File extension**: `.ls`
 **CLI**: `levelscript [--seed N] [--entry name] [--param name=value ...] <file.ls>` (`--entry` defaults to `main`, a tool convention; section 6)
 **Embedding**: namespace `ls::` (see Appendix A)
