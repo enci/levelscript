@@ -4,16 +4,9 @@ project(levelscript CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Emscripten builds only produce the VS Code extension's WASM module (see
-# src/CMakeLists.txt); skip the debugger/test dependencies entirely.
-if(EMSCRIPTEN)
-    add_subdirectory(src)
-    return()
-endif()
-
 include(FetchContent)
 
-# ── levelscript-debugger dependencies: SDL3 + ImGui + JSON + stb + FreeType ─────────
+# ── lsd (debugger) dependencies: SDL3 + ImGui + JSON + stb + FreeType ─────────
 set(SDL_SHARED OFF CACHE BOOL "" FORCE)
 set(SDL_STATIC ON  CACHE BOOL "" FORCE)
 set(SDL_TEST   OFF CACHE BOOL "" FORCE)
@@ -51,11 +44,11 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(sdl3 imgui nlohmann_json stb freetype)
 
-# Opt-in patch to ImGui's docking branch: stock ImGui only rounds the corners
+# Patch to ImGui's docking branch: stock ImGui only rounds the corners
 # of a docked pane that touch the dock host's outer edge, so inner panes stay
 # square regardless of WindowRounding. The patch rounds every docked pane.
 # Applied at configure time and kept in sync with the option (idempotent).
-option(LS_IMGUI_ROUND_DOCKED "Patch ImGui so docked panes get rounded corners" OFF)
+option(LS_IMGUI_ROUND_DOCKED "Patch ImGui so docked panes get rounded corners" ON)
 set(_ls_imgui_patch ${CMAKE_CURRENT_SOURCE_DIR}/cmake/imgui-round-docked.patch)
 find_package(Git QUIET)
 if(GIT_FOUND)
@@ -77,7 +70,7 @@ endif()
 
 # Off by default: imgui_demo.cpp (and the debugger's "Demo" toggle) are a dev
 # tool for exploring ImGui widgets, not something normal builds should ship.
-option(LS_ENABLE_IMGUI_DEMO "Build in ImGui's demo window (dev tool)" ON)
+option(LS_ENABLE_IMGUI_DEMO "Build in ImGui's demo window (dev tool)" OFF)
 
 add_library(imgui_lib STATIC
     ${imgui_SOURCE_DIR}/imgui.cpp

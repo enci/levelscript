@@ -9,6 +9,7 @@
 
 #include <SDL3/SDL.h>
 #include <imgui.h>
+#include <imgui_internal.h>   // DockBuilder (default layout)
 #include <imgui_impl_sdl3.h>
 #include <imgui_impl_sdlrenderer3.h>
 #include <imgui_freetype.h>
@@ -141,9 +142,9 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
         carry("lsd_prefs.json", prefs_path);
     }
 
-    int win_w = 1280, win_h = 800;
+    int win_w = 1600, win_h = 960;
     std::optional<int> win_x, win_y;
-    std::string theme_str        = "system";
+    std::string theme_str        = "light";
     float       pref_play_fps    = 4.f;
     uint64_t    pref_seed        = 0;
     bool        pref_seed_locked = false;
@@ -160,9 +161,9 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
                     auto it = j.find(k);
                     return (it != j.end() && it->is_number()) ? (double)*it : def;
                 };
-                theme_str     = gets("theme", "system");
-                win_w         = (int)getn("win_w", 1280);
-                win_h         = (int)getn("win_h", 800);
+                theme_str     = gets("theme", "light");
+                win_w         = (int)getn("win_w", 1600);
+                win_h         = (int)getn("win_h", 960);
                 pref_play_fps = (float)getn("play_fps", 4.0);
                 pref_seed     = (uint64_t)getn("seed", 0.0);
                 if (auto it = j.find("seed_locked"); it != j.end() && it->is_boolean())
@@ -248,10 +249,11 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
 
     // ── theme ─────────────────────────────────────────────────────────────────
     enum class theme_mode { system, light, dark };
-    theme_mode cur_theme_mode = theme_mode::system;
+    theme_mode cur_theme_mode = theme_mode::light;
     if      (theme_str == "light") cur_theme_mode = theme_mode::light;
     else if (theme_str == "dark")  cur_theme_mode = theme_mode::dark;
-    bool dark_theme = true;
+    else if (theme_str == "system") cur_theme_mode = theme_mode::system;
+    bool dark_theme = false;
 
     auto apply_theme = [&] {
         set_style_metrics();
@@ -456,7 +458,27 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
             // Fonts are a global stack, so this applies to the tab bars the dock
             // host draws here, while pane contents (separate windows) keep the UI font.
             if (tab_font) ImGui::PushFont(tab_font, k_tab_font_size);
-            ImGui::DockSpace(ImGui::GetID("DockSpace"), { 0.f, 0.f });
+            const ImGuiID dock_id = ImGui::GetID("DockSpace");
+            // No saved layout (first run, or layout.ini deleted): dock every pane
+            // in a sensible default instead of letting them stack on top of each other.
+            if (!ImGui::DockBuilderGetNode(dock_id)) {
+                ImGui::DockBuilderRemoveNode(dock_id);
+                ImGui::DockBuilderAddNode(dock_id, ImGuiDockNodeFlags_DockSpace);
+                ImGui::DockBuilderSetNodeSize(dock_id, viewport->WorkSize);
+                ImGuiID center = dock_id, left, right, left_bottom, right_bottom;
+                left  = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left,  0.22f, nullptr, &center);
+                right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.30f, nullptr, &center);
+                ImGui::DockBuilderSplitNode(left,  ImGuiDir_Down, 0.40f, &left_bottom,  &left);
+                ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.45f, &right_bottom, &right);
+                ImGui::DockBuilderDockWindow("Sequence",   left);
+                ImGui::DockBuilderDockWindow("Layers",     left_bottom);
+                ImGui::DockBuilderDockWindow("Viewport", center);
+                ImGui::DockBuilderDockWindow("Rule",         right);
+                ImGui::DockBuilderDockWindow("Tags",         right_bottom);
+                ImGui::DockBuilderDockWindow("Settings", right_bottom);
+                ImGui::DockBuilderFinish(dock_id);
+            }
+            ImGui::DockSpace(dock_id, { 0.f, 0.f });
             if (tab_font) ImGui::PopFont();
             ImGui::End();
         }

@@ -1,8 +1,6 @@
 build/
-build-wasm/
 .vs/
 .vscode/
-!extension/.vscode/
 __pycache__/
 *.user
 CLAUDE.md
@@ -13,5 +11,5 @@ extension/ls_wasm.js
 extension/ls_wasm.wasm
 extension/package-lock.json
 *.vsix
-build-release/
-dist/
+dist
+build-release
