@@ -5,6 +5,7 @@
 #include "phosphor_icons.hpp"
 #include "platform_titlebar.hpp"
 #include "parser.hpp"
+#include "version.hpp"
 #include "diagnostic.hpp"
 
 #include <SDL3/SDL.h>
@@ -728,6 +729,10 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
             ImGui::Text("%s %d x %d", phosphor::PH_GRID_FOUR,
                         run.snap.width(), run.snap.height());
             if (ImGui::IsItemHovered()) bar_tip = "Grid size (columns x rows)";
+
+            ImGui::SameLine(0.f, 24.f);
+            ImGui::TextDisabled("LevelScript " LS_VERSION_STRING);
+            if (ImGui::IsItemHovered()) bar_tip = "LevelScript version";
 
             // Load-status chip, flush against the right edge.
             if (!sc.status.empty()) {
