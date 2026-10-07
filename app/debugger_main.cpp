@@ -3,6 +3,7 @@
 #include <iostream>
 #include <optional> 
 #include <string>
+#include "version.hpp"
 
 // levelscript-debugger -- the LevelScript debugger: an interactive ImGui frontend over the
 // public run API (compile once, step application by application).
@@ -19,7 +20,10 @@ int main(int argc, char* argv[]) {
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        if (arg == "--seed" && i + 1 < argc) {
+        if (arg == "--version") {
+            std::cout << "levelscript-debugger " << LS_VERSION_STRING << '\n';
+            return 0;
+        } else if (arg == "--seed" && i + 1 < argc) {
             seed = (uint64_t)std::strtoull(argv[++i], nullptr, 10);
         } else if (arg == "--entry" && i + 1 < argc) {
             entry = argv[++i];

@@ -1,6 +1,7 @@
 #include "fs_resolver.hpp"
 #include "inspect.hpp"
 #include "ls.hpp"
+#include "version.hpp"
 #include <chrono>
 #include <fstream>
 #include <iostream>
@@ -14,6 +15,7 @@
 static void usage(char const* argv0) {
     std::cerr << "Usage: " << argv0
               << " [--seed N] [--entry name] [--param name=value ...] [--inspect] <file.ls>\n"
+              << "       " << argv0 << " --version\n"
               << "  --entry  the sequence to run (default: main)\n";
 }
 
@@ -44,7 +46,10 @@ int main(int argc, char* argv[]) {
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        if (arg == "--inspect") {
+        if (arg == "--version") {
+            std::cout << "levelscript " << LS_VERSION_STRING << '\n';
+            return 0;
+        } else if (arg == "--inspect") {
             inspect = true;
         } else if (arg == "--seed" && i + 1 < argc) {
             seed = (uint64_t)std::stoull(argv[++i]);

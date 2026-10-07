@@ -13,3 +13,4 @@ extension/package-lock.json
 *.vsix
 dist
 build-release
+build-wasm/

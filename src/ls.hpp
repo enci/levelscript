@@ -5,6 +5,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include "version.hpp"
 
 // LevelScript embedding API — what a game sees.
 //

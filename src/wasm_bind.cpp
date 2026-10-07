@@ -230,6 +230,7 @@ void run_end(int id) {
 }
 
 EMSCRIPTEN_BINDINGS(ls_module) {
+    function("version", +[]() { return std::string(LS_VERSION_STRING); });
     function("inspect_json", &inspect_with);
     function("run_begin", &run_begin);
     function("run_last_error", &run_last_error);
