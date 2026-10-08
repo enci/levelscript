@@ -1,31 +1,31 @@
 diff --git a/imgui.cpp b/imgui.cpp
-index 16d33fa68..3396081c4 100644
+index ac40c72..ad13550 100644
 --- a/imgui.cpp
 +++ b/imgui.cpp
-@@ -7694,7 +7694,7 @@ void ImGui::RenderWindowDecorations(ImGuiWindow* window, const ImRect& title_bar
+@@ -7749,7 +7749,7 @@ void ImGui::RenderWindowDecorations(ImGuiWindow* window, const ImRect& title_bar
                  ImRect bg_rect(window->Pos + ImVec2(0, window->TitleBarHeight), window->Pos + window->Size);
                  ImDrawFlags bg_rounding_flags;
                  if (window->DockIsActive)
 -                    bg_rounding_flags = CalcRoundingFlagsForRectInRect(bg_rect, window->DockNode->HostWindow->Rect(), 0.0f);
-+                    bg_rounding_flags = (window->TitleBarHeight > 0.0f) ? ImDrawFlags_RoundCornersBottom : ImDrawFlags_RoundCornersAll; // levelscript: round every docked pane
++                    bg_rounding_flags = (window->TitleBarHeight > 0.0f) ? ImDrawFlags_RoundBottom : ImDrawFlags_RoundAll; // levelscript: round every docked pane
                  else
-                     bg_rounding_flags = (flags & ImGuiWindowFlags_NoTitleBar) ? ImDrawFlags_RoundCornersAll : ImDrawFlags_RoundCornersBottom;
+                     bg_rounding_flags = (flags & ImGuiWindowFlags_NoTitleBar) ? ImDrawFlags_RoundAll : ImDrawFlags_RoundBottom;
                  ImDrawList* bg_draw_list = window->DockIsActive ? window->DockNode->HostWindow->DrawList : window->DrawList;
-@@ -18342,7 +18342,7 @@ void ImGui::DockContextEndFrame(ImGuiContext* ctx)
+@@ -18397,7 +18397,7 @@ void ImGui::DockContextEndFrame(ImGuiContext* ctx)
              if (node->LastFrameActive == g.FrameCount && node->IsVisible && node->HostWindow && node->IsLeafNode() && !node->IsBgDrawnThisFrame)
              {
                  ImRect bg_rect(node->Pos + ImVec2(0.0f, GetFrameHeight()), node->Pos + node->Size);
 -                ImDrawFlags bg_rounding_flags = CalcRoundingFlagsForRectInRect(bg_rect, node->HostWindow->Rect(), g.Style.DockingSeparatorSize);
-+                ImDrawFlags bg_rounding_flags = ImDrawFlags_RoundCornersAll; // levelscript: round every docked pane
++                ImDrawFlags bg_rounding_flags = ImDrawFlags_RoundAll; // levelscript: round every docked pane
                  node->HostWindow->DrawList->ChannelsSetCurrent(DOCKING_HOST_DRAW_CHANNEL_BG);
                  node->HostWindow->DrawList->AddRectFilled(bg_rect.Min, bg_rect.Max, node->LastBgColor, node->HostWindow->WindowRounding, bg_rounding_flags);
              }
-@@ -19849,7 +19849,7 @@ static void ImGui::DockNodeUpdateTabBar(ImGuiDockNode* node, ImGuiWindow* host_w
+@@ -19904,7 +19904,7 @@ static void ImGui::DockNodeUpdateTabBar(ImGuiDockNode* node, ImGuiWindow* host_w
      if (is_focused)
          node->LastFrameFocused = g.FrameCount;
      ImU32 title_bar_col = GetColorU32(host_window->Collapsed ? ImGuiCol_TitleBgCollapsed : is_focused ? ImGuiCol_TitleBgActive : ImGuiCol_TitleBg);
 -    ImDrawFlags rounding_flags = CalcRoundingFlagsForRectInRect(title_bar_rect, host_window->Rect(), g.Style.DockingSeparatorSize);
-+    ImDrawFlags rounding_flags = ImDrawFlags_RoundCornersTop; // levelscript: round every docked pane
++    ImDrawFlags rounding_flags = ImDrawFlags_RoundTop; // levelscript: round every docked pane
      host_window->DrawList->AddRectFilled(title_bar_rect.Min, title_bar_rect.Max, title_bar_col, host_window->WindowRounding, rounding_flags);
  
      // Docking/Collapse button
