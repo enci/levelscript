@@ -1,0 +1,110 @@
+name: Release
+
+# Builds and publishes the Windows LevelScript installer when a version tag is pushed.
+#
+# Tag convention is semver  vMAJOR.MINOR.PATCH  (e.g. v0.7.1) and MUST match
+# src/version.hpp. The tag is only the "publish" signal; the version baked into the
+# exes comes from version.hpp, and this workflow fails fast if the two disagree.
+#
+#   git tag v0.7.1 && git push origin v0.7.1
+on:
+  push:
+    tags:
+      - "v[0-9]*.[0-9]*.[0-9]*"   # semver vMAJOR.MINOR.PATCH, e.g. v0.7.1
+
+env:
+  PUBLISHER: "Bojan Endrovski"
+
+permissions:
+  contents: write          # required to create/attach the GitHub Release
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  windows:
+    timeout-minutes: 30
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # version.hpp is the single source of truth for the version compiled into the
+      # exes. Catch the common mistake of tagging without bumping version.hpp.
+      - name: Verify tag matches version.hpp
+        id: version
+        run: |
+          $hpp   = Get-Content src/version.hpp -Raw
+          $parts = 'MAJOR', 'MINOR', 'PATCH' | ForEach-Object {
+            [regex]::Match($hpp, "#define\s+LS_VERSION_$_\s+(\d+)").Groups[1].Value
+          }
+          $expected = $parts -join '.'
+          $tag = "${{ github.ref_name }}".TrimStart('v')
+          Write-Host "Tag: ${{ github.ref_name }}    version.hpp: $expected"
+          if ($tag -ne $expected) {
+            Write-Error "Tag '${{ github.ref_name }}' does not match version.hpp ($expected). Bump src/version.hpp or retag."
+            exit 1
+          }
+          "version=$expected" >> $env:GITHUB_OUTPUT
+
+      - name: Configure
+        run: cmake -S . -B build
+
+      - name: Build (Release)
+        run: cmake --build build --config Release --parallel
+
+      # Don't publish a build that fails the tests or the determinism gate.
+      - name: Unit tests
+        run: build\tests\Release\ls_tests.exe
+
+      - name: Examples
+        run: python run_examples.py
+
+      - name: Smoke-test the build
+        run: |
+          $output = & "build\app\Release\levelscript.exe" --version
+          Write-Host "Version: $output"
+          if ($output -ne "levelscript ${{ steps.version.outputs.version }}") {
+            Write-Error "Built exe reports '$output', expected version ${{ steps.version.outputs.version }}"
+            exit 1
+          }
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      # build_installer.py stages bin\ (levelscript, levelscript-debugger, resources\),
+      # examples\ and readme.md, renders packaging/levelscript_installer.iss.in and
+      # compiles it with ISCC into dist/LevelScript-setup-<version>-x64.exe (per-user,
+      # adds bin\ to the user PATH; the fixed AppId keeps in-place upgrades working).
+      - name: Build installer
+        run: >
+          python packaging/build_installer.py
+          --skip-build
+          --build-dir  build
+          --output-dir dist
+          --version    ${{ steps.version.outputs.version }}
+          --publisher  "${{ env.PUBLISHER }}"
+
+      - name: Publish to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/LevelScript-setup-*.exe
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          body: |
+            # LevelScript ${{ steps.version.outputs.version }}
+
+            Windows installer (per-user, no admin required). It installs the
+            `levelscript` compiler/runner and the `levelscript-debugger`, and adds both
+            to your PATH.
+
+            ## Install
+            1. Download **LevelScript-setup-${{ steps.version.outputs.version }}-x64.exe** below and run it.
+            2. Open a new terminal and run `levelscript --version`.
+
+            ```
+            levelscript [--seed N] [--entry name] [--param name=value ...] <file.ls>
+            levelscript-debugger [--seed N] [--entry name] <file.ls>
+            ```
