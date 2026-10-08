@@ -28,7 +28,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # version.hpp is the single source of truth for the version compiled into the
       # exes. Catch the common mistake of tagging without bumping version.hpp.
@@ -87,7 +87,7 @@ jobs:
           --publisher  "${{ env.PUBLISHER }}"
 
       - name: Publish to GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/LevelScript-setup-*.exe
           draft: false
