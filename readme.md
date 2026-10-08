@@ -1,5 +1,8 @@
 # LevelScript
 
+[![Build](https://github.com/enci/levelscript/actions/workflows/build.yaml/badge.svg?branch=main)](https://github.com/enci/levelscript/actions/workflows/build.yaml)
+[![Release](https://img.shields.io/github/v/release/enci/levelscript)](https://github.com/enci/levelscript/releases/latest)
+
 A scripting language for procedural level generation. Programs transform a
 stack of correlated grids through pattern-rewrite rules; output is a pure
 function of (seed, params).
