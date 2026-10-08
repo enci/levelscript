@@ -1,0 +1,49 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  windows:
+    # SDL3, FreeType, ImGui and Catch2 are fetched and built from source on every run.
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        Configuration: ["Debug", "Release"]
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build
+
+      - name: Build (${{ matrix.Configuration }})
+        run: cmake --build build --config ${{ matrix.Configuration }} --parallel
+
+      - name: Unit tests
+        run: build\tests\${{ matrix.Configuration }}\ls_tests.exe
+
+      - name: Test version command
+        run: |
+          $output = & "build\app\${{ matrix.Configuration }}\levelscript.exe" --version
+          Write-Host "Version output: $output"
+          if ($output -notmatch '^levelscript \d+\.\d+\.\d+$') {
+            Write-Error "Unexpected version output: '$output'"
+            exit 1
+          }
+
+      # Golden-output determinism gate (examples/*.ls vs .expected).
+      - name: Examples
+        run: python run_examples.py
