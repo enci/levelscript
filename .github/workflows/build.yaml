@@ -4,7 +4,19 @@ on:
   push:
     branches:
       - main
+    paths: &build_paths
+      - "src/**"
+      - "app/**"
+      - "tests/**"
+      - "cmake/**"
+      - "resources/**"          # copied next to the debugger at build time
+      - "examples/**"           # golden outputs checked by run_examples.py
+      - "CMakeLists.txt"
+      - "run_examples.py"
+      - ".github/workflows/build.yaml"
   pull_request:
+    paths: *build_paths
+  workflow_dispatch:            # run by hand from the Actions tab
 
 permissions:
   contents: read
@@ -29,7 +41,7 @@ jobs:
       OUT_SUBDIR: ${{ matrix.os == 'windows-latest' && format('/{0}', matrix.Configuration) || '' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # SDL3 only enables the video backends whose headers it finds; the debugger needs X11/Wayland.
       - name: Install Linux dependencies
@@ -43,7 +55,7 @@ jobs:
             libasound2-dev libpulse-dev libdbus-1-dev libudev-dev
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
