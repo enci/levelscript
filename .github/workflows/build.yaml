@@ -14,36 +14,58 @@ defaults:
     shell: pwsh
 
 jobs:
-  windows:
+  build:
+    name: ${{ matrix.os }} (${{ matrix.Configuration }})
     # SDL3, FreeType, ImGui and Catch2 are fetched and built from source on every run.
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
+        os: ["windows-latest", "ubuntu-latest", "macos-latest"]
         Configuration: ["Debug", "Release"]
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
+    env:
+      # Visual Studio is multi-config (build/app/Debug/...); Makefiles are single-config (build/app/...).
+      OUT_SUBDIR: ${{ matrix.os == 'windows-latest' && format('/{0}', matrix.Configuration) || '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # SDL3 only enables the video backends whose headers it finds; the debugger needs X11/Wayland.
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends `
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev `
+            libxss-dev libxtst-dev libxkbcommon-dev libwayland-dev libdecor-0-dev `
+            libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev libdrm-dev libgbm-dev `
+            libasound2-dev libpulse-dev libdbus-1-dev libudev-dev
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Configure
-        run: cmake -S . -B build
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.Configuration }}
 
       - name: Build (${{ matrix.Configuration }})
         run: cmake --build build --config ${{ matrix.Configuration }} --parallel
 
       - name: Unit tests
-        run: build\tests\${{ matrix.Configuration }}\ls_tests.exe
+        run: ./build/tests${{ env.OUT_SUBDIR }}/ls_tests
 
       - name: Test version command
         run: |
-          $output = & "build\app\${{ matrix.Configuration }}\levelscript.exe" --version
+          $output = & "./build/app${{ env.OUT_SUBDIR }}/levelscript" --version
           Write-Host "Version output: $output"
           if ($output -notmatch '^levelscript \d+\.\d+\.\d+$') {
             Write-Error "Unexpected version output: '$output'"
             exit 1
           }
 
-      # Golden-output determinism gate (examples/*.ls vs .expected).
+      # Golden-output determinism gate (examples/*.ls vs .expected). Running it on every
+      # platform is what proves the output really is a pure function of (seed, params).
       - name: Examples
         run: python run_examples.py
