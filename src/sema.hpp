@@ -62,12 +62,24 @@ struct compiled_cell {
     int     expr{-1};  // kind::expr — arena index (matches/writes computed)
 };
 
+// One cell the matcher tests, at its offset from the anchor.
+struct match_probe {
+    int     r{0}, c{0};
+    int64_t val{0};    // bare: the value to test against
+    int     expr{-1};  // computed: arena index
+};
+
 struct compiled_pattern {
     int  grid_id{-1};        // layer index, or where_grid (section 5.9)
     bool is_number{false};
     bool is_where{false};
     int  rows{0}, cols{0};
     std::vector<compiled_cell> cells;   // flat, row-major
+
+    // Match side only, filled per variant: the cells of each matching phase
+    // (section 5.11) in row-major order, wildcards dropped.
+    std::vector<match_probe> bare;       // value cells
+    std::vector<match_probe> computed;   // expression and `where` cells
 
     compiled_cell const& at(int r, int c) const { return cells[r * cols + c]; }
 };
