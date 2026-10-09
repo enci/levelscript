@@ -6,7 +6,7 @@ and wraps it in a per-user Inno Setup installer that puts bin\\ on the user PATH
 
 Requires CMake, a C++ toolchain, and Inno Setup 6.3+ (ISCC.exe).
 
-    python packaging/build_installer.py [--version 0.7.0] [--skip-build]
+    python packaging/windows/build_installer.py [--version 0.7.0] [--skip-build]
 
 Output: dist/LevelScript-setup-<version>-x64.exe
 """
@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ROOT = HERE.parent
+ROOT = HERE.parent.parent
 TEMPLATE = HERE / "levelscript_installer.iss.in"
 APP_NAME = "LevelScript"
 APP_ID = "293a058d-338e-42bb-8c1f-5580d855f9ef"   # never change: keeps upgrades in place
