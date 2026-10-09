@@ -173,7 +173,7 @@ struct program_stmt {
     std::vector<op_arg> op_args;
     // apply — a mode, its count where it takes one, and a target (section 6)
     apply_mode  mode{apply_mode::everywhere};
-    long long   count{-1};            // -1 = no count
+    expr_ptr    count;                // the parenthesized count; null = none
     bool        count_percent{false}; // scatter(P%)
     source_loc  count_loc;
     std::string rule_name;            // a rule or a sequence (section 6.10); resolved in sema

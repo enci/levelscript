@@ -655,6 +655,31 @@ TEST_CASE("sequence Q42 (replaced): settle(0) of a sequence is rejected") {
           .has_error("a count of 0 applies nothing"));
 }
 
+TEST_CASE("sequence: a nested computed count is not certain to run, so it does not warn") {
+    compile_result computed("layers { }\nparams { n: number = 1 }\n"
+                            "sequence widen { upscale(2, 2) }\n"
+                            "sequence outer { settle(n) widen }\n"
+                            "sequence main { resize(1, 1)  settle outer }\n");
+    CHECK(computed.ok);
+    CHECK(!has_warning(computed));
+    compile_result literal("layers { }\n"
+                           "sequence widen { upscale(2, 2) }\n"
+                           "sequence outer { settle(1) widen }\n"
+                           "sequence main { resize(1, 1)  settle outer }\n");
+    CHECK(has_warning(literal, "'settle' over sequence 'outer'"));
+}
+
+TEST_CASE("sequence: a computed count of 0 or below runs no iteration") {
+    for (char const* n : {"0", "-3"}) {
+        INFO(n);
+        auto gen = make(counter(5) + "params { n: number = " + n + " }\n"
+                        "sequence tick { everywhere inc }\n"
+                        "sequence main {\n resize(1, 1)\n settle(n) tick\n}\n");
+        REQUIRE(static_cast<bool>(gen));
+        CHECK(cell_sum(gen.generate(gen.sequence("main"), 1), "tiles") == 0);
+    }
+}
+
 TEST_CASE("sequence Q43: bounded counts are never warned") {
     compile_result r("layers { }\nsequence widen { upscale(2, 2) }\n"
                      "sequence main {\n    resize(1, 1)\n    once widen\n    settle(3) widen\n}\n");

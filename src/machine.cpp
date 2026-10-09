@@ -141,24 +141,35 @@ sequence<step_event> machine::run() {
             if (!seq) co_yield step_event{step_event::kind::statement, si};
             continue;
         }
+        int count = eval_count(st);
         co_yield begin_event(si);
         if (seq) {
-            auto sub = run_sequence(st, si);
+            auto sub = run_sequence(st, si, count);
             while (sub.next()) co_yield sub.value();
             continue;
         }
-        auto sub = run_leaf(st, si);
+        auto sub = run_leaf(st, si, count);
         while (sub.next()) co_yield sub.value();
         co_yield step_event{step_event::kind::statement, si};
     }
 }
 
-sequence<step_event> machine::run_leaf(compiled_stmt const& st, int top) {
+int machine::eval_count(compiled_stmt const& st) {
+    if (st.count < 0) return -1;
+    long long v = eval(st.count, 0, 0);
+    if (v < 0) v = 0;
+    if (st.percent && v > 100) v = 100;
+    return (int)v;
+}
+
+sequence<step_event> machine::run_leaf(compiled_stmt const& st, int top, int count) {
     if (st.what == compiled_stmt::kind::op_call) {
         exec_op(st.op);
+    } else if (count == 0) {
+        // a computed count of 0 (or 0%) applies nothing - and draws nothing
     } else if (is_step_mode(st.mode)) {
         auto const& rule = prog_->rules[st.rule_id];
-        int cap = st.mode == apply_mode::once ? 1 : st.count;   // -1 = fixpoint
+        int cap = st.mode == apply_mode::once ? 1 : count;   // -1 = fixpoint
         int applied = 0;
         while (cap < 0 || applied < cap) {
             auto ms = collect(rule);
@@ -178,14 +189,14 @@ sequence<step_event> machine::run_leaf(compiled_stmt const& st, int top) {
         // sweep cap).
         auto const& rule = prog_->rules[st.rule_id];
         bool stab = st.mode == apply_mode::settle;
-        int sweep_cap = stab ? st.count : 1;
-        int cap = st.mode == apply_mode::scatter && !st.percent ? st.count : -1;
+        int sweep_cap = stab ? count : 1;
+        int cap = st.mode == apply_mode::scatter && !st.percent ? count : -1;
         int sweeps = 0;
         while (sweep_cap < 0 || sweeps < sweep_cap) {
             auto ms = collect(rule);
             order_candidates(rule, ms);
             if (st.percent)
-                ms = applicable_prefix(rule, ms, st.count);
+                ms = applicable_prefix(rule, ms, count);
 
             for (auto& g : grids_) g.back = g.front;
             std::unordered_set<uint64_t> written;
@@ -213,9 +224,9 @@ sequence<step_event> machine::run_leaf(compiled_stmt const& st, int top) {
 // section 6.10: `once` = 1 iteration; `settle(N)` = up to N, stopping after a
 // stable one; `settle` = until one is stable. Body statements run exactly as in
 // the program; the frames record where each step happened.
-sequence<step_event> machine::run_sequence(compiled_stmt const& st, int top) {
+sequence<step_event> machine::run_sequence(compiled_stmt const& st, int top, int count) {
     auto const& body = prog_->sequences[st.seq_id].stmts;
-    int cap = st.mode == apply_mode::once ? 1 : st.count;   // -1 = fixpoint
+    int cap = st.mode == apply_mode::once ? 1 : count;   // -1 = fixpoint
     size_t depth = frames_.size();
     for (int it = 0; cap < 0 || it < cap; ++it) {
         bool check = cap != 1;   // `once S` never needs the comparison (section 10.7)
@@ -230,13 +241,14 @@ sequence<step_event> machine::run_sequence(compiled_stmt const& st, int top) {
                 if (!seq) co_yield step_event{step_event::kind::statement, top};
                 continue;
             }
+            int n = eval_count(bs);   // after the guard, once per iteration
             co_yield begin_event(top);
             if (seq) {
-                auto sub = run_sequence(bs, top);
+                auto sub = run_sequence(bs, top, n);
                 while (sub.next()) co_yield sub.value();
                 continue;
             }
-            auto sub = run_leaf(bs, top);
+            auto sub = run_leaf(bs, top, n);
             while (sub.next()) co_yield sub.value();
             co_yield step_event{step_event::kind::statement, top};
         }

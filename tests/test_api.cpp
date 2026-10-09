@@ -430,6 +430,73 @@ TEST_CASE("api: scatter(P%) applies the exact fraction of the applied set") {
     CHECK(count_val(full.generate(full.sequence("main"), 1), "level", full.tag("geo.floor")) == 100);
 }
 
+// ── computed counts (section 6) ────────────────────────────────────────────────
+
+static std::string counted(std::string const& stmt) {
+    return "tag geo { floor }\n"
+           "layers { level: grid of geo }\n"
+           "params { n: number = 3 }\n"
+           "rule paint { level[.] => level[floor] }\n"
+           "sequence main {\n    resize(10, 10)\n    " + stmt + "\n}\n";
+}
+
+static int painted(std::string const& stmt, int n) {
+    auto gen = make(counted(stmt));
+    INFO(gen.error());
+    REQUIRE(static_cast<bool>(gen));
+    return count_val(gen.generate(gen.sequence("main"), 7, {{"n", n}}), "level",
+                     gen.tag("geo.floor"));
+}
+
+TEST_CASE("api: counts are computed from params on each run") {
+    CHECK(painted("scatter(n) paint", 3) == 3);
+    CHECK(painted("scatter(n * 2 + 1) paint", 3) == 7);
+    CHECK(painted("grow(n) paint", 5) == 5);
+    CHECK(painted("scatter(n%) paint", 30) == 30);
+    CHECK(painted("scatter((n * 2)%) paint", 30) == 60);
+}
+
+TEST_CASE("api: computed counts below 0 act as 0; percentages above 100 as 100") {
+    CHECK(painted("scatter(n) paint", -4) == 0);
+    CHECK(painted("grow(n) paint", -1) == 0);
+    CHECK(painted("settle(n) paint", 0) == 0);
+    CHECK(painted("scatter(n%) paint", 250) == 100);
+    CHECK(painted("scatter(n%) paint", -10) == 0);
+}
+
+TEST_CASE("api: a count of 0 draws nothing") {
+    auto with = make(counted("scatter(n) paint\n    scatter(5) paint"));
+    auto without = make(counted("scatter(5) paint"));
+    REQUIRE(static_cast<bool>(with));
+    for (uint64_t seed = 1; seed <= 10; ++seed) {
+        auto a = with.generate(with.sequence("main"), seed, {{"n", 0}});
+        auto b = without.generate(without.sequence("main"), seed);
+        CHECK(dump(a, "level") == dump(b, "level"));
+    }
+}
+
+TEST_CASE("api: a count is evaluated after its guard, drawing on every evaluation") {
+    // random(1, 1) always yields 1 but still draws once, exactly like a guard
+    auto a = make(counted("scatter(random(1, 1)) paint\n    scatter(4) paint"));
+    auto b = make(counted("scatter(1) paint  when (random(1, 1) == 1)\n    scatter(4) paint"));
+    auto c = make(counted("scatter(1) paint\n    scatter(4) paint"));
+    REQUIRE(static_cast<bool>(a));
+    REQUIRE(static_cast<bool>(b));
+    int differs = 0;
+    for (uint64_t seed = 1; seed <= 10; ++seed) {
+        auto la = dump(a.generate(a.sequence("main"), seed), "level");
+        CHECK(la == dump(b.generate(b.sequence("main"), seed), "level"));
+        if (la != dump(c.generate(c.sequence("main"), seed), "level")) ++differs;
+    }
+    CHECK(differs > 0);   // the extra draw shifts later shuffles
+    // a false guard skips the count, and its draw
+    auto skipped = make(counted("scatter(random(1, 1)) paint  when (n > 100)\n    scatter(4) paint"));
+    auto plain = make(counted("scatter(4) paint"));
+    for (uint64_t seed = 1; seed <= 10; ++seed)
+        CHECK(dump(skipped.generate(skipped.sequence("main"), seed), "level") ==
+              dump(plain.generate(plain.sequence("main"), seed), "level"));
+}
+
 TEST_CASE("api: ordered claims in priority order under snapshot") {
     // Both sub-rules match every empty cell; under `ordered`, the wall
     // sub-rule claims every cell first, so floor never applies.

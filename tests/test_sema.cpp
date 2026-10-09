@@ -240,6 +240,34 @@ sequence main {
     CHECK(ok.ok);
 }
 
+TEST_CASE("sema: counts read params only and are numbers (check 21)") {
+    std::string params = "params { n: number = 4 }\n";
+    for (char const* stmt : {"scatter(tiles) fill", "grow(x) fill", "settle(width - 1) fill",
+                             "scatter((height)%) fill"}) {
+        INFO(stmt);
+        CHECK(compile_result(prelude + params + rfill + "sequence main { " + stmt + " }")
+              .has_error("cannot be read here"));
+    }
+    CHECK(compile_result(prelude + params + rfill + "sequence main { scatter(n > 2) fill }")
+          .has_error("a count must be a number"));
+    CHECK(compile_result(prelude + params + rfill + "sequence main { grow(floor) fill }")
+          .has_error("a count must be a number"));
+    compile_result ok(prelude + params + rfill + R"(
+sequence main {
+    resize(4, 4)
+    scatter(n * 2) fill
+    scatter(n%) fill
+    scatter((n * 50)%) fill
+    grow(random(1, n)) fill
+    settle(n - 10) fill
+    scatter(-1) fill
+    scatter((0 - n)%) fill
+}
+)");
+    INFO(ok.diags.format_all());
+    CHECK(ok.ok);   // computed values are clamped at run time, never errors
+}
+
 static bool has_warning(compile_result const& r, std::string const& needle) {
     for (auto const& d : r.diags.all)
         if (!d.is_error && d.message.find(needle) != std::string::npos)
