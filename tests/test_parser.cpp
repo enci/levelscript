@@ -374,6 +374,48 @@ rule edge {
     CHECK(pair.lhs[1].cells[0][0].kind == cell_kind::expr_cell);
 }
 
+TEST_CASE("parser: 'where' is a pattern head on either side of a single pair (0.8, 5.3)") {
+    auto ast = parse_ok("rule r { where[(x == 0), (y == 0)] => g[a] }");
+    auto const& p = ast.rules[0].pairs[0].lhs[0];
+    CHECK(p.is_where);
+    CHECK(p.rows == 2);
+    CHECK(p.cols == 1);
+}
+
+TEST_CASE("parser: commas separate pattern rows (0.8, 5.3)") {
+    auto ast = parse_ok("rule r { algo[* * *, * S W, * * *] => g[a, b, c] }");
+    auto const& lhs = ast.rules[0].pairs[0].lhs[0];
+    CHECK(lhs.rows == 3);
+    CHECK(lhs.cols == 3);
+    CHECK(lhs.cells[1][2].atoms[0].name == "W");
+    auto const& rhs = ast.rules[0].pairs[0].rhs.pat;   // a 1x3 vertical pattern
+    CHECK(rhs.rows == 3);
+    CHECK(rhs.cols == 1);
+}
+
+TEST_CASE("parser: a comma followed by a newline is one row break (0.8, 5.3)") {
+    auto ast = parse_ok("rule r {\n g[a b,\n   c d,   \n   e f]\n =>\n g[* *\n * *\n * *] }");
+    auto const& lhs = ast.rules[0].pairs[0].lhs[0];
+    CHECK(lhs.rows == 3);
+    CHECK(lhs.cols == 2);
+}
+
+TEST_CASE("parser: a comma inside an expression cell belongs to the expression") {
+    auto ast = parse_ok("rule r { n[(min(x, y)) *, * (max(1, 2))] => n[1 1, 1 1] }");
+    auto const& lhs = ast.rules[0].pairs[0].lhs[0];
+    REQUIRE(lhs.rows == 2);
+    CHECK(lhs.cols == 2);
+    CHECK(lhs.cells[0][0].value->kind == expr_kind::call);
+    CHECK(lhs.cells[0][0].value->args.size() == 2);
+}
+
+TEST_CASE("parser: empty pattern rows around commas are errors") {
+    CHECK(parse_fails("rule r { g[a,, b] => g[a, b] }"));
+    CHECK(parse_fails("rule r { g[, a] => g[a] }"));
+    CHECK(parse_fails("rule r { g[a, b,] => g[a, b] }"));
+    CHECK(parse_fails("rule r { g[a,\n] => g[a] }"));
+}
+
 TEST_CASE("parser: params block") {
     auto ast = parse_ok(R"(
 params {
