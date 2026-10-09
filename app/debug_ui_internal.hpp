@@ -64,7 +64,7 @@ void draw_centered_text(ImDrawList* dl, ImVec2 p0, float box_px, ImU32 col,
 // Filled marker centered on `c`, fitting a circle of radius `r`.
 void draw_shape(ImDrawList* dl, ImVec2 c, float r, tag_shape shape, ImU32 col);
 
-// ── script: one loaded .ls file ───────────────────────────────────────────────
+// ── script: one loaded .lvs file ───────────────────────────────────────────────
 
 struct script {
     std::string path;
@@ -264,7 +264,7 @@ struct tile_texture {
     ~tile_texture();
 };
 
-// Resolve a path relative to the .ls file's directory.
+// Resolve a path relative to the .lvs file's directory.
 std::string resolve_path(std::string const& ls_path, std::string const& rel);
 
 // (Re)load every tileset in cfg.tilesets into `textures` (keyed by tileset

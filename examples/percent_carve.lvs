@@ -3,7 +3,7 @@
 //
 // `scatter(P%)` applies P% of one batch's matches — ⌊P·total/100⌋,
 // an *exact* fraction of the candidate set (unlike a per-cell `random` gate,
-// which has variance; cf. random_scatter.ls). Only `scatter` takes one, since
+// which has variance; cf. random_scatter.lvs). Only `scatter` takes one, since
 // one batch's applied set is the percentage's denominator.
 //
 // Here every cell is rock (100 matches), then exactly 40% are carved to floor.

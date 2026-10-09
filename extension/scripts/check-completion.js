@@ -10,7 +10,7 @@ const path = require('path');
 const { completionContext, OPS } = require('../out/src/completion.js');
 const createLsModule = require('../ls_wasm.js');
 
-const decls = `use "lib.ls"
+const decls = `use "lib.lvs"
 tag t { F, W, D = F | W }
 layers {
     g: grid of t
@@ -72,7 +72,7 @@ const cases = [
     ['rule r { g[.] where[ ▮', { kind: 'none' }],
 
     // modules (section 2.6)
-    ['use "schema.ls"\n▮', { kind: 'top' }],
+    ['use "schema.lvs"\n▮', { kind: 'top' }],
     ['use "sche▮', { kind: 'none' }],                     // typing a path
     ['use ▮', { kind: 'none' }],
 
@@ -130,7 +130,7 @@ for (const [marked, want] of cases) {
 
 (async () => {
     const wasm = await createLsModule();
-    const ops = JSON.parse(wasm.inspect_json('sequence main { }', 'x.ls')).symbols.ops;
+    const ops = JSON.parse(wasm.inspect_json('sequence main { }', 'x.lvs')).symbols.ops;
     const mine = OPS.map(o => o.name);
     if (JSON.stringify(ops) !== JSON.stringify(mine)) {
         fail++;

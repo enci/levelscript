@@ -28,13 +28,13 @@ sequence main {
 )";
 
 TEST_CASE("inspect: healthy file emits ok, symbols, and no diagnostics") {
-    std::string j = ls::inspect_json(good_src, "test.ls");
+    std::string j = ls::inspect_json(good_src, "test.lvs");
     CHECK(has(j, "\"ok\":true"));
     CHECK(has(j, "\"diagnostics\":[]"));
     CHECK(has(j, "\"name\":\"geo\""));
     CHECK(has(j, "\"values\":[{\"name\":\"wall\",\"loc\":"));
     CHECK(has(j, "\"unions\":[{\"name\":\"blocker\",\"loc\":{\"line\":2,\"col\":24,\"len\":7,"
-                 "\"module\":\"test.ls\"}}]"));
+                 "\"module\":\"test.lvs\"}}]"));
     CHECK(has(j, "{\"name\":\"level\",\"type\":\"geo\",\"loc\":"));
     CHECK(has(j, "{\"name\":\"tiles\",\"type\":\"number\",\"loc\":"));
     CHECK(has(j, "{\"name\":\"difficulty\",\"derived\":false,\"loc\":"));
@@ -47,7 +47,7 @@ TEST_CASE("inspect: healthy file emits ok, symbols, and no diagnostics") {
 TEST_CASE("inspect: token classification of pattern tag values") {
     // rule fill's write cell 'floor' (value id 1 of tagset 0) — line 11:
     // `rule fill { level[.] => level[floor] }` — col of 'floor' is 31.
-    std::string j = ls::inspect_json(good_src, "test.ls");
+    std::string j = ls::inspect_json(good_src, "test.lvs");
     CHECK(has(j, "{\"line\":11,\"col\":31,\"len\":5,\"tag\":0,\"value\":1}"));
 }
 
@@ -61,7 +61,7 @@ rule bad  { level[lava] => level[wall] }
 rule good { level[.] => level[floor] }
 sequence main { everywhere good }
 )";
-    std::string j = ls::inspect_json(src, "test.ls");
+    std::string j = ls::inspect_json(src, "test.lvs");
     CHECK(has(j, "\"ok\":false"));
     CHECK(has(j, "unknown tag value 'lava'"));
     CHECK(has(j, "\"name\":\"geo\""));                  // symbols survive
@@ -70,7 +70,7 @@ sequence main { everywhere good }
 }
 
 TEST_CASE("inspect: parse-broken file still reports and stays valid JSON-ish") {
-    std::string j = ls::inspect_json("rule r { level[.] =>", "test.ls");
+    std::string j = ls::inspect_json("rule r { level[.] =>", "test.lvs");
     CHECK(has(j, "\"ok\":false"));
     CHECK(has(j, "\"severity\":\"error\""));
     CHECK(j.back() == '}');
@@ -89,7 +89,7 @@ layers { level: grid of geo  tiles: grid of number }
 rule mark { level[floor] => tiles[1] }
 sequence main { grow mark }
 )";
-    std::string j = ls::inspect_json(wsrc, "test.ls");
+    std::string j = ls::inspect_json(wsrc, "test.lvs");
     CHECK(has(j, "\"ok\":true"));
     CHECK(has(j, "\"severity\":\"warning\""));
     CHECK(has(j, "may never terminate"));
@@ -99,7 +99,7 @@ sequence main { grow mark }
 TEST_CASE("inspect: message strings are JSON-escaped") {
     // messages contain single quotes routinely; an unresolved `use` quotes
     // its path in double quotes, which must not break the JSON
-    std::string j = ls::inspect_json("use \"nope.ls\"\n", "test.ls");
+    std::string j = ls::inspect_json("use \"nope.lvs\"\n", "test.lvs");
     CHECK(has(j, "\"ok\":false"));
     CHECK(has(j, "\\\""));   // escaped quote inside a message
 }
@@ -112,7 +112,7 @@ layers {
 }
 rule r { g[* D] n[* 12] => { all g[F D]  n[. 3] } }
 sequence main { }
-)", "test.ls");
+)", "test.lvs");
     CHECK(has(j, "\"diagnostics\":[]"));
     // union D takes the slot after its tag's values (F=0, W=1 -> D=2)
     CHECK(has(j, "{\"line\":6,\"col\":14,\"len\":1,\"tag\":0,\"value\":2}"));
@@ -130,7 +130,7 @@ TEST_CASE("inspect: inline rules are colored and their grids referenced (0.8)") 
     std::string j = ls::inspect_json(R"(tag t { F, W }
 layers { g: grid of t }
 sequence main { everywhere { g[F] => g[W] } }
-)", "test.ls");
+)", "test.lvs");
     CHECK(has(j, "\"diagnostics\":[]"));
     CHECK(has(j, "{\"line\":3,\"col\":32,\"len\":1,\"tag\":0,\"value\":0}"));   // F
     CHECK(has(j, "{\"line\":3,\"col\":30,\"len\":1,\"kind\":\"layer\",\"target\":\"g\"}"));

@@ -147,7 +147,7 @@ export const completionProvider: vscode.CompletionItemProvider = {
 
         switch (ctx.kind) {
         case 'top':
-            snippet('use', 'use "${1:module.ls}"', K.Keyword, 'use another module (head of the file)');
+            snippet('use', 'use "${1:module.lvs}"', K.Keyword, 'use another module (head of the file)');
             snippet('tag', 'tag ${1:name} { ${0} }', K.Keyword);
             snippet('layers', 'layers {\n\t$0\n}', K.Keyword);
             snippet('params', 'params {\n\t$0\n}', K.Keyword);

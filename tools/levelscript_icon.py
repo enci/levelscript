@@ -22,7 +22,7 @@ directory):
     resources/icon/levelscript.ico       Windows executables and installer:
                                          flat up to FLAT_MAX px, full above
     extension/icon.png                   128 px, the VS Code extension
-    extension/file-icon.svg              the flat variant, .ls files in VS Code
+    extension/file-icon.svg              the flat variant, .lvs files in VS Code
     packaging/windows/wizard-*.bmp       Inno Setup wizard images, 100% and 200%
     packaging/macos/background*.png      Installer background (icon bottom-left),
                                          1x and @2x; build_pkg.py joins them

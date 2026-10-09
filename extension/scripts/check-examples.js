@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Runs the extension's parser + sema (the diagnostics engine) over every .ls
+// Runs the extension's parser + sema (the diagnostics engine) over every .lvs
 // file under ../../examples and checks the results against each file's
 // `// @expect ...` annotations.
 //
@@ -30,7 +30,7 @@ function walk(dir) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name);
     if (e.isDirectory()) out.push(...walk(p));
-    else if (e.name.endsWith('.ls')) out.push(p);
+    else if (e.name.endsWith('.lvs')) out.push(p);
   }
   return out;
 }

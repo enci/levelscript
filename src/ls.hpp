@@ -9,7 +9,7 @@
 
 // LevelScript embedding API — what a game sees.
 //
-//   auto gen   = ls::generator::compile(source, "dungeon.ls", resolve);  // once, at load
+//   auto gen   = ls::generator::compile(source, "dungeon.lvs", resolve);  // once, at load
 //   int  wall  = gen.tag("geo.wall");                   // resolve names once
 //   int  entry = gen.sequence("main");                  // any sequence can be the entry
 //   auto level = gen.generate(entry, seed);             // pure in (entry, seed, params)
@@ -186,7 +186,7 @@ public:
     /// Compile `source` as the root module (section 2.6), with canonical name
     /// `name`. The game owns file/asset IO: each `use` is mapped to a module
     /// by `resolve`; with no resolver every `use` is unresolved. Diagnostics
-    /// are labelled with canonical module names ("dungeon.ls:12:3: error: ...").
+    /// are labelled with canonical module names ("dungeon.lvs:12:3: error: ...").
     static generator compile(const std::string& source,
                              const std::string& name = "generator",
                              resolver resolve = {});

@@ -9,7 +9,7 @@
 // public run API (compile once, step application by application).
 
 static void usage(char const* argv0) {
-    std::cerr << "Usage: " << argv0 << " [--seed N] [--entry name] <file.ls>\n"
+    std::cerr << "Usage: " << argv0 << " [--seed N] [--entry name] <file.lvs>\n"
               << "  --entry  the sequence to run (default: main)\n";
 }
 

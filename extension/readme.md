@@ -1,6 +1,6 @@
 # LevelScript
 
-Language support for [LevelScript](https://github.com/enci/levelscript) (`.ls`), a rule-based language for procedural level generation.
+Language support for [LevelScript](https://github.com/enci/levelscript) (`.lvs`), a rule-based language for procedural level generation.
 
 - Syntax highlighting
 - Diagnostics from the LevelScript compiler, as you type

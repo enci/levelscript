@@ -217,6 +217,6 @@ jobs:
 
             ## Usage
             ```
-            levelscript [--seed N] [--entry name] [--param name=value ...] <file.ls>
-            levelscript-debugger [--seed N] [--entry name] <file.ls>
+            levelscript [--seed N] [--entry name] [--param name=value ...] <file.lvs>
+            levelscript-debugger [--seed N] [--entry name] <file.lvs>
             ```

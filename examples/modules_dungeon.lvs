@@ -1,0 +1,9 @@
+// Modules (section 2.6): the root of a three-module closure. It uses carve.lvs only,
+// so it may apply `carve` but not name `level` - that would need its own
+// `use "modules/schema.lvs"`. Tools run the sequence `main` (section 6).
+// @expect run-ok
+use "modules/carve.lvs"
+
+sequence main {
+    once carve
+}

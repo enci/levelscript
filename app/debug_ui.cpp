@@ -244,7 +244,7 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
     io.IniFilename = ini_path.c_str();
     // FreeType backend -- crisper rendering, especially at HiDPI.
     io.Fonts->SetFontLoader(ImGuiFreeType::GetFontLoader());
-    // UI text is Latin only (.ls scripts are ASCII), so ImGui's default glyph
+    // UI text is Latin only (.lvs scripts are ASCII), so ImGui's default glyph
     // range suffices. UI icons come from the merged Phosphor font. Missing
     // font files degrade to ImGui's built-in font rather than failing.
     std::string text_font = find_resource("resources/Roboto-Regular.ttf");
