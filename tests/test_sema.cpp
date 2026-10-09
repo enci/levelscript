@@ -336,8 +336,6 @@ TEST_CASE("sema: param scopes") {
     // reserved / collision names
     CHECK(compile_result("params { width: number = 3 }\n" + rprog)
           .has_error("reserved expression identifier"));
-    CHECK(compile_result("params { random: number = 3 }\n" + rprog)
-          .has_error("built-in function name"));
     CHECK(compile_result(prelude + "params { level: number = 3 }\n" + rprog)
           .has_error("collides with a grid"));
     // valid: defaults may use earlier params and random
@@ -523,13 +521,24 @@ sequence main { mirror(horizontal) }
         INFO(r.diags.format_all());
         CHECK(r.ok);
     }
-    SECTION("max is still unavailable as a name: it is a built-in (check 21)") {
-        CHECK(compile_result("tag t { max }\nlayers { g: grid of t }\n" + rprog)
-              .has_error("built-in"));
-        CHECK(compile_result("params { max: number = 3 }\n" + rprog)
-              .has_error("built-in function name"));
-        CHECK(compile_result("tag t { a }\nlayers { max: grid of t }\n" + rprog)
-              .has_error("built-in"));
+    SECTION("built-in names are not reserved (0.8, section 5.10)") {
+        compile_result r(R"(
+tag t { max, random }
+layers { min: grid of t  n: grid of number }
+params { abs: number = 3  if = abs * 2 }
+rule r { min[.] => min[random] }
+rule s { min[random] n[.] where[ (max(abs, if) == 6) ] => n[ (min(abs, 7)) ] }
+rule u { min[max] => min[ (if(abs > 1, random, max)) ] }
+sequence main { resize(2, 2) all r all s all u }
+)");
+        INFO(r.diags.format_all());
+        REQUIRE(r.ok);
+        CHECK(r.prog.param_id("abs") >= 0);
+        CHECK(r.prog.layer_id("min") >= 0);
+    }
+    SECTION("a bare built-in name with no declaration still does not resolve") {
+        CHECK(compile_result(trio + "rule r { where[ (abs > 0) ] => g[a] }\n" + rprog)
+              .has_error("unknown identifier"));
     }
     SECTION("attribute and axis values are still validated") {
         CHECK(compile_result(trio + "rule r(symmetry=rotation) { g[.] => g[a] }\n" + rprog)
