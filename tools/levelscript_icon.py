@@ -43,7 +43,7 @@ RIBBON = "A1 A5 E5 E3 C3 C1 E1"
 # (the counters between the bands) share what is left, so the ribbon grows
 # inward and the outline stays the same size. All other lengths in cells
 # (radii, shadow widths) use the nominal cell, 1/N of the icon.
-THICKNESS = 1.2
+THICKNESS = 1.25
 
 # Corner radii of the ribbon outline, in cells (0.5 = semicircular band end).
 # Where two corners share an edge too short for both, a piece's explicit
@@ -52,7 +52,7 @@ THICKNESS = 1.2
 # asymmetric: 0.8 on the outside, 0.2 on the inside). Between two corners of
 # the same kind, the smaller is kept and the larger gets the remainder.
 RADII = dict(
-    outer=0.8,    # convex corners on the four corners of the icon square
+    outer=1.0,    # convex corners on the four corners of the icon square
     convex=0.5,   # all other convex corners
     concave=0.0,  # inside corners
 )
@@ -94,12 +94,12 @@ PIECES = [
 # the ribbon reads as a single material; the back face is the front mixed
 # toward BACK_TINT (a deep tint keeps it saturated, unlike mixing with black).
 # BACK_TINT also colours the fold shadows and depth darkening.
-FRONT = ["#F5DD7E", "#3FC46E", "#008167"]  # gradient stops, top-left to bottom-right
+FRONT = ["#F5DD7E", "#3FC46E", "#0F8C72"]  # gradient stops, top-left to bottom-right
 BACK_TINT = "#06352C"
 BACK_DARKEN = 0.38     # 0 = same as front, 1 = BACK_TINT
 FOLD_SHADOW = dict(
-    opacity=0.45,      # darkness at the fold, fading to 0
-    width=1.0,         # how far it reaches into the piece, in cells
+    opacity=0.55,      # darkness at the fold, fading to 0
+    width=1.2,         # how far it reaches into the piece, in cells
 )
 DEPTH = 0.45           # darkness at a piece's far end (see PIECES "depth")
 HIGHLIGHT = 0.22       # white sheen from the top-left; 0 disables
@@ -108,7 +108,7 @@ HIGHLIGHT = 0.22       # white sheen from the top-left; 0 disables
 # gradients, shadows or highlight. The face change alone marks the folds.
 FLAT = dict(
     front="#3FC46E",
-    back="#0E5E4A",
+    back="#339B75",
 )
 FLAT_MAX = 32   # .ico sizes up to this use the flat variant
 # macOS draws app icons at 824 of 1024 px, centred; a full-bleed icon looks
