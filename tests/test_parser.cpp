@@ -12,6 +12,11 @@ static ast_file parse_ok(std::string const& src) {
     return std::move(*ast);
 }
 
+// A count written as a literal: its value; anything else: -1.
+static long long lit(expr_ptr const& e) {
+    return e && e->kind == expr_kind::int_lit ? e->int_val : -1;
+}
+
 static bool parse_fails(std::string const& src) {
     diagnostics diags;
     parse(src, "test", diags);
@@ -54,7 +59,7 @@ TEST_CASE("parser: full skeleton file") {
     CHECK(ast.sequences.back().stmts[1].mode == apply_mode::everywhere);
     CHECK(ast.sequences.back().stmts[2].mode == apply_mode::once);
     CHECK(ast.sequences.back().stmts[3].mode == apply_mode::scatter);
-    CHECK(ast.sequences.back().stmts[3].count == 5);
+    CHECK(lit(ast.sequences.back().stmts[3].count) == 5);
 }
 
 TEST_CASE("parser: multi-row pattern rows and cols") {
@@ -317,19 +322,46 @@ sequence main {
     auto const& s = ast.sequences.back().stmts;
     REQUIRE(s.size() == 8);
     CHECK(s[0].mode == apply_mode::everywhere);
-    CHECK(s[0].count == -1);
+    CHECK(!s[0].count);
     CHECK(s[1].mode == apply_mode::settle);
-    CHECK(s[1].count == -1);
+    CHECK(!s[1].count);
     CHECK(s[2].mode == apply_mode::once);
     CHECK(s[3].mode == apply_mode::grow);
-    CHECK(s[3].count == 200);
+    CHECK(lit(s[3].count) == 200);
     CHECK(s[4].mode == apply_mode::scatter);
     CHECK(s[4].count_percent);
-    CHECK(s[4].count == 50);
-    CHECK(s[5].count == -1);
-    CHECK(s[6].count == 3);
+    CHECK(lit(s[4].count) == 50);
+    CHECK(!s[5].count);
+    CHECK(lit(s[6].count) == 3);
     CHECK(!s[7].count_percent);
     CHECK(s[7].rule_name == "carve");
+}
+
+TEST_CASE("parser: counts are expressions; '%' binds to an atom (0.8, section 6)") {
+    auto ast = parse_ok(R"(
+sequence main {
+    scatter(budget / 10) a
+    scatter(density%) a
+    scatter((n * 2)%) a
+    grow(random(1, 3)) a
+    settle(n - 1) a
+    scatter(50%) a
+}
+)");
+    auto const& s = ast.sequences.back().stmts;
+    REQUIRE(s.size() == 6);
+    CHECK(s[0].count->kind == expr_kind::div_);
+    CHECK(!s[0].count_percent);
+    CHECK(s[1].count->kind == expr_kind::ident);
+    CHECK(s[1].count_percent);
+    CHECK(s[2].count->kind == expr_kind::mul);
+    CHECK(s[2].count_percent);
+    CHECK(s[3].count->kind == expr_kind::call);
+    CHECK(s[4].count->kind == expr_kind::sub);
+    CHECK(lit(s[5].count) == 50);
+    CHECK(parse_fails("sequence main { scatter(n * 2%) a }"));
+    CHECK(parse_fails("sequence main { scatter(-5%) a }"));
+    CHECK(parse_fails("sequence main { scatter(f(1)%) a }"));
 }
 
 TEST_CASE("parser: count forms each mode rejects (0.8, section 6)") {
@@ -504,7 +536,7 @@ sequence main {
     CHECK(ast.rules[1].rotation_angles == std::vector<long long>{90, 180, 270});
     auto const& s = ast.sequences.back().stmts;
     REQUIRE(s.size() == 3);
-    CHECK(s[0].count == 3);
+    CHECK(lit(s[0].count) == 3);
     REQUIRE(s[1].op_args.size() == 1);
     CHECK(s[1].op_args[0].ident == "horizontal");
     CHECK(s[2].op_args[0].ident == "vertical");

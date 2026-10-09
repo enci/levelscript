@@ -267,8 +267,11 @@ std::string stmt_desc(program_stmt const& s) {
     }
     static char const* const names[] = {"once", "scatter", "everywhere", "grow", "settle"};
     std::string p = names[(int)s.mode];
-    if (s.count >= 0)
-        p += "(" + std::to_string(s.count) + (s.count_percent ? "%" : "") + ")";
+    if (s.count) {
+        p += s.count->kind == expr_kind::int_lit ? "(" + std::to_string(s.count->int_val)
+                                                 : std::string("((...)");
+        p += s.count_percent ? "%)" : ")";
+    }
     p += " " + s.rule_name;
     if (s.guard) p += "  when (...)";
     return p;
@@ -626,8 +629,8 @@ struct program_tree {
             if (inside) {   // which iteration of this sequence is running
                 int it = path[(size_t)depth + 1].iteration + 1;
                 ImGui::SameLine();
-                if (cs.count >= 0)
-                    ImGui::TextDisabled("iteration %d / %d", it, cs.count);
+                if (cs.count_lit >= 0)
+                    ImGui::TextDisabled("iteration %d / %d", it, cs.count_lit);
                 else
                     ImGui::TextDisabled("iteration %d", it);
             }

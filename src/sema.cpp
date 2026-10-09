@@ -1119,6 +1119,30 @@ struct analyzer {
         return "";
     }
 
+    // A count (section 6): a statement-scope expression like a guard - params
+    // only, a number (check 21). A literal 0 applies nothing (check 28); a
+    // literal percentage may not exceed 100 (check 30). Computed values are
+    // clamped at run time instead.
+    void compile_count(program_stmt const& s, compiled_stmt& cs, std::string const& ctx) {
+        scope_ = scope{false, false, -1};
+        val_type t;
+        cs.count = compile_expr(*s.count, -1, t);
+        scope_ = scope{};
+        if (t != val_type::num)
+            error(s.count_loc, "a count must be a number" + ctx);
+        // literal-ness from the source: a count that failed to compile also
+        // compiles to a literal
+        auto const& e = *s.count;
+        if (e.kind != expr_kind::int_lit) return;
+        cs.count_lit = (int)e.int_val;
+        if (e.int_val == 0)
+            error(s.count_loc, std::string("a count of 0") +
+                  (s.count_percent ? "%" : "") + " applies nothing" + ctx);
+        if (s.count_percent && e.int_val > 100)
+            error(s.count_loc, "percentage " + std::to_string(e.int_val) +
+                  "% is above 100" + ctx);
+    }
+
     // Levenshtein distance - did-you-mean for unknown rule/sequence names.
     static int edit_distance(std::string const& a, std::string const& b) {
         std::vector<int> row(b.size() + 1);
@@ -1188,7 +1212,6 @@ struct analyzer {
             } else {
                 cs.what = compiled_stmt::kind::apply;
                 cs.mode = s.mode;
-                cs.count = (int)s.count;
                 cs.percent = s.count_percent;
                 for (int i = 0; i < (int)out.rules.size(); ++i)
                     if (out.rules[i].name == s.rule_name) { cs.rule_id = i; break; }
@@ -1206,14 +1229,7 @@ struct analyzer {
                 else
                     require_visible(s.rule_name_loc, "sequence", s.rule_name,
                                     ast.sequences[(size_t)cs.seq_id].loc.mod);
-                // section 7.3, check 28: a literal zero count applies nothing.
-                if (s.count == 0)
-                    error(s.count_loc, std::string("a count of 0") +
-                          (s.count_percent ? "%" : "") + " applies nothing" + ctx);
-                // section 7.3, check 30: a percentage above 100.
-                if (s.count_percent && s.count > 100)
-                    error(s.count_loc, "percentage " + std::to_string(s.count) +
-                          "% is above 100" + ctx);
+                if (s.count) compile_count(s, cs, ctx);
                 if (cs.seq_id >= 0) {
                     // section 7.3, check 37: rule-only modes on a sequence.
                     if (s.mode != apply_mode::once && s.mode != apply_mode::settle)
@@ -1221,7 +1237,7 @@ struct analyzer {
                               s.rule_name + "'; a sequence takes 'once' or 'settle'" +
                               (s.mode == apply_mode::scatter
                                    ? ", and 'scatter' belongs on the statements inside it" : ""));
-                } else if (s.mode == apply_mode::grow && s.count < 0) {
+                } else if (s.mode == apply_mode::grow && !s.count) {
                     // Reductivity warning (section 6.9 — LevelScript addition): a
                     // `grow` fixpoint over a rule whose write never invalidates
                     // its own match cannot terminate.
@@ -1279,8 +1295,8 @@ struct analyzer {
 
     // The operation that changes the grid dimensions on every iteration of
     // sequence `sid` ("" if none is certain): an unguarded non-identity
-    // upscale/pad, directly or through unguarded nested applications (every
-    // count runs at least one iteration). section 6.10.
+    // upscale/pad, directly or through unguarded nested applications that are
+    // certain to run an iteration (no count, or a literal one). section 6.10.
     std::string dims_changer(int sid, std::vector<char>& seen) const {
         if (seen[sid]) return "";
         seen[sid] = 1;
@@ -1289,7 +1305,8 @@ struct analyzer {
             if (st.what == compiled_stmt::kind::op_call) {
                 if (st.op.kind == op_kind::upscale && (st.op.w != 1 || st.op.h != 1)) return "upscale";
                 if (st.op.kind == op_kind::pad && st.op.w > 0) return "pad";
-            } else if (st.seq_id >= 0) {
+            } else if (st.seq_id >= 0 && (st.count < 0 || st.count_lit > 0)) {
+                // a computed count may be zero, so it is not certain to run
                 std::string inner = dims_changer(st.seq_id, seen);
                 if (!inner.empty()) return inner;
             }

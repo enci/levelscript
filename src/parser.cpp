@@ -593,15 +593,39 @@ struct parser {
                at(token_type::kw_settle);
     }
 
-    // count ::= '(' INTEGER ')'; scatter also takes '(' INTEGER '%' ')'.
+    // Is the '(' at peek(off) closed by a ')' directly followed by '%'?
+    bool paren_then_percent(int off) const {
+        int depth = 0;
+        for (;; ++off) {
+            token const& t = peek(off);
+            if (t.is(token_type::end)) return false;
+            if (t.is(token_type::lparen)) ++depth;
+            else if (t.is(token_type::rparen) && --depth == 0)
+                return peek(off + 1).is(token_type::percent);
+        }
+    }
+
+    // count         ::= '(' expr ')'                      (grow, settle)
+    // scatter_count ::= expr | percent
+    // percent       ::= (INTEGER | IDENT | '(' expr ')') '%'
+    // The '%' binds to an atom only, so it always applies to the whole count:
+    // `n * 2%` is an error, `(n * 2)%` a percentage (section 6).
     void parse_count(program_stmt& s, bool percent_ok) {
         eat();   // '('
         s.count_loc = loc();
-        if (!expect(token_type::integer, "a count")) { recover_to(token_type::rparen); return; }
-        s.count = toks[pos - 1].int_val;
+        bool atom_percent =
+            ((at(token_type::integer) || at(token_type::ident)) &&
+             peek(1).is(token_type::percent)) ||
+            (at(token_type::lparen) && paren_then_percent(0));
+        s.count = parse_expr();
         if (at(token_type::percent)) {
-            if (percent_ok) s.count_percent = true;
-            else error_at(peek(), "only 'scatter' takes a percentage");
+            if (!percent_ok)
+                error_at(peek(), "only 'scatter' takes a percentage");
+            else if (!atom_percent)
+                error_at(peek(), "'%' follows a number, a param name, or a parenthesized "
+                         "expression; write '(...)%' for a computed percentage");
+            else
+                s.count_percent = true;
             eat();
         }
         expect(token_type::rparen, "')'");

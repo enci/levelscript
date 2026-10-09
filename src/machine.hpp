@@ -84,10 +84,13 @@ private:
 
     // One rule application or operation - a leaf statement. Yields its
     // applications; the caller yields the statement boundary.
-    sequence<step_event> run_leaf(compiled_stmt const& st, int top);
+    // A statement's count, evaluated on each visit after its guard (section 6):
+    // -1 = none; below 0 acts as 0, a percentage above 100 as 100.
+    int eval_count(compiled_stmt const& st);
+    sequence<step_event> run_leaf(compiled_stmt const& st, int top, int count);
     // A sequence application (section 6.10): iterations of the body until the count
     // runs out or an iteration is stable.
-    sequence<step_event> run_sequence(compiled_stmt const& st, int top);
+    sequence<step_event> run_sequence(compiled_stmt const& st, int top, int count);
 
     // The whole grid stack, for sequence stability (section 6.10, section 10.7).
     struct stack_state {

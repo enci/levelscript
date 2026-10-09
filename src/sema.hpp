@@ -154,8 +154,10 @@ struct compiled_stmt {
     source_loc  loc;
     compiled_op op;                       // op_call
     apply_mode  mode{apply_mode::everywhere};   // apply (sections 6, 6.7)
-    int         count{-1};        // -1 = none: once = 1, everywhere = all, grow/settle = fixpoint
-    bool        percent{false};   // scatter(P%): count is P
+    int         count{-1};        // count expr arena index; -1 = none: once = 1,
+                                  // everywhere = all, grow/settle = fixpoint
+    int         count_lit{-1};    // the count's value when written as a literal; else -1
+    bool        percent{false};   // scatter(P%): the count is P
     int         rule_id{-1};   // apply over a rule
     int         seq_id{-1};    // apply over a sequence (section 6.10): once or settle
     int         guard{-1};   // `when` expr arena index; -1 = unguarded
