@@ -161,7 +161,6 @@ struct analyzer {
             if (name == s.name) return &s;
         return nullptr;
     }
-    static bool is_builtin_name(std::string const& n) { return find_builtin(n) != nullptr; }
 
     // Resolve a bare identifier: x/y/width/height → param → grid → tag value
     // or union (the enclosing cell's tagset first, else a unique value match).
@@ -382,15 +381,13 @@ struct analyzer {
     }
 
     // One collision discipline for every named declaration (the MGSL retro's
-    // check_name): reserved position idents, built-in names, grid/param cross
-    // collisions are all caught here with one message shape.
+    // check_name): reserved position idents are caught here with one message
+    // shape. Built-in names are not reserved (section 5.10): a call is `IDENT '('`,
+    // and tag values, grids, and params are never called.
     void check_name(source_loc loc, std::string const& kind, std::string const& name) {
         if (is_reserved_ident(name))
             error(loc, kind + " '" + name + "' collides with a reserved "
                   "expression identifier (x, y, width, height)");
-        if (is_builtin_name(name))
-            error(loc, kind + " '" + name + "' collides with a built-in "
-                  "function name (if, min, max, abs, clamp, random)");
     }
 
     // ── symbol tables ────────────────────────────────────────────────────────
