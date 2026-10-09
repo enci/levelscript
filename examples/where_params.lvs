@@ -6,7 +6,7 @@
 // water; everything else becomes grass. Raising sea_level floods more of the
 // map from the top.
 //
-// Run it:  levelscript --param sea_level=2 examples/where_params.ls
+// Run it:  levelscript --param sea_level=2 examples/where_params.lvs
 //
 // @param sea_level 2
 // @expect run-ok

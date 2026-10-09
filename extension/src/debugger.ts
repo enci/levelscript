@@ -7,7 +7,7 @@ import * as path from 'path';
 // The native debugger (`levelscript-debugger`) is a separate program shipped by
 // the installer / built from this repo. The extension finds it once, stores the
 // location in the `levelscript.debuggerPath` setting, and launches it on the
-// active .ls file.
+// active .lvs file.
 
 const SETTING = 'levelscript.debuggerPath';
 const EXE = process.platform === 'win32' ? 'levelscript-debugger.exe' : 'levelscript-debugger';
@@ -116,7 +116,7 @@ export function registerDebugger(ctx: vscode.ExtensionContext) {
         vscode.commands.registerCommand('levelscript.run', () => {
             const editor = vscode.window.activeTextEditor;
             if (!editor || editor.document.languageId !== 'levelscript') {
-                vscode.window.showWarningMessage('Open a .ls file to debug it.');
+                vscode.window.showWarningMessage('Open a .lvs file to debug it.');
                 return;
             }
             return launch(editor.document);

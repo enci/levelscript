@@ -30,7 +30,7 @@ sequence main {
 ```
 
 ```cpp
-auto gen   = ls::generator::compile(source, "dungeon.ls", resolve);  // resolve maps `use` paths
+auto gen   = ls::generator::compile(source, "dungeon.lvs", resolve);  // resolve maps `use` paths
 auto level = gen.generate(gen.sequence("main"), seed);
 auto geo   = level["level"];
 int  wall  = gen.tag("geo.wall");
@@ -59,10 +59,10 @@ To build them yourself:
 
 ## Compiler / runner: `levelscript`
 
-Compiles a `.ls` file, runs one sequence and prints every layer as text.
+Compiles a `.lvs` file, runs one sequence and prints every layer as text.
 
 ```
-levelscript [--seed N] [--entry name] [--param name=value ...] [--inspect] <file.ls>
+levelscript [--seed N] [--entry name] [--param name=value ...] [--inspect] <file.lvs>
 ```
 
 | Option | Meaning |
@@ -73,8 +73,8 @@ levelscript [--seed N] [--entry name] [--param name=value ...] [--inspect] <file
 | `--inspect` | Don't run; print a JSON report (diagnostics, symbols) for editor tooling. |
 
 ```
-levelscript --seed 42 examples/dungeon.ls
-levelscript --seed 7 --param difficulty=2 examples/arena.ls
+levelscript --seed 42 examples/dungeon.lvs
+levelscript --seed 7 --param difficulty=2 examples/arena.lvs
 ```
 
 Compile errors and warnings go to stderr; a compile error exits with 1.
@@ -86,7 +86,7 @@ An interactive window over the same program: step through the generation one
 rule application at a time and watch the layers change.
 
 ```
-levelscript-debugger [--seed N] [--entry name] <file.ls>
+levelscript-debugger [--seed N] [--entry name] <file.lvs>
 ```
 
 Breakpoints are set by clicking the gutter next to a statement in the code
@@ -104,8 +104,8 @@ view (red dot). Keys follow VS Code:
 | `Q` | Quit |
 
 Per-layer display settings (text or tileset, opacity, visibility, zoom,
-background colour) are saved next to the script as `<file>.ls.json`
-(see `examples/dungeon.ls.json`). The theme, window geometry and seed are
+background colour) are saved next to the script as `<file>.lvs.json`
+(see `examples/dungeon.lvs.json`). The theme, window geometry and seed are
 remembered per user.
 
 ## Build & test

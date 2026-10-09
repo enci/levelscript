@@ -78,7 +78,7 @@ jobs:
             exit 1
           }
 
-      # Golden-output determinism gate (examples/*.ls vs .expected). Running it on every
+      # Golden-output determinism gate (examples/*.lvs vs .expected). Running it on every
       # platform is what proves the output really is a pure function of (seed, params).
       - name: Examples
         run: python tools/run_examples.py

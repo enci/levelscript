@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Golden-output example runner — the determinism gate.
 
-Runs every examples/*.ls through the levelscript CLI with its pinned seed (a `// @seed N`
+Runs every examples/*.lvs through the levelscript CLI with its pinned seed (a `// @seed N`
 comment, default 42) and compares stdout against the .expected file next to
 it. Any change to shuffle order or draw sequence fails loudly here.
 
@@ -32,14 +32,14 @@ def find_cli() -> Path:
 def main() -> None:
     update = "--update" in sys.argv
     cli = find_cli()
-    examples = sorted((ROOT / "examples").glob("*.ls"))
-    error_examples = sorted((ROOT / "examples" / "errors").glob("*.ls"))
+    examples = sorted((ROOT / "examples").glob("*.lvs"))
+    error_examples = sorted((ROOT / "examples" / "errors").glob("*.lvs"))
     if not examples and not error_examples:
         sys.exit("no examples found")
 
     failed = 0
 
-    # examples/errors/*.ls must FAIL to compile (exit != 0, diagnostics on stderr)
+    # examples/errors/*.lvs must FAIL to compile (exit != 0, diagnostics on stderr)
     for ex in error_examples:
         run = subprocess.run([str(cli), "--seed", "1", str(ex)],
                              capture_output=True, text=True)

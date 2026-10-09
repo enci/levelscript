@@ -1,8 +1,8 @@
 # LevelScript
 
-**Status**: Draft 0.8.2
-**File extension**: `.ls`
-**CLI**: `levelscript [--seed N] [--entry name] [--param name=value ...] <file.ls>` (`--entry` defaults to `main`, a tool convention; section 6)
+**Status**: Draft 0.8.3
+**File extension**: `.lvs`
+**CLI**: `levelscript [--seed N] [--entry name] [--param name=value ...] <file.lvs>` (`--entry` defaults to `main`, a tool convention; section 6)
 **Embedding**: namespace `ls::` (see Appendix A)
 **Scope**: Core language semantics for grid-based procedural generation.
 
@@ -34,7 +34,7 @@ top_decl    ::= tag_decl | layers_decl | params_decl | rule_decl | sequence_decl
 
 ### 2.1 Source files
 
-LevelScript source files have the extension `.ls` and are UTF-8 encoded. Identifiers are ASCII (see section 2.3); non-ASCII bytes are only valid inside comments. Unicode identifiers are deferred to a future version. Each source file is a module (section 2.6).
+LevelScript source files have the extension `.lvs` and are UTF-8 encoded. Identifiers are ASCII (see section 2.3); non-ASCII bytes are only valid inside comments. Unicode identifiers are deferred to a future version. Each source file is a module (section 2.6).
 
 ### 2.2 Comments
 
@@ -113,26 +113,26 @@ A `mask_atom`'s `IDENT` (section 5.3) may be a `tag_value` or a `tag_union` (sec
 Every source file is a **module**. A module may begin with `use` declarations, each naming another module whose declarations it may reference:
 
 ```ls
-// schema.ls
+// schema.lvs
 tag algo { R, W }
 layers { level: grid of algo }
 
-// carve.ls
-use "schema.ls"
+// carve.lvs
+use "schema.lvs"
 rule seed_room { level[.] => level[R] }
 sequence carve {
     resize(16, 7)
     once seed_room
 }
 
-// dungeon.ls
-use "carve.ls"
+// dungeon.lvs
+use "carve.lvs"
 sequence main {
     once carve
 }
 ```
 
-`dungeon.ls` sees `seed_room` and `carve`, but not `level` or `algo`. Those are declared in `schema.ls`, which `dungeon.ls` does not use itself.
+`dungeon.lvs` sees `seed_room` and `carve`, but not `level` or `algo`. Those are declared in `schema.lvs`, which `dungeon.lvs` does not use itself.
 
 **Grammar:**
 ```
@@ -146,9 +146,9 @@ use_decl ::= 'use' STRING
 
 **Names.** Names are unique across the closure. Two tagsets, two grids, or two params with the same name are a compile error wherever they are declared (check 42); so are two rules or sequences (check 39). There are no qualified names (`schema.level`) and there is no selective `use`. Because a name denotes the same declaration in every module, `use` determines only which names a module may reference.
 
-**Visibility.** A module **sees** its own declarations and the declarations of the modules it uses directly. A `use` is not re-exported: in the example above, `carve.ls` sees `schema.ls` and `dungeon.ls` sees `carve.ls`, but `dungeon.ls` does not see `schema.ls`. Every tagset, grid, param, rule, and sequence name a module writes must resolve to a declaration it sees (check 8). Tag values and tag unions need no visibility of their own; they resolve through the declared tagset of the grid they are written in (sections 3 and 5.8). A module's meaning therefore depends only on its own `use` declarations. It compiles identically as the root or as a dependency, and it can be compiled on its own.
+**Visibility.** A module **sees** its own declarations and the declarations of the modules it uses directly. A `use` is not re-exported: in the example above, `carve.lvs` sees `schema.lvs` and `dungeon.lvs` sees `carve.lvs`, but `dungeon.lvs` does not see `schema.lvs`. Every tagset, grid, param, rule, and sequence name a module writes must resolve to a declaration it sees (check 8). Tag values and tag unions need no visibility of their own; they resolve through the declared tagset of the grid they are written in (sections 3 and 5.8). A module's meaning therefore depends only on its own `use` declarations. It compiles identically as the root or as a dependency, and it can be compiled on its own.
 
-**Canonical order.** The closure's modules are put in **canonical order** by a depth-first, post-order walk from the root. The walk follows each module's `use` declarations in written order and visits each module once, so every module comes after the modules it uses, and the root comes last (in the example: `schema.ls`, `carve.ls`, `dungeon.ls`). Declarations are ordered by module in canonical order, then by position in their file. Canonical order fixes the layer order (section 4), the param evaluation order (section 4.2), and the sequence ids of the embedding API (Appendix A). Everything a module sees from another module precedes it in this order.
+**Canonical order.** The closure's modules are put in **canonical order** by a depth-first, post-order walk from the root. The walk follows each module's `use` declarations in written order and visits each module once, so every module comes after the modules it uses, and the root comes last (in the example: `schema.lvs`, `carve.lvs`, `dungeon.lvs`). Declarations are ordered by module in canonical order, then by position in their file. Canonical order fixes the layer order (section 4), the param evaluation order (section 4.2), and the sequence ids of the embedding API (Appendix A). Everything a module sees from another module precedes it in this order.
 
 ---
 
@@ -1087,7 +1087,7 @@ sequence main {
 
 Reading `main`: the first inline rule fills `algo` with `W`, and the second seeds up to five `S` markers into it in one batch; `grow(100)` runs `rwalk` as a drunkard's walk from them, carving `F` through the `W` fill, each step seeing the last (the `rotation=all` variants walk in all four directions); `upscale` doubles the resolution; `reduce` erodes 2x2 seed blocks; then batches convert the `algo` sketch into rewards, geometry, enemies, and tile indices. One-line rules and plain fill passes are written inline; rules with attributes (`rwalk`, `reduce`) or with alternatives (`reward`, `place_enemies`) are named.
 
-A structural-operation companion (`examples/corridor.ls`): scatter a numeric cost field, place a door and an exit with `where`-pinned rules, then
+A structural-operation companion (`examples/corridor.lvs`): scatter a numeric cost field, place a door and an exit with `where`-pinned rules, then
 
 ```ls
 path(from=door, to=exit, into=site, write=road,
@@ -1204,7 +1204,7 @@ The compiled artifact stays self-contained (section 10.1). It holds the merged c
 The reference implementation is a C++ library first and a CLI second. A game embeds `ls.hpp` and sees exactly four types - `generator`, `level`, `grid`, `generation` - in namespace `ls`. Nothing throws: a failed compile yields a falsy `generator` carrying `error()`, and every query on an invalid object reads as empty.
 
 ```cpp
-auto gen   = ls::generator::compile(source, "dungeon.ls", resolve);  // once, at load
+auto gen   = ls::generator::compile(source, "dungeon.lvs", resolve);  // once, at load
 int  wall  = gen.tag("geometry.wall");              // resolve names once
 int  entry = gen.sequence("main");                  // any sequence can be the entry
 auto level = gen.generate(entry, seed);             // pure in (entry, seed, params)
@@ -1218,7 +1218,7 @@ if (geo.at(x, y) == wall) ...
 
 | member | meaning |
 |--------|---------|
-| `static generator compile(const std::string& source, const std::string& name = "generator", resolver resolve = {})` | Compile `source` as the root module (section 2.6), with canonical name `name`. The game owns file/asset IO: each `use` is mapped to a module by `resolve` (see Module resolution below); with no resolver, every `use` is an unresolved module (section 7.3, check 9). Diagnostics are labelled with canonical module names (`"dungeon.ls:12:3: error: ..."`). |
+| `static generator compile(const std::string& source, const std::string& name = "generator", resolver resolve = {})` | Compile `source` as the root module (section 2.6), with canonical name `name`. The game owns file/asset IO: each `use` is mapped to a module by `resolve` (see Module resolution below); with no resolver, every `use` is an unresolved module (section 7.3, check 9). Diagnostics are labelled with canonical module names (`"dungeon.lvs:12:3: error: ..."`). |
 | `explicit operator bool()` | True iff compilation succeeded. |
 | `std::string error()` | Formatted diagnostics when compile failed; `""` on success. |
 | `std::string warnings()` | Formatted warnings of a successful compile (e.g. the reductivity warning, section 7.4); `""` when none. |

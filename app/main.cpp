@@ -14,7 +14,7 @@
 
 static void usage(char const* argv0) {
     std::cerr << "Usage: " << argv0
-              << " [--seed N] [--entry name] [--param name=value ...] [--inspect] <file.ls>\n"
+              << " [--seed N] [--entry name] [--param name=value ...] [--inspect] <file.lvs>\n"
               << "       " << argv0 << " --version\n"
               << "  --entry  the sequence to run (default: main)\n";
 }

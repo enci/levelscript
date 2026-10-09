@@ -773,7 +773,7 @@ struct parser {
         if (after_decls)
             error_at(toks[pos - 1], "'use' declarations must come before all other "
                      "declarations of a file");
-        if (!expect(token_type::string, "a module path in quotes, e.g. use \"schema.ls\""))
+        if (!expect(token_type::string, "a module path in quotes, e.g. use \"schema.lvs\""))
             return;
         out.uses.push_back({l, toks[pos - 1].text});
     }

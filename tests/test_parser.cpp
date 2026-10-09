@@ -110,13 +110,13 @@ TEST_CASE("parser: a stray top-level block is one diagnostic; parsing resumes") 
 }
 
 TEST_CASE("parser: use declarations head the file (2.6)") {
-    auto ast = parse_ok("use \"schema.ls\"\nuse \"lib/rules.ls\"\ntag t { a }\n");
+    auto ast = parse_ok("use \"schema.lvs\"\nuse \"lib/rules.lvs\"\ntag t { a }\n");
     REQUIRE(ast.uses.size() == 2);
-    CHECK(ast.uses[0].path == "schema.ls");
-    CHECK(ast.uses[1].path == "lib/rules.ls");
-    CHECK(parse_fails("tag t { a }\nuse \"schema.ls\"\n"));   // after a declaration
+    CHECK(ast.uses[0].path == "schema.lvs");
+    CHECK(ast.uses[1].path == "lib/rules.lvs");
+    CHECK(parse_fails("tag t { a }\nuse \"schema.lvs\"\n"));   // after a declaration
     CHECK(parse_fails("use schema\n"));                          // a path is a string
-    CHECK(parse_fails("use \"schema.ls\n"));                     // unterminated
+    CHECK(parse_fails("use \"schema.lvs\n"));                     // unterminated
 }
 
 // ── step 2: match blocks, write trees, attributes, body combinators ──────────

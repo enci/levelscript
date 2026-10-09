@@ -109,7 +109,7 @@ std::string project_config::json_path(std::string const& ls_path) {
 
 void project_config::sync_layers(std::vector<std::string> const& layer_names) {
     // Rebuild in the script's declared order every time (composite order
-    // tracks the .ls `layers { }` block, not whatever order a stale sidecar
+    // tracks the .lvs `layers { }` block, not whatever order a stale sidecar
     // had). Existing per-layer settings are preserved by name.
     std::vector<layer_config> reordered;
     reordered.reserve(layer_names.size());

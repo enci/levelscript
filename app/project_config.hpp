@@ -33,13 +33,13 @@ struct layer_config {
 
 struct tileset_config {
     std::string name{"Tileset"};
-    std::string path;   // relative to the .ls file
+    std::string path;   // relative to the .lvs file
     int         tile_w{16};
     int         tile_h{16};
 };
 
 // Per-project debugger settings, persisted in a sidecar JSON next to the
-// script (<file>.ls.json). Keyed by names only, so it survives recompiles
+// script (<file>.lvs.json). Keyed by names only, so it survives recompiles
 // and needs no internal compiler types.
 struct project_config {
     // 1.0 = one screen pixel per source pixel at base_cell_px - a natural
