@@ -107,7 +107,8 @@ struct compiled_pair {
 };
 
 struct compiled_rule {
-    std::string                name;
+    std::string                name;      // an inline rule's is its source position, "inline@L:C"
+    bool                       is_inline{false};   // written in a statement (section 6)
     body_combinator            body{body_combinator::none};   // `ordered` matters at runtime
     std::vector<compiled_pair> pairs;   // all symmetry/rotation variants, deduped
 };

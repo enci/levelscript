@@ -136,7 +136,8 @@ function currentDecl(toks: Tok[]): Tok[] {
 function openFrame(c: '{' | '[' | '(', stack: Frame[]): Frame {
     const parent = stack[stack.length - 1];
     const toks = parent.toks;
-    const prev = toks[toks.length - 1]?.t;
+    const last = toks[toks.length - 1];
+    const prev = last?.t;
     const prev2 = toks[toks.length - 2]?.t;
     const frame = (owner: string, scope: Frame['scope'] = ''): Frame =>
         ({ open: c, owner, scope, toks: [] });
@@ -151,6 +152,9 @@ function openFrame(c: '{' | '[' | '(', stack: Frame[]): Frame {
             if (kw === 'rule') return frame('rule');
             return frame('other');
         }
+        // an inline rule's body: after a mode, a count, or its attributes (section 6)
+        if (parent.owner === 'statements' && last && (endsMode(last) || (last.t === ')' && last.owner === 'attrs')))
+            return frame('rule');
         if (parent.owner === 'attrs' && prev === '=' && prev2 === 'rotation') return frame('set');
         // after '=>' (and inside a write block) a combinator block; otherwise
         // braces only group a match side (section 5.2)
@@ -168,6 +172,7 @@ function openFrame(c: '{' | '[' | '(', stack: Frame[]): Frame {
     if (parent.owner === 'top' && currentDecl(toks)[0]?.t === 'rule') return frame('attrs');
     if (parent.owner === 'statements') {
         if (prev && COUNTED.has(prev)) return frame('count:' + prev, 'restricted');   // params only
+        if (last && endsMode(last)) return frame('attrs');   // an inline rule's attributes
         if (prev === 'when') return frame('when', 'restricted');
         if (prev && isIdentStart(prev[0])) return frame('op:' + prev, 'full');
         return frame('other');
@@ -237,6 +242,7 @@ function classify(stack: Frame[]): CompletionContext {
         if (endsMode(last)) return { kind: 'ruleName' };
         if (prev === ')' && last.owner?.startsWith('op:')) return { kind: 'statement', guard: true };
         if (prev === ')' && last.owner === 'when') return { kind: 'statement', guard: false };
+        if (prev === '}' && last.owner === 'rule') return { kind: 'statement', guard: true };   // an inline rule ended
         // `once r _` / `scatter(3) r _`: an application just ended
         const before = toks[toks.length - 2];
         if (isIdentStart(prev[0]) && before && endsMode(before))

@@ -680,69 +680,73 @@ struct analyzer {
             for (auto const& seen : out.rules)
                 if (seen.name == r.name)
                     error(r.loc, "duplicate rule '" + r.name + "'");
-
-            // attribute validation (spec section 7.3, checks 7/18)
-            if (r.symmetry != "none" && r.symmetry != "horizontal" &&
-                r.symmetry != "vertical" && r.symmetry != "all")
-                error(r.loc, "invalid value '" + r.symmetry +
-                      "' for attribute 'symmetry'; allowed: none, horizontal, vertical, all");
-            for (long long a : r.rotation_angles)
-                if (a != 90 && a != 180 && a != 270)
-                    error(r.loc, "invalid rotation angle '" + std::to_string(a) +
-                          "'; allowed angles are 90, 180, 270");
-
-            // symmetry=all is four variants: identity + H + V + both-axis; the
-            // both-axis/180° coincidence dedups below (spec section 5.6.1, v0.6.2).
-            std::vector<transform> syms = {transform::identity};
-            if (r.symmetry == "horizontal") syms.push_back(transform::flip_h);
-            else if (r.symmetry == "vertical") syms.push_back(transform::flip_v);
-            else if (r.symmetry == "all")
-                syms = {transform::identity, transform::flip_h,
-                        transform::flip_v, transform::flip_both};
-
-            std::vector<transform> rots = {transform::identity};
-            for (long long a : r.rotation_angles) {
-                if (a == 90)       rots.push_back(transform::rot90);
-                else if (a == 180) rots.push_back(transform::flip_both);   // rot180
-                else if (a == 270) rots.push_back(transform::rot270);
-            }
-
-            compiled_rule cr;
-            cr.name = r.name;
-            cr.body = r.body;
-            // Expand each sub-rule into its variants; dedup by (match, write)
-            // equality, scoped per sub-rule so same-LHS sub-rules both survive
-            // (section 5.6.2, section 10.2).
-            for (int bi = 0; bi < (int)r.pairs.size(); ++bi) {
-                compiled_pair base = compile_base_pair(r.pairs[bi]);
-                base.sub_rule_idx = bi;
-                std::vector<compiled_pair> variants;
-                using mirror = compiled_pair::mirror;
-                auto rot_deg = [](transform k) -> int16_t {   // flip_both doubles as rot180
-                    return k == transform::rot90     ? 90
-                         : k == transform::flip_both ? 180
-                         : k == transform::rot270    ? 270 : 0;
-                };
-                auto sym_of = [](transform k) {
-                    return k == transform::flip_h    ? mirror::h
-                         : k == transform::flip_v    ? mirror::v
-                         : k == transform::flip_both ? mirror::both : mirror::none;
-                };
-                for (auto rk : rots)
-                    for (auto sk : syms) {
-                        compiled_pair cand = transform_pair(sk, transform_pair(rk, base));
-                        cand.sub_rule_idx = bi;
-                        cand.rotation = rot_deg(rk);
-                        cand.flip = sym_of(sk);
-                        bool dup = false;
-                        for (auto const& v : variants)
-                            if (pairs_equal(v, cand)) { dup = true; break; }
-                        if (!dup) variants.push_back(std::move(cand));
-                    }
-                for (auto& v : variants) cr.pairs.push_back(std::move(v));
-            }
-            out.rules.push_back(std::move(cr));
+            out.rules.push_back(compile_rule(r));
+            out.rules.back().name = r.name;
         }
+    }
+
+    // One rule's attributes and body, expanded into its variants.
+    compiled_rule compile_rule(rule_decl const& r) {
+        // attribute validation (spec section 7.3, checks 7/18)
+        if (r.symmetry != "none" && r.symmetry != "horizontal" &&
+            r.symmetry != "vertical" && r.symmetry != "all")
+            error(r.loc, "invalid value '" + r.symmetry +
+                  "' for attribute 'symmetry'; allowed: none, horizontal, vertical, all");
+        for (long long a : r.rotation_angles)
+            if (a != 90 && a != 180 && a != 270)
+                error(r.loc, "invalid rotation angle '" + std::to_string(a) +
+                      "'; allowed angles are 90, 180, 270");
+
+        // symmetry=all is four variants: identity + H + V + both-axis; the
+        // both-axis/180° coincidence dedups below (spec section 5.6.1, v0.6.2).
+        std::vector<transform> syms = {transform::identity};
+        if (r.symmetry == "horizontal") syms.push_back(transform::flip_h);
+        else if (r.symmetry == "vertical") syms.push_back(transform::flip_v);
+        else if (r.symmetry == "all")
+            syms = {transform::identity, transform::flip_h,
+                    transform::flip_v, transform::flip_both};
+
+        std::vector<transform> rots = {transform::identity};
+        for (long long a : r.rotation_angles) {
+            if (a == 90)       rots.push_back(transform::rot90);
+            else if (a == 180) rots.push_back(transform::flip_both);   // rot180
+            else if (a == 270) rots.push_back(transform::rot270);
+        }
+
+        compiled_rule cr;
+        cr.body = r.body;
+        // Expand each sub-rule into its variants; dedup by (match, write)
+        // equality, scoped per sub-rule so same-LHS sub-rules both survive
+        // (section 5.6.2, section 10.2).
+        for (int bi = 0; bi < (int)r.pairs.size(); ++bi) {
+            compiled_pair base = compile_base_pair(r.pairs[bi]);
+            base.sub_rule_idx = bi;
+            std::vector<compiled_pair> variants;
+            using mirror = compiled_pair::mirror;
+            auto rot_deg = [](transform k) -> int16_t {   // flip_both doubles as rot180
+                return k == transform::rot90     ? 90
+                     : k == transform::flip_both ? 180
+                     : k == transform::rot270    ? 270 : 0;
+            };
+            auto sym_of = [](transform k) {
+                return k == transform::flip_h    ? mirror::h
+                     : k == transform::flip_v    ? mirror::v
+                     : k == transform::flip_both ? mirror::both : mirror::none;
+            };
+            for (auto rk : rots)
+                for (auto sk : syms) {
+                    compiled_pair cand = transform_pair(sk, transform_pair(rk, base));
+                    cand.sub_rule_idx = bi;
+                    cand.rotation = rot_deg(rk);
+                    cand.flip = sym_of(sk);
+                    bool dup = false;
+                    for (auto const& v : variants)
+                        if (pairs_equal(v, cand)) { dup = true; break; }
+                    if (!dup) variants.push_back(std::move(cand));
+                }
+            for (auto& v : variants) cr.pairs.push_back(std::move(v));
+        }
+        return cr;
     }
 
     // ── reductivity check (LevelScript addition; MGSL section 6.9 left this to the
@@ -1164,6 +1168,7 @@ struct analyzer {
         std::string best, kind;
         int best_d = 3;   // suggest within 2 edits only
         for (auto const& r : out.rules) {
+            if (r.is_inline) continue;
             int d = edit_distance(name, r.name);
             if (d < best_d) { best_d = d; best = r.name; kind = "rule"; }
         }
@@ -1213,7 +1218,17 @@ struct analyzer {
                 cs.what = compiled_stmt::kind::apply;
                 cs.mode = s.mode;
                 cs.percent = s.count_percent;
-                for (int i = 0; i < (int)out.rules.size(); ++i)
+                if (s.inline_rule) {
+                    // an anonymous rule declared in the sequence's module (section 6)
+                    auto const& r = *s.inline_rule;
+                    compiled_rule cr = compile_rule(r);
+                    cr.name = "inline@" + std::to_string(r.loc.line) + ":" +
+                              std::to_string(r.loc.col);
+                    cr.is_inline = true;
+                    out.rules.push_back(std::move(cr));
+                    cs.rule_id = (int)out.rules.size() - 1;
+                }
+                for (int i = 0; cs.rule_id < 0 && i < (int)out.rules.size(); ++i)
                     if (out.rules[i].name == s.rule_name) { cs.rule_id = i; break; }
                 if (cs.rule_id < 0)
                     for (int i = 0; i < (int)out.sequences.size(); ++i)
@@ -1223,7 +1238,9 @@ struct analyzer {
                           did_you_mean(s.rule_name));
                     continue;
                 }
-                if (cs.rule_id >= 0)
+                if (s.inline_rule)
+                    ;   // declared right here
+                else if (cs.rule_id >= 0)
                     require_visible(s.rule_name_loc, "rule", s.rule_name,
                                     ast.rules[(size_t)cs.rule_id].loc.mod);
                 else

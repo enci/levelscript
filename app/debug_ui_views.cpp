@@ -272,7 +272,7 @@ std::string stmt_desc(program_stmt const& s) {
                                                  : std::string("((...)");
         p += s.count_percent ? "%)" : ")";
     }
-    p += " " + s.rule_name;
+    p += s.inline_rule ? std::string(" { ... }") : " " + s.rule_name;
     if (s.guard) p += "  when (...)";
     return p;
 }
@@ -501,9 +501,12 @@ void draw_rule_window(script const& sc, debug_run const& run, float mini_px,
     }
 
     auto const& cr = sc.meta.rules[(size_t)rid];
-    ImGui::TextUnformatted(stmt.rule_name.c_str());
-    for (auto const& rd : sc.ast.rules) {
-        if (rd.name != stmt.rule_name) continue;
+    ImGui::TextUnformatted(cr.name.c_str());   // an inline rule's is its position
+    rule_decl const* decl = stmt.inline_rule.get();
+    for (auto const& rd : sc.ast.rules)
+        if (!decl && rd.name == stmt.rule_name) decl = &rd;
+    if (decl) {
+        auto const& rd = *decl;
         std::string attrs;
         if (rd.symmetry != "none") attrs += " sym=" + rd.symmetry;
         if (!rd.rotation_angles.empty()) {
@@ -516,7 +519,6 @@ void draw_rule_window(script const& sc, debug_run const& run, float mini_px,
         }
         if (rd.body == body_combinator::ordered) attrs += " ordered";
         if (!attrs.empty()) ImGui::TextDisabled("%s", attrs.c_str());
-        break;
     }
     ImGui::Separator();
     if (cr.pairs.empty()) return;

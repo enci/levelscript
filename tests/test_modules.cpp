@@ -340,3 +340,16 @@ TEST_CASE("run: begin events are off by default") {
     while (r.step()) { CHECK(!r.at_statement_begin()); ++steps; }
     CHECK(steps == 2);
 }
+
+TEST_CASE("modules: an inline rule resolves names in its sequence's module (0.8, section 6)") {
+    files f;
+    f.src["schema.ls"] = "tag t { a }\nlayers { g: grid of t }\n";
+    f.src["walls.ls"] = "use \"schema.ls\"\nsequence fill { everywhere { g[.] => g[a] } }\n";
+    f.src["main.ls"] = "use \"walls.ls\"\nsequence main { resize(2, 2) once fill }\n";
+    auto gen = f.compile("main.ls");
+    INFO(gen.error());
+    CHECK(static_cast<bool>(gen));
+    // main.ls does not use schema.ls, so it cannot see grid g
+    f.src["main.ls"] = "use \"walls.ls\"\nsequence main { resize(2, 2) everywhere { g[.] => g[a] } }\n";
+    CHECK(has(f.compile("main.ls").error(), "not visible"));
+}

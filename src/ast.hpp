@@ -178,6 +178,7 @@ struct program_stmt {
     source_loc  count_loc;
     std::string rule_name;            // a rule or a sequence (section 6.10); resolved in sema
     source_loc  rule_name_loc;
+    std::unique_ptr<rule_decl> inline_rule;   // target written in place (section 6); else null
     // optional `when (expr)` guard (section 6): boolean, params only
     expr_ptr    guard;
 };
