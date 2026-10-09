@@ -34,6 +34,10 @@ UninstallDisplayIcon={app}\bin\levelscript-debugger.exe
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+; Wizard images (tools/levelscript_icon.py): Inno picks the one closest to the
+; display's DPI - 100% and 200%.
+WizardImageFile=@ART_DIR@\wizard-large.bmp,@ART_DIR@\wizard-large@2x.bmp
+WizardSmallImageFile=@ART_DIR@\wizard-small.bmp,@ART_DIR@\wizard-small@2x.bmp
 
 [Files]
 ; bin\levelscript.exe, bin\levelscript-debugger.exe, bin\resources\ (fonts the

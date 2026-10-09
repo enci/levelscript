@@ -132,6 +132,10 @@ def main(argv: list[str]) -> int:
     resources = work / "resources"
     resources.mkdir()
     shutil.copy2(HERE / "conclusion.html", resources)
+    # The Installer background (tools/levelscript_icon.py): 1x and @2x joined
+    # into one HiDPI TIFF, which Installer draws sharp on Retina screens.
+    run("tiffutil", "-cathidpicheck", HERE / "background.png", HERE / "background@2x.png",
+        "-out", resources / "background.tiff")
 
     installer = args.output_dir / f"{APP_NAME}-{args.version}-macos-arm64.pkg"
     run("productbuild", "--distribution", render_distribution(args.version, component, work),

@@ -23,6 +23,9 @@ directory):
                                          flat up to FLAT_MAX px, full above
     extension/icon.png                   128 px, the VS Code extension
     extension/file-icon.svg              the flat variant, .ls files in VS Code
+    packaging/windows/wizard-*.bmp       Inno Setup wizard images, 100% and 200%
+    packaging/macos/background*.png      Installer background (icon bottom-left),
+                                         1x and @2x; build_pkg.py joins them
 """
 from __future__ import annotations
 
@@ -114,6 +117,19 @@ FLAT_MAX = 32   # .ico sizes up to this use the flat variant
 # macOS draws app icons at 824 of 1024 px, centred; a full-bleed icon looks
 # oversized in the Dock next to every other app.
 MACOS_PADDING = 100 / 1024
+
+# Installer art. Inno Setup's wizard: a small image top-right on the inner
+# pages (on white) and a tall one on the Welcome/Finished pages, given at 100%
+# and 200% so it stays sharp on high-DPI screens. Sizes in pixels at 100%.
+WIZARD_SMALL = (55, 55)
+WIZARD_SMALL_ICON = 47       # inside WIZARD_SMALL, leaving a margin
+WIZARD_LARGE = (164, 314)
+WIZARD_LARGE_BG = "#EAF6EE"   # the band behind the icon: a light tint, so the dark folds read
+# macOS Installer background: the icon in the bottom-left corner, on a
+# transparent canvas (so one image serves light and dark), in points.
+PKG_BACKGROUND = (128, 128)
+PKG_ICON = 80
+PKG_INSET = 20   # from the window's left and bottom edges
 
 PADDING = 0.0          # fraction of the canvas left empty on each side
 CANVAS = 1024
@@ -460,7 +476,13 @@ def image(svg: str, size: int):
     return Image.open(io.BytesIO(rasterize(svg, size))).convert("RGBA")
 
 
+def centred(im, box):
+    """(image, position, mask) for Image.paste: im centred in a box of size box."""
+    return im, ((box[0] - im.width) // 2, (box[1] - im.height) // 2), im
+
+
 def main():
+    from PIL import Image
     out = ROOT / "resources" / "icon"
     out.mkdir(parents=True, exist_ok=True)
 
@@ -477,7 +499,27 @@ def main():
     ext = ROOT / "extension"
     (ext / "icon.png").write_bytes(rasterize(svg, 128))
     (ext / "file-icon.svg").write_text(flat)
-    print(f"wrote {out} and {ext}")
+
+    win = ROOT / "packaging" / "windows"
+    for scale, suffix in ((1, ""), (2, "@2x")):
+        w, h = WIZARD_SMALL[0] * scale, WIZARD_SMALL[1] * scale
+        small = Image.new("RGB", (w, h), "white")
+        small.paste(*centred(image(svg, WIZARD_SMALL_ICON * scale), (w, h)))
+        small.save(win / f"wizard-small{suffix}.bmp")
+        w, h = WIZARD_LARGE[0] * scale, WIZARD_LARGE[1] * scale
+        large = Image.new("RGB", (w, h), WIZARD_LARGE_BG)
+        large.paste(*centred(image(svg, w * 3 // 4), (w, h)))
+        large.save(win / f"wizard-large{suffix}.bmp")
+
+    mac = ROOT / "packaging" / "macos"
+    for scale, suffix in ((1, ""), (2, "@2x")):
+        w, h = PKG_BACKGROUND[0] * scale, PKG_BACKGROUND[1] * scale
+        bg = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        icon = image(svg, PKG_ICON * scale)
+        inset = PKG_INSET * scale
+        bg.alpha_composite(icon, (inset, h - inset - icon.height))   # bottom-left
+        bg.save(mac / f"background{suffix}.png")
+    print(f"wrote {out}, {ext}, {win} and {mac}")
 
 
 if __name__ == "__main__":

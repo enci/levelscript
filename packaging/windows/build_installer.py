@@ -98,6 +98,7 @@ def render_script(args, bundle: Path, basename: str, work: Path) -> Path:
         "BUNDLE_DIR": str(bundle.resolve()),
         "OUTPUT_DIR": str(args.output_dir.resolve()),
         "OUTPUT_BASENAME": basename,
+        "ART_DIR": str(HERE.resolve()),   # wizard images, from tools/levelscript_icon.py
     }
     text = TEMPLATE.read_text("utf-8")
     for k, v in tokens.items():
