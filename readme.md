@@ -114,5 +114,5 @@ remembered per user.
 cmake -S . -B build
 cmake --build build --config Debug --parallel
 build/tests/Debug/ls_tests.exe
-python run_examples.py
+python tools/run_examples.py
 ```

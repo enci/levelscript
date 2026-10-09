@@ -5,15 +5,15 @@ Runs every examples/*.ls through the levelscript CLI with its pinned seed (a `//
 comment, default 42) and compares stdout against the .expected file next to
 it. Any change to shuffle order or draw sequence fails loudly here.
 
-    python run_examples.py             # verify all
-    python run_examples.py --update    # regenerate goldens (intended changes)
+    python tools/run_examples.py             # verify all
+    python tools/run_examples.py --update    # regenerate goldens (intended changes)
 """
 import re
 import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).resolve().parent.parent   # the repository root
 
 
 def find_cli() -> Path:

@@ -1,4 +1,4 @@
-// Completion context: where in the grammar (spec.md) the cursor sits, decided
+// Completion context: where in the grammar (docs/spec.md) the cursor sits, decided
 // from the text before it. Pure (no vscode import) so scripts/ can test it.
 //
 // A tiny scanner tokenizes up to the word being typed, skipping comments, and
