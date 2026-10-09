@@ -234,6 +234,47 @@ TEST_CASE("parser: commas separate body pairs like newlines (list_sep)") {
     CHECK(ast.rules[0].pairs.size() == 2);
 }
 
+TEST_CASE("parser: list commas are optional; newlines are whitespace (0.8, section 3)") {
+    // comma-only, on one line
+    auto a = parse_ok("tag t { a, b, c }\nlayers { g: grid of t, h: grid of number }\n"
+                      "params { n: number = 2, m = n * 2 }\n"
+                      "rule r { all g[a] => g[b], g[b] => g[c] }");
+    CHECK(a.tags[0].values.size() == 3);
+    CHECK(a.layers.layers.size() == 2);
+    CHECK(a.params.size() == 2);
+    CHECK(a.rules[0].pairs.size() == 2);
+    // no separators at all, items sharing a line
+    auto b = parse_ok("tag t { a b c }\nlayers { g: grid of t h: grid of number }\n"
+                      "params { n: number = 2 m = n * 2 }\n"
+                      "rule r { all g[a] => g[b] g[b] => g[c] }");
+    CHECK(b.tags[0].values.size() == 3);
+    CHECK(b.layers.layers.size() == 2);
+    CHECK(b.params.size() == 2);
+    CHECK(b.rules[0].pairs.size() == 2);
+    // newline-only, with trailing commas and line breaks inside items
+    auto c = parse_ok("tag t {\n a\n b,\n}\nparams {\n n: number =\n   2\n}\n"
+                      "rule r {\n g[a]\n =>\n { any\n g[a],\n g[b],\n }\n}");
+    CHECK(c.tags[0].values.size() == 2);
+    REQUIRE(c.params.size() == 1);
+    CHECK(c.rules[0].pairs[0].rhs.items.size() == 2);
+}
+
+TEST_CASE("parser: statements are delimited by the grammar, not by newlines (0.8)") {
+    auto ast = parse_ok("rule r { g[.] => g[a] }\n"
+                        "sequence main { resize(4, 4) all r one r\n"
+                        "  path(from=a,\n to=a, into=g, write=a)\n"
+                        "  all r\n    when (1 == 1)\n}");
+    REQUIRE(ast.sequences[0].stmts.size() == 5);
+    CHECK(ast.sequences[0].stmts[3].op_name == "path");
+    CHECK(ast.sequences[0].stmts[4].guard != nullptr);
+}
+
+TEST_CASE("parser: a bad statement is reported once per line") {
+    diagnostics diags;
+    parse("sequence main {\n  frob frob frob\n  resize(4, 4)\n}", "test", diags);
+    CHECK(diags.all.size() == 1);
+}
+
 TEST_CASE("parser: a single sub-rule under a body combinator is allowed") {
     auto ast = parse_ok("rule r { all\n g[.] => g[x]\n}");
     CHECK(ast.rules[0].pairs.size() == 1);
