@@ -4,6 +4,6 @@ tag t { a }
 layers { g: grid of t }
 sequence main {
     resize(2,2)
-    all r
+    everywhere r
 }
 rule r { g[.] => g[a] }

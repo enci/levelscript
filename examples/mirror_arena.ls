@@ -25,9 +25,9 @@ rule frame {
 
 sequence main {
     resize(6, 4)
-    all carve
+    everywhere carve
     mirror(horizontal)
     mirror(vertical)
     pad(1)
-    all frame
+    everywhere frame
 }

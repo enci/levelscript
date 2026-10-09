@@ -29,9 +29,9 @@ rule place_exit {
 
 sequence main {
     resize(16, 9)
-    all scatter_rocks
-    all place_door
-    all place_exit
+    everywhere scatter_rocks
+    everywhere place_door
+    everywhere place_exit
     path(from=door, to=exit, into=site, write=road,
          passable=((0 == 0)), cost=(1 + rocks))
 }

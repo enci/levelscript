@@ -1,5 +1,5 @@
 // @seed 33
-// Stabilize: iterated sweeps to a fixpoint. Water floods from one spring
+// Settle: iterated sweeps to a fixpoint. Water floods from one spring
 // through the open cells; the rock mix bounds the pools.
 tag geo { rock, water }
 
@@ -30,7 +30,7 @@ rule flow(rotation=all) {
 
 sequence main {
     resize(15, 9)
-    all scatter_rocks
-    one spring
-    all(policy=stabilize) flow
+    everywhere scatter_rocks
+    once spring
+    settle flow
 }

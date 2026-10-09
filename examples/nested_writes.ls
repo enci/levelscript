@@ -41,7 +41,7 @@ rule furnish {
 
 sequence main {
     resize(8, 8)
-    all furnish
+    everywhere furnish
 }
 
 // any-of-all alternative (correlated layers) would read:

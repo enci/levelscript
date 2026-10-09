@@ -8,7 +8,7 @@ rule fill { g[.] => g[a] }
 rule loop { g[a] => g[a] }
 sequence main {
     resize(3, 3)
-    all fill
-    all loop
-    all loop
+    everywhere fill
+    everywhere loop
+    everywhere loop
 }

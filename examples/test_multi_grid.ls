@@ -22,5 +22,5 @@ rule both {
 
 sequence main {
     resize(3, 3)
-    all both
+    everywhere both
 }

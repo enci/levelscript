@@ -30,7 +30,7 @@ rule spread(symmetry=all, rotation=all) {
 }
 sequence main {
     resize(5, 5)
-    all fill
-    one seed_one
-    all spread
+    everywhere fill
+    once seed_one
+    everywhere spread
 }

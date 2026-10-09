@@ -153,13 +153,11 @@ struct compiled_stmt {
     enum class kind { op_call, apply } what{kind::apply};
     source_loc  loc;
     compiled_op op;                       // op_call
-    strategy    strat{strategy::all};     // apply — count × policy (section 6.7)
-    exec_policy pol{exec_policy::snapshot};
-    bool        is_percent{false};
-    int         max_count{0};
-    int         percent{0};
+    apply_mode  mode{apply_mode::everywhere};   // apply (sections 6, 6.7)
+    int         count{-1};        // -1 = none: once = 1, everywhere = all, grow/settle = fixpoint
+    bool        percent{false};   // scatter(P%): count is P
     int         rule_id{-1};   // apply over a rule
-    int         seq_id{-1};    // apply over a sequence (section 6.10): a count only
+    int         seq_id{-1};    // apply over a sequence (section 6.10): once or settle
     int         guard{-1};   // `when` expr arena index; -1 = unguarded
 };
 

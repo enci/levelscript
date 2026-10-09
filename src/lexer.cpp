@@ -17,15 +17,13 @@ static token_type keyword_or_ident(std::string_view text) {
         {"grid", token_type::kw_grid},     {"of", token_type::kw_of},
         {"number", token_type::kw_number}, {"rule", token_type::kw_rule},
         {"sequence", token_type::kw_sequence},
-        {"one", token_type::kw_one},       {"all", token_type::kw_all},
-        {"some", token_type::kw_some},
-        {"any", token_type::kw_any},
+        {"all", token_type::kw_all},       {"any", token_type::kw_any},
         {"ordered", token_type::kw_ordered},
-        {"policy", token_type::kw_policy},
-        {"snapshot", token_type::kw_snapshot},
-        {"incremental", token_type::kw_incremental},
-        {"stabilize", token_type::kw_stabilize},
-        {"percent", token_type::kw_percent},
+        {"once", token_type::kw_once},
+        {"scatter", token_type::kw_scatter},
+        {"everywhere", token_type::kw_everywhere},
+        {"grow", token_type::kw_grow},
+        {"settle", token_type::kw_settle},
         {"params", token_type::kw_params},
         {"where", token_type::kw_where},
         {"when", token_type::kw_when},
@@ -134,6 +132,7 @@ std::vector<token> lex(std::string_view src, std::string_view file,
         case ':': t = token_type::colon;    break;
         case '*': t = token_type::star;     break;
         case '.': t = token_type::dot;      break;
+        case '%': t = token_type::percent;  break;
         case '+': t = token_type::plus;     break;
         case '-': t = token_type::minus;    break;
         case '/': t = token_type::slash;    break;   // '//' comments handled above

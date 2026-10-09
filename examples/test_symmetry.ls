@@ -1,6 +1,6 @@
 // Symmetry expansion: [S F] with symmetry=all also matches [F S].
 // Fill a 1x4 grid: S F S F. After sym rule, all pairs become F S.
-// The swap rule's matches overlap (snapshot conflict-resolves by the seeded
+// The swap rule's matches overlap (the batch conflict-resolves by the seeded
 // shuffle), so the clean 2/2 swap is seed-dependent; pin a seed that yields it.
 // @seed 6
 // @expect grid g count(F) == 2
@@ -28,7 +28,7 @@ rule swap(symmetry=all) {
 
 sequence main {
     resize(4, 1)
-    all seed_sf
-    all alt        // result: S F S F
-    all swap       // result: F S F S  (each pair swapped)
+    everywhere seed_sf
+    everywhere alt        // result: S F S F
+    everywhere swap       // result: F S F S  (each pair swapped)
 }

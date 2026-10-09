@@ -14,5 +14,5 @@ rule plant {
 
 sequence main {
     resize(10, 6)
-    some(max=5) plant
+    scatter(5) plant
 }

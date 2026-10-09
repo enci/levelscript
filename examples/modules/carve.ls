@@ -12,6 +12,6 @@ rule open_room {
 
 sequence carve {
     resize(8, 5)
-    all wall_all
-    all open_room
+    everywhere wall_all
+    everywhere open_room
 }

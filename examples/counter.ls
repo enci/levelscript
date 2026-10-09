@@ -17,8 +17,8 @@ rule bump { n[ (n) ] => n[ (n + 1) ] }
 
 sequence main {
     resize(2, 2)
-    all zero
-    all bump
-    all bump
-    all bump
+    everywhere zero
+    everywhere bump
+    everywhere bump
+    everywhere bump
 }

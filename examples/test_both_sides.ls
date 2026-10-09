@@ -22,6 +22,6 @@ rule place {
 }
 sequence main {
     resize(3, 3)
-    all fill_floor
-    all place
+    everywhere fill_floor
+    everywhere place
 }

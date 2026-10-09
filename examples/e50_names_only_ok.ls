@@ -7,5 +7,5 @@ layers { g: grid of t }
 rule fill { g[.] => g[wall] }
 sequence main {
     resize(2, 2)
-    all fill
+    everywhere fill
 }

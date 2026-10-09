@@ -44,8 +44,8 @@ rule finalize { all
 
 sequence main {
     resize(60, 30)
-    all init_bg
-    some(max=15) plant
-    all expand
-    all finalize
+    everywhere init_bg
+    scatter(15) plant
+    everywhere expand
+    everywhere finalize
 }

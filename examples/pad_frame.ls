@@ -18,6 +18,6 @@ rule fill { level[.] => level[floor] }
 
 sequence main {
     resize(3, 3)
-    all fill      // solid 3×3 interior
+    everywhere fill      // solid 3×3 interior
     pad(1)        // → 5×5; interior moves to (1,1)–(3,3), border is empty
 }

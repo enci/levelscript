@@ -1,10 +1,10 @@
 // @seed 42
-// Showcase (v0.6): the `stabilize` policy — a synchronous cellular automaton.
+// Showcase: the `settle` mode — a synchronous cellular automaton.
 //
-// `all(policy=stabilize)` runs full `snapshot` sweeps back-to-back, re-snapshotting
+// `settle` runs full batch sweeps back-to-back, re-snapshotting
 // between them, until a sweep changes nothing (a fixpoint, section 6.4/section 6.6). Each sweep
 // updates every cell against the *previous* generation (synchronous), unlike
-// `incremental` which sees each write immediately.
+// `grow` which sees each write immediately.
 //
 // Here a border of walls grows inward one ring per generation. Because each
 // sweep sees only the last generation, both sides advance in lockstep until the
@@ -27,11 +27,11 @@ rule mid    { g[.] => g[floor] }
 
 // A floor cell adjacent to a wall becomes wall (`*` preserves the wall cell, so
 // the four rotated variants never conflict on it).
-rule grow(rotation=all) { g[wall floor] => g[* wall] }
+rule dilate(rotation=all) { g[wall floor] => g[* wall] }
 
 sequence main {
     resize(6, 6)
-    all border
-    all mid
-    all(policy=stabilize) grow
+    everywhere border
+    everywhere mid
+    settle dilate
 }

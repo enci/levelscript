@@ -31,7 +31,7 @@ rule finalize { all
 
 sequence main {
     resize(40, 20)
-    one start
-    some(max=300, policy=incremental) walk
-    all finalize
+    once start
+    grow(300) walk
+    everywhere finalize
 }

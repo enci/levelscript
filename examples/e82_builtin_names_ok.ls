@@ -7,6 +7,6 @@ rule fill { min[.] => min[random] }
 rule count { min[random] n[.] => n[ (min(max, 7) + max(1, 2)) ] }
 sequence main {
     resize(3, 2)
-    all fill
-    all count
+    everywhere fill
+    everywhere count
 }

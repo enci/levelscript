@@ -38,7 +38,7 @@ rule spawn     { actors[.]  => actors[boss] }
 
 sequence main {
     resize(3, 3)
-    all cave_fill when (style == 0)
-    all room_fill when (style == 1)
-    all spawn     when (budget > 6)
+    everywhere cave_fill when (style == 0)
+    everywhere room_fill when (style == 1)
+    everywhere spawn     when (budget > 6)
 }

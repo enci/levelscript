@@ -9,6 +9,6 @@ rule fill { g[.] => g[W] }
 
 sequence main {
     resize(2, 2)
-    all fill
+    everywhere fill
     upscale(3, 2)
 }

@@ -11,6 +11,6 @@ rule clear { g[a] => g[b] }
 
 sequence main {
     resize(5, 5)
-    all fill
-    all clear
+    everywhere fill
+    everywhere clear
 }

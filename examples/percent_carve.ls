@@ -1,10 +1,10 @@
 // @seed 42
-// Showcase (v0.6): the `percent` count with the default `snapshot` policy.
+// Showcase: a `scatter` percentage.
 //
-// `some(percent=P)` applies P% of one snapshot batch's matches — ⌊P·total/100⌋,
+// `scatter(P%)` applies P% of one batch's matches — ⌊P·total/100⌋,
 // an *exact* fraction of the candidate set (unlike a per-cell `random` gate,
-// which has variance; cf. random_scatter.mgsl). It is snapshot-only, since the
-// full match set is the percentage's denominator.
+// which has variance; cf. random_scatter.ls). Only `scatter` takes one, since
+// one batch's applied set is the percentage's denominator.
 //
 // Here every cell is rock (100 matches), then exactly 40% are carved to floor.
 //
@@ -23,6 +23,6 @@ rule carve { g[rock] => g[floor] }
 
 sequence main {
     resize(10, 10)
-    all solid
-    some(percent=40) carve
+    everywhere solid
+    scatter(40%) carve
 }

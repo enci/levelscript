@@ -65,9 +65,25 @@ TEST_CASE("lexer: contextual names lex as identifiers (spec section 2.4)") {
     CHECK(t[0].text == "max");
     CHECK(t[5].text == "none");
     // the true keywords stay reserved
-    auto k = lex_ok("all some percent weight");
+    auto k = lex_ok("all once scatter everywhere grow settle weight");
     CHECK(k[0].is(token_type::kw_all));
-    CHECK(k[1].is(token_type::kw_some));
-    CHECK(k[2].is(token_type::kw_percent));
-    CHECK(k[3].is(token_type::kw_weight));
+    CHECK(k[1].is(token_type::kw_once));
+    CHECK(k[2].is(token_type::kw_scatter));
+    CHECK(k[3].is(token_type::kw_everywhere));
+    CHECK(k[4].is(token_type::kw_grow));
+    CHECK(k[5].is(token_type::kw_settle));
+    CHECK(k[6].is(token_type::kw_weight));
+}
+
+TEST_CASE("lexer: the 0.7 count and policy words are plain names (0.8)") {
+    auto t = lex_ok("one some policy snapshot incremental stabilize percent max");
+    REQUIRE(t.size() == 9);
+    for (int i = 0; i < 8; ++i) CHECK(t[i].is(token_type::ident));
+}
+
+TEST_CASE("lexer: '%' is a token") {
+    auto t = lex_ok("50%");
+    REQUIRE(t.size() == 3);
+    CHECK(t[0].is(token_type::integer));
+    CHECK(t[1].is(token_type::percent));
 }

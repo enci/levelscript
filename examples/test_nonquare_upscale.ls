@@ -7,6 +7,6 @@ layers { g: grid of t }
 rule fill { g[.] => g[W] }
 sequence main {
     resize(2, 1)
-    all fill
+    everywhere fill
     upscale(3, 2)
 }

@@ -14,5 +14,5 @@ rule fill {
 
 sequence main {
     resize(8, 4)
-    all fill
+    everywhere fill
 }

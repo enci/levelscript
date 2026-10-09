@@ -20,7 +20,7 @@ rule seed {
 }
 
 // Grow land into adjacent ocean.
-rule grow(symmetry=all, rotation=all) {
+rule dilate(symmetry=all, rotation=all) {
     world[ocean land]
     =>
     world[land land]
@@ -76,11 +76,11 @@ rule peak(symmetry=all, rotation=all) {
 
 sequence main {
     resize(80, 40)
-    all init
-    some(max=30) seed
-    some(max=300, policy=incremental) grow
-    all fill
-    all coast
-    all highland
-    all peak
+    everywhere init
+    scatter(30) seed
+    grow(300) dilate
+    everywhere fill
+    everywhere coast
+    everywhere highland
+    everywhere peak
 }

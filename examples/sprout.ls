@@ -22,6 +22,6 @@ rule sprout(rotation=all) {
 
 sequence main {
     resize(11, 7)
-    some(max=3) plant
-    all sprout
+    scatter(3) plant
+    everywhere sprout
 }

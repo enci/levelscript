@@ -34,6 +34,6 @@ rule land { map[.] => map[grass] }
 
 sequence main {
     resize(4, 4)
-    all flood
-    all land
+    everywhere flood
+    everywhere land
 }

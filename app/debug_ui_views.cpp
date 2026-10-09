@@ -265,19 +265,12 @@ std::string stmt_desc(program_stmt const& s) {
         }
         return d + ")";
     }
-    std::string p;
-    switch (s.strat) {
-        case strategy::one: p = "one "; break;
-        case strategy::all: p = "all "; break;
-        case strategy::some:
-            p = s.is_percent ? "some(percent=" + std::to_string(s.percent) + ") "
-                             : "some(max=" + std::to_string(s.max_count) + ") ";
-            break;
-    }
-    p += s.rule_name;
-    if (s.pol == exec_policy::incremental) p += "  policy=incremental";
-    if (s.pol == exec_policy::stabilize)   p += "  policy=stabilize";
-    if (s.guard)                           p += "  when (...)";
+    static char const* const names[] = {"once", "scatter", "everywhere", "grow", "settle"};
+    std::string p = names[(int)s.mode];
+    if (s.count >= 0)
+        p += "(" + std::to_string(s.count) + (s.count_percent ? "%" : "") + ")";
+    p += " " + s.rule_name;
+    if (s.guard) p += "  when (...)";
     return p;
 }
 
@@ -633,8 +626,8 @@ struct program_tree {
             if (inside) {   // which iteration of this sequence is running
                 int it = path[(size_t)depth + 1].iteration + 1;
                 ImGui::SameLine();
-                if (cs.strat == strategy::some)
-                    ImGui::TextDisabled("iteration %d / %d", it, cs.max_count);
+                if (cs.count >= 0)
+                    ImGui::TextDisabled("iteration %d / %d", it, cs.count);
                 else
                     ImGui::TextDisabled("iteration %d", it);
             }

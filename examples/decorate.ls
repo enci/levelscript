@@ -42,8 +42,8 @@ rule reward {
 
 sequence main {
     resize(9, 6)
-    some(max=4) plant
-    all spread
-    all fill_geo
-    all reward
+    scatter(4) plant
+    everywhere spread
+    everywhere fill_geo
+    everywhere reward
 }
