@@ -125,3 +125,14 @@ sequence main { }
     CHECK(has(j, "{\"line\":6,\"col\":44,\"len\":1,\"tag\":-2,\"value\":-2}"));
     CHECK(has(j, "{\"line\":6,\"col\":46,\"len\":1,\"tag\":-3,\"value\":3}"));
 }
+
+TEST_CASE("inspect: inline rules are colored and their grids referenced (0.8)") {
+    std::string j = ls::inspect_json(R"(tag t { F, W }
+layers { g: grid of t }
+sequence main { everywhere { g[F] => g[W] } }
+)", "test.ls");
+    CHECK(has(j, "\"diagnostics\":[]"));
+    CHECK(has(j, "{\"line\":3,\"col\":32,\"len\":1,\"tag\":0,\"value\":0}"));   // F
+    CHECK(has(j, "{\"line\":3,\"col\":30,\"len\":1,\"kind\":\"layer\",\"target\":\"g\"}"));
+    CHECK(!has(j, "\"kind\":\"rule\""));   // no name reference for an inline target
+}

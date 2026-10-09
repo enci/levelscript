@@ -379,6 +379,41 @@ TEST_CASE("parser: the 0.7 count and policy forms are not statements") {
     CHECK(parse_fails("sequence main { all(policy=stabilize) r }"));
 }
 
+TEST_CASE("parser: inline rules as statement targets (0.8, section 6)") {
+    auto ast = parse_ok(R"(
+sequence main {
+    everywhere { g[.] => g[a] }
+    once (symmetry=all) { g[a .] => g[* b] }
+    grow (rotation=all) { g[a .] => g[* a] }
+    grow(n) (rotation=all) { g[a .] => g[* a] }
+    settle(3) { all g[a] => g[b], g[b] => g[a] }
+    scatter(50%) { { g[a] h[.] } => h[x] }
+    everywhere fill
+}
+)");
+    auto const& s = ast.sequences.back().stmts;
+    REQUIRE(s.size() == 7);
+    REQUIRE(s[0].inline_rule);
+    CHECK(s[0].rule_name.empty());
+    CHECK(s[0].inline_rule->pairs.size() == 1);
+    CHECK(s[1].inline_rule->symmetry == "all");
+    CHECK(!s[2].count);                                  // '(' IDENT '=' is attributes
+    CHECK(s[2].inline_rule->rotation_angles.size() == 3);
+    CHECK(s[3].count);                                   // a count, then attributes
+    CHECK(s[3].inline_rule->rotation_angles.size() == 3);
+    CHECK(s[4].inline_rule->body == body_combinator::all);
+    CHECK(s[4].inline_rule->pairs.size() == 2);
+    CHECK(s[5].inline_rule->pairs[0].lhs.size() == 2);
+    CHECK(!s[6].inline_rule);
+    CHECK(s[6].rule_name == "fill");
+}
+
+TEST_CASE("parser: an inline rule is always braced") {
+    CHECK(parse_fails("sequence main { everywhere g[.] => g[a] }"));
+    CHECK(parse_fails("sequence main { once (symmetry=all) fill }"));
+    CHECK(parse_fails("sequence main { everywhere { } }"));
+}
+
 TEST_CASE("parser: ordered body combinator") {
     auto ast = parse_ok(R"(
 rule climb { ordered

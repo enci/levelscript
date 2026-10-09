@@ -589,11 +589,26 @@ TEST_CASE("sequence Q32: 'sequence' is a keyword") {
           .has_error("'sequence' - a reserved keyword cannot be used as a name"));
 }
 
-TEST_CASE("sequence Q33: no inline rules in a body") {
+TEST_CASE("sequence Q33: a bare pattern pair is not a statement") {
     compile_result r("tag t { a }\nlayers { g: grid of t }\nsequence s {\n    g[.] => g[a]\n}\n"
                      "sequence main { resize(1, 1)  once s }\n");
-    CHECK(r.has_error("expected a statement in sequence 's'; rules are declared with 'rule'"));
+    CHECK(r.has_error("expected a statement in sequence 's'; a rule is applied with a mode"));
     CHECK(r.diags.all.size() == 1);   // one diagnostic for the bad line
+}
+
+TEST_CASE("sequence: an inline rule behaves exactly as the named rule (0.8, section 6)") {
+    std::string decls = "tag t { a, b, c }\nlayers { g: grid of t }\n";
+    check_equivalent(
+        decls + "rule fill { g[.] => g[a] }\n"
+                "rule mark(rotation=all) { g[a a] => g[* b] }\n"
+                "rule mix { all g[a] => g[c], g[b] => { any g[a] g[c] } }\n"
+                "sequence main { resize(6, 5) everywhere fill grow(7) mark settle mix }\n",
+        decls + "sequence main {\n"
+                "    resize(6, 5)\n"
+                "    everywhere { g[.] => g[a] }\n"
+                "    grow(7) (rotation=all) { g[a a] => g[* b] }\n"
+                "    settle { all\n        g[a] => g[c]\n        g[b] => { any g[a] g[c] }\n    }\n"
+                "}\n");
 }
 
 TEST_CASE("sequence Q34: sequences take no attributes") {

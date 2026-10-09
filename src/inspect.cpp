@@ -139,6 +139,18 @@ void emit_loc(std::string& o, module_closure const& mods, source_loc l, size_t l
     o += "}";
 }
 
+// Every rule of the root module: declared ones, then those written inline in
+// its sequences' statements (section 6).
+template <class F>
+void for_each_root_rule(ast_file const& ast, int root, F&& f) {
+    for (auto const& r : ast.rules)
+        if (r.loc.mod == root) f(r);
+    for (auto const& sq : ast.sequences)
+        if (sq.loc.mod == root)
+            for (auto const& s : sq.stmts)
+                if (s.inline_rule) f(*s.inline_rule);
+}
+
 }  // namespace
 
 std::string inspect_json(std::string const& source, std::string const& name,
@@ -174,13 +186,13 @@ std::string inspect_json(std::string const& source, std::string const& name,
     o += ",\"tokens\":[";
     {
         comma_list cl{o};
-        for (auto const& r : ast->rules)
-            if (in_root(r.loc))
+        for_each_root_rule(*ast, mods.root, [&](rule_decl const& r) {
             for (auto const& pr : r.pairs) {
                 for (auto const& lp : pr.lhs)
                     emit_pattern_tokens(o, cl, prog, lp);
                 emit_write_term_tokens(o, cl, prog, pr.rhs);
             }
+        });
     }
     o += "]";
 
@@ -190,7 +202,7 @@ std::string inspect_json(std::string const& source, std::string const& name,
         // Rule / sequence references in program and sequence statements
         auto stmt_refs = [&](std::vector<program_stmt> const& stmts) {
             for (auto const& s : stmts) {
-                if (s.what != program_stmt::kind::apply) continue;
+                if (s.what != program_stmt::kind::apply || s.inline_rule) continue;
                 bool is_seq = false;
                 for (auto const& sq : ast->sequences)
                     if (sq.name == s.rule_name) is_seq = true;
@@ -207,14 +219,13 @@ std::string inspect_json(std::string const& source, std::string const& name,
         };
         for (auto const& sq : ast->sequences)
             if (in_root(sq.loc)) stmt_refs(sq.stmts);
-        // Grid references in Rule patterns
-        for (auto const& r : ast->rules) {
-            if (!in_root(r.loc)) continue;
+        // Grid references in rule patterns, named and inline
+        for_each_root_rule(*ast, mods.root, [&](rule_decl const& r) {
             for (auto const& pr : r.pairs) {
                 for (auto const& lp : pr.lhs) emit_pattern_refs(o, cl, lp);
                 emit_write_term_refs(o, cl, pr.rhs);
             }
-        }
+        });
     }
     o += "]";
 

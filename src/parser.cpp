@@ -555,8 +555,13 @@ struct parser {
         if (!expect(token_type::ident, "a rule name")) return;
         r.name_loc = prev_loc();
         r.name = toks[pos - 1].text;
+        if (parse_rule_rest(r)) out.rules.push_back(std::move(r));
+    }
+
+    // rule_attrs? '{' rule_body '}' - shared by named and inline rules (section 5.1)
+    bool parse_rule_rest(rule_decl& r) {
         if (accept(token_type::lparen)) parse_rule_attrs(r);
-        if (!expect(token_type::lbrace, "'{'")) return;
+        if (!expect(token_type::lbrace, "'{'")) return false;
 
         // Body-level combinator: `rule r { all pair pair … }` — multiple
         // independent sub-rules; `ordered` makes declaration order a priority
@@ -578,11 +583,11 @@ struct parser {
                 diags.error(file, bl.line, bl.col, "empty rule body");
         } else {
             rule_pair pr;
-            if (!parse_pair(pr)) { recover_to(token_type::rbrace); return; }
+            if (!parse_pair(pr)) { recover_to(token_type::rbrace); return false; }
             r.pairs.push_back(std::move(pr));
         }
         expect(token_type::rbrace, "'}'");
-        out.rules.push_back(std::move(r));
+        return true;
     }
 
     // ── program ──────────────────────────────────────────────────────────────
@@ -631,9 +636,16 @@ struct parser {
         expect(token_type::rparen, "')'");
     }
 
-    // apply_stmt ::= mode IDENT   (section 6)
-    // mode ::= 'once' | 'scatter' '(' count ')' | 'everywhere'
-    //        | 'grow' ('(' count ')')? | 'settle' ('(' count ')')?
+    // `(` IDENT `=` begins rule attributes, never a count (section 6)
+    bool at_rule_attrs() const {
+        return at(token_type::lparen) && peek(1).is(token_type::ident) &&
+               peek(2).is(token_type::equals);
+    }
+
+    // apply_stmt ::= mode target   (section 6)
+    // mode   ::= 'once' | 'scatter' '(' scatter_count ')' | 'everywhere'
+    //          | 'grow' ('(' expr ')')? | 'settle' ('(' expr ')')?
+    // target ::= IDENT | rule_attrs? '{' rule_body '}'
     void parse_apply(program_stmt& s) {
         token const& m = eat();
         switch (m.type) {
@@ -645,7 +657,7 @@ struct parser {
         }
         bool counted = s.mode == apply_mode::scatter || s.mode == apply_mode::grow ||
                        s.mode == apply_mode::settle;
-        if (at(token_type::lparen)) {
+        if (at(token_type::lparen) && !at_rule_attrs()) {
             if (counted) {
                 parse_count(s, s.mode == apply_mode::scatter);
             } else {
@@ -657,7 +669,18 @@ struct parser {
         } else if (s.mode == apply_mode::scatter) {
             error_at(peek(), "'scatter' takes a count, e.g. 'scatter(5)' or 'scatter(50%)'");
         }
-        if (expect(token_type::ident, "a rule or sequence name")) {
+        parse_target(s);
+    }
+
+    void parse_target(program_stmt& s) {
+        if (at(token_type::lbrace) || at_rule_attrs()) {   // an inline rule
+            auto r = std::make_unique<rule_decl>();
+            r->loc = loc();
+            r->name_loc = r->loc;
+            if (parse_rule_rest(*r)) s.inline_rule = std::move(r);
+            return;
+        }
+        if (expect(token_type::ident, "a rule or sequence name, or an inline rule '{ ... }'")) {
             s.rule_name_loc = prev_loc();
             s.rule_name = toks[pos - 1].text;
         }
@@ -726,8 +749,8 @@ struct parser {
                     error_at(peek(), "expected a statement (a mode + rule, or an operation call)");
                 else
                     error_at(peek(), "expected a statement in sequence '" + where +
-                             "'; rules are declared with 'rule' and applied by name, "
-                             "e.g. 'everywhere fill'");
+                             "'; a rule is applied with a mode, by name or inline, "
+                             "e.g. 'everywhere fill' or 'everywhere { g[.] => g[a] }'");
                 // one diagnostic per bad line, not one per token
                 skip_line(peek().line);
                 continue;

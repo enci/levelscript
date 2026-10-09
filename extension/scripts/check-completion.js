@@ -100,6 +100,13 @@ const cases = [
     ['sequence main {\n    grow(k * 2) ▮', { kind: 'ruleName' }],
     ['sequence main {\n    scatter(50%) ▮', { kind: 'ruleName' }],
     ['sequence main {\n    scatter(▮', { kind: 'expr', grids: false, pos: false }],   // params only
+    // inline rules (section 6)
+    ['sequence main {\n    everywhere {▮', { kind: 'ruleBody', start: true }],
+    ['sequence main {\n    everywhere { g[F] => ▮', { kind: 'ruleBody', start: false }],
+    ['sequence main {\n    once (▮', { kind: 'ruleAttr' }],
+    ['sequence main {\n    once (symmetry=▮', { kind: 'attrValue', attr: 'symmetry' }],
+    ['sequence main {\n    scatter(3) (rotation=all) {▮', { kind: 'ruleBody', start: true }],
+    ['sequence main {\n    settle { g[F] => g[W] }\n    ▮', { kind: 'statement', guard: true }],
     ['sequence main {\n    settle(k - ▮', { kind: 'expr', grids: false, pos: false }],
     ['sequence main {\n    mirror(▮', { kind: 'opArg', op: 'mirror', index: 0, used: [] }],
     ['sequence main {\n    path(from=a, ▮', { kind: 'opArg', op: 'path', index: 1, used: ['from'] }],

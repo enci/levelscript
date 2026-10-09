@@ -596,3 +596,37 @@ TEST_CASE("sema: variants record the rotation and flip that produced them (5.6)"
     CHECK(got == std::vector<std::pair<int, mirror>>{
         {0, mirror::none}, {0, mirror::h}, {90, mirror::none}, {90, mirror::v}});
 }
+
+TEST_CASE("sema: inline rules compile as anonymous rules named by position (0.8)") {
+    compile_result r(prelude + R"(
+rule fill { level[.] => level[floor] }
+sequence main {
+    resize(2, 2)
+    everywhere fill
+    everywhere (symmetry=horizontal) { level[floor .] => level[* wall] }
+}
+)");
+    INFO(r.diags.format_all());
+    REQUIRE(r.ok);
+    REQUIRE(r.prog.rules.size() == 2);
+    CHECK(!r.prog.rules[0].is_inline);
+    CHECK(r.prog.rules[1].is_inline);
+    CHECK(r.prog.rules[1].name == "inline@12:16");
+    CHECK(r.prog.rules[1].pairs.size() == 2);   // the H variant
+    CHECK(r.prog.sequences[0].stmts[2].rule_id == 1);
+}
+
+TEST_CASE("sema: inline rules get every rule check, located at the rule") {
+    CHECK(compile_result(prelude + "sequence main { everywhere { level[lava] => level[floor] } }")
+          .has_error("unknown tag value 'lava'"));
+    CHECK(compile_result(prelude + "sequence main { everywhere (symmetry=diagonal) { level[.] => level[floor] } }")
+          .has_error("invalid value 'diagonal'"));
+    // the reductivity warning names the rule by its position
+    compile_result w(prelude + "sequence main {\n    grow { level[floor] => tiles[1] }\n}");
+    CHECK(w.ok);
+    CHECK(has_warning(w, "'grow' over rule 'inline@8:10' may never terminate"));
+    // and an inline rule is never a did-you-mean suggestion
+    compile_result u(prelude + "sequence main { everywhere { level[.] => level[floor] } everywhere inlin }");
+    CHECK(u.has_error("undeclared rule or sequence 'inlin'"));
+    CHECK(!u.has_error("did you mean"));
+}
