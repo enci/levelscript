@@ -9,7 +9,7 @@
 //   loot:    a numeric "reward" grid — clamped so it never exceeds 5, and the
 //            `100 / spacing` term is safe even when the (dead) branch divides by 0.
 //
-// Run it:  mgsl --param difficulty=5 examples/if_difficulty.mgsl
+// Run it:  levelscript --param difficulty=5 examples/if_difficulty.ls
 //
 // @param difficulty 5
 // @expect run-ok
