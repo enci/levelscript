@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- LevelScript - productbuild distribution. Rendered by build_pkg.py:
+     @TOKEN@ markers are replaced before productbuild runs. -->
+<installer-gui-script minSpecVersion="2">
+    <title>@APP_NAME@ @APP_VERSION@</title>
+    <!-- hostArchitectures: Apple Silicon only; without it, Installer treats a
+         package that has scripts as Intel and offers to install Rosetta. -->
+    <options customize="never" require-scripts="false" hostArchitectures="arm64"/>
+    <domains enable_localSystem="true"/>
+    <volume-check>
+        <allowed-os-versions><os-version min="@MIN_MACOS@"/></allowed-os-versions>
+    </volume-check>
+    <conclusion file="conclusion.html" mime-type="text/html"/>
+    <choices-outline>
+        <line choice="default"><line choice="@PKG_ID@"/></line>
+    </choices-outline>
+    <choice id="default"/>
+    <choice id="@PKG_ID@" visible="false">
+        <pkg-ref id="@PKG_ID@"/>
+    </choice>
+    <pkg-ref id="@PKG_ID@" version="@APP_VERSION@" onConclusion="none">@COMPONENT_PKG@</pkg-ref>
+</installer-gui-script>

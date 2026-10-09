@@ -37,13 +37,25 @@ int  wall  = gen.tag("geo.wall");
 if (geo.at(x, y) == wall) ...
 ```
 
-## Install (Windows)
+## Install
 
-`python packaging/build_installer.py` builds a per-user installer (needs
-[Inno Setup](https://jrsoftware.org/isinfo.php) 6.3+) at
-`dist/LevelScript-setup-<version>-x64.exe`. It installs `levelscript` and
-`levelscript-debugger` and adds them to your PATH; open a new terminal
-afterwards.
+Installers for Windows and macOS are attached to every
+[release](https://github.com/enci/levelscript/releases/latest). Both install
+`levelscript` and `levelscript-debugger` and add them to your PATH; open a new
+terminal afterwards.
+
+To build them yourself:
+
+- **Windows:** `python packaging/windows/build_installer.py` builds a per-user installer
+  (needs [Inno Setup](https://jrsoftware.org/isinfo.php) 6.3+) at
+  `dist/LevelScript-setup-<version>-x64.exe`.
+- **macOS:** `python packaging/macos/build_pkg.py` builds an Apple Silicon
+  (macOS 11+) package at
+  `dist/LevelScript-<version>-macos-arm64.pkg`. It installs to
+  `/usr/local/levelscript` and puts `bin/` on PATH via `/etc/paths.d`. The
+  package is unsigned: the first time, allow it under System Settings >
+  Privacy & Security > Open Anyway. Uninstall with
+  `sudo /usr/local/levelscript/uninstall.sh`.
 
 ## Compiler / runner: `levelscript`
 

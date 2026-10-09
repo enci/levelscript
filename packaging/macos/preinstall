@@ -1,0 +1,6 @@
+#!/bin/sh
+# Runs as root before the payload is written. Installer only adds and overwrites
+# files, so clear the previous install: an upgrade then leaves exactly what the
+# new package contains (like a fresh install).
+rm -rf /usr/local/levelscript
+exit 0

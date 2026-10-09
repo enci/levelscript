@@ -1,12 +1,16 @@
 name: Release
 
-# Builds and publishes the Windows LevelScript installer when a version tag is pushed.
+# Builds the Windows and macOS LevelScript installers when a version tag is pushed,
+# and publishes both to one GitHub Release.
 #
 # Tag convention is semver  vMAJOR.MINOR.PATCH  (e.g. v0.7.1) and MUST match
 # src/version.hpp. The tag is only the "publish" signal; the version baked into the
 # exes comes from version.hpp, and this workflow fails fast if the two disagree.
 #
 #   git tag v0.7.1 && git push origin v0.7.1
+#
+# Each platform job uploads its installer as a workflow artifact; the release is
+# created once, by the publish job, after both have passed their tests.
 on:
   push:
     tags:
@@ -16,22 +20,23 @@ env:
   PUBLISHER: "Bojan Endrovski"
 
 permissions:
-  contents: write          # required to create/attach the GitHub Release
+  contents: read
 
 defaults:
   run:
     shell: pwsh
 
 jobs:
-  windows:
-    timeout-minutes: 30
-    runs-on: windows-latest
+  # version.hpp is the single source of truth for the version compiled into the
+  # exes. Catch the common mistake of tagging without bumping version.hpp.
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # version.hpp is the single source of truth for the version compiled into the
-      # exes. Catch the common mistake of tagging without bumping version.hpp.
       - name: Verify tag matches version.hpp
         id: version
         run: |
@@ -47,6 +52,16 @@ jobs:
             exit 1
           }
           "version=$expected" >> $env:GITHUB_OUTPUT
+
+  windows:
+    needs: version
+    timeout-minutes: 30
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
 
       - name: Configure
         run: cmake -S . -B build
@@ -65,8 +80,8 @@ jobs:
         run: |
           $output = & "build\app\Release\levelscript.exe" --version
           Write-Host "Version: $output"
-          if ($output -ne "levelscript ${{ steps.version.outputs.version }}") {
-            Write-Error "Built exe reports '$output', expected version ${{ steps.version.outputs.version }}"
+          if ($output -ne "levelscript $env:VERSION") {
+            Write-Error "Built exe reports '$output', expected version $env:VERSION"
             exit 1
           }
 
@@ -74,36 +89,133 @@ jobs:
         run: choco install innosetup -y --no-progress
 
       # build_installer.py stages bin\ (levelscript, levelscript-debugger, resources\),
-      # examples\ and readme.md, renders packaging/levelscript_installer.iss.in and
+      # examples\ and readme.md, renders packaging/windows/levelscript_installer.iss.in and
       # compiles it with ISCC into dist/LevelScript-setup-<version>-x64.exe (per-user,
       # adds bin\ to the user PATH; the fixed AppId keeps in-place upgrades working).
       - name: Build installer
         run: >
-          python packaging/build_installer.py
+          python packaging/windows/build_installer.py
           --skip-build
           --build-dir  build
           --output-dir dist
-          --version    ${{ steps.version.outputs.version }}
+          --version    ${{ env.VERSION }}
           --publisher  "${{ env.PUBLISHER }}"
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-installer
+          path: dist/LevelScript-setup-*.exe
+          if-no-files-found: error
+
+  macos:
+    needs: version
+    timeout-minutes: 30
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # Apple Silicon binaries that run on macOS 11 and later;
+      # left at its default, the deployment target would be the runner's own macOS.
+      # Keep these flags in sync with packaging/macos/build_pkg.py.
+      - name: Configure
+        run: >
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_OSX_ARCHITECTURES=arm64
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+
+      - name: Build (Release)
+        run: cmake --build build --config Release --parallel
+
+      # Don't publish a build that fails the tests or the determinism gate.
+      - name: Unit tests
+        run: ./build/tests/ls_tests
+
+      - name: Examples
+        run: python run_examples.py
+
+      - name: Smoke-test the build
+        run: |
+          $output = & ./build/app/levelscript --version
+          Write-Host "Version: $output"
+          if ($output -ne "levelscript $env:VERSION") {
+            Write-Error "Built exe reports '$output', expected version $env:VERSION"
+            exit 1
+          }
+
+      # build_pkg.py stages /usr/local/levelscript (bin/, bin/resources/,
+      # examples/, uninstall.sh) plus /etc/paths.d/levelscript (puts bin/ on PATH) and
+      # wraps it with pkgbuild + productbuild into
+      # dist/LevelScript-<version>-macos-arm64.pkg. The fixed package id keeps
+      # upgrades in place; a preinstall script clears the previous install first.
+      - name: Build installer
+        run: >
+          python packaging/macos/build_pkg.py
+          --skip-build
+          --build-dir  build
+          --output-dir dist
+          --version    ${{ env.VERSION }}
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-installer
+          path: dist/LevelScript-*-macos-arm64.pkg
+          if-no-files-found: error
+
+  publish:
+    needs: [version, windows, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # required to create/attach the GitHub Release
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - name: Download installers
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
 
       - name: Publish to GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          files: dist/LevelScript-setup-*.exe
+          files: |
+            dist/LevelScript-setup-*.exe
+            dist/LevelScript-*-macos-arm64.pkg
+          fail_on_unmatched_files: true
           draft: false
           prerelease: false
           generate_release_notes: true
           body: |
-            # LevelScript ${{ steps.version.outputs.version }}
+            # LevelScript ${{ env.VERSION }}
 
-            Windows installer (per-user, no admin required). It installs the
-            `levelscript` compiler/runner and the `levelscript-debugger`, and adds both
-            to your PATH.
+            Installs the `levelscript` compiler/runner and the `levelscript-debugger`,
+            and adds both to your PATH.
 
-            ## Install
-            1. Download **LevelScript-setup-${{ steps.version.outputs.version }}-x64.exe** below and run it.
+            ## Windows
+            1. Download **LevelScript-setup-${{ env.VERSION }}-x64.exe** below and run it
+               (per-user, no admin required).
             2. Open a new terminal and run `levelscript --version`.
 
+            ## macOS (11 or later, Apple Silicon)
+            1. Download **LevelScript-${{ env.VERSION }}-macos-arm64.pkg** below and open it.
+            2. The package is not signed, so macOS blocks it the first time: open
+               **System Settings > Privacy & Security** and click **Open Anyway**.
+            3. Open a new terminal and run `levelscript --version`.
+
+            Installs to `/usr/local/levelscript`. To uninstall:
+            `sudo /usr/local/levelscript/uninstall.sh`
+
+            ## Usage
             ```
             levelscript [--seed N] [--entry name] [--param name=value ...] <file.ls>
             levelscript-debugger [--seed N] [--entry name] <file.ls>
