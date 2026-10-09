@@ -9,10 +9,20 @@ its own corner radii. Every fold, where a piece meets the rest of the ribbon,
 gets the same fold shadow; pieces can also darken toward their deep end.
 
 Usage:
-    python levelscript_icon.py
+    pip install -r tools/requirements.txt
+    python tools/levelscript_icon.py
 
-Writes the SVG master, a 512 px preview and every size in EXPORT_SIZES to
-OUT_DIR (relative to this script, so it works from any working directory).
+Writes, relative to the repository root (so it works from any working
+directory):
+    resources/icon/levelscript.svg       the master
+    resources/icon/levelscript-flat.svg  the flat variant, for tiny sizes
+    resources/icon/levelscript.png       256 px, the debugger's window icon
+    resources/icon/levelscript-macos.png 512 px with Apple's icon margin, the
+                                         debugger's Dock icon on macOS
+    resources/icon/levelscript.ico       Windows executables and installer:
+                                         flat up to FLAT_MAX px, full above
+    extension/icon.png                   128 px, the VS Code extension
+    extension/file-icon.svg              the flat variant, .ls files in VS Code
 """
 from __future__ import annotations
 
@@ -21,12 +31,19 @@ from collections import defaultdict
 
 # ---------------------------------------------------------------- config ---
 
-OUT_DIR = "resources"  # relative to this script
+ROOT = pathlib.Path(__file__).resolve().parent.parent   # the repository root
 
-N = 5  # grid is N x N uniform cells; A1 = top-left
+N = 5  # grid is N x N cells; A1 = top-left
 
 # Ribbon path as waypoints; consecutive waypoints share a row or a column.
 RIBBON = "A1 A5 E5 E3 C3 C1 E1"
+
+# Ribbon thickness in cells (1 = uniform grid). Columns the ribbon runs down
+# and rows it runs along get this width/height; the remaining columns and rows
+# (the counters between the bands) share what is left, so the ribbon grows
+# inward and the outline stays the same size. All other lengths in cells
+# (radii, shadow widths) use the nominal cell, 1/N of the icon.
+THICKNESS = 1.2
 
 # Corner radii of the ribbon outline, in cells (0.5 = semicircular band end).
 # Where two corners share an edge too short for both, a piece's explicit
@@ -59,14 +76,14 @@ RADII = dict(
 # corner cell (its rounded outer corner). At a fold the piece's corner on the
 # ribbon's outer edge is rounded (0.5) and the inner one is square.
 PIECES = [
-    # shared bottom bar: deep at D5 where it comes out from the S-bottom fold,
-    # rising toward A5. It bends through the corner A5 and continues into A4,
-    # where it is mostly hidden by the stem; only its corner shows there.
-    dict(cells="A4:A5 B5:D5", corners={(0, 3): 0, (1, 3): 0, (4, 4): 0, (4, 5): 0.5},
+    # L stem on the front face: deep at the bottom, rising toward A1. It bends
+    # through the corner A5 and continues into B5, where it is mostly hidden by
+    # the bar; only its corner shows.
+    dict(cells="A1:A5 B5", face="front", corners={(2, 4): 0, (2, 5): 0}, depth="bottom"),
+    # shared bottom bar: folds out from the stem at B5, rounded at the
+    # bottom-left of B5; deep at D5 where it comes out from the S-bottom fold
+    dict(cells="B5:D5", corners={(1, 4): 0, (1, 5): 0.5, (4, 4): 0, (4, 5): 0.5},
          depth="right"),
-    # L stem on the front face: deep at A4 where it folds out from under the
-    # bar, rising toward A1; rounded at the bottom-left of A4
-    dict(cells="A1:A4", face="front", corners={(0, 4): 0.5, (1, 4): 0}, depth="bottom"),
     # middle of the S; folds from column E (right) and into column C (left)
     dict(cells="D3", corners={(3, 2): 0, (4, 2): 0.5, (4, 3): 0, (3, 3): 0.5}),
     # top band; folds out of column C (left)
@@ -76,19 +93,31 @@ PIECES = [
 # Colours. Both faces share one gradient axis (top-left to bottom-right) so
 # the ribbon reads as a single material; the back face is the front mixed
 # toward BACK_TINT (a deep tint keeps it saturated, unlike mixing with black).
-FRONT = ["#14DC85", "#00DBD4", "#D6DF30"]
-BACK_TINT = "#2F7000"
-BACK_DARKEN = 0.28     # 0 = same as front, 1 = BACK_TINT
+# BACK_TINT also colours the fold shadows and depth darkening.
+FRONT = ["#F5DD7E", "#3FC46E", "#008167"]  # gradient stops, top-left to bottom-right
+BACK_TINT = "#06352C"
+BACK_DARKEN = 0.38     # 0 = same as front, 1 = BACK_TINT
 FOLD_SHADOW = dict(
-    opacity=0.55,      # darkness at the fold, fading to 0
-    width=1.2,         # how far it reaches into the piece, in cells
+    opacity=0.45,      # darkness at the fold, fading to 0
+    width=1.0,         # how far it reaches into the piece, in cells
 )
 DEPTH = 0.45           # darkness at a piece's far end (see PIECES "depth")
 HIGHLIGHT = 0.22       # white sheen from the top-left; 0 disables
 
+# Flat variant for tiny sizes (file icons): one solid colour per face, no
+# gradients, shadows or highlight. The face change alone marks the folds.
+FLAT = dict(
+    front="#3FC46E",
+    back="#0E5E4A",
+)
+FLAT_MAX = 32   # .ico sizes up to this use the flat variant
+# macOS draws app icons at 824 of 1024 px, centred; a full-bleed icon looks
+# oversized in the Dock next to every other app.
+MACOS_PADDING = 100 / 1024
+
 PADDING = 0.0          # fraction of the canvas left empty on each side
 CANVAS = 1024
-EXPORT_SIZES = [16, 20, 24, 32, 40, 48, 64, 96, 128, 180, 192, 256, 512, 1024]
+ICO_SIZES = [16, 20, 24, 32, 40, 48, 64, 128, 256]
 
 # ------------------------------------------------------------- geometry ---
 
@@ -160,24 +189,56 @@ def boundary_loops(cells):
     return loops
 
 
+def band_lines(spec: str):
+    """Column and row indices the ribbon runs along (its bands)."""
+    way = [cell(w) for w in spec.split()]
+    cols, rows = set(), set()
+    for a, b in zip(way, way[1:]):
+        if a[0] == b[0]:
+            cols.add(a[0])
+        else:
+            rows.add(a[1])
+    return cols, rows
+
+
+def sizes(bands):
+    """Widths of the N columns (or rows), in nominal cells, summing to N."""
+    rest = N - len(bands)
+    other = (N - THICKNESS * len(bands)) / rest if rest else 0
+    if rest and other <= 0:
+        raise ValueError(f"THICKNESS {THICKNESS} leaves no room between the bands")
+    return [THICKNESS if i in bands else other for i in range(N)]
+
+
 class Grid:
     def __init__(self, canvas=CANVAS, padding=PADDING):
         self.size = canvas * (1 - 2 * padding)
         self.o = canvas * padding
-        self.c = self.size / N
+        self.c = self.size / N  # nominal cell, the unit for radii and shadows
+        cols, rows = band_lines(RIBBON)
+        self.xs = self._lines(sizes(cols))
+        self.ys = self._lines(sizes(rows))
+
+    def _lines(self, widths):
+        out, acc = [self.o], self.o
+        for w in widths:
+            acc += w * self.c
+            out.append(acc)
+        return out
 
     def pt(self, gx, gy):
-        return self.o + gx * self.c, self.o + gy * self.c
+        """Canvas position of grid point (gx, gy); gx, gy are integers 0..N."""
+        return self.xs[gx], self.ys[gy]
 
 
-def rounded_path(cells, g: Grid, override=None) -> str:
-    """SVG path of a cell set with rounded corners.
+def corner_table(cells, g: Grid, override=None):
+    """Per outline loop: grid vertices, canvas points, convexity, final radii.
 
     override maps a grid point to a radius in cells; other points use RADII.
     """
     override = override or {}
     icon_corners = {(0, 0), (N, 0), (0, N), (N, N)}
-    parts = []
+    table = []
     for loop in boundary_loops(cells):
         n = len(loop)
         P = [g.pt(*v) for v in loop]
@@ -207,13 +268,21 @@ def rounded_path(cells, g: Grid, override=None) -> str:
                 small = min(rad[i], rad[j], length / 2)
                 for k, other in ((i, j), (j, i)):
                     lim[k] = min(lim[k], small if rad[k] <= rad[other] else length - small)
-        rad = lim
+        table.append((loop, P, convex, lim))
+    return table
 
-        def unit(p, q):
-            dx, dy = q[0] - p[0], q[1] - p[1]
-            m = abs(dx) + abs(dy)
-            return dx / m, dy / m
 
+def rounded_path(cells, g: Grid, override=None) -> str:
+    """SVG path of a cell set with rounded corners (see corner_table)."""
+
+    def unit(p, q):
+        dx, dy = q[0] - p[0], q[1] - p[1]
+        m = abs(dx) + abs(dy)
+        return dx / m, dy / m
+
+    parts = []
+    for _, P, convex, rad in corner_table(cells, g, override):
+        n = len(P)
         seg = []
         for i in range(n + 1):
             k = i % n
@@ -252,26 +321,39 @@ def gradient(gid, colors, a, b, opacities=None):
 
 
 def folds(cells, ribbon):
-    """Sides of a piece where it meets the rest of the ribbon.
+    """Edges of a piece where it meets the rest of the ribbon.
 
-    Yields (side, edge, (lo, hi)) for each of left/right/top/bottom where ribbon
-    cells outside the piece touch it: edge is the grid coordinate of that
-    side, lo..hi the extent along it covered by the touching cells.
+    Yields (side, edge, (lo, hi)): side of the piece, the grid line of that
+    edge, and the extent lo..hi along it, one per contiguous stretch.
     """
-    x0, y0 = min(c for c, _ in cells), min(r for _, r in cells)
-    x1, y1 = max(c for c, _ in cells) + 1, max(r for _, r in cells) + 1
     outside = ribbon - cells
-    checks = {
-        "left": ({(x0 - 1, r) for r in range(y0, y1)}, x0),
-        "right": ({(x1, r) for r in range(y0, y1)}, x1),
-        "top": ({(c, y0 - 1) for c in range(x0, x1)}, y0),
-        "bottom": ({(c, y1) for c in range(x0, x1)}, y1),
-    }
-    for side, (neighbours, edge) in checks.items():
-        touching = neighbours & outside
-        if touching:
-            along = [r for _, r in touching] if side in ("left", "right") else [c for c, _ in touching]
-            yield side, edge, (min(along), max(along) + 1)
+    found = defaultdict(set)  # (side, edge) -> positions along the edge
+    for c, r in cells:
+        for side, (dc, dr), edge, pos in (("left", (-1, 0), c, r), ("right", (1, 0), c + 1, r),
+                                          ("top", (0, -1), r, c), ("bottom", (0, 1), r + 1, c)):
+            if (c + dc, r + dr) in outside:
+                found[(side, edge)].add(pos)
+    for (side, edge), positions in sorted(found.items()):
+        run = sorted(positions)
+        start = prev = run[0]
+        for p in run[1:] + [None]:
+            if p != prev + 1 if p is not None else True:
+                yield side, edge, (start, prev + 1)
+                start = p
+            prev = p if p is not None else prev
+
+
+def strip_rect(side, edge, span, length, g):
+    """Canvas rect (x0, y0, x1, y1) inside a piece along its fold edge."""
+    step = {"left": 1, "right": -1, "top": 1, "bottom": -1}[side] * length
+    lo, hi = span
+    if side in ("left", "right"):
+        x, y0, y1 = g.xs[edge], g.ys[lo], g.ys[hi]
+        x0, x1 = sorted((x, x + step))
+        return x0, y0, x1, y1
+    y, x0, x1 = g.ys[edge], g.xs[lo], g.xs[hi]
+    y0, y1 = sorted((y, y + step))
+    return x0, y0, x1, y1
 
 
 def fold_shadow(gid, side, edge, span, g, defs, clip, width=None):
@@ -279,38 +361,64 @@ def fold_shadow(gid, side, edge, span, g, defs, clip, width=None):
 
     It covers only the extent of the ribbon cells touching that side.
     """
-    w = FOLD_SHADOW["width"] if width is None else width
-    step = {"left": 1, "right": -1, "top": 1, "bottom": -1}[side] * w
-    lo, hi = span
-    a0, a1 = sorted((edge, edge + step))
+    w = (FOLD_SHADOW["width"] if width is None else width) * g.c
+    x0, y0, x1, y1 = strip_rect(side, edge, span, w, g)
     if side in ("left", "right"):
-        rect, a, b = (a0, lo, a1, hi), g.pt(edge, lo), g.pt(edge + step, lo)
+        x = g.xs[edge]
+        a, b = (x, y0), (x + (w if side == "left" else -w), y0)
     else:
-        rect, a, b = (lo, a0, hi, a1), g.pt(lo, edge), g.pt(lo, edge + step)
+        y = g.ys[edge]
+        a, b = (x0, y), (x0, y + (w if side == "top" else -w))
     defs.append(gradient(gid, [BACK_TINT, BACK_TINT], a, b, [FOLD_SHADOW["opacity"], 0]))
-    (rx0, ry0), (rx1, ry1) = g.pt(rect[0], rect[1]), g.pt(rect[2], rect[3])
-    return (f'<rect x="{rx0:.2f}" y="{ry0:.2f}" width="{rx1 - rx0:.2f}" height="{ry1 - ry0:.2f}" '
+    return (f'<rect x="{x0:.2f}" y="{y0:.2f}" width="{x1 - x0:.2f}" height="{y1 - y0:.2f}" '
             f'fill="url(#{gid})" clip-path="url(#{clip})"/>')
 
 
-def build_svg(canvas=CANVAS, padding=PADDING) -> str:
+def visible_folds(pieces, ribbon_set):
+    """(piece index, side, edge, span) for every fold not hidden by a later piece."""
+    out = []
+    for i, cells in enumerate(pieces):
+        later = set().union(*pieces[i + 1:]) if i + 1 < len(pieces) else set()
+        for side, edge, span in folds(cells, ribbon_set):
+            lo, hi = span
+            if side in ("left", "right"):
+                col = edge if side == "left" else edge - 1
+                strip = {(col, r) for r in range(lo, hi)}
+            else:
+                row = edge if side == "top" else edge - 1
+                strip = {(c, row) for c in range(lo, hi)}
+            if not strip <= later:
+                out.append((i, side, edge, span))
+    return out
+
+
+def build_svg(canvas=CANVAS, padding=PADDING, flat=False) -> str:
+    """The icon as SVG; flat=True gives the simplified variant for tiny sizes."""
     g = Grid(canvas, padding)
     tl, br = g.pt(0, 0), g.pt(N, N)
-    defs = [
-        gradient("front", FRONT, tl, br),
-        gradient("back", [mix(c, BACK_TINT, BACK_DARKEN) for c in FRONT], tl, br),
-    ]
+    if flat:
+        fill = {"front": FLAT["front"], "back": FLAT["back"]}
+        defs = []
+    else:
+        fill = {"front": "url(#front)", "back": "url(#back)"}
+        defs = [
+            gradient("front", FRONT, tl, br),
+            gradient("back", [mix(c, BACK_TINT, BACK_DARKEN) for c in FRONT], tl, br),
+        ]
     ribbon_set = ribbon_cells(RIBBON)
     ribbon = rounded_path(ribbon_set, g)
-    body = [f'<path d="{ribbon}" fill="url(#front)"/>']
+    body = [f'<path d="{ribbon}" fill="{fill["front"]}"/>']
 
     pieces = [cell_range(p["cells"]) for p in PIECES]
+    fold_list = visible_folds(pieces, ribbon_set)
     for i, (piece, cells) in enumerate(zip(PIECES, pieces)):
         d = rounded_path(cells, g, piece.get("corners"))
+        body.append(f'<path d="{d}" fill="{fill[piece.get("face", "back")]}"/>')
+        if flat:
+            continue
+        defs.append(f'<clipPath id="piece{i}"><path d="{d}"/></clipPath>')
         x0, y0 = min(c for c, _ in cells), min(r for _, r in cells)
         x1, y1 = max(c for c, _ in cells) + 1, max(r for _, r in cells) + 1
-        body.append(f'<path d="{d}" fill="url(#{piece.get("face", "back")})"/>')
-        defs.append(f'<clipPath id="piece{i}"><path d="{d}"/></clipPath>')
 
         far = piece.get("depth")
         if far and DEPTH > 0:
@@ -324,20 +432,11 @@ def build_svg(canvas=CANVAS, padding=PADDING) -> str:
             body.append(f'<path d="{d}" fill="url(#depth{i})"/>')
 
         if FOLD_SHADOW["opacity"] > 0:
-            later = set().union(*pieces[i + 1:]) if i + 1 < len(pieces) else set()
-            for j, (side, edge, span) in enumerate(folds(cells, ribbon_set)):
-                lo, hi = span
-                if side in ("left", "right"):
-                    col = edge if side == "left" else edge - 1
-                    strip = {(col, r) for r in range(lo, hi)}
-                else:
-                    row = edge if side == "top" else edge - 1
-                    strip = {(c, row) for c in range(lo, hi)}
-                if strip <= later:  # this fold is hidden under a later piece
-                    continue
+            for j, (k, side, edge, span) in enumerate(f for f in fold_list if f[0] == i):
                 body.append(fold_shadow(f"fold{i}-{j}", side, edge, span, g, defs, f"piece{i}",
                                         piece.get("shadow", {}).get(side)))
-    if HIGHLIGHT > 0:
+
+    if not flat and HIGHLIGHT > 0:
         defs.append(gradient("hl", ["#ffffff", "#ffffff"], tl, ((tl[0] + br[0]) / 2, (tl[1] + br[1]) / 2),
                              [HIGHLIGHT, 0]))
         body.append(f'<path d="{ribbon}" fill="url(#hl)"/>')
@@ -354,16 +453,31 @@ def rasterize(svg: str, size: int) -> bytes:
     return bytes(resvg_py.svg_to_bytes(svg_string=svg, width=size, height=size))
 
 
+def image(svg: str, size: int):
+    """Rendered from the vector at this size, not downscaled - small sizes stay crisp."""
+    import io
+    from PIL import Image
+    return Image.open(io.BytesIO(rasterize(svg, size))).convert("RGBA")
+
+
 def main():
-    out = pathlib.Path(__file__).resolve().parent / OUT_DIR
-    (out / "png").mkdir(parents=True, exist_ok=True)
+    out = ROOT / "resources" / "icon"
+    out.mkdir(parents=True, exist_ok=True)
 
     svg = build_svg()
+    flat = build_svg(flat=True)
     (out / "levelscript.svg").write_text(svg)
-    (out / "levelscript-preview.png").write_bytes(rasterize(svg, 512))
-    for s in EXPORT_SIZES:
-        (out / "png" / f"levelscript-{s}.png").write_bytes(rasterize(svg, s))
-    print(f"wrote {out}")
+    (out / "levelscript-flat.svg").write_text(flat)
+    (out / "levelscript.png").write_bytes(rasterize(svg, 256))
+    (out / "levelscript-macos.png").write_bytes(rasterize(build_svg(padding=MACOS_PADDING), 512))
+    ico = [image(flat if s <= FLAT_MAX else svg, s) for s in ICO_SIZES]
+    ico[-1].save(out / "levelscript.ico", format="ICO",
+                 sizes=[im.size for im in ico], append_images=ico[:-1])
+
+    ext = ROOT / "extension"
+    (ext / "icon.png").write_bytes(rasterize(svg, 128))
+    (ext / "file-icon.svg").write_text(flat)
+    print(f"wrote {out} and {ext}")
 
 
 if __name__ == "__main__":

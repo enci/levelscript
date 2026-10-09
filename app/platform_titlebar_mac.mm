@@ -18,4 +18,10 @@ void set_titlebar(SDL_Window* w, float r, float g, float b, bool dark_appearance
         dark_appearance ? NSAppearanceNameDarkAqua : NSAppearanceNameAqua];
 }
 
+void set_app_icon(char const* image_path) {
+    if (!image_path || !*image_path) return;
+    NSImage* icon = [[NSImage alloc] initWithContentsOfFile:[NSString stringWithUTF8String:image_path]];
+    if (icon) [NSApp setApplicationIconImage:icon];
+}
+
 }  // namespace ls::platform

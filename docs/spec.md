@@ -1,6 +1,6 @@
 # LevelScript
 
-**Status**: Draft 0.8.1
+**Status**: Draft 0.8.2
 **File extension**: `.ls`
 **CLI**: `levelscript [--seed N] [--entry name] [--param name=value ...] <file.ls>` (`--entry` defaults to `main`, a tool convention; section 6)
 **Embedding**: namespace `ls::` (see Appendix A)

@@ -15,6 +15,7 @@
 #include <imgui_impl_sdlrenderer3.h>
 #include <imgui_freetype.h>
 #include <nlohmann/json.hpp>
+#include <stb_image.h>
 
 #include <algorithm>
 #include <chrono>
@@ -101,6 +102,29 @@ static std::string find_resource(char const* rel) {
     return {};
 }
 
+// The application icon (resources/icon, from tools/levelscript_icon.py). macOS
+// gets a variant with Apple's icon margin, so it matches the other Dock icons.
+#ifdef __APPLE__
+static char const* const k_app_icon = "resources/icon/levelscript-macos.png";
+#else
+static char const* const k_app_icon = "resources/icon/levelscript.png";
+#endif
+
+// The window icon for the title bar and taskbar. Optional: without the
+// resource the window keeps the platform default.
+static void set_window_icon(SDL_Window* window) {
+    std::string path = find_resource(k_app_icon);
+    if (path.empty()) return;
+    int w, h, ch;
+    unsigned char* px = stbi_load(path.c_str(), &w, &h, &ch, 4);
+    if (!px) return;
+    if (SDL_Surface* icon = SDL_CreateSurfaceFrom(w, h, SDL_PIXELFORMAT_RGBA32, px, w * 4)) {
+        SDL_SetWindowIcon(window, icon);   // SDL copies the pixels
+        SDL_DestroySurface(icon);
+    }
+    stbi_image_free(px);
+}
+
 // ── themes (defined below run_debug_ui) ──────────────────────────────────────
 
 // Color of the gaps between docked panes (the dock host's background).
@@ -125,6 +149,7 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
 
     // ── prefs (theme + window geometry + seed) -- SDL's per-user location ────
     SDL_Init(SDL_INIT_VIDEO);
+    platform::set_app_icon(find_resource(k_app_icon).c_str());   // before the Dock tile shows
     char* pref_raw = SDL_GetPrefPath("levelscript", "debugger");
     std::string pref_dir = pref_raw ? pref_raw : "";
     if (pref_raw) SDL_free(pref_raw);
@@ -199,6 +224,7 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
         ("LevelScript - " + path).c_str(), win_w, win_h,
         SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (win_x && win_y) SDL_SetWindowPosition(window, *win_x, *win_y);
+    set_window_icon(window);
 
     SDL_Renderer* renderer = SDL_CreateRenderer(window, nullptr);
     SDL_SetRenderVSync(renderer, 1);

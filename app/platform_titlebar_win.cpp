@@ -31,4 +31,6 @@ void set_titlebar(SDL_Window* w, float r, float g, float b, bool dark_appearance
     DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR, &color, sizeof(color));
 }
 
+void set_app_icon(char const*) {}   // the window icon covers it (SDL_SetWindowIcon)
+
 }  // namespace ls::platform

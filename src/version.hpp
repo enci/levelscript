@@ -6,7 +6,7 @@
 
 #define LS_VERSION_MAJOR 0
 #define LS_VERSION_MINOR 8
-#define LS_VERSION_PATCH 1
+#define LS_VERSION_PATCH 2
 
 #define LS_STR_(x) #x
 #define LS_STR(x)  LS_STR_(x)
