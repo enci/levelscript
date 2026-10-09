@@ -359,12 +359,23 @@ struct parser {
             return at(token_type::rbracket) || at(token_type::arrow) ||
                    at(token_type::rbrace) || at_end();
         };
+        // row_sep ::= ',' WS* NEWLINE? | NEWLINE. A comma inside '( ... )' is
+        // consumed by the cell's expression, so only a depth-0 comma gets here.
         while (!body_ends()) {
             std::vector<cell> row;
-            while (!at(token_type::newline) && !body_ends()) {
+            while (!at(token_type::newline) && !at(token_type::comma) && !body_ends()) {
                 cell c;
                 if (!parse_cell(c)) { eat_bad(); continue; }
                 row.push_back(std::move(c));
+            }
+            if (at(token_type::comma)) {
+                token const& comma = eat();
+                if (row.empty())
+                    error_at(comma, "empty pattern row before ','");
+                accept(token_type::newline);   // ',' + newline is a single break
+                skip_newlines();
+                if (body_ends())
+                    error_at(peek(), "expected a pattern row after ','");
             }
             if (!row.empty()) p.cells.push_back(std::move(row));
             skip_newlines();
