@@ -30,10 +30,8 @@ rule fill_geo { all
 }
 
 rule reward {
-    { all
-      level[floor]
-      loot[.]
-    }
+    level[floor]
+    loot[.]
     =>
     { any
       (weight=6) loot[.]

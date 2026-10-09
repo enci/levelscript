@@ -16,13 +16,13 @@ rule scatter_rocks {
 }
 
 rule place_door {
-    { all site[.] where[ (x == 0 && y == height / 2) ] }
+    site[.] where[ (x == 0 && y == height / 2) ]
     =>
     site[door]
 }
 
 rule place_exit {
-    { all site[.] where[ (x == width - 1 && y == height / 2) ] }
+    site[.] where[ (x == width - 1 && y == height / 2) ]
     =>
     site[exit]
 }

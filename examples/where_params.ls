@@ -23,10 +23,8 @@ layers {
 
 // Water fills every still-empty cell whose row is above the sea level.
 rule flood {
-    { all
-      map[.]
-      where[ (y < sea_level) ]
-    }
+    map[.]
+    where[ (y < sea_level) ]
     =>
     map[water]
 }

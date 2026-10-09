@@ -29,10 +29,8 @@ layers {
 
 // Place a single core at the centre via `where` position guards.
 rule seed {
-    { all
-      g[.]
-      where[ (x == width / 2 && y == height / 2) ]
-    }
+    g[.]
+    where[ (x == width / 2 && y == height / 2) ]
     =>
     g[core]
 }

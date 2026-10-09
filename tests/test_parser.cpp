@@ -119,13 +119,11 @@ TEST_CASE("parser: use declarations head the file (2.6)") {
 
 // ── step 2: match blocks, write trees, attributes, body combinators ──────────
 
-TEST_CASE("parser: { all } match side") {
+TEST_CASE("parser: consecutive patterns conjoin on the match side (0.8, 5.2)") {
     auto ast = parse_ok(R"(
 rule place {
-    { all
-      algo[F]
-      enemies[.]
-    }
+    algo[F]
+    enemies[.]
     =>
     enemies[goblin]
 }
@@ -190,12 +188,39 @@ rule r {
 )"));
 }
 
-TEST_CASE("parser: { any } on the match side is an error") {
+TEST_CASE("parser: the match side takes no combinator or commas (0.8, 5.2)") {
     CHECK(parse_fails("rule r { { any g[a] h[b] } => g[c] }"));
+    CHECK(parse_fails("rule r { g[a], h[b] => g[c] }"));
+    CHECK(parse_fails("rule r { { g[a], h[b] } => g[c] }"));
+    diagnostics diags;   // the 0.7 form says how to migrate
+    parse("rule r { { all g[a] h[b] } => g[c] }", "test", diags);
+    REQUIRE(diags.all.size() == 1);
+    CHECK(diags.all[0].message.find("only group patterns") != std::string::npos);
+}
+
+TEST_CASE("parser: braces may group a match side and change nothing (0.8, 5.2)") {
+    auto a = parse_ok("rule r { all\n { g[a] h[b] } => g[c]\n { g[b]\n h[.] } => { all g[d] h[e] }\n g[c] => g[d] }");
+    REQUIRE(a.rules[0].pairs.size() == 3);
+    CHECK(a.rules[0].pairs[0].lhs.size() == 2);
+    CHECK(a.rules[0].pairs[1].lhs.size() == 2);
+    CHECK(a.rules[0].pairs[2].lhs.size() == 1);
+    auto b = parse_ok("rule r { { g[a] } => g[b] }");
+    CHECK(b.rules[0].pairs[0].lhs.size() == 1);
+    CHECK(parse_fails("rule r { { } => g[c] }"));
+    CHECK(parse_fails("rule r { { { g[a] } } => g[c] }"));
+}
+
+TEST_CASE("parser: match-side patterns may share a line or span several") {
+    auto a = parse_ok("rule r { g[a] h[b] where[(x == 0)] => g[c] }");
+    CHECK(a.rules[0].pairs[0].lhs.size() == 3);
+    auto b = parse_ok("rule r { all\n g[a]\n h[b]\n =>\n g[c]\n g[d] h[.] => h[e] }");
+    REQUIRE(b.rules[0].pairs.size() == 2);
+    CHECK(b.rules[0].pairs[0].lhs.size() == 2);
+    CHECK(b.rules[0].pairs[1].lhs.size() == 2);
 }
 
 TEST_CASE("parser: single-item combinator blocks are allowed") {
-    auto ast = parse_ok("rule r { { all g[a] } => { any g[b] } }");
+    auto ast = parse_ok("rule r { g[a] => { any g[b] } }");
     CHECK(ast.rules[0].pairs[0].lhs.size() == 1);
     CHECK(ast.rules[0].pairs[0].rhs.items.size() == 1);
 }
@@ -360,10 +385,8 @@ TEST_CASE("parser: expression cells and precedence") {
 TEST_CASE("parser: where pseudo-layer") {
     auto ast = parse_ok(R"(
 rule edge {
-    { all
-      level[floor]
-      where[ (x == 0) ]
-    }
+    level[floor]
+    where[ (x == 0) ]
     =>
     level[wall]
 }

@@ -447,37 +447,44 @@ struct parser {
         expect(token_type::rparen, "')'");
     }
 
-    // ── match side: a pattern, or { all p1 p2 … } ────────────────────────────
+    // ── match side: pattern+ (spec section 5.2) ──────────────────────────────────
 
+    bool at_pattern_head() const {
+        return (at(token_type::ident) || at(token_type::kw_where)) &&
+               peek(1).is(token_type::lbracket);
+    }
+
+    // Consecutive patterns before '=>' conjoin; there is no match-side
+    // combinator and no comma between the patterns. Braces may group them for
+    // the reader: `{ p1 p2 } => ...` means `p1 p2 => ...`.
     bool parse_match_side(std::vector<pattern>& lhs) {
-        if (at(token_type::lbrace)) {
-            source_loc bl = loc();
-            (void)bl;
-            eat();   // '{'
-            if (at(token_type::kw_any) || at(token_type::kw_ordered)) {
-                error_at(peek(), "'{ " + peek().text +
-                         " }' is not supported on the match side");
-                recover_to(token_type::rbrace);
-                return false;
-            }
-            if (!expect(token_type::kw_all, "'all'")) {
-                recover_to(token_type::rbrace);
-                return false;
-            }
-            while (!at(token_type::rbrace) && !at_end()) {
-                pattern p;
-                if (!parse_pattern(p)) { eat_bad(); list_sep(); continue; }
-                lhs.push_back(std::move(p));
-                list_sep();
-            }
-            expect(token_type::rbrace, "'}'");
-            // single-item blocks are allowed (relaxed from MGSL's ≥2 rule —
-            // generated/templated rules often produce them)
-            return !lhs.empty();
+        if (!at(token_type::lbrace)) return parse_match_patterns(lhs);
+        eat();   // '{'
+        if (at(token_type::kw_all) || at(token_type::kw_any) || at(token_type::kw_ordered)) {
+            // 0.7's `{ all p1 p2 }` migrates by dropping the keyword
+            error_at(peek(), "match-side braces only group patterns and take no '" +
+                     peek().text + "' since 0.8; write '{ p1 p2 }' or just 'p1 p2'");
+            eat();
         }
-        pattern p;
-        if (!parse_pattern(p)) return false;
-        lhs.push_back(std::move(p));
+        if (at(token_type::rbrace)) {
+            error_at(peek(), "empty match-side group");
+            eat();
+            return false;
+        }
+        if (!parse_match_patterns(lhs)) { recover_to(token_type::rbrace); return false; }
+        return expect(token_type::rbrace, "'}'");
+    }
+
+    bool parse_match_patterns(std::vector<pattern>& lhs) {
+        do {
+            pattern p;
+            if (!parse_pattern(p)) return false;
+            lhs.push_back(std::move(p));
+            if (at(token_type::comma)) {
+                error_at(peek(), "patterns on the match side are not separated by commas");
+                eat();
+            }
+        } while (at_pattern_head());
         return true;
     }
 

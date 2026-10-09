@@ -6,7 +6,7 @@ tag geometry { floor }
 tag item { chest }
 layers { level: grid of geometry  items: grid of item }
 rule bad {
-    { all level[.] items[.] }
+    level[.] items[.]
     =>
     { all
       (weight=2) level[floor]

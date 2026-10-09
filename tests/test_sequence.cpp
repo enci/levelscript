@@ -93,10 +93,8 @@ std::string counter(int cap) {
     return R"(
 layers { tiles: grid of number }
 rule inc {
-    { all
-      tiles[*]
-      where[ (tiles < )" + std::to_string(cap) + R"() ]
-    }
+    tiles[*]
+    where[ (tiles < )" + std::to_string(cap) + R"() ]
     =>
     tiles[ (tiles + 1) ]
 }

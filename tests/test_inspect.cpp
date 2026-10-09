@@ -110,18 +110,18 @@ layers {
     g: grid of t
     n: grid of number
 }
-rule r { { all g[* D]  n[* 12] } => { all g[F D]  n[. 3] } }
+rule r { g[* D] n[* 12] => { all g[F D]  n[. 3] } }
 sequence main { }
 )", "test.ls");
     CHECK(has(j, "\"diagnostics\":[]"));
     // union D takes the slot after its tag's values (F=0, W=1 -> D=2)
-    CHECK(has(j, "{\"line\":6,\"col\":20,\"len\":1,\"tag\":0,\"value\":2}"));
-    CHECK(has(j, "{\"line\":6,\"col\":47,\"len\":1,\"tag\":0,\"value\":2}"));
+    CHECK(has(j, "{\"line\":6,\"col\":14,\"len\":1,\"tag\":0,\"value\":2}"));
+    CHECK(has(j, "{\"line\":6,\"col\":38,\"len\":1,\"tag\":0,\"value\":2}"));
     // '*' in a tag grid and in a number grid
-    CHECK(has(j, "{\"line\":6,\"col\":18,\"len\":1,\"tag\":-1,\"value\":-1}"));
-    CHECK(has(j, "{\"line\":6,\"col\":26,\"len\":1,\"tag\":-1,\"value\":-1}"));
+    CHECK(has(j, "{\"line\":6,\"col\":12,\"len\":1,\"tag\":-1,\"value\":-1}"));
+    CHECK(has(j, "{\"line\":6,\"col\":19,\"len\":1,\"tag\":-1,\"value\":-1}"));
     // number-grid literals carry their value; '.' is the empty token
-    CHECK(has(j, "{\"line\":6,\"col\":28,\"len\":2,\"tag\":-3,\"value\":12}"));
-    CHECK(has(j, "{\"line\":6,\"col\":53,\"len\":1,\"tag\":-2,\"value\":-2}"));
-    CHECK(has(j, "{\"line\":6,\"col\":55,\"len\":1,\"tag\":-3,\"value\":3}"));
+    CHECK(has(j, "{\"line\":6,\"col\":21,\"len\":2,\"tag\":-3,\"value\":12}"));
+    CHECK(has(j, "{\"line\":6,\"col\":44,\"len\":1,\"tag\":-2,\"value\":-2}"));
+    CHECK(has(j, "{\"line\":6,\"col\":46,\"len\":1,\"tag\":-3,\"value\":3}"));
 }

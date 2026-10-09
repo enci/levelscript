@@ -19,10 +19,8 @@ rule pave {
 }
 
 rule frame {
-    { all
-      level[floor]
-      where[ (x == 0 || y == 0 || x == width - 1 || y == height - 1) ]
-    }
+    level[floor]
+    where[ (x == 0 || y == 0 || x == width - 1 || y == height - 1) ]
     =>
     level[wall]
 }
