@@ -77,7 +77,7 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "build:wasm": "cd .. && emcmake cmake -B build-wasm -DCMAKE_BUILD_TYPE=Release && cmake --build build-wasm",
+    "build:wasm": "cd .. && emcmake cmake -B build/wasm -DCMAKE_BUILD_TYPE=Release && cmake --build build/wasm",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "test": "npm run compile && node scripts/check-examples.js && node scripts/check-completion.js",
