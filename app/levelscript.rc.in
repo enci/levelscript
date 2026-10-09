@@ -1,0 +1,4 @@
+// Windows resources for levelscript.exe and levelscript-debugger.exe: the
+// application icon, shown by Explorer, the taskbar and the installer. CMake
+// fills in the icon's absolute path (app/CMakeLists.txt).
+1 ICON "@LS_ICON_ICO@"

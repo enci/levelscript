@@ -28,6 +28,8 @@ ChangesEnvironment=yes
 OutputDir=@OUTPUT_DIR@
 OutputBaseFilename=@OUTPUT_BASENAME@
 UninstallDisplayName={#AppName} {#AppVersion}
+; The application icon, also embedded in both exes (app/levelscript.rc.in).
+SetupIconFile={#BundleDir}\bin\resources\icon\levelscript.ico
 UninstallDisplayIcon={app}\bin\levelscript-debugger.exe
 Compression=lzma2
 SolidCompression=yes
