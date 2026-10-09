@@ -205,26 +205,17 @@ export const completionProvider: vscode.CompletionItemProvider = {
             tagValues(tagOf(ctx.grid));
             break;
         case 'statement':
-            snippet('one', 'one ${1:rule}', K.Keyword, 'apply once');
-            snippet('all', 'all ${1:rule}', K.Keyword, 'apply to every match');
-            snippet('some', 'some(max=${1:1}) ${2:rule}', K.Keyword, 'apply up to N times');
+            snippet('once', 'once ${1:rule}', K.Keyword, 'one application, or one iteration');
+            snippet('scatter', 'scatter(${1:N}) ${2:rule}', K.Keyword, 'up to N (or P%) of one batch');
+            snippet('everywhere', 'everywhere ${1:rule}', K.Keyword, 'every match of one batch');
+            snippet('grow', 'grow ${1:rule}', K.Keyword, 'steps, each seeing the last; grow(N) for N');
+            snippet('settle', 'settle ${1:rule}', K.Keyword, 'repeat until nothing changes; settle(N) for at most N');
             OPS.forEach(op => snippet(op.name, op.snippet, K.Function, 'operation'));
             if (ctx.guard) snippet('when', 'when (${1})', K.Keyword, 'guard');
             break;
         case 'ruleName':
             sym?.rules.forEach(r => word(r.name, K.Method, 'rule'));
             sym?.sequences?.forEach(s => word(s.name, K.Module, 'sequence'));
-            break;
-        case 'strategyArg':
-            // the target is not typed yet: offer everything a rule takes
-            if (ctx.strategy === 'some') {
-                snippet('max', 'max=${1:1}', K.Property);
-                snippet('percent', 'percent=${1:50}', K.Property);
-            }
-            snippet('policy', 'policy=${1|snapshot,incremental,stabilize|}', K.Property);
-            break;
-        case 'policyValue':
-            ['snapshot', 'incremental', 'stabilize'].forEach(v => word(v, K.EnumMember));
             break;
         case 'opArg': {
             const op = OPS.find(o => o.name === ctx.op);

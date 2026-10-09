@@ -22,11 +22,11 @@
     },
     "keyword": {
       "name": "keyword.control.levelscript",
-      "match": "\\b(use|tag|layers|grid|of|number|rule|sequence|params|where|when|any|all|one|some|ordered|symmetry|rotation|weight|max|percent|policy|snapshot|incremental|stabilize|none|horizontal|vertical|ordered)\\b"
+      "match": "\\b(use|tag|layers|grid|of|number|rule|sequence|params|where|when|any|all|ordered|once|scatter|everywhere|grow|settle|symmetry|rotation|weight|none|horizontal|vertical)\\b"
     },
     "operator": {
       "name": "keyword.operator.levelscript",
-      "match": "=>|==|!=|<=|>=|&&|\\|\\||[+\\-*/|!<>=]"
+      "match": "=>|==|!=|<=|>=|&&|\\|\\||[+\\-*/|!<>=%]"
     },
     "pattern-body": {
       "name": "meta.pattern.levelscript",

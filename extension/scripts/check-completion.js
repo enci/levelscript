@@ -54,8 +54,12 @@ const cases = [
     ['rule r { any\n    g[F] => g[W]\n    ▮', { kind: 'ruleBody', start: false }],
     ['rule r { g▮', { kind: 'ruleBody', start: true }],   // typing the grid name
     ['rule r { g ▮', { kind: 'none' }],                   // '[' expected
-    ['rule r { {▮', { kind: 'combinator' }],
-    ['rule r { { all ▮', { kind: 'ruleBody', start: false }],
+    ['rule r { g[F] => {▮', { kind: 'combinator' }],
+    ['rule r { g[F] => { all ▮', { kind: 'ruleBody', start: false }],
+    ['rule r { g[F] => { all g[W] {▮', { kind: 'combinator' }],   // a nested write block
+    ['rule r { {▮', { kind: 'ruleBody', start: false }],           // a match-side group
+    ['rule r { { g[F] ▮', { kind: 'ruleBody', start: false }],
+    ['rule r { all\n    { g[F] } => g[W]\n    {▮', { kind: 'ruleBody', start: false }],
     ['rule r { g[F] => { any (▮', { kind: 'weight' }],
     ['rule r { g[▮', { kind: 'cell', grid: 'g' }],
     ['rule r { g[F ▮', { kind: 'cell', grid: 'g' }],
@@ -64,8 +68,8 @@ const cases = [
     ['rule r { g[F] => g[ (▮', { kind: 'expr', grids: true, pos: true }],
     ['rule r { g[F] => g[ (min(n, ▮', { kind: 'expr', grids: true, pos: true }],
     ['rule r { g[F] => g[ (k ▮', { kind: 'none' }],
-    ['rule r { { all g[.] where[ (x == ▮', { kind: 'expr', grids: true, pos: true }],
-    ['rule r { { all g[.] where[ ▮', { kind: 'none' }],
+    ['rule r { g[.] where[ (x == ▮', { kind: 'expr', grids: true, pos: true }],
+    ['rule r { g[.] where[ ▮', { kind: 'none' }],
 
     // modules (section 2.6)
     ['use "schema.ls"\n▮', { kind: 'top' }],
@@ -76,21 +80,27 @@ const cases = [
     ['sequence ▮', { kind: 'none' }],
     ['sequence s(▮', { kind: 'none' }],
     ['sequence s {\n    ▮', { kind: 'statement', guard: false }],
-    ['sequence s {\n    all r\n    ▮', { kind: 'statement', guard: true }],
-    ['sequence s {\n    some(max=2) ▮', { kind: 'ruleName' }],
-    [decls + 'sequence s { all r }\n\n▮', { kind: 'top' }],
+    ['sequence s {\n    everywhere r\n    ▮', { kind: 'statement', guard: true }],
+    ['sequence s {\n    settle(2) ▮', { kind: 'ruleName' }],
+    [decls + 'sequence s { everywhere r }\n\n▮', { kind: 'top' }],
 
     // statements (the body of a sequence)
     ['sequence main {\n    ▮', { kind: 'statement', guard: false }],
     ['sequence main {\n    resize(4, 4)\n    ▮', { kind: 'statement', guard: true }],
-    ['sequence main {\n    one r\n    ▮', { kind: 'statement', guard: true }],
-    ['sequence main {\n    some(max=3) r\n    ▮', { kind: 'statement', guard: true }],
+    ['sequence main {\n    once r\n    ▮', { kind: 'statement', guard: true }],
+    ['sequence main {\n    scatter(3) r\n    ▮', { kind: 'statement', guard: true }],
+    ['sequence main {\n    grow r\n    ▮', { kind: 'statement', guard: true }],
     ['sequence main {\n    mirror(horizontal) when (k > 1)\n    ▮', { kind: 'statement', guard: false }],
-    ['sequence main {\n    one ▮', { kind: 'ruleName' }],
-    ['sequence main {\n    all(policy=incremental) ▮', { kind: 'ruleName' }],
-    ['sequence main {\n    some(max=2) ▮', { kind: 'ruleName' }],
-    ['sequence main {\n    some(▮', { kind: 'strategyArg', strategy: 'some' }],
-    ['sequence main {\n    one(policy=▮', { kind: 'policyValue' }],
+    ['sequence main {\n    once ▮', { kind: 'ruleName' }],
+    ['sequence main {\n    everywhere ▮', { kind: 'ruleName' }],
+    ['sequence main {\n    grow ▮', { kind: 'ruleName' }],
+    ['sequence main {\n    settle ▮', { kind: 'ruleName' }],
+    ['sequence main {\n    scatter ▮', { kind: 'none' }],          // '(' expected
+    ['sequence main {\n    scatter(2) ▮', { kind: 'ruleName' }],
+    ['sequence main {\n    grow(k * 2) ▮', { kind: 'ruleName' }],
+    ['sequence main {\n    scatter(50%) ▮', { kind: 'ruleName' }],
+    ['sequence main {\n    scatter(▮', { kind: 'expr', grids: false, pos: false }],   // params only
+    ['sequence main {\n    settle(k - ▮', { kind: 'expr', grids: false, pos: false }],
     ['sequence main {\n    mirror(▮', { kind: 'opArg', op: 'mirror', index: 0, used: [] }],
     ['sequence main {\n    path(from=a, ▮', { kind: 'opArg', op: 'path', index: 1, used: ['from'] }],
     ['sequence main {\n    path(into=▮', { kind: 'opValue', op: 'path', param: 'into' }],
