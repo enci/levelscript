@@ -6,7 +6,7 @@ and wraps it in a per-user Inno Setup installer that puts bin\\ on the user PATH
 
 Requires CMake, a C++ toolchain, and Inno Setup 6.3+ (ISCC.exe).
 
-    python packaging/windows/build_installer.py [--version 0.8.1] [--skip-build]
+    python packaging/windows/build_installer.py [--version X.Y.Z] [--skip-build]
 
 Output: dist/LevelScript-setup-<version>-x64.exe
 """
