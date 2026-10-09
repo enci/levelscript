@@ -10,7 +10,7 @@
 // `where`, which gates WHICH cells inside a rule (spatial). Derived params name
 // a function of the inputs once (`budget`) and reuse it in a guard.
 //
-// Run it:  mgsl --param style=0 --param difficulty=5 examples/when_style.mgsl
+// Run it:  levelscript --param style=0 --param difficulty=5 examples/when_style.ls
 //
 // @param style 0
 // @param difficulty 5

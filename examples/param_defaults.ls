@@ -5,8 +5,8 @@
 // may read an earlier one (same scope discipline as a derived param). Supply
 // `--param difficulty=N` to override; otherwise the defaults drive the run.
 //
-// Run it:  mgsl --seed 1 examples/param_defaults.mgsl
-//     or:  mgsl --seed 1 --param difficulty=5 examples/param_defaults.mgsl
+// Run it:  levelscript --seed 1 examples/param_defaults.ls
+//     or:  levelscript --seed 1 --param difficulty=5 examples/param_defaults.ls
 //
 // @seed 1
 // @expect run-ok

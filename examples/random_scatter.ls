@@ -6,7 +6,7 @@
 // of becoming rubble, and the rest are filled with floor. The exact scatter is
 // fixed for a given --seed (determinism is per seed, per implementation version).
 //
-// Run it:  mgsl --seed 42 examples/random_scatter.mgsl
+// Run it:  levelscript --seed 42 examples/random_scatter.ls
 //
 // @seed 42
 // @expect run-ok
