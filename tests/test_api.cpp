@@ -666,6 +666,33 @@ sequence main {
     }
 }
 
+TEST_CASE("api: bare cells test before expression cells and draw nothing") {
+    // Every candidate is rejected by a bare cell (`5` on an empty grid, `wall`
+    // where there is none), which section 5.11 tests before any expression or
+    // `where` cell, so the gates must not draw: `roll` sees the same stream as
+    // a program without them.
+    auto rolled = [](char const* gates, char const* steps) {
+        auto gen = make(std::string(R"(
+tag geo { wall }
+layers {
+    tiles: grid of number
+    marks: grid of number
+    level: grid of geo
+}
+rule roll { tiles[.] => tiles[ (random(0, 999)) ] }
+)") + gates + "sequence main {\n    resize(6, 6)\n" + steps + "    everywhere roll\n}\n");
+        INFO(gen.error());
+        REQUIRE(static_cast<bool>(gen));
+        return dump(gen.generate(gen.sequence("main"), 7), "tiles");
+    };
+    auto plain = rolled("", "");
+    auto gated = rolled(R"(
+rule cell_gate { marks[ (random(0, 1)) 5 ] => marks[1 1] }
+rule where_gate { where[ (random(0, 1) == 0) ] level[wall] => level[.] }
+)", "    everywhere cell_gate\n    everywhere where_gate\n");
+    CHECK(gated == plain);
+}
+
 TEST_CASE("api: totality — division by zero yields zero") {
     auto gen = make(R"(
 layers { tiles: grid of number }

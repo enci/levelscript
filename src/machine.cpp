@@ -614,7 +614,27 @@ std::vector<machine::match> machine::collect(compiled_rule const& rule) {
     return out;
 }
 
+// Two phases (section 5.11): every bare cell of every pattern first - pure, so
+// their order is unobservable - then expression and `where` cells in pattern
+// order, row-major. Only phase 2 can draw, so a candidate its bare cells
+// reject consumes no draws.
 bool machine::match_at(compiled_pair const& pair, int row, int col) {
+    auto test = [](compiled_pattern const& pat, int64_t stored, long long want) {
+        return pat.is_number ? stored == want            // by value
+                             : (stored & want) != 0;     // mask overlap (section 4.1)
+    };
+    for (auto const& pat : pair.lhs) {
+        if (pat.is_where) continue;
+        if (pat.grid_id < 0) return false;
+        grid_state const& g = grids_[pat.grid_id];
+        if (row + pat.rows > g.rows || col + pat.cols > g.cols) return false;
+        for (int r = 0; r < pat.rows; ++r)
+            for (int c = 0; c < pat.cols; ++c) {
+                auto const& cell = pat.at(r, c);
+                if (cell.what != compiled_cell::kind::value) continue;
+                if (!test(pat, g.get(row + r, col + c), cell.val)) return false;
+            }
+    }
     for (auto const& pat : pair.lhs) {
         if (pat.is_where) {   // section 5.9: every cell's boolean must hold
             for (int r = 0; r < pat.rows; ++r)
@@ -625,22 +645,13 @@ bool machine::match_at(compiled_pair const& pair, int row, int col) {
                 }
             continue;
         }
-        if (pat.grid_id < 0) return false;
         grid_state const& g = grids_[pat.grid_id];
-        if (row + pat.rows > g.rows || col + pat.cols > g.cols) return false;
         for (int r = 0; r < pat.rows; ++r)
             for (int c = 0; c < pat.cols; ++c) {
                 auto const& cell = pat.at(r, c);
-                if (cell.what == compiled_cell::kind::wildcard) continue;
-                int64_t stored = g.get(row + r, col + c);
-                long long want = cell.what == compiled_cell::kind::expr
-                               ? eval(cell.expr, col + c, row + r)
-                               : cell.val;
-                if (pat.is_number) {
-                    if (stored != want) return false;          // by value
-                } else {
-                    if ((stored & want) == 0) return false;    // mask overlap (section 4.1)
-                }
+                if (cell.what != compiled_cell::kind::expr) continue;
+                long long want = eval(cell.expr, col + c, row + r);
+                if (!test(pat, g.get(row + r, col + c), want)) return false;
             }
     }
     return true;
