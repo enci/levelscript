@@ -16,7 +16,7 @@ else()
 endif()
 
 # ── WASM module for the VS Code extension ─────────────────────────────────────
-# Build with:  emcmake cmake -B build-wasm && cmake --build build-wasm
+# Build with:  emcmake cmake -B build/wasm && cmake --build build/wasm
 # Emits ls_wasm.js + ls_wasm.wasm straight into extension/ (gitignored).
 if(EMSCRIPTEN)
     add_executable(ls_wasm wasm_bind.cpp)
