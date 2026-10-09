@@ -3,7 +3,7 @@
 //
 // A tiny scanner tokenizes up to the word being typed, skipping comments, and
 // keeps a stack of open '{' '[' '(' frames. Each frame knows what opened it
-// (a `tag` block, a rule's attributes, `some(`, `path(`, a pattern of grid g,
+// (a `tag` block, a rule's attributes, `scatter(`, `path(`, a pattern of grid g,
 // ...) and the tokens seen inside it so far; the innermost frame plus its last
 // token or two decide the context. Anything unrecognized is 'none' - no list
 // at all beats a list of everything.
@@ -20,13 +20,11 @@ export type CompletionContext =
     | { kind: 'ruleAttr' }                              // rule r(_)
     | { kind: 'attrValue'; attr: string }               // rule r(symmetry=_)
     | { kind: 'ruleBody'; start: boolean }              // a pattern may start here
-    | { kind: 'combinator' }                            // { _   (all / any)
+    | { kind: 'combinator' }                            // => { _   (all / any)
     | { kind: 'weight' }                                // { any (_ ) g[...] }
     | { kind: 'cell'; grid: string }                    // g[ _ ]
     | { kind: 'statement'; guard: boolean }             // sequence s { _ }
-    | { kind: 'ruleName' }                              // sequence s { one _ } - rules and sequences
-    | { kind: 'strategyArg'; strategy: string }         // some(_)
-    | { kind: 'policyValue' }                           // one(policy=_)
+    | { kind: 'ruleName' }                              // sequence s { once _ } - rules and sequences
     | { kind: 'opArg'; op: string; index: number; used: string[] }  // path(_)
     | { kind: 'opValue'; op: string; param: string };   // path(into=_)
 
@@ -60,14 +58,16 @@ export const OPS: { name: string; params: OpParam[]; snippet: string }[] = [
 interface Tok { t: string; owner?: string }   // t: text; owner set on synthetic closers
 interface Frame {
     open: '{' | '[' | '(' | '';
-    owner: string;       // what opened it: 'top' 'tag:t' 'layers' 'params' 'rule' 'statements' 'combinator' 'set' 'grid:g' 'where' 'attrs' 'strategy:one' 'op:path' 'when' 'weight' 'expr'
+    owner: string;       // what opened it: 'top' 'tag:t' 'layers' 'params' 'rule' 'statements' 'combinator' 'group' 'set' 'grid:g' 'where' 'attrs' 'count:grow' 'op:path' 'when' 'weight' 'expr'
     scope: 'full' | 'restricted' | '';   // expression scope inherited by '(' frames
     toks: Tok[];
 }
 
 const STRING = '<string>';   // token text for any string literal
 const OPERATORS = new Set(['+', '-', '*', '/', '==', '!=', '<', '<=', '>', '>=', '&&', '||', '|', '!']);
-const STRATEGIES = new Set(['one', 'all', 'some']);
+// Modes (section 6). scatter always takes a count; grow and settle may.
+const MODES = new Set(['once', 'scatter', 'everywhere', 'grow', 'settle']);
+const COUNTED = new Set(['scatter', 'grow', 'settle']);
 
 function isIdentStart(c: string) { return /[A-Za-z_]/.test(c); }
 function isIdent(c: string) { return /[A-Za-z0-9_]/.test(c); }
@@ -152,7 +152,11 @@ function openFrame(c: '{' | '[' | '(', stack: Frame[]): Frame {
             return frame('other');
         }
         if (parent.owner === 'attrs' && prev === '=' && prev2 === 'rotation') return frame('set');
-        if (parent.owner === 'rule' || parent.owner === 'combinator') return frame('combinator');
+        // after '=>' (and inside a write block) a combinator block; otherwise
+        // braces only group a match side (section 5.2)
+        if (parent.owner === 'combinator' || (parent.owner === 'rule' && prev === '=>'))
+            return frame('combinator');
+        if (parent.owner === 'rule') return frame('group');
         return frame('other');
     }
     if (c === '[') {
@@ -163,7 +167,7 @@ function openFrame(c: '{' | '[' | '(', stack: Frame[]): Frame {
     // '('
     if (parent.owner === 'top' && currentDecl(toks)[0]?.t === 'rule') return frame('attrs');
     if (parent.owner === 'statements') {
-        if (prev && STRATEGIES.has(prev)) return frame('strategy:' + prev);
+        if (prev && COUNTED.has(prev)) return frame('count:' + prev, 'restricted');   // params only
         if (prev === 'when') return frame('when', 'restricted');
         if (prev && isIdentStart(prev[0])) return frame('op:' + prev, 'full');
         return frame('other');
@@ -173,6 +177,12 @@ function openFrame(c: '{' | '[' | '(', stack: Frame[]): Frame {
     if (parent.owner.startsWith('grid:') || parent.owner === 'where') return frame('expr', 'full');
     if (parent.scope) return frame('expr', parent.scope);
     return frame('other');
+}
+
+// Does this token end a mode, so a rule or sequence name follows? A mode
+// word that takes no count yet, or the ')' closing a count.
+function endsMode(t: Tok) {
+    return (MODES.has(t.t) && t.t !== 'scatter') || (t.t === ')' && !!t.owner?.startsWith('count:'));
 }
 
 // Tokens after which an expression operand may start.
@@ -210,6 +220,8 @@ function classify(stack: Frame[]): CompletionContext {
         if (prev === undefined || prev === ',') return { kind: 'ruleAttr' };
         if (prev === '=' && prev2) return { kind: 'attrValue', attr: prev2 };
         return none;
+    case 'group':
+        return prev === undefined || prev === ']' ? { kind: 'ruleBody', start: false } : none;
     case 'rule':
     case 'combinator': {
         if (prev === undefined) return f.owner === 'rule' ? { kind: 'ruleBody', start: true } : { kind: 'combinator' };
@@ -222,14 +234,12 @@ function classify(stack: Frame[]): CompletionContext {
         return prev === undefined ? { kind: 'weight' } : none;
     case 'statements': {
         if (prev === undefined) return { kind: 'statement', guard: false };
-        if (prev === 'one' || prev === 'all' || (prev === ')' && last.owner?.startsWith('strategy:')))
-            return { kind: 'ruleName' };
+        if (endsMode(last)) return { kind: 'ruleName' };
         if (prev === ')' && last.owner?.startsWith('op:')) return { kind: 'statement', guard: true };
         if (prev === ')' && last.owner === 'when') return { kind: 'statement', guard: false };
-        // `one r _` / `some(max=3) r _`: an application just ended
+        // `once r _` / `scatter(3) r _`: an application just ended
         const before = toks[toks.length - 2];
-        if (isIdentStart(prev[0]) && before &&
-            (before.t === 'one' || before.t === 'all' || (before.t === ')' && before.owner?.startsWith('strategy:'))))
+        if (isIdentStart(prev[0]) && before && endsMode(before))
             return { kind: 'statement', guard: true };
         return none;
     }
@@ -243,11 +253,6 @@ function classify(stack: Frame[]): CompletionContext {
     if (f.owner.startsWith('grid:')) {
         // a cell may start anywhere except right after an atom-joining '|' / '!' ... which also want a value
         return { kind: 'cell', grid: f.owner.slice(5) };
-    }
-    if (f.owner.startsWith('strategy:')) {
-        if (prev === undefined || prev === ',') return { kind: 'strategyArg', strategy: f.owner.slice(9) };
-        if (prev === '=' && prev2 === 'policy') return { kind: 'policyValue' };
-        return none;
     }
     if (f.owner.startsWith('op:')) {
         const op = f.owner.slice(3);
@@ -263,7 +268,7 @@ function classify(stack: Frame[]): CompletionContext {
         if (prev === '=' && prev2) return { kind: 'opValue', op, param: prev2 };
         return none;
     }
-    if (f.owner === 'when' || f.owner === 'expr')
+    if (f.owner === 'when' || f.owner === 'expr' || f.owner.startsWith('count:'))
         return exprMayStart(prev)
             ? { kind: 'expr', grids: f.scope === 'full', pos: f.scope === 'full' }
             : none;
