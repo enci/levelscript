@@ -10,9 +10,9 @@ on:
       - "tests/**"
       - "cmake/**"
       - "resources/**"          # copied next to the debugger at build time
-      - "examples/**"           # golden outputs checked by run_examples.py
+      - "examples/**"           # golden outputs checked by tools/run_examples.py
       - "CMakeLists.txt"
-      - "run_examples.py"
+      - "tools/run_examples.py"
       - ".github/workflows/build.yaml"
   pull_request:
     paths: *build_paths
@@ -29,7 +29,8 @@ jobs:
   build:
     name: ${{ matrix.os }} (${{ matrix.Configuration }})
     # SDL3, FreeType, ImGui and Catch2 are fetched and built from source on every run.
-    timeout-minutes: 30
+    # macOS runners are slow at that, so they get 3 hours; the rest keep 30 minutes.
+    timeout-minutes: ${{ matrix.os == 'macos-latest' && 180 || 30 }}
     strategy:
       fail-fast: false
       matrix:
@@ -80,4 +81,4 @@ jobs:
       # Golden-output determinism gate (examples/*.ls vs .expected). Running it on every
       # platform is what proves the output really is a pure function of (seed, params).
       - name: Examples
-        run: python run_examples.py
+        run: python tools/run_examples.py

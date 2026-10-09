@@ -10,7 +10,7 @@ Privacy & Security > Open Anyway. Installed files are not quarantined.
 
 Requires CMake and Xcode (command line tools).
 
-    python packaging/macos/build_pkg.py [--version 0.7.0] [--skip-build]
+    python packaging/macos/build_pkg.py [--version 0.8.1] [--skip-build]
 
 Output: dist/LevelScript-<version>-macos-arm64.pkg
 """
