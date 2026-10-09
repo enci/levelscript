@@ -11,13 +11,24 @@ struct parser {
     diagnostics&              diags;
     size_t                    pos{0};
     int                       mod{0};   // module id stamped into every loc
+    // Newlines are whitespace everywhere except between a pattern's brackets,
+    // where they separate rows (spec sections 2, 5.3). Outside a grid the
+    // newline tokens are invisible to peek/eat.
+    bool                      in_grid{false};
 
+    size_t skip_nl(size_t p) const {
+        if (!in_grid)
+            while (p + 1 < toks.size() && toks[p].is(token_type::newline)) ++p;
+        return p;
+    }
     token const& peek(int off = 0) const {
-        size_t p = pos + (size_t)off;
+        size_t p = skip_nl(pos);
+        for (int i = 0; i < off; ++i) p = skip_nl(p + 1);
         return p < toks.size() ? toks[p] : toks.back();
     }
     token const& eat() {
-        token const& t = peek();
+        pos = skip_nl(pos);
+        token const& t = toks[pos];
         if (pos + 1 < toks.size()) ++pos;
         return t;
     }
@@ -43,8 +54,9 @@ struct parser {
         return false;
     }
 
-    void skip_newlines() { while (at(token_type::newline)) eat(); }
-    void skip_seps()     { while (at(token_type::newline) || at(token_type::comma)) eat(); }
+    void skip_newlines() { while (at(token_type::newline)) eat(); }   // grid rows only
+    // list_sep ::= ','  - optional between list items (section 3)
+    void list_sep()      { accept(token_type::comma); }
 
     source_loc loc() const { return {peek().line, peek().col, mod}; }
     // location of the token just consumed
@@ -197,9 +209,8 @@ struct parser {
         if (!expect(token_type::ident, "a tagset name")) return;
         d.name = toks[pos - 1].text;
         if (!expect(token_type::lbrace, "'{'")) return;
-        skip_seps();
         while (!at(token_type::rbrace) && !at_end()) {
-            if (!expect(token_type::ident, "a tag value name")) { eat_bad(); skip_seps(); continue; }
+            if (!expect(token_type::ident, "a tag value name")) { eat_bad(); list_sep(); continue; }
             source_loc name_loc = prev_loc();
             std::string name = toks[pos - 1].text;
             if (at(token_type::equals)) {   // named union: blocker = wall | door (section 3)
@@ -215,7 +226,7 @@ struct parser {
             } else {
                 d.values.push_back({name_loc, std::move(name)});
             }
-            skip_seps();
+            list_sep();
         }
         expect(token_type::rbrace, "'}'");
         out.tags.push_back(std::move(d));
@@ -228,21 +239,20 @@ struct parser {
         out.has_layers = true;
         eat();   // 'layers'
         if (!expect(token_type::lbrace, "'{'")) return;
-        skip_seps();
         while (!at(token_type::rbrace) && !at_end()) {
             layer_decl l;
-            if (!expect(token_type::ident, "a grid name")) { eat_bad(); skip_seps(); continue; }
+            if (!expect(token_type::ident, "a grid name")) { eat_bad(); list_sep(); continue; }
             l.loc = prev_loc();
             l.name = toks[pos - 1].text;
-            if (!expect(token_type::colon, "':'"))         { skip_seps(); continue; }
-            if (!expect(token_type::kw_grid, "'grid'"))    { skip_seps(); continue; }
-            if (!expect(token_type::kw_of, "'of'"))        { skip_seps(); continue; }
+            if (!expect(token_type::colon, "':'"))         { list_sep(); continue; }
+            if (!expect(token_type::kw_grid, "'grid'"))    { list_sep(); continue; }
+            if (!expect(token_type::kw_of, "'of'"))        { list_sep(); continue; }
             if (accept(token_type::kw_number))       l.type = "number";
             else if (expect(token_type::ident, "a tagset name or 'number'"))
                 l.type = toks[pos - 1].text;
-            else { skip_seps(); continue; }
+            else { list_sep(); continue; }
             out.layers.layers.push_back(std::move(l));
-            skip_seps();
+            list_sep();
         }
         expect(token_type::rbrace, "'}'");
     }
@@ -255,24 +265,23 @@ struct parser {
         out.has_params = true;
         eat();   // 'params'
         if (!expect(token_type::lbrace, "'{'")) return;
-        skip_seps();
         while (!at(token_type::rbrace) && !at_end()) {
             param_decl p;
             p.loc = loc();
-            if (!expect(token_type::ident, "a param name")) { eat_bad(); skip_seps(); continue; }
+            if (!expect(token_type::ident, "a param name")) { eat_bad(); list_sep(); continue; }
             p.name = toks[pos - 1].text;
             if (accept(token_type::colon)) {   // input: name ':' 'number' '=' expr
-                if (!expect(token_type::kw_number, "'number'")) { skip_seps(); continue; }
+                if (!expect(token_type::kw_number, "'number'")) { list_sep(); continue; }
                 if (accept(token_type::equals))
                     p.value = parse_expr();
                 // a missing default is section 7.3, check 27 — reported in sema with p.loc
             } else {                           // derived: name '=' expr
                 p.is_derived = true;
-                if (!expect(token_type::equals, "':' or '='")) { skip_seps(); continue; }
+                if (!expect(token_type::equals, "':' or '='")) { list_sep(); continue; }
                 p.value = parse_expr();
             }
             out.params.push_back(std::move(p));
-            skip_seps();
+            list_sep();
         }
         expect(token_type::rbrace, "'}'");
     }
@@ -342,6 +351,7 @@ struct parser {
             p.grid = toks[pos - 1].text;
         }
         if (!expect(token_type::lbracket, "'['")) return false;
+        in_grid = true;    // newlines separate rows until ']'
         skip_newlines();   // '[' may be followed by a newline before the first row
         // '=>' and '}' can never be cells: an unclosed pattern stops there and
         // reports the missing ']' instead of a cell error per token
@@ -359,6 +369,7 @@ struct parser {
             if (!row.empty()) p.cells.push_back(std::move(row));
             skip_newlines();
         }
+        in_grid = false;
         if (!expect(token_type::rbracket, "']'")) return false;
         p.rows = (int)p.cells.size();
         p.cols = p.cells.empty() ? 0 : (int)p.cells[0].size();
@@ -442,12 +453,11 @@ struct parser {
                 recover_to(token_type::rbrace);
                 return false;
             }
-            skip_seps();
             while (!at(token_type::rbrace) && !at_end()) {
                 pattern p;
-                if (!parse_pattern(p)) { eat_bad(); skip_seps(); continue; }
+                if (!parse_pattern(p)) { eat_bad(); list_sep(); continue; }
                 lhs.push_back(std::move(p));
-                skip_seps();
+                list_sep();
             }
             expect(token_type::rbrace, "'}'");
             // single-item blocks are allowed (relaxed from MGSL's ≥2 rule —
@@ -498,16 +508,15 @@ struct parser {
             return false;
         }
         t.what = is_any ? write_term::kind::any : write_term::kind::all;
-        skip_seps();
         while (!at(token_type::rbrace) && !at_end()) {
             write_term item;
             if (!parse_write_term(item, /*weight_allowed=*/is_any)) {
                 eat_bad();
-                skip_seps();
+                list_sep();
                 continue;
             }
             t.items.push_back(std::move(item));
-            skip_seps();
+            list_sep();
         }
         expect(token_type::rbrace, "'}'");
         if (t.items.empty())
@@ -518,9 +527,7 @@ struct parser {
     bool parse_pair(rule_pair& pr) {
         pr.loc = loc();
         if (!parse_match_side(pr.lhs)) return false;
-        skip_newlines();
         if (!expect(token_type::arrow, "'=>'")) return false;
-        skip_newlines();
         return parse_write_term(pr.rhs, /*weight_allowed=*/false);
     }
 
@@ -533,7 +540,6 @@ struct parser {
         r.name = toks[pos - 1].text;
         if (accept(token_type::lparen)) parse_rule_attrs(r);
         if (!expect(token_type::lbrace, "'{'")) return;
-        skip_newlines();
 
         // Body-level combinator: `rule r { all pair pair … }` — multiple
         // independent sub-rules; `ordered` makes declaration order a priority
@@ -545,12 +551,11 @@ struct parser {
                                                 : body_combinator::any;
             source_loc bl = loc();
             eat();
-            skip_seps();   // pairs separate by newline or comma (list_sep)
             while (!at(token_type::rbrace) && !at_end()) {
                 rule_pair pr;
                 if (!parse_pair(pr)) { recover_to(token_type::rbrace); break; }
                 r.pairs.push_back(std::move(pr));
-                skip_seps();
+                list_sep();   // optional comma between pairs (section 3)
             }
             if (r.pairs.empty())
                 diags.error(file, bl.line, bl.col, "empty rule body");
@@ -558,7 +563,6 @@ struct parser {
             rule_pair pr;
             if (!parse_pair(pr)) { recover_to(token_type::rbrace); return; }
             r.pairs.push_back(std::move(pr));
-            skip_newlines();
         }
         expect(token_type::rbrace, "'}'");
         out.rules.push_back(std::move(r));
@@ -654,7 +658,6 @@ struct parser {
         s.what = program_stmt::kind::op_call;
         s.op_name = eat().text;   // IDENT
         if (!expect(token_type::lparen, "'('")) return;
-        skip_newlines();   // long calls (path) may spread over lines
         while (!at(token_type::rparen) && !at_end()) {
             op_arg a;
             a.loc = loc();
@@ -663,19 +666,16 @@ struct parser {
                 a.name = eat().text;
                 eat();   // '='
             }
-            if (!parse_op_arg_value(a)) { eat_bad(); skip_newlines(); continue; }
+            if (!parse_op_arg_value(a)) { eat_bad(); continue; }
             s.op_args.push_back(std::move(a));
             if (!accept(token_type::comma)) break;
-            skip_newlines();
         }
-        skip_newlines();
         expect(token_type::rparen, "')'");
     }
 
     // statement_list (section 6) - the body of `program` and of every `sequence`.
     // `where` names the enclosing sequence for diagnostics ("" = program).
     void parse_statement_list(std::vector<program_stmt>& out, std::string const& where) {
-        skip_newlines();
         while (!at(token_type::rbrace) && !at_end()) {
             program_stmt s;
             s.loc = loc();
@@ -692,9 +692,7 @@ struct parser {
                              "'; rules are declared with 'rule' and applied by name, "
                              "e.g. 'all fill'");
                 // one diagnostic per bad line, not one per token
-                while (!at(token_type::newline) && !at(token_type::rbrace) && !at_end())
-                    eat();
-                skip_newlines();
+                skip_line(peek().line);
                 continue;
             }
             // optional `when (expr)` guard (section 6)
@@ -705,7 +703,6 @@ struct parser {
                 }
             }
             out.push_back(std::move(s));
-            skip_newlines();
         }
     }
 
@@ -759,6 +756,11 @@ struct parser {
     // ── recovery ─────────────────────────────────────────────────────────────
 
     void eat_bad() { if (!at_end()) eat(); }
+    // Skip the rest of source line `line`, stopping at a '}' that may close
+    // the enclosing block.
+    void skip_line(int line) {
+        while (!at_end() && !at(token_type::rbrace) && peek().line == line) eat();
+    }
     void recover_to(token_type t) {
         while (!at(t) && !at_end()) eat();
         accept(t);
@@ -767,12 +769,10 @@ struct parser {
     // ── entry ────────────────────────────────────────────────────────────────
 
     void run(ast_file& out) {
-        skip_newlines();
         bool after_decls = false;
         while (!at_end()) {
             if (at(token_type::kw_use)) {
                 parse_use(out, after_decls);
-                skip_newlines();
                 continue;
             }
             after_decls = true;
@@ -792,7 +792,6 @@ struct parser {
                 eat_bad();
                 break;
             }
-            skip_newlines();
         }
     }
 };

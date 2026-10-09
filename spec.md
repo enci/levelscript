@@ -1,6 +1,6 @@
 # LevelScript
 
-**Status**: Draft 0.7 (implementation version `0.7.x`, see `ls-versioning.md`)
+**Status**: Draft 0.8.0 (implementation version `0.7.x`, see `ls-versioning.md`)
 **File extension**: `.ls`
 **CLI**: `levelscript [--seed N] [--entry name] [--param name=value ...] <file.ls>` (`--entry` defaults to `main`, a tool convention; section 6)
 **Embedding**: namespace `ls::` (see Appendix A)
@@ -17,14 +17,14 @@ The reference implementation is a C++ library first and a CLI second, built arou
 1. **Declarative**: a generator describes *what to match and write*, not *how to iterate*.
 2. **Visual**: pattern bodies look like the grids they match; an editor can render them with colored backgrounds.
 3. **Minimal surface area**: a small set of orthogonal concepts (tags, grids, rules, sequences, operations, modules) covers the design space.
-4. **Predictable execution**: snapshot-based rule application; one well-defined collect-then-pick model for all strategies.
+4. **Predictable execution**: snapshot-based rule application; one well-defined collect-then-pick model for all modes.
 5. **Cognitive load over terseness**: a rule should read clearly in isolation, even if that costs a few characters. Boilerplate is required only when ambiguity would otherwise exist.
 
 ---
 
 ## 2. Lexical and file structure
 
-Formal grammar productions throughout this document use EBNF: `::=` defines a production; `|` separates alternatives; `?` is zero or one; `*` is zero or more; `+` is one or more; `( )` groups; quoted strings are literal terminals; `UPPER_CASE` names are lexical tokens; lowercase names are non-terminals. Whitespace and comments are skipped between tokens everywhere except inside pattern cell grids, where newlines act as row separators (section 5.3).
+Formal grammar productions throughout this document use EBNF: `::=` defines a production; `|` separates alternatives; `?` is zero or one; `*` is zero or more; `+` is one or more; `( )` groups; quoted strings are literal terminals; `UPPER_CASE` names are lexical tokens; lowercase names are non-terminals. Whitespace and comments are skipped between tokens everywhere except inside pattern cell grids, where newlines and commas act as row separators (section 5.3).
 
 **Grammar** - top-level structure:
 ```
@@ -67,21 +67,21 @@ A `STRING` has no escape sequences and is ASCII (section 2.1). Its only use is t
 ```
 tag  layers  grid  of  number
 rule  sequence  params  where  when  use
-any  all  one  some  ordered
+any  all  ordered
+once  scatter  everywhere  grow  settle
 weight
-policy  snapshot  incremental  stabilize  percent
 ```
 
 Keywords are ASCII and match exactly.
 
 ```
 RESERVED_CHARS ::= '[' | ']' | '{' | '}' | '(' | ')' | ',' | '='
-                 | '*' | '.' | '"' | WS | NEWLINE
+                 | '*' | '.' | '"' | '%' | WS | NEWLINE
                  | <ASCII letters, digits, and '_'>
 ```
 `?` is not reserved; it is held for future syntax and lexes as an error.
 
-**Contextual names.** A few grammar terminals are matched by identifier text rather than reserved: `max` in a `some(...)` count (section 6), and the attribute names and values of section 5.6 (`symmetry`, `rotation`, `none`, `horizontal`, `vertical`). They lex as `IDENT`. `max` is still unavailable as a tag value, grid, or param name, because it is a built-in function name (section 5.10, section 7.3 check 21); the others may be used as names, since each slot resolves them against its own table.
+**Contextual names.** A few grammar terminals are matched by identifier text rather than reserved: the attribute names and values of section 5.6 (`symmetry`, `rotation`, `none`, `horizontal`, `vertical`). They lex as `IDENT` and may also be used as names, since each slot resolves them against its own table.
 
 **Operation names are not keywords.** The built-in operations `resize`, `upscale`, `trim`, `mirror`, `pad`, `path` (section 6.0) are resolved from the operation table, not reserved - like the built-in *functions* of section 5.10, a bare name that is not an operation call is just an identifier. They may be used as tag values, grid names, or params; they resolve as operations only in `op_call` position (section 6).
 
@@ -122,13 +122,13 @@ use "schema.ls"
 rule seed_room { level[.] => level[R] }
 sequence carve {
     resize(16, 7)
-    one seed_room
+    once seed_room
 }
 
 // dungeon.ls
 use "carve.ls"
 sequence main {
-    one carve
+    once carve
 }
 ```
 
@@ -167,15 +167,15 @@ Tag values are referenced by their name in pattern bodies. Two tagsets may defin
 **Grammar:**
 ```
 tag_decl       ::= 'tag' IDENT '{' tag_item_list? '}'
-tag_item_list  ::= tag_item (list_sep tag_item)* list_sep?
+tag_item_list  ::= tag_item (list_sep? tag_item)* list_sep?
 tag_item       ::= tag_value | tag_union
 tag_value      ::= IDENT
 tag_union      ::= IDENT '=' union_expr
 union_expr     ::= union_atom ('|' union_atom)*
 union_atom     ::= IDENT
-list_sep       ::= ',' | NEWLINE
+list_sep       ::= ','
 ```
-`list_sep` allows commas or newlines between list items (or both); a trailing separator is permitted.
+Commas between list items are optional, and a trailing comma is permitted. Line breaks are ordinary whitespace (section 2), so items may share a line or each take their own. The grammar delimits items: each list item ends unambiguously - a pattern at `]`, a block at `}`, a pattern pair after its write side, and a name, union, or expression at the first token that cannot continue it.
 
 A `tag_union` names a mask over the tagset's own members. Each `union_atom` is a `tag_value` of the same tagset, or a `tag_union` declared **earlier** in the same block (so unions may build on unions - `hazard = blocker | lava` - while remaining acyclic). A union references only members of its own tagset; there is no cross-tagset union.
 
@@ -215,7 +215,7 @@ Grids have no declared size; size is set at run time via `resize`. All grids sha
 **Grammar:**
 ```
 layers_decl      ::= 'layers' '{' layer_entry_list? '}'
-layer_entry_list ::= layer_entry (list_sep layer_entry)* list_sep?
+layer_entry_list ::= layer_entry (list_sep? layer_entry)* list_sep?
 layer_entry      ::= IDENT ':' 'grid' 'of' grid_type
 grid_type        ::= IDENT | 'number'
 ```
@@ -250,7 +250,7 @@ params {
 **Grammar:**
 ```
 params_decl      ::= 'params' '{' param_entry_list? '}'
-param_entry_list ::= param_entry (list_sep param_entry)* list_sep?
+param_entry_list ::= param_entry (list_sep? param_entry)* list_sep?
 param_entry      ::= input_param | derived_param
 input_param      ::= IDENT ':' 'number' '=' expr
 derived_param    ::= IDENT '=' expr
@@ -263,13 +263,13 @@ Two kinds of param, distinguished solely by the `: number` annotation:
 
 Both kinds carry an expression under the same scope discipline: literals, input params, and **earlier-declared** params only - no grid reads, no `x`/`y`, and no `width`/`height` (dimensions change during a run, so a startup-frozen dimension would be stale; read `width`/`height` directly in a cell expression instead). References resolve in declaration order; a forward reference or any cycle is a compile error. The expression may call `random` (section 5.10), drawing once at that single evaluation. Because both kinds are fixed once inputs bind, params are run-constant and determinism (section 7.2) holds.
 
-At most one `params` block per module. Declaration order spans modules: the closure's params are ordered canonically (section 2.6), so a param expression may reference only params that are declared earlier **and** that its module sees. (A param of a directly used module is always earlier.) A param name (input or derived) must not collide with a grid name, a reserved identifier (section 2.4), or a built-in name (section 5.10). Param values and expressions are numbers; a derived param whose expression is not a number is a compile error.
+At most one `params` block per module. Declaration order spans modules: the closure's params are ordered canonically (section 2.6), so a param expression may reference only params that are declared earlier **and** that its module sees. (A param of a directly used module is always earlier.) A param name (input or derived) must not collide with a grid name or a reserved identifier (section 2.4). Param values and expressions are numbers; a derived param whose expression is not a number is a compile error.
 
 ---
 
 ## 5. Rules
 
-A rule is a named match-write transformation. Its body declares one or more *match patterns* (left of `=>`) and one or more *write patterns* (right of `=>`).
+A rule is a match-write transformation, declared by name with `rule` or written inline in a statement (section 6). Its body declares one or more *match patterns* (left of `=>`) and one or more *write patterns* (right of `=>`).
 
 ### 5.1 Basic form
 
@@ -292,19 +292,18 @@ attr              ::= IDENT '=' attr_value
 attr_value        ::= IDENT | INTEGER | 'all' | '{' INTEGER (',' INTEGER)* '}'
 rule_body         ::= pattern_pair
                     | combinator pattern_pair_list
-pattern_pair_list ::= pattern_pair (list_sep pattern_pair)* list_sep?
+pattern_pair_list ::= pattern_pair (list_sep? pattern_pair)* list_sep?
 pattern_pair      ::= match_side '=>' write_side
 ```
 
 ### 5.2 Combinators (`any` / `all` / `ordered`)
 
-**Combinator blocks are required when grouping more than one item at the same level; a single-item block is also legal.** A rule containing a single match-write pair, with a single pattern on each side, needs no combinator anywhere - but `{ all p }`, `{ any p }`, and a one-sub-rule combinator body all parse and run, with the obvious meaning. An **empty** combinator block (zero items) is a compile error.
+**Combinator blocks are required when grouping more than one item at the same level; a single-item block is also legal.** A rule containing a single match-write pair with a single write pattern needs no combinator anywhere - but `{ all p }`, `{ any p }`, and a one-sub-rule combinator body all parse and run, with the obvious meaning. An **empty** combinator block (zero items) is a compile error.
 
 > Single-item blocks run with zero special-casing, which matters for generated or heavily-edited sources where an alternative list shrinks to one entry. Semantics: `{ all p }` is identical to bare `p`; a single-item `{ any p }` always picks its one item but, having no special case, **still consumes its one PRNG draw** (section 6.7) like any other `{ any }` node.
 
 A combinator block is needed for:
 
-- A LHS that conjoins multiple patterns across grids (use `{ all ... }`).
 - A RHS that picks among alternatives (use `{ any ... }`).
 - A rule body containing multiple independent match-write sub-rules (use `any`, `all`, or `ordered` at the rule body level).
 
@@ -330,25 +329,23 @@ rule fill_geo { all
 }
 ```
 
-There is no default combinator: in any context that contains more than one item, `any`, `all` (or, at body level, `ordered`) must be stated explicitly.
+There is no default combinator: in any context that contains more than one item, `any`, `all` (or, at body level, `ordered`) must be stated explicitly. The match side is the exception, because it has only one meaning: consecutive patterns conjoin.
 
 **Grammar** - match and write sides:
 ```
-match_side      ::= pattern
-                  | '{' 'all' pattern_list '}'
+match_side      ::= pattern+
 write_side      ::= write_term
 write_term      ::= pattern
                   | '{' 'all' all_item_list '}'
                   | '{' 'any' any_item_list '}'
-all_item_list   ::= write_term (list_sep write_term)* list_sep?
-any_item_list   ::= any_item (list_sep any_item)* list_sep?
+all_item_list   ::= write_term (list_sep? write_term)* list_sep?
+any_item_list   ::= any_item (list_sep? any_item)* list_sep?
 any_item        ::= weight? write_term
-pattern_list    ::= pattern (list_sep pattern)* list_sep?
 combinator      ::= 'any' | 'all' | 'ordered'
 weight          ::= '(' 'weight' '=' INTEGER ')'
 ```
-All item lists are one-or-more; both sides may be a bare pattern or a braced combinator block. The combinators are not interchangeable across sides:
-- A **match side** conjoins patterns across grids, so only `{ all ... }` is meaningful; `{ any ... }` on the match side is not supported (disjunctive matching would change the candidate model, read footprints, and conflict semantics; it is out of scope).
+All item lists are one-or-more. A match side is one or more patterns; a write side is a bare pattern or a braced combinator block:
+- A **match side** conjoins its patterns across grids: every pattern before `=>` must match at the anchor. There is no match-side combinator; disjunctive matching would change the candidate model, read footprints, and conflict semantics, and is out of scope. Line breaks between the patterns are ordinary whitespace (section 2).
 - A **write side** is a recursive `write_term`: a `{ any ... }` (pick one alternative) or `{ all ... }` (write every item simultaneously), whose items may themselves be blocks to any depth.
 
 `weight` attaches only to the items of an `{ any ... }` write block. It is not part of the grammar for `{ all ... }` blocks or bare patterns, so `(weight=N)` inside `{ all ... }` is rejected at parse time. A weight on a nested block (an `{ all }` option inside an `{ any }`) weights the choice of that whole sub-tree.
@@ -375,12 +372,12 @@ All item lists are one-or-more; both sides may be a bare pattern or a braced com
 
 An `{ all }` writes every item; an `{ any }` picks exactly one item (weighted), then resolves it. Evaluation walks the write tree once per application: each `{ any }` node on the resolved path contributes **one draw**, in **declaration order** (outer before inner, earlier sibling first), deterministic per seed (section 10.6). Nesting composes the writer only; it changes neither matching nor the write-protection mask (section 6.8), which act on the final resolved set of cell writes.
 
-**The `ordered` body-level combinator.** `ordered` is a **body-level** combinator only (not a match- or write-side form). In `{ ordered s1 s2 ... }`, the sub-rules carry a **priority** in declaration order (s1 highest). `ordered` is purely an *ordering key on the candidate vector*: candidates are grouped by sub-rule priority (all of s1's, then s2's, ...) and shuffled only *within* each group. What that ordering *does* is inherited from the execution policy (section 6.7) that runs the statement - `ordered` is orthogonal to the policy, affecting only order:
-- Under **`snapshot`**: pull in priority order under the write mask - s1 claims its cells first, s2 fills what's left, s3 last. Spatial priority / conflict resolution in one batch ("place big rooms; where you can't, small; else floor").
-- Under **`incremental`**: re-collect each step and take the highest-priority available match - s1 keeps firing while it can; when a lower rule fires and reopens an s1 match, the next step prefers s1 again. This is **preemptive priority** (the ordered-rule / MarkovJunior loop), the behaviour statement-sequencing cannot express.
-- Under **`stabilize`**: priority-ordered sweeps to fixpoint.
+**The `ordered` body-level combinator.** `ordered` is a **body-level** combinator only (not a write-side form). In `{ ordered s1 s2 ... }`, the sub-rules carry a **priority** in declaration order (s1 highest). `ordered` is purely an *ordering key on the candidate vector*: candidates are grouped by sub-rule priority (all of s1's, then s2's, ...) and shuffled only *within* each group. What that ordering *does* is inherited from the mode (section 6.7) that runs the statement - `ordered` is orthogonal to the mode, affecting only order:
+- Under the **batch modes** (`scatter`, `everywhere`): pull in priority order under the write mask - s1 claims its cells first, s2 fills what's left, s3 last. Spatial priority / conflict resolution in one batch ("place big rooms; where you can't, small; else floor").
+- Under the **step modes** (`once`, `grow`): re-collect each step and take the highest-priority available match - s1 keeps firing while it can; when a lower rule fires and reopens an s1 match, the next step prefers s1 again. This is **preemptive priority** (the ordered-rule / MarkovJunior loop), the behaviour statement-sequencing cannot express.
+- Under **`settle`**: priority-ordered sweeps to fixpoint.
 
-`any` stays a weighted random pick (order carries no meaning); `all` collects every matching sub-rule's candidates together (uniform priority). Because `ordered` is body-level only, using it as a match-side or write-side combinator is a compile error (section 7.3, check 29).
+`any` stays a weighted random pick (order carries no meaning); `all` collects every matching sub-rule's candidates together (uniform priority). Because `ordered` is body-level only, using it as a write-side combinator is a compile error (section 7.3, check 29).
 
 ### 5.3 Pattern bodies
 
@@ -395,7 +392,7 @@ algo[
 
 The above is a 3x3 pattern. The center cell must be `S`, the right-center must be `W`, and the eight cells marked `*` match anything (including empty).
 
-Single-cell patterns are written inline: `algo[S]`.
+Single-cell patterns are written inline: `algo[S]`. Rows may also be separated by commas, so a tall pattern can be written on one line: `algo[* * *, * S W, * * *]` is the 3x3 pattern above, and `g[a, b, c]` is a 1x3 vertical one. A comma followed by a newline (with only whitespace between) is a single row break, so rows may end in commas across lines without creating empty rows.
 
 Multi-row pattern grammar:
 - Empty rows are illegal.
@@ -405,14 +402,16 @@ Multi-row pattern grammar:
 
 **Grammar:**
 ```
-pattern   ::= IDENT '[' cell_grid ']'
-cell_grid ::= cell_row (NEWLINE cell_row)*
-cell_row  ::= WS* cell (WS+ cell)* WS*
-cell      ::= '*' | '.' | INTEGER | tag_mask | '(' expr ')'
-tag_mask  ::= mask_atom ('|' mask_atom)*
-mask_atom ::= '!'? IDENT
+pattern      ::= pattern_head '[' cell_grid ']'
+pattern_head ::= IDENT | 'where'
+cell_grid    ::= cell_row (row_sep cell_row)*
+row_sep      ::= ',' WS* NEWLINE? | NEWLINE
+cell_row     ::= WS* cell (WS+ cell)* WS*
+cell         ::= '*' | '.' | INTEGER | tag_mask | '(' expr ')'
+tag_mask     ::= mask_atom ('|' mask_atom)*
+mask_atom    ::= '!'? IDENT
 ```
-A `tag_mask` is whitespace-free (the cell ends at the next whitespace). `expr` inside `( ... )` follows section 5.8 and may contain whitespace. `tag_mask` and the bare-`*`/`.` forms are exactly the mask literals; every other expression must be parenthesized.
+A `tag_mask` is whitespace-free (the cell ends at the next whitespace or comma). A comma inside `( ... )` belongs to the expression; only a comma outside parentheses separates rows. `expr` inside `( ... )` follows section 5.8 and may contain whitespace. `tag_mask` and the bare-`*`/`.` forms are exactly the mask literals; every other expression must be parenthesized.
 
 The opening `[` may be followed immediately by content on the same line or by a newline starting the first row. The closing `]` may follow the last row or sit on its own line.
 
@@ -561,14 +560,12 @@ Precedence follows C conventions (lowest to highest): `||`, `&&`, `|`, equality,
 where[ (y < height/2)  (tiles > 5) ]
 ```
 
-A `where` cell matches at a position iff its expression evaluates to true there. `where` cells read but never write - they contribute to the read footprint (section 5.7) and never to the write footprint. A `where` pattern combines with real-grid patterns at the same position under `{ all }`:
+A `where` cell matches at a position iff its expression evaluates to true there. `where` cells read but never write - they contribute to the read footprint (section 5.7) and never to the write footprint. A `where` pattern conjoins with real-grid patterns on the match side (section 5.2):
 
 ```ls
 rule deep_water {
-    { all
-      level[floor]
-      where[ (tiles > 5) ]
-    }
+    level[floor]
+    where[ (tiles > 5) ]
     =>
     level[water]
 }
@@ -591,7 +588,7 @@ LevelScript has a closed set of **built-in** functions; there are no user-define
 
 Arities are fixed. `min`/`max` are binary; nest for more operands (`min(a, min(b, c))`). `if` is the only function whose type is parametric in `T`; it is a single generic signature, not overloading. Because evaluation is eager and all operators are total (section 5.8), `if(c, a, b)` never faults on its unused branch - e.g. `if(n == 0, 0, 100 / n)` is safe at `n == 0`.
 
-**Reserved built-in names.** `if`, `min`, `max`, `abs`, `clamp`, `random` may not be used as tag value, grid, or param names (compile error). They are **not** keywords (they are not in section 2.4): a bare occurrence not followed by `(` does not resolve to anything and is a compile error.
+**Built-in names are not reserved.** A call is recognised syntactically (an identifier followed by `(`, section 5.8), and tag values, grids, and params are never called, so `if`, `min`, `max`, `abs`, `clamp`, and `random` may also be used as tag value, grid, or param names. Followed by `(`, such a name always denotes the built-in; otherwise it resolves per section 5.8. Like operation names (section 2.4), built-in names are not keywords.
 
 **`random` is impure; the others are pure.** Because `if` is eager, `if(c, random(0,9), random(0,9))` evaluates **both** branches and therefore draws **twice**, in left-to-right order, discarding the unused value. This is defined behaviour, not a fault; if exactly one draw is wanted, place the `random` outside the `if`. (Eager `if` is deliberate: totality makes the dead branch safe, and the fixed two-draw cost keeps the draw sequence trivially pinned.) `random` may appear in any expression position (match cells, `where`, write cells, `when` guards, param expressions): it reads no grid, position, or dimension, so the config-scope restrictions of sections 4.2/6 do not exclude it. It draws once each time its expression is evaluated.
 
@@ -604,20 +601,20 @@ Generation is orchestrated by **statements** (operation calls, rule applications
 ```ls
 sequence main {
     resize(60, 40)
-    some(max=5)   start
-    some(max=100, policy=incremental) rwalk
+    scatter(5)   start
+    grow(100)    rwalk
     upscale(2, 2)
-    all reduce
-    all reward
-    all fill_geo
-    some(max=10) place_enemies
-    all decorate
+    everywhere   reduce
+    everywhere   reward
+    everywhere   fill_geo
+    scatter(10)  place_enemies
+    everywhere   decorate
 }
 ```
 
 Statements execute top to bottom.
 
-**Entries.** The embedder names the entry when it starts a run (Appendix A). Any sequence can be the entry; the language designates none. A run first binds the params (section 4.2), then applies the entry exactly as `one S` (section 6.10) to a 0 x 0 stack: one iteration of its body. Applying the entry involves no guard, no draw, and no stability check. A rule is not an entry; to run a single rule, apply it from a sequence.
+**Entries.** The embedder names the entry when it starts a run (Appendix A). Any sequence can be the entry; the language designates none. A run first binds the params (section 4.2), then applies the entry exactly as `once S` (section 6.10) to a 0 x 0 stack: one iteration of its body. Applying the entry involves no guard, no draw, and no stability check. A rule is not an entry; to run a single rule, apply it from a sequence.
 
 The tools (the `levelscript` CLI and `levelscript-debugger`) run the sequence named `main` unless told otherwise. That is a tool convention, not part of the language: `main` is an ordinary sequence name, and the embedding API always takes an explicit entry.
 
@@ -634,23 +631,43 @@ positional_args ::= arg_value (',' arg_value)*
 named_args      ::= named_arg (',' named_arg)*
 named_arg       ::= IDENT '=' arg_value
 arg_value       ::= INTEGER | IDENT | '(' expr ')'
-apply_stmt      ::= strategy IDENT
-strategy        ::= 'one'  strat_opts?
-                  | 'all'  strat_opts?
-                  | 'some' '(' count_arg (',' policy_arg)? ')'
-strat_opts      ::= '(' policy_arg ')'
-count_arg       ::= 'max' '=' INTEGER | 'percent' '=' INTEGER
-policy_arg      ::= 'policy' '=' policy_name
-policy_name     ::= 'snapshot' | 'incremental' | 'stabilize'
+apply_stmt      ::= mode target
+mode            ::= 'once'
+                  | 'scatter' '(' scatter_count ')'
+                  | 'everywhere'
+                  | 'grow'   ( '(' expr ')' )?
+                  | 'settle' ( '(' expr ')' )?
+target          ::= IDENT | inline_rule
+inline_rule     ::= rule_attrs? '{' rule_body '}'
+scatter_count   ::= expr | percent
+percent         ::= (INTEGER | IDENT | '(' expr ')') '%'
 ```
-A statement is either an **operation call** (`op_call` - a built-in operation applied to the grid stack, section 6.0) or an **application** (`apply_stmt` - a strategy plus a rule or sequence name). In an `op_call`, arguments are **positional first, then named**; the operation name and its arguments resolve **semantically** against the operation table (section 6.0), not by the grammar - there are no per-verb productions and no verb keywords. Newlines are permitted inside an argument list. `IDENT` after a strategy must reference a rule or sequence its module sees (sections 2.6 and 6.10; semantic check; forward references are fine). Every strategy over a rule may carry `policy=`; omitted, it defaults to `snapshot`. Over a sequence, `policy=` and `percent` are errors (section 6.10). `one`/`all` take only a policy; `some` takes a count (`max` **or** `percent`, never both) and an optional policy. (`max` here is a contextual name matched by `IDENT` text, not a keyword; section 2.4.) A guard (`when`) may follow any statement.
+A statement is either an **operation call** (`op_call` - a built-in operation applied to the grid stack, section 6.0) or an **application** (`apply_stmt` - a mode keyword, with its count where the mode takes one, and a target). In an `op_call`, arguments are **positional first, then named**; the operation name and its arguments resolve **semantically** against the operation table (section 6.0), not by the grammar - there are no per-verb productions and no verb keywords. Newlines are permitted inside an argument list. A target is either a name, which must reference a rule or sequence its module sees (sections 2.6 and 6.10; semantic check; forward references are fine), or an **inline rule**, which begins with `{` or with its attributes. After `grow` or `settle`, a `(` followed by `IDENT '='` begins inline-rule attributes rather than a count. A guard (`when`) may follow any statement.
+
+**Modes.** The mode fixes how many applications occur and what each one sees (section 6.7 for rules, section 6.10 for sequences):
+
+| mode | over a rule | over a sequence |
+|---|---|---|
+| `once` | one application (a single uniform pick) | one iteration |
+| `scatter(N)`, `scatter(P%)` | up to `N` applications from one batch; with `P%`, that percentage of the batch | invalid |
+| `everywhere` | every non-conflicting application of one batch | invalid |
+| `grow`, `grow(N)` | up to `N` steps, each seeing the last; without a count, until no candidate remains (fixpoint) | invalid |
+| `settle`, `settle(N)` | batch sweeps until one changes nothing; with a count, at most `N` sweeps | iterations until one is stable; with a count, at most `N` |
+
+A rule-only mode on a sequence is an error (check 37). Over a rule the modes fall into two kinds, plus `settle`: the **batch modes** (`scatter`, `everywhere`) apply from one snapshot in one shuffled pass under the write mask; the **step modes** (`once`, `grow`) re-snapshot after every application and use no mask; `settle` repeats batch sweeps until nothing changes.
+
+**Counts.** A count is a statement-scope expression (section 5.8). Like a guard, it reads params only: a grid read, `x`/`y`, or `width`/`height` in a count is a compile error, as is a count that is not a number (check 21). It is evaluated each time its statement is reached, after the guard and only if the guard passed; a `random` in it draws on every evaluation. A count written as the literal `0` is an error (check 28), as is a `scatter` percentage written as a literal above `100` (check 30). A computed count below `0` is treated as `0`, so the statement applies nothing (over a sequence, it runs no iteration); a computed percentage above `100` is treated as `100`. Neither warns. The `%` follows a literal, a param name, or a parenthesized expression (`50%`, `density%`, `(n * 2)%`), so it always applies to the whole count; `n * 2%` is a parse error. It is part of `scatter`'s count, not of the expression: it selects a percentage of the batch (section 6.7) and is not a value.
+
+**Inline rules.** A target may be a rule written in place, with the grammar of a named rule minus `rule IDENT` (section 5.1): optional attributes, then a braced body. An inline rule behaves exactly as a named rule with the same attributes and body, declared in the enclosing sequence's module and applied by name; its names resolve in that module. To apply one rule from several places, declare it with `rule`. Diagnostics and the debugger locate an inline rule by its source position (section 10.8); the observe channel identifies statements by position, not by rule name (Appendix A).
 
 Reads:
 ```ls
-all fill                               // snapshot (default), full batch
-all(policy=stabilize) smooth           // CA: re-sweep to fixpoint
-some(max=200, policy=incremental) walk // drunkard's walk
-some(percent=50) carve                 // half of one snapshot batch
+everywhere fill                           // one batch, every non-conflicting match
+settle smooth                             // CA: re-sweep until nothing changes
+grow(200) walk                            // drunkard's walk, each step sees the last
+scatter(50%) carve                        // half of one batch
+scatter(budget / 10) place_enemies        // count computed from params
+everywhere { algo[F|S] => level[floor] }  // inline rule
 path(from=door, to=exit, into=site, write=road)  // structural op: carve a route
 ```
 
@@ -659,10 +676,10 @@ A `guard` may follow any statement. Its expression (section 5.8) is **boolean** 
 ```ls
 sequence main {
     resize(60, 40)
-    some(max=5) start
-    all place_bosses  when (difficulty > 3)
-    all cave_pass     when (style == 0)
-    all room_pass     when (style == 1)
+    scatter(5)   start
+    everywhere   place_bosses  when (difficulty > 3)
+    everywhere   cave_pass     when (style == 0)
+    everywhere   room_pass     when (style == 1)
 }
 ```
 Selection among rules is expressed by complementary guards, as with `style` above. There is no `if`/`else` block; statements stay a flat, top-to-bottom list. A sequence (section 6.10) does not change this: it is a named statement list applied by name, like a rule, not a nested block.
@@ -720,8 +737,8 @@ Crops the active grids to the smallest rectangle that contains all meaningful co
 ```ls
 sequence main {
     resize(60, 40)
-    one start
-    some(max=100, policy=incremental) rwalk
+    once start
+    grow(100) rwalk
     trim()
 }
 ```
@@ -784,40 +801,29 @@ Consequence, stated normatively: **the search algorithm is unobservable.** Any c
 
 ### 6.7 Rule application semantics
 
-An apply statement over a rule pairs a **count** (`one`/`all`/`some`) with an **execution policy** (`policy=`, default `snapshot`). (An apply statement over a sequence takes a count only; see section 6.10.) The count bounds how many applications occur; the policy governs what each application sees and how conflicts are handled.
+An application over a rule pairs a **mode** (section 6) with the rule. The mode bounds how many applications occur and governs what each application sees and how conflicts are handled. (An application over a sequence takes `once` or `settle` only; see section 6.10.)
 
-All policies share **candidate collection**: for each anchor position in row-major `(y, x)` order, the rule's match side is tested - every sub-rule and every symmetry/rotation variant (section 5.6) - at that anchor. Each matching `(anchor, sub-rule, variant)` is a **candidate**. The anchor is the pattern's top-left origin (section 5.7); a candidate exists only where the (possibly reshaped) variant fits entirely within the grid - **matching is bounded, never wrapped**.
+All modes share **candidate collection**: for each anchor position in row-major `(y, x)` order, the rule's match side is tested - every sub-rule and every symmetry/rotation variant (section 5.6) - at that anchor. Each matching `(anchor, sub-rule, variant)` is a **candidate**. The anchor is the pattern's top-left origin (section 5.7); a candidate exists only where the (possibly reshaped) variant fits entirely within the grid - **matching is bounded, never wrapped**.
 
-**`snapshot`** (default) - one frozen snapshot, one pass:
+**Batch modes** (`scatter`, `everywhere`) - one frozen snapshot, one pass:
 1. Snapshot the grid stack (section 7.1); collect all candidates against it.
 2. Shuffle the candidates (seeded). Empty the write-protection mask (section 6.8).
 3. In shuffled order, for each candidate: if its **write** footprint intersects a marked (grid, cell), skip; else apply the write and mark its write footprint. Count one application.
-4. Stop at the count cap (`one` = 1; `some(max=N)` = N; `all` = the whole set). For `some(percent=P)`, the cap is floor(P * A / 100) where **A is the number of applications a full pass would make** - the non-conflicting applied set, *not* the raw candidate count (raw candidates would let redundant variants and skipped conflicts inflate the denominator, so `percent=50` could cover far more than half the grid). Concretely: the pass first determines the non-conflicting sequence the batch would apply, then applies its first floor(P * A / 100) entries.
+4. Stop at the cap (`scatter(N)` = N; `everywhere` = the whole set). For `scatter(P%)`, the cap is floor(P * A / 100) where **A is the number of applications a full pass would make** - the non-conflicting applied set, *not* the raw candidate count (raw candidates would let redundant variants and skipped conflicts inflate the denominator, so `50%` could cover far more than half the grid). Concretely: the pass first determines the non-conflicting sequence the batch would apply, then applies its first floor(P * A / 100) entries.
 
-Because all candidates saw one snapshot, earlier writes are invisible to later applications; the mask alone prevents two applications writing the same cell.
+Because all candidates saw one snapshot, earlier writes are invisible to later applications; the mask alone prevents two applications writing the same cell. Only `scatter` takes a percentage, because a percentage needs one batch's applied set as its denominator.
 
-**`incremental`** - each application re-snapshots and therefore sees prior writes:
+**Step modes** (`once`, `grow`) - each application re-snapshots and therefore sees prior writes:
 1. Snapshot; collect; pick one candidate uniformly (a single draw; under `ordered`, uniformly within the highest-priority group, section 10.4). Apply and commit; the `{ any }` alternatives on its write tree are drawn at application, weighted per section 5.5.
 2. Repeat. Each step re-snapshots, so the next pick sees the last write.
 
-One application per step means no intra-step conflict, so **`incremental` uses no mask**. Stop at the count cap; `all` runs until a step finds no candidate (**fixpoint**, section 6.9).
+One application per step means no intra-step conflict, so **step modes use no mask**. `once` stops after one application and `grow(N)` after N; `grow` without a count runs until a step finds no candidate (**fixpoint**, section 6.9). Over a rule, `once` and `grow(1)` make the same application.
 
-**`stabilize`** - iterated `snapshot` sweeps to a fixpoint:
-1. Run a full `snapshot` sweep (steps 1-4 above, applying the whole set).
+**`settle`** - iterated batch sweeps to a fixpoint:
+1. Run a full `everywhere` sweep (steps 1-4 above, applying the whole set).
 2. If that sweep changed any cell, repeat from a fresh snapshot; else stop.
 
-Each sweep is internally a `snapshot` batch (mask per sweep); between sweeps the grid re-snapshots, so a later sweep sees the previous sweep's result. This is the cellular-automaton case (smooth until stable). For `stabilize` the count unit is a **sweep**: `all(policy=stabilize)` = sweeps to fixpoint; `some(max=N, policy=stabilize)` = at most N sweeps. `percent` is not valid with `stabilize`.
-
-**Count x policy validity.**
-
-| | `snapshot` | `incremental` | `stabilize` |
-|---|---|---|---|
-| `one` | yes | yes (same distribution as snapshot; different draws) | no |
-| `some(max=N)` | yes (up to N of batch) | yes (N steps) | yes (N sweeps) |
-| `some(percent=P)` | yes | no | no |
-| `all` | yes (full batch) | yes (fixpoint) | yes (fixpoint) |
-
-Invalid combinations are compile errors (section 7.3). `percent` needs the whole applied set as its denominator (it runs the full pass to size it), so it is `snapshot`-only. `one` with `stabilize` is contradictory (a single application cannot reach a sweep fixpoint). `one` under `snapshot` and under `incremental` select from the same distribution, because the first entry of a shuffle is a uniform pick. They consume different draws, however (a full shuffle vs. a single uniform pick, section 10.4), so a given seed yields different outputs.
+Each sweep is internally a batch (mask per sweep); between sweeps the grid re-snapshots, so a later sweep sees the previous sweep's result. This is the cellular-automaton case (smooth until stable). For `settle` the count unit is a **sweep**: `settle` = sweeps to fixpoint; `settle(N)` = at most N sweeps, stopping early after a sweep that changes nothing.
 
 **Variants and alternatives.** Each matching variant is a **separate candidate**, so shuffling treats variants with equal priority - no top-left/first-declared bias; when several variants match one anchor, the one applied is whichever the shuffle selects. At application the runtime walks the resolved write tree and draws once per `{ any }` node on the resolved path (section 5.2), each weighted per section 5.5 and reproducible per seed (section 10.6).
 
@@ -825,34 +831,34 @@ All random choices are deterministic per (seed, params) and per implementation v
 
 ### 6.8 The write-protection mask
 
-The mask exists only in the **batch-family** policies (`snapshot`, and each sweep of `stabilize`). `incremental` applies one write per step and needs no mask.
+The mask exists only in **batch passes** (`scatter`, `everywhere`, and each sweep of `settle`). The step modes (`once`, `grow`) apply one write per step and need no mask.
 
 - The mask is keyed by **(grid, cell)** - a per-layer set, not a single grid-sized mask. Marking `level` at (x, y) does not protect `items` at (x, y).
 - It tracks **write footprints only**. A candidate is skipped iff its **write** footprint intersects a cell already marked this pass. **Read footprints do not participate** - under snapshot semantics (section 7.1) a candidate reading a just-written cell already sees the pre-write snapshot value, so there is nothing to protect against, and skipping on reads would wrongly prevent a synchronous CA sweep (every cell that reads a neighbour's written value would be suppressed).
 - Skipped candidates do not consume the count budget.
 - Footprint intersection is per (grid, cell), never per bounding rectangle: two candidates whose rectangles overlap both apply if the overlap is entirely `*`-preserved (not in either write footprint) in the same grid.
 
-The mask is the only conflict mechanism; the runtime special-cases no other "conflict." It is reset at the start of each `snapshot` pass (and each `stabilize` sweep).
+The mask is the only conflict mechanism; the runtime special-cases no other "conflict." It is reset at the start of each batch pass (and each `settle` sweep).
 
 ### 6.9 Termination
 
-**Bounded strategies over a rule always terminate** (for sequences, see below): `one`; `some(max=N)` and `some(percent=P)` under any policy; and `all(policy=snapshot)` (a single pass over a finite candidate set).
+**Bounded modes over a rule always terminate** (for sequences, see below): `once`, `scatter`, and `everywhere` (a single pass over a finite candidate set), `grow(N)`, and `settle(N)`.
 
-**Fixpoint strategies run until nothing changes:** `all(policy=incremental)` and `all(policy=stabilize)`. These terminate **iff the rule is reductive** - iff repeated application cannot keep producing new matches. A reductive rule (fills empties, removes tags, narrows values) reaches a fixpoint; a generative one (a rule whose write recreates its own match) may not, and `all` with a fixpoint policy will then loop forever.
+**Fixpoint modes run until nothing changes:** `grow` and `settle` without a count. These terminate **iff the rule is reductive** - iff repeated application cannot keep producing new matches. A reductive rule (fills empties, removes tags, narrows values) reaches a fixpoint; a generative one (a rule whose write recreates its own match) may not, and a fixpoint mode will then loop forever.
 
-The language does not verify reductivity in general - a fixpoint strategy is a loop with a computed exit, like `while (...)`: the construct is provided, and not writing a divergent rule is the author's responsibility. This is a deliberate, scoped weakening of universal termination: bounded strategies keep it; fixpoint strategies trade it for expressive iteration.
+The language does not verify reductivity in general - a fixpoint mode is a loop with a computed exit, like `while (...)`: the construct is provided, and not writing a divergent rule is the author's responsibility. This is a deliberate, scoped weakening of universal termination: bounded modes keep it; fixpoint modes trade it for expressive iteration.
 
-**The reductivity warning.** The compiler does, however, flag the *guaranteed*-divergent case. For an `all(policy=incremental)` statement, consider each sub-rule's **unconditional** writes - the write leaves that occur on every resolution of the write tree; leaves under an `{ any }` do **not** count, since the pick may avoid them. If some sub-rule has no unconditional write that **invalidates its own LHS** - i.e. no write that overwrites an LHS-constrained cell of the same grid with a value that no longer matches that cell's requirement - then an applied anchor re-matches forever and the fixpoint is unreachable: the compiler emits the warning *"'all(policy=incremental)' over rule '<name>' may never terminate: a sub-rule's write leaves its own match intact, so the fixpoint is unreachable."*
+**The reductivity warning.** The compiler does, however, flag the *guaranteed*-divergent case. For a `grow` statement without a count, consider each sub-rule's **unconditional** writes - the write leaves that occur on every resolution of the write tree; leaves under an `{ any }` do **not** count, since the pick may avoid them. If some sub-rule has no unconditional write that **invalidates its own LHS** - i.e. no write that overwrites an LHS-constrained cell of the same grid with a value that no longer matches that cell's requirement - then an applied anchor re-matches forever and the fixpoint is unreachable: the compiler emits the warning *"'grow' over rule '<name>' may never terminate: a sub-rule's write leaves its own match intact, so the fixpoint is unreachable."* For an inline rule, `<name>` is its source position.
 
 The analysis is conservative in both directions:
 - **Uncertainty suppresses the warning.** A computed (expression) match or write cell, and any `where` guard, make the invalidation question undecidable at compile time; such a sub-rule is assumed to invalidate and produces no warning. Only the statically certain case warns.
 - **Silence proves nothing.** Passing the check does not prove termination; a rule can still diverge through interactions the per-sub-rule check cannot see.
 
-`all(policy=stabilize)` is **exempt**: its loop exits on a no-change sweep, so an idempotent write (one that re-matches but rewrites the same value) still reaches the fixpoint - the guaranteed-loop argument does not apply.
+`settle` is **exempt**: its loop exits on a no-change sweep, so an idempotent write (one that re-matches but rewrites the same value) still reaches the fixpoint - the guaranteed-loop argument does not apply.
 
 The warning is a compile-time **warning**, not an error (section 7.4); it is surfaced to embedders via `generator::warnings()` (Appendix A) and to CLI users on stderr.
 
-**Sequences** (section 6.10). `one S` and `some(max=N) S` bound the number of **iterations**; each iteration terminates iff its body statements do, so a fixpoint statement inside the body can still diverge. `all S` is a fixpoint strategy: it terminates iff some iteration is stable. As with rules, that is the author's responsibility; the compiler flags only the case that is certain to diverge by changing dimensions (section 6.10).
+**Sequences** (section 6.10). `once S` and `settle(N) S` bound the number of **iterations**; each iteration terminates iff its body statements do, so a fixpoint statement inside the body can still diverge. `settle S` is a fixpoint mode: it terminates iff some iteration is stable. As with rules, that is the author's responsibility; the compiler flags only the case that is certain to diverge by changing dimensions (section 6.10).
 
 ### 6.10 Sequences
 
@@ -860,15 +866,15 @@ A **sequence** is a named, reusable statement list, applied by name like a rule.
 
 ```ls
 sequence smooth {
-    all erode
-    all grow
+    everywhere erode
+    everywhere dilate
 }
 
 sequence main {
     resize(40, 25)
-    all fill
-    some(max=4) smooth    // up to 4 iterations of the body
-    all smooth            // iterate until an iteration changes nothing
+    everywhere fill
+    settle(4) smooth    // up to 4 iterations of the body
+    settle smooth       // iterate until an iteration changes nothing
 }
 ```
 
@@ -876,29 +882,29 @@ sequence main {
 ```
 sequence_decl ::= 'sequence' IDENT '{' statement_list '}'
 ```
-The body is a `statement_list` (section 6): rule applications, sequence applications, and operation calls, each with an optional `when` guard. There are no inline rules. Rules and sequences share one namespace; an `apply_stmt`'s `IDENT` resolves to either one (section 7.3, check 39). A sequence may apply other sequences. A sequence that applies itself, directly or through others, is a compile error (check 38). Declaration order does not matter, and an unapplied sequence is legal, like an unused rule. An empty body is legal; every iteration of it is stable.
+The body is a `statement_list` (section 6): rule applications, sequence applications, and operation calls, each with an optional `when` guard. Rules may also be written inline in a statement (section 6). Rules and sequences share one namespace; an `apply_stmt`'s target name resolves to either one (section 7.3, check 39). A sequence may apply other sequences. A sequence that applies itself, directly or through others, is a compile error (check 38). Declaration order does not matter, and an unapplied sequence is legal, like an unused rule. An empty body is legal; every iteration of it is stable.
 
-**Iteration.** Applying a sequence runs its body from top to bottom; one run of the body is an **iteration**. Each body statement executes as sections 6.0-6.9 specify, with its own count, policy, and guard, and sees every prior write. A sequence adds no snapshot, write mask, or pass of its own.
+**Iteration.** Applying a sequence runs its body from top to bottom; one run of the body is an **iteration**. Each body statement executes as sections 6.0-6.9 specify, with its own mode, count, and guard, and sees every prior write. A sequence adds no snapshot, write mask, or pass of its own.
 
-**Stability.** An iteration is **stable** iff the grid stack at its end equals the stack at its start: the same dimensions, and every cell of every layer holding the same value. Stability compares states, not writes. Writing an unchanged value does not count as a change, and neither does a cell changed and changed back within the iteration. Stability is judged on the iteration just run. A stable iteration ends the statement even if a further iteration could have changed the stack through different draws (`random`, `{ any }`, `path` ties); the same holds for `stabilize` sweeps (section 6.7).
+**Stability.** An iteration is **stable** iff the grid stack at its end equals the stack at its start: the same dimensions, and every cell of every layer holding the same value. Stability compares states, not writes. Writing an unchanged value does not count as a change, and neither does a cell changed and changed back within the iteration. Stability is judged on the iteration just run. A stable iteration ends the statement even if a further iteration could have changed the stack through different draws (`random`, `{ any }`, `path` ties); the same holds for `settle` sweeps over a rule (section 6.7).
 
-**Counts.** The count unit is one iteration:
+**Modes.** A sequence application takes `once` or `settle`; the count unit is one iteration:
 
 | statement | runs |
 |---|---|
-| `one S` | exactly one iteration |
-| `some(max=N) S` | up to N iterations; stops early after a stable iteration |
-| `all S` | iterations until one is stable (**fixpoint**, section 6.9) |
+| `once S` | exactly one iteration |
+| `settle(N) S` | up to N iterations; stops early after a stable iteration |
+| `settle S` | iterations until one is stable (**fixpoint**, section 6.9) |
 
-The early stop under `some(max=N)` mirrors `some(max=N, policy=stabilize)`: the count is an upper bound, and a stable iteration ends the statement. `policy=` is not valid on a sequence application, because each body statement carries its own policy. `some(percent=P)` is not valid either: its denominator would be the number of iterations a fixpoint run takes, which may be unbounded (check 37). For a fraction of each inner batch, write `percent` on the inner statements.
+`settle` means the same over a sequence as over a rule (section 6.7): repeat until a repetition changes nothing, with `N` as an upper bound. `scatter`, `everywhere`, and `grow` are not valid on a sequence (check 37): they select among one rule's candidates, and a sequence has no candidates of its own. For a fraction of each inner batch, write `scatter(P%)` on the inner statements.
 
-**Guards.** A `when` on a sequence application gates the whole application. It is evaluated once, when the statement is reached (section 6). A `when` on a statement inside the body is evaluated each time that statement is reached, which is once per iteration. Guards read params only, so the value is constant unless the guard calls `random`, which draws on every evaluation.
+**Guards.** A `when` on a sequence application gates the whole application. It is evaluated once, when the statement is reached (section 6). A `when` on a statement inside the body is evaluated each time that statement is reached, which is once per iteration. Guards read params only, so the value is constant unless the guard calls `random`, which draws on every evaluation. Counts (section 6) are evaluated the same way.
 
 **Draw order.** A sequence application has no draw sites of its own, and the stability check draws nothing. Body statements draw per section 10.6 as each one is reached, iteration after iteration.
 
-**The dimension warning.** For `all S`, the compiler warns when no iteration can be stable because every iteration changes the grid dimensions. This happens when S's body contains an `upscale` whose factors are not both 1, or a `pad` whose margin is greater than 0, and that operation is **reached on every iteration**. That requires two things: neither the operation nor any enclosing nested sequence application carries a `when` guard, and every enclosing nested application runs at least one iteration, which every count does (`some(max=0)` is an error, check 28). The warning reads: *"'all' over sequence '<name>' may never terminate: '<operation>' changes the grid dimensions on every iteration, so no iteration can be stable."*
+**The dimension warning.** For `settle S` without a count, the compiler warns when no iteration can be stable because every iteration changes the grid dimensions. This happens when S's body contains an `upscale` whose factors are not both 1, or a `pad` whose margin is greater than 0, and that operation is **reached on every iteration**. That requires two things: neither the operation nor any enclosing nested sequence application carries a `when` guard, and every enclosing nested application runs at least one iteration, which holds for `once`, for `settle` without a count, and for a count written as a literal (a literal `0` is an error, check 28), but not for a computed count, which may be zero. The warning reads: *"'settle' over sequence '<name>' may never terminate: '<operation>' changes the grid dimensions on every iteration, so no iteration can be stable."*
 
-Like the reductivity warning, this check is conservative. A guard suppresses the warning, because it may be false. Silence proves nothing, because a rule in the body can still keep recreating its own match. Bounded applications (`one`, `some(max=N)`) are never warned: `some(max=3) grow_and_upscale` is legitimate intended growth.
+Like the reductivity warning, this check is conservative. A guard suppresses the warning, because it may be false. Silence proves nothing, because a rule in the body can still keep recreating its own match. Bounded applications (`once`, `settle(N)`) are never warned: `settle(3) grow_and_upscale` is legitimate intended growth.
 
 ---
 
@@ -906,11 +912,11 @@ Like the reductivity warning, this check is conservative. A guard suppresses the
 
 ### 7.1 Snapshot semantics
 
-Matching is always evaluated against a **snapshot** of the grid, never against a partially-written live grid. The unit that shares a snapshot is the **pass**, and passes differ by policy: `snapshot` is one pass (every candidate sees statement-entry state); `stabilize` is a sequence of passes (each sweep re-snapshots, seeing the prior sweep); `incremental` re-snapshots every application (each sees all prior writes). Within any single pass, all candidates see the same input and earlier applications' writes are invisible; the write-protection mask (section 6.8) prevents conflicting writes within a batch pass. At end of statement the live grid becomes the next statement's input.
+Matching is always evaluated against a **snapshot** of the grid, never against a partially-written live grid. The unit that shares a snapshot is the **pass**, and passes differ by mode: a batch mode (`scatter`, `everywhere`) is one pass (every candidate sees statement-entry state); `settle` is a sequence of passes (each sweep re-snapshots, seeing the prior sweep); a step mode (`once`, `grow`) re-snapshots every application (each sees all prior writes). Within any single pass, all candidates see the same input and earlier applications' writes are invisible; the write-protection mask (section 6.8) prevents conflicting writes within a batch pass. At end of statement the live grid becomes the next statement's input.
 
 Implementations may realize a pass's snapshot as a full copy, copy-on-write per touched cell, or any equivalent mechanism (section 10.3); only the visibility rules above are observable.
 
-The snapshot mechanism is independent of the write-protection mask (section 6.8). The snapshot guarantees match consistency *across* candidates within a pass; the mask (used by the batch-family policies) prevents conflicting *writes* among the candidates that have already succeeded.
+The snapshot mechanism is independent of the write-protection mask (section 6.8). The snapshot guarantees match consistency *across* candidates within a pass; the mask (used by batch passes) prevents conflicting *writes* among the candidates that have already succeeded.
 
 ### 7.2 Determinism
 
@@ -919,7 +925,7 @@ A LevelScript run's output is a pure function of **(entry, seed, params, impleme
 The mechanism is a **single sequential PRNG stream** - `mt19937_64` as specified by the C++ standard, seeded with the 64-bit invocation seed - with **pinned draw primitives** (section 10.6: every mapping from the stream to a decision is integer arithmetic defined in this document, never a standard-library distribution or shuffle, whose algorithms differ between libraries) and a **pinned draw order**: every stochastic decision - candidate shuffling, weighted `{ any }` selection, `random(...)` calls, `path` tie keys - consumes draws from that one stream at points fixed by the execution model (section 10.6). There is **no position-keyed PRNG**: one stream is deliberately kept for simplicity, accepting the relaxed cross-version claim below (a position-keyed PRNG would decouple draws from evaluation order and permit parallel matching; it remains a possible future change).
 
 Consequences:
-- `when` guards and param expressions are evaluated **once** (params at startup, a guard when its statement is reached), so each is constant for the remainder of the run; a `random` there draws once, reproducibly.
+- Param expressions are evaluated **once**, at startup, so each param is constant for the run. A `when` guard or a count is evaluated each time its statement is reached, so it is constant unless it calls `random`, which draws on every evaluation, reproducibly.
 - The source of a generator is its whole closure (section 2.6). Reordering `use` declarations can change canonical order, and with it the layer order and the param evaluation order; when a param expression calls `random`, that shifts the draw sequence.
 - Changing an input param may shift the draw sequence and cascade through the rest of the run - expected in PCG, not a determinism defect (a small input change is not expected to produce a small output change).
 - Determinism is **per implementation version**, not per build: every build of a version agrees, on every platform. A future version may change evaluation/scan/shuffle order and remain deterministic; cross-version (and cross-implementation) reproducibility of specific outputs is not promised. What *is* promised across versions is the semantics of this document, not the byte-identical artifact of a given seed.
@@ -948,23 +954,23 @@ The compiler must reject:
 18. **Invalid transform value.** A `rotation=` value that is not `none`/`all`, a bare `90`/`180`/`270`, or a set `{...}` of those angles; a `symmetry=` value other than `none`/`horizontal`/`vertical`/`all`; or an angle set containing a value other than 90/180/270. (An empty set `{}` and a `symmetry` set are also errors.)
 19. **Function arity.** A built-in call with the wrong number of arguments.
 20. **Function argument type.** A built-in argument of the wrong kind (e.g. `abs` of a tag); or `if` whose two branches differ in type; or `if` whose condition is not bool.
-21. **Built-in name collision.** A tag value, grid, or param named `if`, `min`, `max`, `abs`, `clamp`, or `random`.
+21. **Count scope.** A count (section 6) that reads a grid, `x`/`y`, or `width`/`height`; or whose expression is not a `number`.
 22. **Guard scope.** A `when` guard that reads a grid, `x`/`y`, or `width`/`height`; or whose expression is not boolean.
 23. **Derived param scope.** A derived param expression that reads a grid, `x`/`y`, or `width`/`height`; or that forward-references a later param; or that participates in a cycle.
 24. **Derived param type.** A derived param whose expression is not a `number`.
 25. **Invalid union.** A `tag_union` whose member is not a `tag_value` or earlier `tag_union` of the same tagset; a member that forward-references a later union; or a union cycle. (A union name colliding with a `tag_value` name, a grid, a param, a reserved identifier, or a built-in is caught by the existing duplicate/collision checks - a union shares the tagset's value namespace.)
 26. **Default param scope.** A default expression (section 4.2) that reads a grid, `x`/`y`, or `width`/`height`; that forward-references a later param; or that participates in a cycle. (Same discipline as check 23; a default may reference earlier params and may call `random`.)
 27. **Input param without a default.** An `input_param` written as `name : number` with no `= expr` (every input param must carry a default, section 4.2).
-28. **Invalid count/policy combination.** For a rule application: `percent` with a policy other than `snapshot`; `one` with `policy=stabilize`; `max` and `percent` both in one `some(...)`. For any application: `some(max=0)`, which applies nothing. (Sequence applications: check 37.)
-29. **`ordered` misplacement.** `ordered` used as a match-side or write-side combinator (it is body-level only).
-30. **Unknown policy.** A `policy=` value not in {`snapshot`, `incremental`, `stabilize`}.
+28. **Zero count.** A count written as the literal `0` (or `0%`), which applies nothing.
+29. **`ordered` misplacement.** `ordered` used as a write-side combinator (it is body-level only).
+30. **Percentage over 100.** A `scatter` percentage written as a literal above `100`.
 31. **Same-grid simultaneous write.** Within one `{ all }` write block, two items whose write footprints overlap on the **same grid** at the same cell (e.g. `{ all g[wall] g[floor] }`). Simultaneous writes to one cell are ambiguous; use a union `|` (section 5.5) to store multiple values. (Different grids at the same position are fine - the mask is (grid, cell)-keyed, section 6.8.)
 32. **Unknown operation.** An `op_call` (section 6.0) whose name is not in the operation table.
 33. **Operation argument arity/binding.** More positional arguments than the operation's positional parameters; a named-only parameter supplied positionally; a named argument preceding a positional one; or a parameter supplied both positionally and by name.
 34. **Missing required operation argument.** A required parameter not supplied.
 35. **Operation argument kind / enum.** An argument whose kind does not match the parameter (e.g. `grid` given a non-grid); an `enum` value outside its set (`mirror` axis not in {horizontal, vertical}; `connectivity` not in {4, 8}); or an ambiguous bare-tag `pred` (no layer the module sees, or more than one, could hold the tag - section 6.6).
 36. **Operation value constraint.** `resize`/`upscale` dimensions must be positive; a `pad` margin must be non-negative. (Value checks applied after kind resolution.)
-37. **Invalid sequence count.** `policy=` on a sequence application (any policy, including an explicit `snapshot`), or `some(percent=P)` of a sequence (section 6.10).
+37. **Mode on a sequence.** `scatter`, `everywhere`, or `grow` applied to a sequence (section 6.10).
 38. **Sequence cycle.** A sequence that applies itself, directly or through other sequences.
 39. **Duplicate rule or sequence name.** Rules and sequences share one namespace: two declarations with the same name anywhere in the closure (section 2.6), whether both are rules, both are sequences, or one of each.
 40. **Module cycle.** A module that uses itself, directly or through other modules (section 2.6).
@@ -978,8 +984,8 @@ Warnings never stop compilation or execution; the runtime degrades with a warnin
 
 **Compile-time warnings** (surfaced via `generator::warnings()`, Appendix A):
 
-1. **Reductivity.** `all(policy=incremental)` over a rule where no unconditional write invalidates its own LHS - "may never terminate" (section 6.9). Not an error: the analysis is conservative, and a build pipeline may still choose to treat warnings as failures.
-2. **Unreachable sequence fixpoint.** `all` over a sequence where every iteration is certain to change the grid dimensions, through an `upscale` or `pad` reached on every iteration (section 6.10).
+1. **Reductivity.** `grow` without a count over a rule where no unconditional write invalidates its own LHS - "may never terminate" (section 6.9). Not an error: the analysis is conservative, and a build pipeline may still choose to treat warnings as failures.
+2. **Unreachable sequence fixpoint.** `settle` without a count over a sequence where every iteration is certain to change the grid dimensions, through an `upscale` or `pad` reached on every iteration (section 6.10).
 
 **Runtime warnings** (logged; the statement becomes a no-op):
 
@@ -1004,12 +1010,6 @@ layers {
     enemies: grid of enemies
     items:   grid of items
     algo:    grid of algo
-}
-
-rule start {
-    algo[.]
-    =>
-    algo[S]
 }
 
 rule rwalk(rotation=all) {
@@ -1052,17 +1052,9 @@ rule reward {
     }
 }
 
-rule fill_geo { all
-    algo[W] => level[wall]
-    algo[F] => level[floor]
-    algo[S] => level[floor]
-}
-
 rule place_enemies {
-    { all
-      algo[F]
-      enemies[.]
-    }
+    algo[F]
+    enemies[.]
     =>
     { any
       enemies[goblin]
@@ -1071,25 +1063,28 @@ rule place_enemies {
     }
 }
 
-rule decorate { all
-    level[floor] => tiles[1]
-    level[wall]  => tiles[2]
-}
-
 sequence main {
     resize(60, 40)
-    some(max=5)   start
-    some(max=100, policy=incremental) rwalk
+    everywhere { algo[.] => algo[W] }
+    scatter(5) { algo[W] => algo[S] }
+    grow(100)  rwalk
     upscale(2, 2)
-    all reduce
-    all reward
-    all fill_geo
-    some(max=10) place_enemies
-    all decorate
+    everywhere reduce
+    everywhere reward
+    everywhere { all
+        algo[W] => level[wall]
+        algo[F] => level[floor]
+        algo[S] => level[floor]
+    }
+    scatter(10) place_enemies
+    everywhere { all
+        level[floor] => tiles[1]
+        level[wall]  => tiles[2]
+    }
 }
 ```
 
-Reading `main`: `start` seeds up to five `S` markers into one snapshot batch; `rwalk` under `policy=incremental` grows a drunkard's walk from them, each step seeing the last (the `rotation=all` variants walk in all four directions); `upscale` doubles the resolution; `reduce` erodes 2x2 seed blocks; then a cascade of snapshot batches converts the `algo` sketch into geometry, rewards, enemies, and tile indices.
+Reading `main`: the first inline rule fills `algo` with `W`, and the second seeds up to five `S` markers into it in one batch; `grow(100)` runs `rwalk` as a drunkard's walk from them, carving `F` through the `W` fill, each step seeing the last (the `rotation=all` variants walk in all four directions); `upscale` doubles the resolution; `reduce` erodes 2x2 seed blocks; then batches convert the `algo` sketch into rewards, geometry, enemies, and tile indices. One-line rules and plain fill passes are written inline; rules with attributes (`rwalk`, `reduce`) or with alternatives (`reward`, `place_enemies`) are named.
 
 A structural-operation companion (`examples/corridor.ls`): scatter a numeric cost field, place a door and an exit with `where`-pinned rules, then
 
@@ -1111,8 +1106,6 @@ Deferred, in rough priority order:
 **The structural-operation family.** `path` is the first of a family conforming to the section 6.0 envelope (predicate/grid arguments in, result written into a grid, seeded, table-resolved): BSP subdivision, flood-fill regions, MST/room-linking, Voronoi, a full distance field. The graph-generalizable members - `path`, MST, distance - share the `over` seam; BSP and Voronoi are grid-native. Each is a table row plus an executor; none needs a grammar change.
 
 **Templates.** Named constant grids stamped by rules (`template Vault3x3 { ... }`). Modules (section 2.6) are their distribution mechanism: a Spelunky-style chunk library is a module of templates.
-
-**Inline rules.** Anonymous rules in statement position (in sequence bodies). Open costs: diagnostics and the observe channel identify rules by name, so an inline rule would need a synthesized one (`smooth#2`); rule attributes would have to mix with the statement's count options; `all { all ... }` stacks the count and the body combinator on one word; and design principle 5 favours rules that read in isolation. Parked, not rejected.
 
 **Applicability-driven sequences.** The planned answer to data-dependent `if`, in the MarkovJunior style: a statement **succeeds** if it made any change, and an `ordered` sequence runs its first item that succeeds, then restarts from the top. This gives `else if` over grid state with no condition expressions and no aggregate queries (those belong to graph layers). Parameter-driven branching is already served by `when` guards on sequence applications. Parked.
 
@@ -1138,26 +1131,26 @@ This section is non-normative; it records how the reference implementation is bu
 
 ### 10.2 Symmetry expansion
 
-Symmetry and rotation are expanded at compile time. `symmetry` contributes up to four dimension-preserving flips (identity, H, V, both-axis); `rotation` contributes turns (identity, 90, 180, 270, or a set). The two are composed and the resulting variant set is **de-duplicated by structural equality of the transformed (match side, write tree) pair, scoped per sub-rule** (so two sub-rules with the same LHS both survive). Structural equality means the same pattern cells (expression cells compared as expression trees), the same `{ any }`/`{ all }` nesting in the same item order, and the same weights. The both-axis flip and the 180-degree rotation are the same transform, so `symmetry=all, rotation=all` collapses to the 8 variants of D4 (fewer when the rule is itself symmetric). The runtime treats each surviving variant as an independent pattern (section 6.7). Elimination happens at compile time, but its result is observable, because each variant is a separate candidate weighting its anchor in the shuffle and in the `incremental` pick. That is why the key is normative (section 5.6.2).
+Symmetry and rotation are expanded at compile time. `symmetry` contributes up to four dimension-preserving flips (identity, H, V, both-axis); `rotation` contributes turns (identity, 90, 180, 270, or a set). The two are composed and the resulting variant set is **de-duplicated by structural equality of the transformed (match side, write tree) pair, scoped per sub-rule** (so two sub-rules with the same LHS both survive). Structural equality means the same pattern cells (expression cells compared as expression trees), the same `{ any }`/`{ all }` nesting in the same item order, and the same weights. The both-axis flip and the 180-degree rotation are the same transform, so `symmetry=all, rotation=all` collapses to the 8 variants of D4 (fewer when the rule is itself symmetric). The runtime treats each surviving variant as an independent pattern (section 6.7). Elimination happens at compile time, but its result is observable, because each variant is a separate candidate weighting its anchor in the shuffle and in the step-mode pick. That is why the key is normative (section 5.6.2).
 
 ### 10.3 Snapshot implementation
 
-The per-pass snapshot (section 7.1) is implementable several ways; a pass is the whole statement for `policy=snapshot`, one sweep for `stabilize`, and one application for `incremental`. The reference runtime uses a **full copy** (double buffering: matches read the front buffer, writes go to the back, then swap); copy-on-write side tables or per-cell versioning are equivalent and cheaper when few cells are written. A full copy is recommended until profiling says otherwise.
+The per-pass snapshot (section 7.1) is implementable several ways; a pass is the whole statement for a batch mode, one sweep for `settle`, and one application for a step mode. The reference runtime uses a **full copy** (double buffering: matches read the front buffer, writes go to the back, then swap); copy-on-write side tables or per-cell versioning are equivalent and cheaper when few cells are written. A full copy is recommended until profiling says otherwise.
 
 **Empty in number grids.** A `grid of number` stores an **empty sentinel** distinct from every representable integer (a reserved value or a parallel presence bit). Reads coerce the sentinel to `0` for arithmetic and comparison (section 5.8); the `(g == .)` / `(g != .)` tests inspect the sentinel directly, before coercion. Writing `.` stores the sentinel. Tag grids need no sentinel - empty is bit 0 of the mask (section 4.1).
 
 ### 10.4 Candidate collection and selection
 
-All policies build from one structure: a vector of **candidate slots**, each a small record of indices - `(anchor_x, anchor_y, sub_rule_idx, variant_idx)`. The chosen `{ any }` alternative is **not** stored; it is drawn at application (section 10.6). Slots reference compile-time tables (sub-rules, expanded variants), so a candidate is a few small integers.
+All modes build from one structure: a vector of **candidate slots**, each a small record of indices - `(anchor_x, anchor_y, sub_rule_idx, variant_idx)`. The chosen `{ any }` alternative is **not** stored; it is drawn at application (section 10.6). Slots reference compile-time tables (sub-rules, expanded variants), so a candidate is a few small integers.
 
-**Eager collection.** The reference implementation collects and matches the whole candidate vector per pass (row-major anchors; cells tested with short-circuit per candidate; `where`/expression cells - including `random` draws - evaluate during this scan). A semi-lazy split (enumerate slots cheaply, match only when pulled, so `one`/`some`/`incremental` never match the whole grid) is an available optimization - note that it would move match-side `random` draw sites, which the per-implementation-version determinism claim (section 7.2) permits but a golden-output corpus will notice.
+**Eager collection.** The reference implementation collects and matches the whole candidate vector per pass (row-major anchors; cells tested with short-circuit per candidate; `where`/expression cells - including `random` draws - evaluate during this scan). A semi-lazy split (enumerate slots cheaply, match only when pulled, so `once`/`scatter`/`grow` never match the whole grid) is an available optimization - note that it would move match-side `random` draw sites, which the per-implementation-version determinism claim (section 7.2) permits but a golden-output corpus will notice.
 
-**Selection per policy:**
-- `snapshot` / `stabilize` (per sweep): collect, seeded-shuffle, pull in shuffle order under the (grid, cell) write mask, stop at count. Shuffling is what gives variants equal priority.
-- `incremental`: collect, pick **one** uniformly (a single draw; under `ordered`, uniformly within the highest-priority group), apply, **re-collect** (the write changed the match set); repeat.
-- `ordered` is a **sort of the vector**, not a per-anchor short-circuit: the whole vector is shuffled (one Fisher-Yates pass, section 10.6), then **stably** sorted by sub-rule priority - so each priority group keeps its shuffled order - then consumed exactly as the shuffled vector would be by the active policy.
+**Selection per mode:**
+- Batch modes, and each `settle` sweep: collect, seeded-shuffle, pull in shuffle order under the (grid, cell) write mask, stop at count. Shuffling is what gives variants equal priority.
+- Step modes (`once`, `grow`): collect, pick **one** uniformly (a single draw; under `ordered`, uniformly within the highest-priority group), apply, **re-collect** (the write changed the match set); repeat.
+- `ordered` is a **sort of the vector**, not a per-anchor short-circuit: the whole vector is shuffled (one Fisher-Yates pass, section 10.6), then **stably** sorted by sub-rule priority - so each priority group keeps its shuffled order - then consumed exactly as the shuffled vector would be by the active mode.
 
-**Parallelism (future).** The split makes the parallelizable phase explicit - independent match-testing over the candidate vector: `snapshot` matching is embarrassingly parallel (all vs one snapshot) except when the match side draws (`random` shares the one stream and serializes; a position-keyed PRNG would lift this, section 9); `stabilize` is parallel within a sweep, serial across sweeps; `incremental` is inherently sequential.
+**Parallelism (future).** The split makes the parallelizable phase explicit - independent match-testing over the candidate vector: batch matching is embarrassingly parallel (all vs one snapshot) except when the match side draws (`random` shares the one stream and serializes; a position-keyed PRNG would lift this, section 9); `settle` is parallel within a sweep, serial across sweeps; step modes are inherently sequential.
 
 ### 10.5 Match enumeration
 
@@ -1170,9 +1163,9 @@ When a `where` or match cell contains `random`, the matcher's cell-test order, v
 A single PRNG stream (`mt19937_64` in the reference implementation), seeded from the invocation seed, drives all stochastic decisions. Every draw site is ordered by the execution model, so the sequence is fixed per (entry, seed, params):
 
 1. **Param expressions** (section 4.2) evaluate once at startup, in canonical declaration order (section 2.6), an input's default only when the param was not supplied - their draws come first.
-2. A **`when` guard** (section 6) evaluates once when its statement is reached, in statement order.
+2. A **`when` guard** (section 6) evaluates once when its statement is reached, in statement order; if it passes, the statement's **count** (section 6), if any, evaluates next.
 3. **Match-cell and `where`-cell** expressions evaluate during the collection scan, in row-major anchor order and, within an anchor, in sub-rule/variant declaration order; cells test in row-major order, short-circuiting on first mismatch - a `random` in a cell not reached does not draw.
-4. **Candidate ordering** draws next: the pass's seeded shuffle (batch family) or the single uniform pick (`incremental`), per section 10.4.
+4. **Candidate ordering** draws next: the pass's seeded shuffle (batch modes and `settle` sweeps) or the single uniform pick (step modes), per section 10.4.
 5. **At application**: one draw per `{ any }` node on the resolved write path, outer before inner, earlier sibling first (a single-item `{ any }` still draws, section 5.2); then write-cell expressions, row-major per resolved leaf.
 6. **`path` statements** follow the section 6.6 draw contract: predicate passes (`from`, `to`, `passable`), per-cell `cost`, exactly one tie-key draw, then the start-to-goal `write` stamps.
 
@@ -1183,7 +1176,7 @@ A sequence application (section 6.10) adds no draw sites: its body statements dr
 - **Raw draw**: the stream's next 64-bit output. Used once per `path` statement for the tie key (section 6.6).
 - **`uniform(n)`**, an integer in `[0, n)` for `n >= 1`, without bias: let `t = (2^64 - n) mod n` (in 64-bit arithmetic, `(0 - n) % n`); take raw draws until one, `x`, satisfies `x >= t`; the result is `x mod n`. It may consume more than one raw draw, but it counts as one draw for the order above.
 - **Shuffle** of a vector of `k` candidates (Fisher-Yates): for `i` from `k - 1` down to `1`, swap the items at `i` and `uniform(i + 1)`.
-- **Uniform pick** of one of `k` candidates (`incremental`): the item at `uniform(k)`.
+- **Uniform pick** of one of `k` candidates (step modes): the item at `uniform(k)`.
 - **Weighted `{ any }`** over items with integer weights `w1..wm` and total `W > 0`: `r = uniform(W)`; the chosen item is the first whose running weight sum exceeds `r`.
 - **`random(lo, hi)`**: `lo + uniform(hi - lo + 1)`. An empty range (`hi < lo`) still draws once, as `uniform(1)`, and yields `lo`.
 
@@ -1193,7 +1186,7 @@ Determinism is per (entry, seed, params, implementation version), on every platf
 
 ### 10.7 Sequence stability
 
-The reference approach copies the grid stack at the start of an iteration and compares it at the end. That costs one extra stack, the same order of cost as the snapshot double buffer (section 10.3). A cheaper equivalent keeps a per-(grid, cell) set of cells written during the iteration, and compares only those against their start values, plus the dimensions. It must still compare values, because a cell written back to its original value is not a change (section 6.10). Both approaches are unobservable. `one S` never needs the comparison, and neither does applying the entry (section 6).
+The reference approach copies the grid stack at the start of an iteration and compares it at the end. That costs one extra stack, the same order of cost as the snapshot double buffer (section 10.3). A cheaper equivalent keeps a per-(grid, cell) set of cells written during the iteration, and compares only those against their start values, plus the dimensions. It must still compare values, because a cell written back to its original value is not a change (section 6.10). Both approaches are unobservable. `once S` never needs the comparison, and neither does applying the entry (section 6).
 
 ### 10.8 Module loading
 
