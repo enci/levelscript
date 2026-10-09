@@ -11,6 +11,10 @@
         <allowed-os-versions><os-version min="@MIN_MACOS@"/></allowed-os-versions>
     </volume-check>
     <conclusion file="conclusion.html" mime-type="text/html"/>
+    <!-- The icon in the bottom-left corner; transparent, so one image serves
+         both appearances. -->
+    <background file="background.tiff" alignment="bottomleft" scaling="none"/>
+    <background-darkAqua file="background.tiff" alignment="bottomleft" scaling="none"/>
     <choices-outline>
         <line choice="default"><line choice="@PKG_ID@"/></line>
     </choices-outline>
