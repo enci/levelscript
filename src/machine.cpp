@@ -619,40 +619,32 @@ std::vector<machine::match> machine::collect(compiled_rule const& rule) {
 // order, row-major. Only phase 2 can draw, so a candidate its bare cells
 // reject consumes no draws.
 bool machine::match_at(compiled_pair const& pair, int row, int col) {
-    auto test = [](compiled_pattern const& pat, int64_t stored, long long want) {
-        return pat.is_number ? stored == want            // by value
-                             : (stored & want) != 0;     // mask overlap (section 4.1)
-    };
     for (auto const& pat : pair.lhs) {
         if (pat.is_where) continue;
         if (pat.grid_id < 0) return false;
         grid_state const& g = grids_[pat.grid_id];
         if (row + pat.rows > g.rows || col + pat.cols > g.cols) return false;
-        for (int r = 0; r < pat.rows; ++r)
-            for (int c = 0; c < pat.cols; ++c) {
-                auto const& cell = pat.at(r, c);
-                if (cell.what != compiled_cell::kind::value) continue;
-                if (!test(pat, g.get(row + r, col + c), cell.val)) return false;
-            }
+        if (pat.is_number) {
+            for (auto const& p : pat.bare)   // by value
+                if (g.get(row + p.r, col + p.c) != p.val) return false;
+        } else {
+            for (auto const& p : pat.bare)   // mask overlap (section 4.1)
+                if ((g.get(row + p.r, col + p.c) & p.val) == 0) return false;
+        }
     }
     for (auto const& pat : pair.lhs) {
+        if (pat.computed.empty()) continue;
         if (pat.is_where) {   // section 5.9: every cell's boolean must hold
-            for (int r = 0; r < pat.rows; ++r)
-                for (int c = 0; c < pat.cols; ++c) {
-                    auto const& cell = pat.at(r, c);
-                    if (cell.expr < 0) continue;
-                    if (eval(cell.expr, col + c, row + r) == 0) return false;
-                }
+            for (auto const& p : pat.computed)
+                if (eval(p.expr, col + p.c, row + p.r) == 0) return false;
             continue;
         }
         grid_state const& g = grids_[pat.grid_id];
-        for (int r = 0; r < pat.rows; ++r)
-            for (int c = 0; c < pat.cols; ++c) {
-                auto const& cell = pat.at(r, c);
-                if (cell.what != compiled_cell::kind::expr) continue;
-                long long want = eval(cell.expr, col + c, row + r);
-                if (!test(pat, g.get(row + r, col + c), want)) return false;
-            }
+        for (auto const& p : pat.computed) {
+            int64_t stored = g.get(row + p.r, col + p.c);
+            long long want = eval(p.expr, col + p.c, row + p.r);
+            if (pat.is_number ? stored != want : (stored & want) == 0) return false;
+        }
     }
     return true;
 }

@@ -37,6 +37,21 @@ compiled_pattern transform_pattern(transform k, compiled_pattern const& p) {
     return out;
 }
 
+// Split a match-side pattern's cells into the matcher's two phases (section
+// 5.11), in the variant's row-major order.
+void index_probes(compiled_pattern& p) {
+    p.bare.clear();
+    p.computed.clear();
+    for (int r = 0; r < p.rows; ++r)
+        for (int c = 0; c < p.cols; ++c) {
+            auto const& cell = p.at(r, c);
+            if (cell.what == compiled_cell::kind::value && !p.is_where)
+                p.bare.push_back({r, c, cell.val, -1});
+            else if (cell.expr >= 0)
+                p.computed.push_back({r, c, 0, cell.expr});
+        }
+}
+
 compiled_write_term transform_write_term(transform k, compiled_write_term const& t) {
     compiled_write_term out;
     out.what   = t.what;
@@ -744,6 +759,8 @@ struct analyzer {
                         if (pairs_equal(v, cand)) { dup = true; break; }
                     if (!dup) variants.push_back(std::move(cand));
                 }
+            for (auto& v : variants)
+                for (auto& pat : v.lhs) index_probes(pat);
             for (auto& v : variants) cr.pairs.push_back(std::move(v));
         }
         return cr;
