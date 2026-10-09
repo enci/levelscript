@@ -11,10 +11,8 @@ layers {
 }
 rule fill_a { a[.] => a[X] }
 rule place {
-    { all
-      a[X]
-      b[.]
-    }
+    a[X]
+    b[.]
     =>
     b[mark]
 }

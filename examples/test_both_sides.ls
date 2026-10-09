@@ -12,10 +12,8 @@ layers {
 }
 rule fill_floor { level[.] => level[floor] }
 rule place {
-    { all
-      level[floor]
-      actors[.]
-    }
+    level[floor]
+    actors[.]
     =>
     { any
       actors[goblin]

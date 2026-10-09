@@ -5,10 +5,8 @@
 // @expect run-ok
 layers { tiles: grid of number }
 rule inc {
-    { all
-      tiles[*]
-      where[ (tiles < 3) ]
-    }
+    tiles[*]
+    where[ (tiles < 3) ]
     =>
     tiles[ (tiles + 1) ]
 }

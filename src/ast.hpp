@@ -119,7 +119,7 @@ struct write_term {
 };
 
 // One match-write sub-rule: LHS patterns (conjoined across grids at one
-// anchor, `{ all … }` when more than one) => a write tree.
+// anchor; consecutive patterns before `=>`) => a write tree.
 struct rule_pair {
     source_loc           loc;
     std::vector<pattern> lhs;

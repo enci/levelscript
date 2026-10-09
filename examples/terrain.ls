@@ -15,9 +15,9 @@ rule roll {
 }
 
 rule classify { all
-    { all land[.] where[ (depth <= 2) ] }               => land[water]
-    { all land[.] where[ (depth > 2 && depth <= 6) ] } => land[grass]
-    { all land[.] where[ (depth > 6) ] }                => land[rock]
+    land[.] where[ (depth <= 2) ]              => land[water]
+    land[.] where[ (depth > 2 && depth <= 6) ] => land[grass]
+    land[.] where[ (depth > 6) ]               => land[rock]
 }
 
 sequence main {

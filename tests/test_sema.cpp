@@ -308,10 +308,8 @@ TEST_CASE("sema: where discipline") {
           .has_error("cannot appear on the write side"));
     CHECK(compile_result(prelude + R"(
 rule r {
-    { all
-      level[.]
-      where[ (x + 1) ]
-    }
+    level[.]
+    where[ (x + 1) ]
     =>
     level[floor]
 }

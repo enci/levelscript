@@ -27,7 +27,7 @@ layers {
 
 // all-of-any: level[floor] is unconditional; the item is an independent choice.
 rule furnish {
-    { all level[.] items[.] }
+    level[.] items[.]
     =>
     { all
       level[floor]

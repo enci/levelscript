@@ -17,10 +17,8 @@ rule carve {
 }
 
 rule frame {
-    { all
-      level[*]
-      where[ (x == 0 || y == 0 || x == width - 1 || y == height - 1) ]
-    }
+    level[*]
+    where[ (x == 0 || y == 0 || x == width - 1 || y == height - 1) ]
     =>
     level[wall]
 }

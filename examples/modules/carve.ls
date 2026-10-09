@@ -4,10 +4,8 @@ use "schema.ls"
 
 rule wall_all { level[.] => level[W] }
 rule open_room {
-    { all
-      level[W]
-      where[ (x > 0 && x < width - 1 && y > 0 && y < height - 1) ]
-    }
+    level[W]
+    where[ (x > 0 && x < width - 1 && y > 0 && y < height - 1) ]
     =>
     level[R]
 }

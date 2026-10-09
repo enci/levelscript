@@ -334,6 +334,7 @@ There is no default combinator: in any context that contains more than one item,
 **Grammar** - match and write sides:
 ```
 match_side      ::= pattern+
+                  | '{' pattern+ '}'
 write_side      ::= write_term
 write_term      ::= pattern
                   | '{' 'all' all_item_list '}'
@@ -344,8 +345,8 @@ any_item        ::= weight? write_term
 combinator      ::= 'any' | 'all' | 'ordered'
 weight          ::= '(' 'weight' '=' INTEGER ')'
 ```
-All item lists are one-or-more. A match side is one or more patterns; a write side is a bare pattern or a braced combinator block:
-- A **match side** conjoins its patterns across grids: every pattern before `=>` must match at the anchor. There is no match-side combinator; disjunctive matching would change the candidate model, read footprints, and conflict semantics, and is out of scope. Line breaks between the patterns are ordinary whitespace (section 2).
+All item lists are one-or-more. A match side is one or more patterns, optionally grouped in braces; a write side is a bare pattern or a braced combinator block:
+- A **match side** conjoins its patterns across grids: every pattern before `=>` must match at the anchor. There is no match-side combinator; disjunctive matching would change the candidate model, read footprints, and conflict semantics, and is out of scope. Line breaks between the patterns are ordinary whitespace (section 2). Braces around a match side group it for the reader and change nothing: `{ level[floor] loot[.] } => loot[chest]` is `level[floor] loot[.] => loot[chest]`. A group holds one or more patterns, takes no combinator keyword, and does not nest.
 - A **write side** is a recursive `write_term`: a `{ any ... }` (pick one alternative) or `{ all ... }` (write every item simultaneously), whose items may themselves be blocks to any depth.
 
 `weight` attaches only to the items of an `{ any ... }` write block. It is not part of the grammar for `{ all ... }` blocks or bare patterns, so `(weight=N)` inside `{ all ... }` is rejected at parse time. A weight on a nested block (an `{ all }` option inside an `{ any }`) weights the choice of that whole sub-tree.

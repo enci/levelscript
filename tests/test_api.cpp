@@ -554,10 +554,8 @@ tag geo { wall, floor }
 layers { level: grid of geo }
 rule pave { level[.] => level[floor] }
 rule frame {
-    { all
-      level[floor]
-      where[ (x == 0 || y == 0 || x == width - 1 || y == height - 1) ]
-    }
+    level[floor]
+    where[ (x == 0 || y == 0 || x == width - 1 || y == height - 1) ]
     =>
     level[wall]
 }
@@ -623,10 +621,8 @@ layers {
 }
 rule zero_some { tiles[.] => tiles[0] }
 rule mark_empty {
-    { all
-      flags[.]
-      where[ ((tiles == 0) && (tiles != .)) ]
-    }
+    flags[.]
+    where[ ((tiles == 0) && (tiles != .)) ]
     =>
     flags[mark]
 }
@@ -677,10 +673,8 @@ TEST_CASE("api: upscale, pad, mirror, trim") {
 tag geo { wall, floor }
 layers { level: grid of geo }
 rule seed_corner {
-    { all
-      level[.]
-      where[ (x == 0 && y == 0) ]
-    }
+    level[.]
+    where[ (x == 0 && y == 0) ]
     =>
     level[wall]
 }
@@ -714,10 +708,8 @@ TEST_CASE("api: trim crops to the union content box") {
 tag geo { wall }
 layers { level: grid of geo }
 rule mark {
-    { all
-      level[.]
-      where[ (x >= 2 && x <= 4 && y >= 1 && y <= 3) ]
-    }
+    level[.]
+    where[ (x >= 2 && x <= 4 && y >= 1 && y <= 3) ]
     =>
     level[wall]
 }
@@ -739,18 +731,14 @@ static const std::string corridor_src = R"(
 tag algo { start, goal, road }
 layers { algo: grid of algo }
 rule place_start {
-    { all
-      algo[.]
-      where[ (x == 0 && y == 0) ]
-    }
+    algo[.]
+    where[ (x == 0 && y == 0) ]
     =>
     algo[start]
 }
 rule place_goal {
-    { all
-      algo[.]
-      where[ (x == width - 1 && y == height - 1) ]
-    }
+    algo[.]
+    where[ (x == width - 1 && y == height - 1) ]
     =>
     algo[goal]
 }
@@ -788,20 +776,18 @@ layers {
     swamp: grid of number
 }
 rule mark_swamp {
-    { all
-      swamp[.]
-      where[ (y == 0 && x > 0 && x < width - 1) ]
-    }
+    swamp[.]
+    where[ (y == 0 && x > 0 && x < width - 1) ]
     =>
     swamp[9]
 }
 rule place_start {
-    { all algo[.] where[ (x == 0 && y == 0) ] }
+    algo[.] where[ (x == 0 && y == 0) ]
     =>
     algo[start]
 }
 rule place_goal {
-    { all algo[.] where[ (x == width - 1 && y == 0) ] }
+    algo[.] where[ (x == width - 1 && y == 0) ]
     =>
     algo[goal]
 }
@@ -831,12 +817,12 @@ TEST_CASE("api: path with no route warns and leaves grids unchanged") {
 tag algo { start, goal, road }
 layers { algo: grid of algo }
 rule place_start {
-    { all algo[.] where[ (x == 0 && y == 0) ] }
+    algo[.] where[ (x == 0 && y == 0) ]
     =>
     algo[start]
 }
 rule place_goal {
-    { all algo[.] where[ (x == 4 && y == 4) ] }
+    algo[.] where[ (x == 4 && y == 4) ]
     =>
     algo[goal]
 }
