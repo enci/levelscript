@@ -5,5 +5,5 @@
 use "modules/carve.ls"
 
 sequence main {
-    one carve
+    once carve
 }

@@ -34,9 +34,9 @@ rule fill {
 
 sequence main {
     resize(8, 4)
-    all fill
-    one fill
-    some(max=5) fill
+    everywhere fill
+    once fill
+    scatter(5) fill
 }
 )";
 
@@ -51,10 +51,10 @@ TEST_CASE("parser: full skeleton file") {
     REQUIRE(ast.sequences.back().stmts.size() == 4);
     CHECK(ast.sequences.back().stmts[0].what == program_stmt::kind::op_call);
     CHECK(ast.sequences.back().stmts[0].op_name == "resize");
-    CHECK(ast.sequences.back().stmts[1].strat == strategy::all);
-    CHECK(ast.sequences.back().stmts[2].strat == strategy::one);
-    CHECK(ast.sequences.back().stmts[3].strat == strategy::some);
-    CHECK(ast.sequences.back().stmts[3].max_count == 5);
+    CHECK(ast.sequences.back().stmts[1].mode == apply_mode::everywhere);
+    CHECK(ast.sequences.back().stmts[2].mode == apply_mode::once);
+    CHECK(ast.sequences.back().stmts[3].mode == apply_mode::scatter);
+    CHECK(ast.sequences.back().stmts[3].count == 5);
 }
 
 TEST_CASE("parser: multi-row pattern rows and cols") {
@@ -96,15 +96,12 @@ TEST_CASE("parser: missing arrow is an error") {
     CHECK(parse_fails("rule r { g[.] g[floor] }"));
 }
 
-TEST_CASE("parser: a removed 'program' block says how to migrate (0.7)") {
+TEST_CASE("parser: a stray top-level block is one diagnostic; parsing resumes") {
     diagnostics diags;
-    auto ast = parse("program {\n    resize(2, 2)\n}\n", "test", diags);
+    auto ast = parse("program {\n    resize(2, 2)\n}\nrule r { g[.] => g[a] }\n", "test", diags);
     REQUIRE(diags.all.size() == 1);
-    CHECK(diags.all[0].message.find("write 'sequence main { ... }'") != std::string::npos);
-    // recovered as `sequence main`, so the rest of the file is still checked
-    REQUIRE(ast->sequences.size() == 1);
-    CHECK(ast->sequences[0].name == "main");
-    CHECK(ast->sequences[0].stmts.size() == 1);
+    CHECK(diags.all[0].message.find("expected a declaration") != std::string::npos);
+    CHECK(ast->rules.size() == 1);
 }
 
 TEST_CASE("parser: use declarations head the file (2.6)") {
@@ -192,10 +189,7 @@ TEST_CASE("parser: the match side takes no combinator or commas (0.8, 5.2)") {
     CHECK(parse_fails("rule r { { any g[a] h[b] } => g[c] }"));
     CHECK(parse_fails("rule r { g[a], h[b] => g[c] }"));
     CHECK(parse_fails("rule r { { g[a], h[b] } => g[c] }"));
-    diagnostics diags;   // the 0.7 form says how to migrate
-    parse("rule r { { all g[a] h[b] } => g[c] }", "test", diags);
-    REQUIRE(diags.all.size() == 1);
-    CHECK(diags.all[0].message.find("only group patterns") != std::string::npos);
+    CHECK(parse_fails("rule r { { all g[a] h[b] } => g[c] }"));
 }
 
 TEST_CASE("parser: braces may group a match side and change nothing (0.8, 5.2)") {
@@ -286,9 +280,9 @@ TEST_CASE("parser: list commas are optional; newlines are whitespace (0.8, secti
 
 TEST_CASE("parser: statements are delimited by the grammar, not by newlines (0.8)") {
     auto ast = parse_ok("rule r { g[.] => g[a] }\n"
-                        "sequence main { resize(4, 4) all r one r\n"
+                        "sequence main { resize(4, 4) everywhere r once r\n"
                         "  path(from=a,\n to=a, into=g, write=a)\n"
-                        "  all r\n    when (1 == 1)\n}");
+                        "  everywhere r\n    when (1 == 1)\n}");
     REQUIRE(ast.sequences[0].stmts.size() == 5);
     CHECK(ast.sequences[0].stmts[3].op_name == "path");
     CHECK(ast.sequences[0].stmts[4].guard != nullptr);
@@ -305,42 +299,57 @@ TEST_CASE("parser: a single sub-rule under a body combinator is allowed") {
     CHECK(ast.rules[0].pairs.size() == 1);
 }
 
-// ── step 3: policies, percent, ordered ────────────────────────────────────────
+// ── step 3: modes, counts, ordered ────────────────────────────────────────────
 
-TEST_CASE("parser: policy arguments") {
+TEST_CASE("parser: modes and counts (0.8, section 6)") {
     auto ast = parse_ok(R"(
 sequence main {
-    all fill
-    all(policy=stabilize) smooth
-    one(policy=incremental) start
-    some(max=200, policy=incremental) walk
-    some(percent=50) carve
+    everywhere fill
+    settle smooth
+    once start
+    grow(200) walk
+    scatter(50%) carve
+    grow walk
+    settle(3) smooth
+    scatter(7) carve
 }
 )");
     auto const& s = ast.sequences.back().stmts;
-    REQUIRE(s.size() == 5);
-    CHECK(s[0].pol == exec_policy::snapshot);   // default
-    CHECK(s[1].pol == exec_policy::stabilize);
-    CHECK(s[2].pol == exec_policy::incremental);
-    CHECK(s[3].pol == exec_policy::incremental);
-    CHECK(s[3].max_count == 200);
-    CHECK(s[4].is_percent);
-    CHECK(s[4].percent == 50);
-    CHECK(s[4].pol == exec_policy::snapshot);
+    REQUIRE(s.size() == 8);
+    CHECK(s[0].mode == apply_mode::everywhere);
+    CHECK(s[0].count == -1);
+    CHECK(s[1].mode == apply_mode::settle);
+    CHECK(s[1].count == -1);
+    CHECK(s[2].mode == apply_mode::once);
+    CHECK(s[3].mode == apply_mode::grow);
+    CHECK(s[3].count == 200);
+    CHECK(s[4].mode == apply_mode::scatter);
+    CHECK(s[4].count_percent);
+    CHECK(s[4].count == 50);
+    CHECK(s[5].count == -1);
+    CHECK(s[6].count == 3);
+    CHECK(!s[7].count_percent);
+    CHECK(s[7].rule_name == "carve");
 }
 
-TEST_CASE("parser: unknown policy is recorded for sema") {
-    diagnostics diags;
-    auto ast = parse("sequence main { all(policy=ranked) r }", "test", diags);
-    REQUIRE(ast.has_value());
-    CHECK(!diags.has_errors());   // parse accepts; sema rejects (#30)
-    CHECK(ast->sequences.back().stmts[0].bad_policy);
-    CHECK(ast->sequences.back().stmts[0].policy_raw == "ranked");
+TEST_CASE("parser: count forms each mode rejects (0.8, section 6)") {
+    CHECK(parse_fails("sequence main { scatter r }"));       // scatter needs a count
+    CHECK(parse_fails("sequence main { once(2) r }"));       // once takes none
+    CHECK(parse_fails("sequence main { everywhere(2) r }"));
+    CHECK(parse_fails("sequence main { grow(50%) r }"));     // only scatter takes %
+    CHECK(parse_fails("sequence main { settle(10%) r }"));
+}
+
+TEST_CASE("parser: the 0.7 count and policy forms are not statements") {
+    CHECK(parse_fails("sequence main { one r }"));
+    CHECK(parse_fails("sequence main { some(max=5) r }"));
+    CHECK(parse_fails("sequence main { all r }"));
+    CHECK(parse_fails("sequence main { all(policy=stabilize) r }"));
 }
 
 TEST_CASE("parser: ordered body combinator") {
     auto ast = parse_ok(R"(
-rule grow { ordered
+rule climb { ordered
     g[a] => g[b]
     g[.] => g[a]
 }
@@ -460,7 +469,7 @@ TEST_CASE("parser: when guards") {
     auto ast = parse_ok(R"(
 sequence main {
     resize(4, 4)  when (difficulty > 3)
-    all fill      when (style == 0)
+    everywhere fill      when (style == 0)
 }
 )");
     REQUIRE(ast.sequences.back().stmts.size() == 2);
@@ -483,7 +492,7 @@ rule a(symmetry=none, rotation=none) { g[.] => g[x] }
 rule b(rotation=all, symmetry=vertical) { g[.] => g[x] }
 rule c { g[ (max(g, 1)) ] => g[x] }
 sequence main {
-    some(max=3) a
+    scatter(3) a
     mirror(horizontal)
     mirror(vertical)
 }
@@ -495,7 +504,7 @@ sequence main {
     CHECK(ast.rules[1].rotation_angles == std::vector<long long>{90, 180, 270});
     auto const& s = ast.sequences.back().stmts;
     REQUIRE(s.size() == 3);
-    CHECK(s[0].max_count == 3);
+    CHECK(s[0].count == 3);
     REQUIRE(s[1].op_args.size() == 1);
     CHECK(s[1].op_args[0].ident == "horizontal");
     CHECK(s[2].op_args[0].ident == "vertical");

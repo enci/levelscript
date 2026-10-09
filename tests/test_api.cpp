@@ -13,7 +13,7 @@ layers {
 rule fill { level[.] => level[floor] }
 sequence main {
     resize(8, 4)
-    all fill
+    everywhere fill
 }
 )";
 
@@ -23,7 +23,7 @@ layers { algo: grid of algo }
 rule plant { algo[.] => algo[S] }
 sequence main {
     resize(10, 6)
-    some(max=5) plant
+    scatter(5) plant
 }
 )";
 
@@ -102,7 +102,7 @@ static std::vector<int> dump(ls::level const& lv, char const* layer) {
     return out;
 }
 
-TEST_CASE("api: some(max=N) applies exactly N, deterministically per seed") {
+TEST_CASE("api: scatter(N) applies exactly N, deterministically per seed") {
     auto gen = make(scatter_src);
     REQUIRE(static_cast<bool>(gen));
 
@@ -120,14 +120,14 @@ TEST_CASE("api: some(max=N) applies exactly N, deterministically per seed") {
     CHECK(b.width() == 10);
 }
 
-TEST_CASE("api: one applies exactly one") {
+TEST_CASE("api: once applies exactly one") {
     auto gen = make(R"(
 tag algo { S }
 layers { algo: grid of algo }
 rule plant { algo[.] => algo[S] }
 sequence main {
     resize(4, 4)
-    one plant
+    once plant
 }
 )");
     int planted = 0;
@@ -144,8 +144,8 @@ rule fill  { level[.] => level[floor] }
 rule strip { level[floor] => level[.] }
 sequence main {
     resize(3, 3)
-    all fill
-    all strip
+    everywhere fill
+    everywhere strip
 }
 )");
     ls::level lv = gen.generate(gen.sequence("main"), 1);
@@ -159,7 +159,7 @@ TEST_CASE("api: stepping matches batch generation") {
     auto g1 = gen.run(gen.sequence("main"), 7, ls::step_mode::statement);
     int stmts = 0;
     while (g1.step()) ++stmts;
-    CHECK(stmts == 2);   // resize + some(max=5)
+    CHECK(stmts == 2);   // resize + scatter(5)
 
     // application granularity: resize stops once, each application once
     auto g2 = gen.run(gen.sequence("main"), 7, ls::step_mode::application);
@@ -192,8 +192,8 @@ rule fill_geo { all
 }
 sequence main {
     resize(6, 4)
-    some(max=4) plant
-    all fill_geo
+    scatter(4) plant
+    everywhere fill_geo
 }
 )");
     REQUIRE(static_cast<bool>(gen));
@@ -220,7 +220,7 @@ rule mix {
 }
 sequence main {
     resize(12, 8)
-    all mix
+    everywhere mix
 }
 )");
     REQUIRE(static_cast<bool>(gen));
@@ -252,8 +252,8 @@ rule mark(rotation=all) {
 }
 sequence main {
     resize(1, 2)
-    one seed_top
-    one mark
+    once seed_top
+    once mark
 }
 )");
     REQUIRE(static_cast<bool>(gen));
@@ -291,8 +291,8 @@ rule decorate {
 }
 sequence main {
     resize(4, 4)
-    all pave
-    all decorate
+    everywhere pave
+    everywhere decorate
 }
 )");
     REQUIRE(static_cast<bool>(gen));
@@ -303,7 +303,7 @@ sequence main {
             CHECK(loot.at(x, y) >= 0);   // every cell got chest or heart
 }
 
-// ── step 3: policies, percent, ordered, observe ───────────────────────────────
+// ── step 3: modes, percentages, ordered, observe ──────────────────────────────
 
 static int count_val(ls::level const& lv, char const* layer, int val) {
     int n = 0;
@@ -316,45 +316,45 @@ static const std::string grow_src = R"(
 tag algo { S }
 layers { algo: grid of algo }
 rule plant { algo[.] => algo[S] }
-rule grow(rotation=all) {
+rule spread(rotation=all) {
     algo[S .]
     =>
     algo[* S]
 }
 sequence main {
     resize(9, 9)
-    one plant
-    some(max=20, policy=incremental) grow
+    once plant
+    grow(20) spread
 }
 )";
 
-TEST_CASE("api: incremental sees prior writes; snapshot does not") {
-    // From one seed, 20 incremental growth steps add exactly 20 cells —
+TEST_CASE("api: grow sees prior writes; scatter does not") {
+    // From one seed, 20 grow steps add exactly 20 cells —
     // each step re-collects, so growth feeds on its own writes.
     auto inc = make(grow_src);
     REQUIRE(static_cast<bool>(inc));
     ls::level lv = inc.generate(inc.sequence("main"), 4);
     CHECK(count_val(lv, "algo", inc.tag("algo.S")) == 21);
 
-    // The same rule under (default) snapshot can only fill the frozen
+    // The same rule as one scatter batch can only fill the frozen
     // snapshot's neighbourhood: at most the seed's 4 neighbours.
     std::string snap_src = grow_src;
-    auto pos = snap_src.find(", policy=incremental");
-    snap_src.erase(pos, std::string(", policy=incremental").size());
+    auto pos = snap_src.find("grow(20)");
+    snap_src.replace(pos, std::string("grow(20)").size(), "scatter(20)");
     auto snap = make(snap_src);
     REQUIRE(static_cast<bool>(snap));
     ls::level sv = snap.generate(snap.sequence("main"), 4);
     CHECK(count_val(sv, "algo", snap.tag("algo.S")) <= 5);
 }
 
-TEST_CASE("api: all(policy=incremental) runs to the fixpoint") {
+TEST_CASE("api: grow without a count runs to the fixpoint") {
     auto gen = make(R"(
 tag geo { floor }
 layers { level: grid of geo }
 rule fill { level[.] => level[floor] }
 sequence main {
     resize(6, 5)
-    all(policy=incremental) fill
+    grow fill
 }
 )");
     REQUIRE(static_cast<bool>(gen));
@@ -376,8 +376,8 @@ rule flood(rotation=all) {
 }
 sequence main {
     resize(7, 7)
-    one plant
-    all(policy=stabilize) flood
+    once plant
+    settle flood
 }
 )");
     REQUIRE(static_cast<bool>(gen));
@@ -385,7 +385,7 @@ sequence main {
     CHECK(count_val(lv, "algo", gen.tag("algo.S")) == 49);
 }
 
-TEST_CASE("api: some(max=N, policy=stabilize) counts sweeps") {
+TEST_CASE("api: settle(N) counts sweeps") {
     // Two sweeps from a corner seed reach cells within Manhattan distance 2.
     auto gen = make(R"(
 tag algo { S }
@@ -398,8 +398,8 @@ rule flood(rotation=all) {
 }
 sequence main {
     resize(9, 9)
-    one plant
-    some(max=2, policy=stabilize) flood
+    once plant
+    settle(2) flood
 }
 )");
     REQUIRE(static_cast<bool>(gen));
@@ -409,20 +409,22 @@ sequence main {
     CHECK(n <= 13);
 }
 
-TEST_CASE("api: some(percent=P) applies the exact fraction of the applied set") {
+TEST_CASE("api: scatter(P%) applies the exact fraction of the applied set") {
     auto src = [](int pct) {
         return "tag geo { floor }\n"
                "layers { level: grid of geo }\n"
                "rule paint { level[.] => level[floor] }\n"
-               "sequence main {\n    resize(10, 10)\n    some(percent=" +
-               std::to_string(pct) + ") paint\n}\n";
+               "sequence main {\n    resize(10, 10)\n    scatter(" +
+               std::to_string(pct) + "%) paint\n}\n";
     };
     auto half = make(src(50));
     REQUIRE(static_cast<bool>(half));
     CHECK(count_val(half.generate(half.sequence("main"), 1), "level", half.tag("geo.floor")) == 50);
 
-    auto none = make(src(0));
-    CHECK(count_val(none.generate(none.sequence("main"), 1), "level", none.tag("geo.floor")) == 0);
+    auto one = make(src(1));
+    CHECK(count_val(one.generate(one.sequence("main"), 1), "level", one.tag("geo.floor")) == 1);
+
+    CHECK(!make(src(0)));   // a literal 0% is check 28
 
     auto full = make(src(100));
     CHECK(count_val(full.generate(full.sequence("main"), 1), "level", full.tag("geo.floor")) == 100);
@@ -440,7 +442,7 @@ rule paint { ordered
 }
 sequence main {
     resize(6, 6)
-    all paint
+    everywhere paint
 }
 )");
     REQUIRE(static_cast<bool>(gen));
@@ -461,7 +463,7 @@ rule tick { ordered
 }
 sequence main {
     resize(3, 3)
-    all(policy=incremental) tick
+    grow tick
 }
 )");
     REQUIRE(static_cast<bool>(gen));
@@ -528,8 +530,8 @@ rule paint { level[.] => level[ (if(difficulty > 3, wall, floor)) ] }
 rule strip { level[wall] => level[.] }
 sequence main {
     resize(4, 4)
-    all paint
-    all strip  when (extra > 10)
+    everywhere paint
+    everywhere strip  when (extra > 10)
 }
 )");
     INFO(gen.error());
@@ -561,8 +563,8 @@ rule frame {
 }
 sequence main {
     resize(6, 5)
-    all pave
-    all frame
+    everywhere pave
+    everywhere frame
 }
 )");
     INFO(gen.error());
@@ -583,7 +585,7 @@ layers { tiles: grid of number }
 rule roll { tiles[.] => tiles[ (random(3, 7)) ] }
 sequence main {
     resize(8, 8)
-    all roll
+    everywhere roll
 }
 )");
     INFO(gen.error());
@@ -604,7 +606,7 @@ params { n: number = 0 }
 rule f { tiles[.] => tiles[ (if(n == 0, 0, 100 / n)) ] }
 sequence main {
     resize(2, 2)
-    all f
+    everywhere f
 }
 )");
     INFO(gen.error());
@@ -628,8 +630,8 @@ rule mark_empty {
 }
 sequence main {
     resize(4, 1)
-    some(max=2) zero_some
-    all mark_empty
+    scatter(2) zero_some
+    everywhere mark_empty
 }
 )");
     INFO(gen.error());
@@ -656,8 +658,8 @@ rule mix {
 rule clear_blockers { level[blocker] => level[floor] }
 sequence main {
     resize(6, 6)
-    all mix
-    all clear_blockers
+    everywhere mix
+    everywhere clear_blockers
 }
 )");
     INFO(gen.error());
@@ -680,7 +682,7 @@ rule seed_corner {
 }
 sequence main {
     resize(2, 2)
-    all seed_corner
+    everywhere seed_corner
     upscale(2, 2)
     pad(1)
     mirror(horizontal)
@@ -715,7 +717,7 @@ rule mark {
 }
 sequence main {
     resize(8, 6)
-    all mark
+    everywhere mark
     trim()
 }
 )");
@@ -744,8 +746,8 @@ rule place_goal {
 }
 sequence main {
     resize(7, 5)
-    all place_start
-    all place_goal
+    everywhere place_start
+    everywhere place_goal
     path(from=start, to=goal, into=algo, write=road,
          passable=((0 == 0)))
 }
@@ -793,9 +795,9 @@ rule place_goal {
 }
 sequence main {
     resize(5, 3)
-    all mark_swamp
-    all place_start
-    all place_goal
+    everywhere mark_swamp
+    everywhere place_start
+    everywhere place_goal
     path(from=start, to=goal, into=algo, write=road,
          passable=((0 == 0)), cost=(1 + swamp))
 }
@@ -828,8 +830,8 @@ rule place_goal {
 }
 sequence main {
     resize(5, 5)
-    all place_start
-    all place_goal
+    everywhere place_start
+    everywhere place_goal
     path(from=start, to=goal, into=algo, write=road,
          passable=((algo == road)))
 }
@@ -869,8 +871,8 @@ rule fill { g[.] => g[a] }
 rule pair(symmetry=horizontal) { g[a a] => g[b c] }
 sequence main {
     resize(2, 1)
-    all fill
-    one pair
+    everywhere fill
+    once pair
 }
 )");
     INFO(gen.error());
@@ -906,8 +908,8 @@ rule reduce(rotation=all) {
 }
 sequence main {
     resize(2, 2)
-    all fill
-    one reduce
+    everywhere fill
+    once reduce
 }
 )");
     INFO(gen.error());
@@ -935,8 +937,8 @@ sequence main {
 // The draw primitives are plain 64-bit integer arithmetic over mt19937_64, so
 // these exact outputs must come out on every platform and compiler. A
 // failure here on one platform only is a portability bug, not a golden to
-// update. Each primitive is exercised: `random` (bounded draws), `one mark`
-// (the batch shuffle), `pick` (incremental uniform picks), `mix` (weighted
+// update. Each primitive is exercised: `random` (bounded draws), `scatter(1)
+// mark` (the batch shuffle), `pick` (step-mode uniform picks), `mix` (weighted
 // `{ any }` rolls).
 TEST_CASE("api: pinned draws give the same level on every platform") {
     auto gen = make(R"(
@@ -952,11 +954,11 @@ rule pick { g[a] => g[b] }
 rule mix  { g[a] => { any (weight=1) g[b]  (weight=3) g[c] } }
 sequence main {
     resize(4, 3)
-    all rnd
-    one mark
-    all fill
-    some(max=2, policy=incremental) pick
-    all mix
+    everywhere rnd
+    scatter(1) mark
+    everywhere fill
+    grow(2) pick
+    everywhere mix
 }
 )");
     REQUIRE(static_cast<bool>(gen));

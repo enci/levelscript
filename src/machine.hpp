@@ -145,13 +145,13 @@ private:
     // group present (preemptive priority under re-collection).
     match pick_candidate(compiled_rule const& rule, std::vector<match> const& ms);
     // The non-conflicting prefix a full snapshot pass would apply, cut to P%
-    // — the `percent` denominator is the applied set, not raw candidates.
+    // — the `scatter(P%)` denominator is the applied set, not raw candidates.
     std::vector<match> applicable_prefix(compiled_rule const& rule,
                                          std::vector<match> const& ordered_ms,
                                          int pct) const;
     void add_write_footprint(compiled_pair const& pair, match const& m,
                              std::unordered_set<uint64_t>& out) const;
-    bool grids_differ() const;   // back vs front (stabilize change detection)
+    bool grids_differ() const;   // back vs front (settle change detection)
     void record_highlights(compiled_pair const& pair, match const& m);
 
     static uint64_t mask_key(int grid_id, int flat) {

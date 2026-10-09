@@ -1,7 +1,7 @@
 // @seed 42
 // Showcase (v0.3.1): explicit rotation angles and the set form `rotation={..}`.
 //
-// A single `core` is placed at the grid centre, then `grow` extends an arm into
+// A single `core` is placed at the grid centre, then `extend` extends an arm into
 // the empty cell "ahead of" it. The rotation attribute decides which directions
 // the arm grows:
 //
@@ -36,7 +36,7 @@ rule seed {
 }
 
 // Grow an arm into the empty cell ahead of a core, in three orientations.
-rule grow(rotation={90, 270}) {
+rule extend(rotation={90, 270}) {
     g[core .]
     =>
     g[*    arm]
@@ -44,6 +44,6 @@ rule grow(rotation={90, 270}) {
 
 sequence main {
     resize(5, 5)
-    all seed
-    all grow
+    everywhere seed
+    everywhere extend
 }

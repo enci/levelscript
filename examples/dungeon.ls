@@ -84,13 +84,13 @@ rule hack {
 
 sequence main {
     resize(5, 5)
-    all init
+    everywhere init
     upscale(6, 4)
-    some(max=8) start
-    some(max=200, policy=incremental) walk2
+    scatter(8) start
+    grow(200) walk2
     upscale(2, 2)
-    all reduce
-    one place_player
-    all reward
-    all clean
+    everywhere reduce
+    once place_player
+    everywhere reward
+    everywhere clean
 }

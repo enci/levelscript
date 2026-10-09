@@ -750,7 +750,7 @@ struct analyzer {
     //    that happens on every resolution ({ any } branches don't count)
     //    overwrites one of its own LHS-constrained cells with a value that no
     //    longer matches — the applied anchor then re-matches forever, and
-    //    `all(policy=incremental)` never terminates. Conservative: warns only
+    //    `grow` without a count never terminates. Conservative: warns only
     //    on the guaranteed case. ─────────────────────────────────────────────
 
     static void collect_unconditional_leaves(compiled_write_term const& t,
@@ -790,7 +790,7 @@ struct analyzer {
             }
             if (!invalidates) {
                 warning(loc,
-                    "'all(policy=incremental)' over rule '" + rule.name +
+                    "'grow' over rule '" + rule.name +
                     "' may never terminate: a sub-rule's write leaves its own "
                     "match intact, so the fixpoint is unreachable");
                 return;
@@ -1108,6 +1108,17 @@ struct analyzer {
 
     // ── statements (section 6): the program body and every sequence body ──────────
 
+    static std::string mode_name(apply_mode m) {
+        switch (m) {
+        case apply_mode::once:       return "once";
+        case apply_mode::scatter:    return "scatter";
+        case apply_mode::everywhere: return "everywhere";
+        case apply_mode::grow:       return "grow";
+        case apply_mode::settle:     return "settle";
+        }
+        return "";
+    }
+
     // Levenshtein distance - did-you-mean for unknown rule/sequence names.
     static int edit_distance(std::string const& a, std::string const& b) {
         std::vector<int> row(b.size() + 1);
@@ -1176,11 +1187,9 @@ struct analyzer {
                 if (!compile_op_call(s, cs.op)) continue;
             } else {
                 cs.what = compiled_stmt::kind::apply;
-                cs.strat = s.strat;
-                cs.pol = s.pol;
-                cs.is_percent = s.is_percent;
-                cs.max_count = s.max_count;
-                cs.percent = s.percent;
+                cs.mode = s.mode;
+                cs.count = (int)s.count;
+                cs.percent = s.count_percent;
                 for (int i = 0; i < (int)out.rules.size(); ++i)
                     if (out.rules[i].name == s.rule_name) { cs.rule_id = i; break; }
                 if (cs.rule_id < 0)
@@ -1197,33 +1206,26 @@ struct analyzer {
                 else
                     require_visible(s.rule_name_loc, "sequence", s.rule_name,
                                     ast.sequences[(size_t)cs.seq_id].loc.mod);
-                if (s.strat == strategy::some && !s.is_percent && s.max_count == 0)
-                    error(s.loc, "'some(max=0)' applies no matches; did you mean a different strategy?");
+                // section 7.3, check 28: a literal zero count applies nothing.
+                if (s.count == 0)
+                    error(s.count_loc, std::string("a count of 0") +
+                          (s.count_percent ? "%" : "") + " applies nothing" + ctx);
+                // section 7.3, check 30: a percentage above 100.
+                if (s.count_percent && s.count > 100)
+                    error(s.count_loc, "percentage " + std::to_string(s.count) +
+                          "% is above 100" + ctx);
                 if (cs.seq_id >= 0) {
-                    // section 7.3, check 37: a sequence application takes a count only.
-                    if (s.policy_given)
-                        error(s.loc, "'policy=' is not valid on sequence '" + s.rule_name +
-                              "'; each statement inside a sequence carries its own policy");
-                    if (s.is_percent)
-                        error(s.loc, "'some(percent=...)' is not valid on sequence '" +
-                              s.rule_name + "'; use 'some(max=N)', or 'percent' on the "
-                              "statements inside it");
-                } else {
-                    // section 7.3, check 30: unknown policy value.
-                    if (s.bad_policy)
-                        error(s.loc, "unknown policy '" + s.policy_raw +
-                              "'; expected snapshot, incremental, or stabilize" + ctx);
-                    // section 7.3, check 28: invalid count/policy combination.
-                    if (s.is_percent && s.pol != exec_policy::snapshot)
-                        error(s.loc, "'percent' requires the default 'snapshot' policy" + ctx);
-                    if (s.strat == strategy::one && s.pol == exec_policy::stabilize)
-                        error(s.loc, "'one' with 'policy=stabilize' is contradictory "
-                              "(a single application cannot reach a sweep fixpoint)" + ctx);
-                    // Reductivity warning (section 6.9 — LevelScript addition): an
-                    // `all(policy=incremental)` fixpoint over a rule whose write
-                    // never invalidates its own match cannot terminate.
-                    if (s.strat == strategy::all && s.pol == exec_policy::incremental)
-                        check_reductive(out.rules[cs.rule_id], s.loc);
+                    // section 7.3, check 37: rule-only modes on a sequence.
+                    if (s.mode != apply_mode::once && s.mode != apply_mode::settle)
+                        error(s.loc, "'" + mode_name(s.mode) + "' is not valid on sequence '" +
+                              s.rule_name + "'; a sequence takes 'once' or 'settle'" +
+                              (s.mode == apply_mode::scatter
+                                   ? ", and 'scatter' belongs on the statements inside it" : ""));
+                } else if (s.mode == apply_mode::grow && s.count < 0) {
+                    // Reductivity warning (section 6.9 — LevelScript addition): a
+                    // `grow` fixpoint over a rule whose write never invalidates
+                    // its own match cannot terminate.
+                    check_reductive(out.rules[cs.rule_id], s.loc);
                 }
             }
             // `when (expr)` guard (section 6): boolean, params only — no grids, no
@@ -1295,17 +1297,17 @@ struct analyzer {
         return "";
     }
 
-    // section 7.4 warning 2: `all S` where no iteration can be stable.
+    // section 7.4 warning 2: `settle S` (no count) where no iteration can be stable.
     void warn_unstable_fixpoints(std::vector<compiled_stmt> const& stmts) {
         for (auto const& st : stmts) {
             if (st.what != compiled_stmt::kind::apply || st.seq_id < 0 ||
-                st.strat != strategy::all)
+                st.mode != apply_mode::settle || st.count >= 0)
                 continue;
             std::vector<char> seen(out.sequences.size(), 0);
             std::string op = dims_changer(st.seq_id, seen);
             if (!op.empty())
                 warning(st.loc,
-                    "'all' over sequence '" + out.sequences[st.seq_id].name +
+                    "'settle' over sequence '" + out.sequences[st.seq_id].name +
                     "' may never terminate: '" + op + "' changes the grid dimensions "
                     "on every iteration, so no iteration can be stable");
         }

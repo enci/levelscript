@@ -461,9 +461,8 @@ struct parser {
         if (!at(token_type::lbrace)) return parse_match_patterns(lhs);
         eat();   // '{'
         if (at(token_type::kw_all) || at(token_type::kw_any) || at(token_type::kw_ordered)) {
-            // 0.7's `{ all p1 p2 }` migrates by dropping the keyword
-            error_at(peek(), "match-side braces only group patterns and take no '" +
-                     peek().text + "' since 0.8; write '{ p1 p2 }' or just 'p1 p2'");
+            error_at(peek(), "match-side braces only group patterns; they take no '" +
+                     peek().text + "'");
             eat();
         }
         if (at(token_type::rbrace)) {
@@ -588,56 +587,53 @@ struct parser {
 
     // ── program ──────────────────────────────────────────────────────────────
 
-    // policy = snapshot | incremental | stabilize; an unknown value is
-    // recorded raw and rejected in sema (section 7.3, check 30).
-    void parse_policy_arg(program_stmt& s) {
-        eat();   // 'policy'
-        s.policy_given = true;
-        if (!expect(token_type::equals, "'='")) return;
-        if (accept(token_type::kw_snapshot))         s.pol = exec_policy::snapshot;
-        else if (accept(token_type::kw_incremental)) s.pol = exec_policy::incremental;
-        else if (accept(token_type::kw_stabilize))   s.pol = exec_policy::stabilize;
-        else {
-            s.bad_policy = true;
-            s.policy_raw = peek().text;
-            eat_bad();
-        }
+    bool at_mode() const {
+        return at(token_type::kw_once) || at(token_type::kw_scatter) ||
+               at(token_type::kw_everywhere) || at(token_type::kw_grow) ||
+               at(token_type::kw_settle);
     }
 
-    void parse_apply(program_stmt& s) {
-        if (at(token_type::kw_one) || at(token_type::kw_all)) {
-            s.strat = at(token_type::kw_one) ? strategy::one : strategy::all;
+    // count ::= '(' INTEGER ')'; scatter also takes '(' INTEGER '%' ')'.
+    void parse_count(program_stmt& s, bool percent_ok) {
+        eat();   // '('
+        s.count_loc = loc();
+        if (!expect(token_type::integer, "a count")) { recover_to(token_type::rparen); return; }
+        s.count = toks[pos - 1].int_val;
+        if (at(token_type::percent)) {
+            if (percent_ok) s.count_percent = true;
+            else error_at(peek(), "only 'scatter' takes a percentage");
             eat();
-            if (accept(token_type::lparen)) {   // one/all take only a policy
-                if (at(token_type::kw_policy)) parse_policy_arg(s);
-                else { error_at(peek(), "expected 'policy=' here"); eat_bad(); }
-                expect(token_type::rparen, "')'");
-            }
-        } else {   // 'some' '(' max=N | percent=P (',' policy=…)? ')'
-            eat();
-            s.strat = strategy::some;
-            if (!expect(token_type::lparen, "'('")) return;
-            if (accept_word("max")) {
-                if (!expect(token_type::equals, "'='")) return;
-                if (!expect(token_type::integer, "a count")) return;
-                s.max_count = (int)toks[pos - 1].int_val;
-            } else if (accept(token_type::kw_percent)) {
-                s.is_percent = true;
-                if (!expect(token_type::equals, "'='")) return;
-                if (!expect(token_type::integer, "a percentage")) return;
-                s.percent = (int)toks[pos - 1].int_val;
-            } else {
-                error_at(peek(), "expected 'max=' or 'percent='");
-                recover_to(token_type::rparen);
-                return;
-            }
-            if (accept(token_type::comma)) {
-                if (at(token_type::kw_policy)) parse_policy_arg(s);
-                else { error_at(peek(), "expected 'policy=' here"); eat_bad(); }
-            }
-            if (!expect(token_type::rparen, "')'")) return;
         }
-        if (expect(token_type::ident, "a rule name")) {
+        expect(token_type::rparen, "')'");
+    }
+
+    // apply_stmt ::= mode IDENT   (section 6)
+    // mode ::= 'once' | 'scatter' '(' count ')' | 'everywhere'
+    //        | 'grow' ('(' count ')')? | 'settle' ('(' count ')')?
+    void parse_apply(program_stmt& s) {
+        token const& m = eat();
+        switch (m.type) {
+        case token_type::kw_once:       s.mode = apply_mode::once;       break;
+        case token_type::kw_scatter:    s.mode = apply_mode::scatter;    break;
+        case token_type::kw_everywhere: s.mode = apply_mode::everywhere; break;
+        case token_type::kw_grow:       s.mode = apply_mode::grow;       break;
+        default:                        s.mode = apply_mode::settle;     break;
+        }
+        bool counted = s.mode == apply_mode::scatter || s.mode == apply_mode::grow ||
+                       s.mode == apply_mode::settle;
+        if (at(token_type::lparen)) {
+            if (counted) {
+                parse_count(s, s.mode == apply_mode::scatter);
+            } else {
+                error_at(peek(), "'" + m.text + "' takes no count" +
+                         (s.mode == apply_mode::once ? "; use 'grow(N)' for N steps"
+                                                     : "; use 'scatter(N)' for up to N applications"));
+                recover_to(token_type::rparen);
+            }
+        } else if (s.mode == apply_mode::scatter) {
+            error_at(peek(), "'scatter' takes a count, e.g. 'scatter(5)' or 'scatter(50%)'");
+        }
+        if (expect(token_type::ident, "a rule or sequence name")) {
             s.rule_name_loc = prev_loc();
             s.rule_name = toks[pos - 1].text;
         }
@@ -697,18 +693,17 @@ struct parser {
         while (!at(token_type::rbrace) && !at_end()) {
             program_stmt s;
             s.loc = loc();
-            if (at(token_type::kw_one) || at(token_type::kw_all) ||
-                at(token_type::kw_some)) {
+            if (at_mode()) {
                 parse_apply(s);
             } else if (at(token_type::ident) && peek(1).is(token_type::lparen)) {
                 parse_op_call(s);
             } else {
                 if (where.empty())
-                    error_at(peek(), "expected a statement (a strategy + rule, or an operation call)");
+                    error_at(peek(), "expected a statement (a mode + rule, or an operation call)");
                 else
                     error_at(peek(), "expected a statement in sequence '" + where +
                              "'; rules are declared with 'rule' and applied by name, "
-                             "e.g. 'all fill'");
+                             "e.g. 'everywhere fill'");
                 // one diagnostic per bad line, not one per token
                 skip_line(peek().line);
                 continue;
@@ -734,22 +729,6 @@ struct parser {
         if (!expect(token_type::string, "a module path in quotes, e.g. use \"schema.ls\""))
             return;
         out.uses.push_back({l, toks[pos - 1].text});
-    }
-
-    // `program { ... }` was removed in 0.7 (section 6). Say how to migrate, then
-    // parse the block as `sequence main` so the rest of the file is checked.
-    void parse_removed_program(ast_file& out) {
-        error_at(peek(), "'program' blocks were removed in 0.7; write "
-                 "'sequence main { ... }' - tools run the sequence 'main' by default");
-        sequence_decl sq;
-        sq.loc = loc();
-        sq.name_loc = loc();
-        sq.name = "main";
-        eat();   // 'program'
-        if (!expect(token_type::lbrace, "'{'")) return;
-        parse_statement_list(sq.stmts, "");
-        expect(token_type::rbrace, "'}'");
-        out.sequences.push_back(std::move(sq));
     }
 
     // sequence_decl ::= 'sequence' IDENT '{' statement_list '}'   (section 6.10)
@@ -786,6 +765,16 @@ struct parser {
 
     // ── entry ────────────────────────────────────────────────────────────────
 
+    bool at_declaration() const {
+        switch (peek().type) {
+        case token_type::kw_use: case token_type::kw_tag: case token_type::kw_layers:
+        case token_type::kw_params: case token_type::kw_rule: case token_type::kw_sequence:
+            return true;
+        default:
+            return false;
+        }
+    }
+
     void run(ast_file& out) {
         bool after_decls = false;
         while (!at_end()) {
@@ -801,13 +790,10 @@ struct parser {
             case token_type::kw_rule:     parse_rule(out);     break;
             case token_type::kw_sequence: parse_sequence(out); break;
             default:
-                if (at(token_type::ident) && peek().text == "program" &&
-                    peek(1).is(token_type::lbrace)) {
-                    parse_removed_program(out);
-                    break;
-                }
+                // one diagnostic, then resume at the next declaration
                 error_at(peek(), "expected a declaration (use, tag, layers, params, rule, sequence)");
                 eat_bad();
+                while (!at_end() && !at_declaration()) eat();
                 break;
             }
         }

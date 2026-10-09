@@ -6,4 +6,4 @@ tag t { a }
 layers { g: grid of t }
 rule fill  { g[.] => g[a] }
 rule clear { g[a] => g[.] }
-sequence main { resize(2, 2) all fill all clear }
+sequence main { resize(2, 2) everywhere fill everywhere clear }

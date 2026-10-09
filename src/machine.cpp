@@ -106,22 +106,22 @@ long long machine::eval(int idx, int x, int y) {
 }
 
 // The one execution core (spec section 6.7). Statements run top to bottom; the
-// count × policy algebra lives here and only here — batch generate(),
-// progressive stepping, and observation all pull this coroutine.
+// mode algebra lives here and only here — batch generate(), progressive
+// stepping, and observation all pull this coroutine.
 //
-//   snapshot    — one frozen pass: collect, seeded-shuffle (+ `ordered`
+//   scatter, everywhere — one frozen pass: collect, seeded-shuffle (+ `ordered`
 //                 priority sort), apply non-conflicting matches to the back
-//                 buffer under the write mask (section 6.8), swap. `percent` first
+//                 buffer under the write mask (section 6.8), swap. `P%` first
 //                 sizes the applied set a full pass would make (section 6.7) and
 //                 keeps its prefix.
-//   incremental — re-collect each application; each sees all prior writes.
-//                 No mask. `all` runs to the fixpoint.
-//   stabilize   — iterated snapshot sweeps until one changes nothing; the
+//   once, grow  — re-collect each application; each sees all prior writes.
+//                 No mask. `grow` without a count runs to the fixpoint.
+//   settle      — iterated batch sweeps until one changes nothing; the
 //                 count unit is a sweep.
 //
 // Yields after every application and every completed statement — pullers
 // filter to their granularity.
-// A run binds the params, then applies the entry exactly as `one S` to the
+// A run binds the params, then applies the entry exactly as `once S` to the
 // empty stack (section 6): one iteration of its body - no guard, no draw, no
 // stability check. Its body statements are frame 0 of the statement stack.
 sequence<step_event> machine::run() {
@@ -156,11 +156,9 @@ sequence<step_event> machine::run() {
 sequence<step_event> machine::run_leaf(compiled_stmt const& st, int top) {
     if (st.what == compiled_stmt::kind::op_call) {
         exec_op(st.op);
-    } else if (st.pol == exec_policy::incremental) {
+    } else if (is_step_mode(st.mode)) {
         auto const& rule = prog_->rules[st.rule_id];
-        int cap = st.strat == strategy::one  ? 1
-                : st.strat == strategy::some ? st.max_count
-                : -1;   // all = fixpoint
+        int cap = st.mode == apply_mode::once ? 1 : st.count;   // -1 = fixpoint
         int applied = 0;
         while (cap < 0 || applied < cap) {
             auto ms = collect(rule);
@@ -176,21 +174,18 @@ sequence<step_event> machine::run_leaf(compiled_stmt const& st, int top) {
             co_yield step_event{step_event::kind::application, top};
         }
     } else {
-        // Batch family: snapshot = one sweep; stabilize = sweeps to a
-        // fixpoint (or the sweep cap).
+        // Batch modes = one sweep; settle = sweeps to a fixpoint (or the
+        // sweep cap).
         auto const& rule = prog_->rules[st.rule_id];
-        bool stab = st.pol == exec_policy::stabilize;
-        int sweep_cap = stab ? (st.strat == strategy::all ? -1 : st.max_count) : 1;
-        int cap = (stab || st.is_percent) ? -1
-                : st.strat == strategy::one  ? 1
-                : st.strat == strategy::some ? st.max_count
-                : -1;
+        bool stab = st.mode == apply_mode::settle;
+        int sweep_cap = stab ? st.count : 1;
+        int cap = st.mode == apply_mode::scatter && !st.percent ? st.count : -1;
         int sweeps = 0;
         while (sweep_cap < 0 || sweeps < sweep_cap) {
             auto ms = collect(rule);
             order_candidates(rule, ms);
-            if (st.is_percent)
-                ms = applicable_prefix(rule, ms, st.percent);
+            if (st.percent)
+                ms = applicable_prefix(rule, ms, st.count);
 
             for (auto& g : grids_) g.back = g.front;
             std::unordered_set<uint64_t> written;
@@ -215,17 +210,15 @@ sequence<step_event> machine::run_leaf(compiled_stmt const& st, int top) {
 
 }
 
-// section 6.10: `one` = 1 iteration; `some(max=N)` = up to N, stopping after a
-// stable one; `all` = until one is stable. Body statements run exactly as in
+// section 6.10: `once` = 1 iteration; `settle(N)` = up to N, stopping after a
+// stable one; `settle` = until one is stable. Body statements run exactly as in
 // the program; the frames record where each step happened.
 sequence<step_event> machine::run_sequence(compiled_stmt const& st, int top) {
     auto const& body = prog_->sequences[st.seq_id].stmts;
-    int cap = st.strat == strategy::one  ? 1
-            : st.strat == strategy::some ? st.max_count
-            : -1;
+    int cap = st.mode == apply_mode::once ? 1 : st.count;   // -1 = fixpoint
     size_t depth = frames_.size();
     for (int it = 0; cap < 0 || it < cap; ++it) {
-        bool check = cap != 1;   // `one S` never needs the comparison (section 10.7)
+        bool check = cap != 1;   // `once S` never needs the comparison (section 10.7)
         stack_state start;
         if (check) start = capture();
         for (int j = 0; j < (int)body.size(); ++j) {

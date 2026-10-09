@@ -1,5 +1,5 @@
 // @seed 14
-// Ordered + incremental = preemptive priority (the MarkovJunior loop):
+// Ordered + grow = preemptive priority (the MarkovJunior loop):
 // extending an existing path always beats starting a new one, so exactly
 // one germinated path snakes across the grid until nothing can extend.
 tag algo { head, trail }
@@ -15,5 +15,5 @@ rule snake(rotation=all) { ordered
 
 sequence main {
     resize(12, 8)
-    some(max=40, policy=incremental) snake
+    grow(40) snake
 }

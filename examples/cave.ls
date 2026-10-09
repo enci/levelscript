@@ -30,7 +30,7 @@ rule erode(symmetry=all, rotation=all) {
 }
 
 // A floor completely surrounded by wall is filled in.
-rule grow(symmetry=all, rotation=all) {
+rule dilate(symmetry=all, rotation=all) {
     level[
         wall wall wall
         wall floor wall
@@ -44,8 +44,8 @@ rule grow(symmetry=all, rotation=all) {
 
 sequence main {
     resize(60, 25)
-    all fill
-    all erode
-    all grow
-    all erode
+    everywhere fill
+    everywhere erode
+    everywhere dilate
+    everywhere erode
 }

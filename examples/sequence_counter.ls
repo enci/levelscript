@@ -10,8 +10,8 @@ rule inc {
     =>
     tiles[ (tiles + 1) ]
 }
-sequence tick { all inc }
+sequence tick { everywhere inc }
 sequence main {
     resize(3, 2)
-    all tick
+    settle tick
 }

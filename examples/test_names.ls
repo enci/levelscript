@@ -13,6 +13,6 @@ rule clear { level[wall] => level[.] }
 
 sequence main {
     resize(4, 4)
-    all fill
-    all clear
+    everywhere fill
+    everywhere clear
 }

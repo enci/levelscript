@@ -36,7 +36,7 @@ rule hazards {
 
 sequence main {
     resize(12, 7)
-    all pave
-    all frame
-    all hazards  when (difficulty > 3)
+    everywhere pave
+    everywhere frame
+    everywhere hazards  when (difficulty > 3)
 }

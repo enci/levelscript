@@ -14,6 +14,6 @@ rule cycle { all
 }
 sequence main {
     resize(3, 3)
-    all seed
-    all cycle
+    everywhere seed
+    everywhere cycle
 }

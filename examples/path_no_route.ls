@@ -26,9 +26,9 @@ rule ee { where[ (x == 6 && y == 1) ] => marks[exit] }
 
 sequence main {
     resize(7, 3)
-    all barrier
-    all ground
-    all dd
-    all ee
+    everywhere barrier
+    everywhere ground
+    everywhere dd
+    everywhere ee
     path(from=door, to=exit, into=marks, write=corridor, passable=floor)
 }

@@ -1,7 +1,7 @@
 // @seed 42
 // Winding corridor generator.
 // A small number of random walkers carve through a wall background.
-// 'some' picks one random match per iteration so walkers meander freely.
+// 'grow' picks one random match per step so walkers meander freely.
 // @expect grid level count(f) >= 5
 
 tag algo    { head, trail }
@@ -37,8 +37,8 @@ rule finalize { all
 
 sequence main {
     resize(60, 30)
-    all init_bg
-    all seed
-    some(max=600, policy=incremental) step
-    all finalize
+    everywhere init_bg
+    everywhere seed
+    grow(600) step
+    everywhere finalize
 }

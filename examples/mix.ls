@@ -17,5 +17,5 @@ rule mix {
 
 sequence main {
     resize(12, 8)
-    all mix
+    everywhere mix
 }

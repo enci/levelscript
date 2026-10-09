@@ -19,13 +19,13 @@ layers {
 }
 
 // A match-side `random` draw gates placement per candidate (~30%).
-rule scatter { where[ (random(1, 100) <= 30) ] => ground[rubble] }
+rule rubble { where[ (random(1, 100) <= 30) ] => ground[rubble] }
 
 // Everything still empty becomes floor.
 rule fill { ground[.] => ground[floor] }
 
 sequence main {
     resize(8, 8)
-    all scatter
-    all fill
+    everywhere rubble
+    everywhere fill
 }

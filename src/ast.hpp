@@ -140,11 +140,18 @@ struct rule_decl {
 
 // ── program ──────────────────────────────────────────────────────────────────
 
-enum class strategy { one, some, all };
+// The mode of an application (spec section 6): how many applications occur and
+// what each one sees. Over a sequence only `once` and `settle` are valid.
+//   once        - one application (a single uniform pick) / one iteration
+//   scatter     - batch: up to N applications of one snapshot, or P% of it
+//   everywhere  - batch: every non-conflicting application of one snapshot
+//   grow        - steps, each seeing the last; N steps, or to the fixpoint
+//   settle      - batch sweeps (or sequence iterations) until one changes nothing
+enum class apply_mode { once, scatter, everywhere, grow, settle };
 
-// Execution policy (spec section 6.7): what each application sees and how conflicts
-// are handled. Orthogonal to the count.
-enum class exec_policy { snapshot, incremental, stabilize };
+// Step modes re-snapshot after every application and use no mask; the batch
+// modes (scatter, everywhere) and each settle sweep apply one snapshot (6.7).
+inline bool is_step_mode(apply_mode m) { return m == apply_mode::once || m == apply_mode::grow; }
 
 // One operation-call argument (spec section 6.0). Positional when `name` is empty;
 // the value is an integer, a bare identifier (grid, tag value, enum word), or
@@ -164,18 +171,14 @@ struct program_stmt {
     // op_call — resolved against the operation table in sema
     std::string         op_name;
     std::vector<op_arg> op_args;
-    // apply — count × policy (section 6.7)
-    strategy    strat{strategy::all};
-    exec_policy pol{exec_policy::snapshot};
-    bool        policy_given{false};  // policy= written at all (section 7.3, check 37 on sequences)
-    bool        bad_policy{false};    // policy= had an unknown value (section 7.3, check 30)
-    std::string policy_raw;           // its raw text, for the diagnostic
-    bool        is_percent{false};    // some(percent=P) instead of max
-    int         max_count{0};
-    int         percent{0};
+    // apply — a mode, its count where it takes one, and a target (section 6)
+    apply_mode  mode{apply_mode::everywhere};
+    long long   count{-1};            // -1 = no count
+    bool        count_percent{false}; // scatter(P%)
+    source_loc  count_loc;
     std::string rule_name;            // a rule or a sequence (section 6.10); resolved in sema
     source_loc  rule_name_loc;
-    // optional `when (expr)` guard (section 6): boolean, params only, evaluated once
+    // optional `when (expr)` guard (section 6): boolean, params only
     expr_ptr    guard;
 };
 

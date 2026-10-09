@@ -8,15 +8,16 @@ namespace ls {
 
 enum class token_type {
     ident, integer, string, newline, end, bad,
-    // keywords (spec section 2.4); contextual names such as `max`, `symmetry`, or
+    // keywords (spec section 2.4); contextual names such as `symmetry` or
     // `horizontal` lex as ident and are matched by text in the parser
     kw_tag, kw_layers, kw_grid, kw_of, kw_number, kw_rule, kw_sequence,
-    kw_one, kw_all, kw_some, kw_any, kw_ordered, kw_weight,
-    kw_policy, kw_snapshot, kw_incremental, kw_stabilize, kw_percent,
+    kw_all, kw_any, kw_ordered, kw_weight,
+    kw_once, kw_scatter, kw_everywhere, kw_grow, kw_settle,   // modes (section 6)
     kw_params, kw_where, kw_when, kw_use,
     // punctuation
     lbrace, rbrace, lbracket, rbracket, lparen, rparen,
     comma, colon, equals, arrow, star, dot,
+    percent,   // '%' closing a scatter percentage (section 6)
     // expression operators (section 5.8)
     plus, minus, slash, pipe, bang,
     eq_eq, bang_eq, lt, le, gt, ge, amp_amp, pipe_pipe,
@@ -36,8 +37,8 @@ struct token {
     bool is(token_type t) const { return type == t; }
 };
 
-// Tokenize the whole source. Newlines are tokens (rows in pattern bodies,
-// separators elsewhere); lex errors are reported and yield a `bad` token.
+// Tokenize the whole source. Newlines are tokens (row separators in pattern
+// grids; the parser treats them as whitespace everywhere else); lex errors are reported and yield a `bad` token.
 // The last token is always `end`.
 std::vector<token> lex(std::string_view source, std::string_view file,
                        diagnostics& diags);

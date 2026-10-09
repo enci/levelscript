@@ -38,8 +38,8 @@ files spec_example() {
     f.src["carve.ls"] =
         "use \"schema.ls\"\n"
         "rule seed_room { level[.] => level[R] }\n"
-        "sequence carve {\n    resize(16, 7)\n    one seed_room\n}\n";
-    f.src["dungeon.ls"] = "use \"carve.ls\"\nsequence main {\n    one carve\n}\n";
+        "sequence carve {\n    resize(16, 7)\n    once seed_room\n}\n";
+    f.src["dungeon.ls"] = "use \"carve.ls\"\nsequence main {\n    once carve\n}\n";
     return f;
 }
 
@@ -68,7 +68,7 @@ TEST_CASE("modules: a use is not re-exported (D3)") {
     // dungeon.ls writes `level`, declared in schema.ls, which it does not use
     f.src["dungeon.ls"] =
         "use \"carve.ls\"\nrule mark { level[R] => level[W] }\n"
-        "sequence main {\n    one carve\n    all mark\n}\n";
+        "sequence main {\n    once carve\n    everywhere mark\n}\n";
     auto gen = f.compile("dungeon.ls");
     CHECK(!gen);
     CHECK(has(gen.error(), "dungeon.ls:2:"));
@@ -83,7 +83,7 @@ TEST_CASE("modules: every kind of name goes through visibility (check 8)") {
     files f;
     f.src["lib.ls"] =
         "tag t { a }\nlayers { g: grid of t }\nparams { k: number = 2 }\n"
-        "rule fill { g[.] => g[a] }\nsequence s { all fill }\n";
+        "rule fill { g[.] => g[a] }\nsequence s { everywhere fill }\n";
     f.src["mid.ls"] = "use \"lib.ls\"\n";
     auto check = [&](std::string body, char const* kind, char const* name) {
         f.src["root.ls"] = "use \"mid.ls\"\n" + body;
@@ -93,8 +93,8 @@ TEST_CASE("modules: every kind of name goes through visibility (check 8)") {
     };
     check("layers { h: grid of t }\n", "tagset", "t");
     check("rule r { g[.] => g[a] }\n", "grid", "g");
-    check("sequence main { resize(1, 1)  one fill }\n", "rule", "fill");
-    check("sequence main { one s }\n", "sequence", "s");
+    check("sequence main { resize(1, 1)  once fill }\n", "rule", "fill");
+    check("sequence main { once s }\n", "sequence", "s");
     check("params { q = k + 1 }\n", "param", "k");
     check("sequence main { resize(1, 1)  path(from=a, to=a, into=g, write=a) }\n", "grid", "g");
 }
@@ -104,7 +104,7 @@ TEST_CASE("modules: tag values need no visibility of their own") {
     f.src["schema.ls"] = "tag t { a, b }\nlayers { g: grid of t }\n";
     f.src["root.ls"] =
         "use \"schema.ls\"\n"   // sees g; `a`/`b` resolve through g's tagset
-        "rule r { g[.] => g[ (if(x == 0, a, b)) ] }\nsequence main { resize(2, 1)  all r }\n";
+        "rule r { g[.] => g[ (if(x == 0, a, b)) ] }\nsequence main { resize(2, 1)  everywhere r }\n";
     INFO(f.compile("root.ls").error());
     CHECK(static_cast<bool>(f.compile("root.ls")));
 }
@@ -140,14 +140,14 @@ TEST_CASE("modules: params evaluate in canonical order across modules") {
     f.src["root.ls"] = "use \"base.ls\"\nparams { r2: number = random(0, 1000000)\n"
                        "both = r1 * 0 + r2 }\n"
                        "layers { n: grid of number }\nrule w { n[.] => n[ (both) ] }\n"
-                       "sequence main { resize(1, 1)  all w }\n";
+                       "sequence main { resize(1, 1)  everywhere w }\n";
     // r1's draw comes first: base.ls precedes root.ls in canonical order. The
     // same declarations in one file, in that order, give the same output.
     files one;
     one.src["one.ls"] = "params { r1: number = random(0, 1000000)\n"
                         "r2: number = random(0, 1000000)\nboth = r1 * 0 + r2 }\n"
                         "layers { n: grid of number }\nrule w { n[.] => n[ (both) ] }\n"
-                        "sequence main { resize(1, 1)  all w }\n";
+                        "sequence main { resize(1, 1)  everywhere w }\n";
     auto a = f.compile("root.ls"), b = one.compile("one.ls");
     INFO(a.error() << b.error());
     REQUIRE(static_cast<bool>(a));
@@ -262,8 +262,8 @@ sequence small {
 }
 sequence main {
     resize(2, 2)
-    all one_up
-    one small
+    everywhere one_up
+    once small
 }
 )";
 
@@ -304,11 +304,11 @@ layers { tiles: grid of number }
 params { off: number = 0 }
 rule one_up { tiles[*] => tiles[ (tiles + 1) ] }
 sequence inner {
-    one one_up
+    once one_up
 }
 sequence main {
     resize(1, 1)
-    some(max=2) inner
+    settle(2) inner
     pad(1)  when (off == 1)
 }
 )");

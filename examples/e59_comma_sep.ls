@@ -8,7 +8,7 @@ rule r { all
 rule seed_a { g[.] => g[a] }
 sequence main {
     resize(1, 1)
-    all seed_a
-    all r
-    all r
+    everywhere seed_a
+    everywhere r
+    everywhere r
 }

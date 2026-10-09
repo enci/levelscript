@@ -21,7 +21,7 @@ rule warm  { where[ (heat == .) ] => heat[ (heat + 1) ] }  // empty number reads
 
 sequence main {
     resize(4, 4)
-    all seed
-    all fill
-    all warm
+    everywhere seed
+    everywhere fill
+    everywhere warm
 }

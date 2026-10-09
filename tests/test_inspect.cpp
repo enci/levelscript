@@ -23,7 +23,7 @@ params {
 rule fill { level[.] => level[floor] }
 sequence main {
     resize(4, 4)
-    all fill
+    everywhere fill
 }
 )";
 
@@ -59,7 +59,7 @@ tag geo { wall, floor }
 layers { level: grid of geo }
 rule bad  { level[lava] => level[wall] }
 rule good { level[.] => level[floor] }
-sequence main { all good }
+sequence main { everywhere good }
 )";
     std::string j = ls::inspect_json(src, "test.ls");
     CHECK(has(j, "\"ok\":false"));
@@ -87,7 +87,7 @@ layers2: grid of geo
 tag geo { floor }
 layers { level: grid of geo  tiles: grid of number }
 rule mark { level[floor] => tiles[1] }
-sequence main { all(policy=incremental) mark }
+sequence main { grow mark }
 )";
     std::string j = ls::inspect_json(wsrc, "test.ls");
     CHECK(has(j, "\"ok\":true"));

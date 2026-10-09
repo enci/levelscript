@@ -5,6 +5,6 @@
 use "../modules/carve.ls"
 rule mark { level[R] => level[W] }
 sequence main {
-    one carve
-    all mark
+    once carve
+    everywhere mark
 }

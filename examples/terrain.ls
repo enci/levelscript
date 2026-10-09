@@ -22,6 +22,6 @@ rule classify { all
 
 sequence main {
     resize(14, 8)
-    all roll
-    all classify
+    everywhere roll
+    everywhere classify
 }

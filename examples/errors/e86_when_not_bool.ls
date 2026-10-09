@@ -5,4 +5,4 @@ tag t { a }
 params { n: number = 0 }
 layers { g: grid of t }
 rule r { g[.] => g[a] }
-sequence main { resize(2,2) all r when (n + 1) }
+sequence main { resize(2,2) everywhere r when (n + 1) }

@@ -111,11 +111,11 @@ tag t { a }
 layers { g: grid of t }
 rule fill { g[.] => g[a] }
 sequence s {
-    all fill
+    everywhere fill
 }
 sequence main {
     resize(4, 4)
-    one s
+    once s
 }
 )");
     INFO(gen.error());
@@ -132,10 +132,10 @@ tag t { a }
 layers { g: grid of t }
 sequence main {
     resize(2, 2)
-    one s
+    once s
 }
 sequence s {
-    all fill
+    everywhere fill
 }
 rule fill { g[.] => g[a] }
 )");
@@ -148,7 +148,7 @@ TEST_CASE("sequence Q03: an unapplied sequence is legal, no warning") {
 tag t { a }
 layers { g: grid of t }
 rule fill { g[.] => g[a] }
-sequence unused { all fill }
+sequence unused { everywhere fill }
 sequence main { resize(2, 2) }
 )");
     INFO(r.diags.format_all());
@@ -163,18 +163,18 @@ params { big: number = 0 }
 layers { g: grid of t }
 rule fill { g[.] => g[a] }
 rule flip { g[a] => g[b] }
-sequence inner { all fill }
+sequence inner { everywhere fill }
 sequence outer {
-    one inner
-    some(max=3, policy=incremental) flip
-    all(policy=stabilize) fill
-    some(percent=50) flip
+    once inner
+    grow(3) flip
+    settle fill
+    scatter(50%) flip
     pad(1)                  when (big == 1)
     resize(8, 8)
 }
 sequence main {
     resize(4, 4)
-    one outer
+    once outer
 }
 )");
     INFO(r.diags.format_all());
@@ -187,20 +187,20 @@ tag t { a, b }
 layers { g: grid of t }
 rule fill { g[.] => g[a] }
 rule flip { g[a] => g[b] }
-sequence s { all fill all flip }
-sequence main { resize(2, 2) one s }
+sequence s { everywhere fill everywhere flip }
+sequence main { resize(2, 2) once s }
 )", R"(
 tag t { a, b }
 layers { g: grid of t }
 rule fill { g[.] => g[a] }
 rule flip { g[a] => g[b] }
 sequence s {
-    all fill
-    all flip
+    everywhere fill
+    everywhere flip
 }
 sequence main {
     resize(2, 2)
-    one s
+    once s
 }
 )");
 }
@@ -215,13 +215,13 @@ rule fill   { g[.] => g[a] }
 rule a_to_b { g[a] => g[b] }
 rule b_to_a { g[b] => g[a] }
 sequence flip {
-    all a_to_b
-    all b_to_a
+    everywhere a_to_b
+    everywhere b_to_a
 }
 sequence main {
     resize(4, 4)
-    all fill
-    all flip
+    everywhere fill
+    settle flip
 }
 )");
     REQUIRE(static_cast<bool>(gen));
@@ -238,11 +238,11 @@ tag t { a }
 layers { g: grid of t }
 rule fill { g[.] => g[a] }
 rule same { g[a] => g[a] }
-sequence s { all same }
+sequence s { everywhere same }
 sequence main {
     resize(3, 3)
-    all fill
-    all s
+    everywhere fill
+    settle s
 }
 )");
     REQUIRE(static_cast<bool>(gen));
@@ -257,8 +257,8 @@ rule seed { g[.] => g[a] }
 sequence crop { trim() }
 sequence main {
     resize(5, 5)
-    one seed
-    all crop
+    once seed
+    settle crop
 }
 )");
     REQUIRE(static_cast<bool>(gen));
@@ -275,7 +275,7 @@ layers { }
 sequence r { resize(6, 4) }
 sequence main {
     resize(5, 5)
-    all r
+    settle r
 }
 )");
     CHECK(r.diags.all.empty());   // no warning
@@ -284,7 +284,7 @@ layers { }
 sequence r { resize(6, 4) }
 sequence main {
     resize(5, 5)
-    all r
+    settle r
 }
 )");
     REQUIRE(static_cast<bool>(gen));
@@ -300,7 +300,7 @@ layers { }
 sequence nothing { }
 sequence main {
     resize(2, 2)
-    all nothing
+    settle nothing
 }
 )");
     INFO(gen.error());
@@ -317,12 +317,12 @@ layers { tiles: grid of number }
 rule zero { tiles[.] => tiles[0] }
 rule poke { tiles[*] => tiles[ (tiles + 100) ] }
 sequence maybe {
-    one poke  when (random(0, 1) == 0)
+    once poke  when (random(0, 1) == 0)
 }
 sequence main {
     resize(4, 4)
-    all zero
-    some(max=50) maybe
+    everywhere zero
+    settle(50) maybe
 }
 )");
     INFO(gen.error());
@@ -339,23 +339,23 @@ sequence main {
 // ── 3. Counts ─────────────────────────────────────────────────────────────────
 
 TEST_CASE("sequence Q12: one S runs exactly one iteration") {
-    auto gen = make(counter(3) + "sequence tick { all inc }\nsequence main {\n resize(1, 1)\n one tick\n}\n");
+    auto gen = make(counter(3) + "sequence tick { everywhere inc }\nsequence main {\n resize(1, 1)\n once tick\n}\n");
     REQUIRE(static_cast<bool>(gen));
     auto t = run_trace(gen, 1);
     CHECK(iterations(t, {1}) == 1);
     CHECK(t.final["tiles"].at(0, 0) == 1);
 }
 
-TEST_CASE("sequence Q13: some(max=N) stops early after a stable iteration") {
-    auto gen = make(counter(3) + "sequence tick { all inc }\nsequence main {\n resize(1, 1)\n some(max=10) tick\n}\n");
+TEST_CASE("sequence Q13: settle(N) stops early after a stable iteration") {
+    auto gen = make(counter(3) + "sequence tick { everywhere inc }\nsequence main {\n resize(1, 1)\n settle(10) tick\n}\n");
     REQUIRE(static_cast<bool>(gen));
     auto t = run_trace(gen, 1);
     CHECK(iterations(t, {1}) == 4);
     CHECK(t.final["tiles"].at(0, 0) == 3);
 }
 
-TEST_CASE("sequence Q14: some(max=N) runs all N iterations when each changes something") {
-    auto gen = make(counter(100) + "sequence tick { all inc }\nsequence main {\n resize(1, 1)\n some(max=5) tick\n}\n");
+TEST_CASE("sequence Q14: settle(N) runs all N iterations when each changes something") {
+    auto gen = make(counter(100) + "sequence tick { everywhere inc }\nsequence main {\n resize(1, 1)\n settle(5) tick\n}\n");
     REQUIRE(static_cast<bool>(gen));
     auto t = run_trace(gen, 1);
     CHECK(iterations(t, {1}) == 5);
@@ -363,7 +363,7 @@ TEST_CASE("sequence Q14: some(max=N) runs all N iterations when each changes som
 }
 
 TEST_CASE("sequence Q15: all S is a fixpoint") {
-    auto gen = make(counter(3) + "sequence tick { all inc }\nsequence main {\n resize(1, 1)\n all tick\n}\n");
+    auto gen = make(counter(3) + "sequence tick { everywhere inc }\nsequence main {\n resize(1, 1)\n settle tick\n}\n");
     REQUIRE(static_cast<bool>(gen));
     auto t = run_trace(gen, 1);
     CHECK(iterations(t, {1}) == 4);
@@ -378,8 +378,8 @@ rule fill { g[.] => g[a] }
 sequence widen { upscale(2, 1) }
 sequence main {
     resize(1, 1)
-    all fill
-    some(max=3) widen
+    everywhere fill
+    settle(3) widen
 }
 )";
     compile_result r(src);
@@ -392,11 +392,11 @@ sequence main {
 }
 
 static std::string const q17 = counter(100) + R"(
-sequence inner { all inc }
-sequence outer { some(max=2) inner }
+sequence inner { everywhere inc }
+sequence outer { settle(2) inner }
 sequence main {
     resize(1, 1)
-    some(max=3) outer
+    settle(3) outer
 }
 )";
 
@@ -424,24 +424,24 @@ rule poke  { tiles[*] => tiles[ (tiles + 100) ] }
 TEST_CASE("sequence Q18: a sequence equals its unrolled statements (snapshot body)") {
     check_equivalent(noise_poke + R"(
 sequence s {
-    all noise
-    one poke
+    everywhere noise
+    once poke
 }
 sequence main {
     resize(8, 8)
-    some(max=3) s
-    all noise
+    settle(3) s
+    everywhere noise
 }
 )", noise_poke + R"(
 sequence main {
     resize(8, 8)
-    all noise
-    one poke
-    all noise
-    one poke
-    all noise
-    one poke
-    all noise
+    everywhere noise
+    once poke
+    everywhere noise
+    once poke
+    everywhere noise
+    once poke
+    everywhere noise
 }
 )");
 }
@@ -449,22 +449,22 @@ sequence main {
 TEST_CASE("sequence Q19: a sequence equals its unrolled statements (mixed policies)") {
     check_equivalent(noise_poke + R"(
 sequence s {
-    some(max=5, policy=incremental) poke
-    some(max=2, policy=stabilize) noise
+    grow(5) poke
+    settle(2) noise
 }
 sequence main {
     resize(6, 6)
-    some(max=2) s
-    all noise
+    settle(2) s
+    everywhere noise
 }
 )", noise_poke + R"(
 sequence main {
     resize(6, 6)
-    some(max=5, policy=incremental) poke
-    some(max=2, policy=stabilize) noise
-    some(max=5, policy=incremental) poke
-    some(max=2, policy=stabilize) noise
-    all noise
+    grow(5) poke
+    settle(2) noise
+    grow(5) poke
+    settle(2) noise
+    everywhere noise
 }
 )");
 }
@@ -472,26 +472,26 @@ sequence main {
 TEST_CASE("sequence Q20: a body guard is evaluated every iteration") {
     check_equivalent(noise_poke + R"(
 sequence s {
-    one poke
-    one poke  when (random(0, 1) == 0)
+    once poke
+    once poke  when (random(0, 1) == 0)
 }
 sequence main {
     resize(4, 4)
-    some(max=4) s
-    all noise
+    settle(4) s
+    everywhere noise
 }
 )", noise_poke + R"(
 sequence main {
     resize(4, 4)
-    one poke
-    one poke  when (random(0, 1) == 0)
-    one poke
-    one poke  when (random(0, 1) == 0)
-    one poke
-    one poke  when (random(0, 1) == 0)
-    one poke
-    one poke  when (random(0, 1) == 0)
-    all noise
+    once poke
+    once poke  when (random(0, 1) == 0)
+    once poke
+    once poke  when (random(0, 1) == 0)
+    once poke
+    once poke  when (random(0, 1) == 0)
+    once poke
+    once poke  when (random(0, 1) == 0)
+    everywhere noise
 }
 )");
 }
@@ -501,11 +501,11 @@ TEST_CASE("sequence Q21: a false application guard consumes no body draws") {
 layers { tiles: grid of number }
 params { enabled: number = 0 }
 rule noise { tiles[*] => tiles[ (random(0, 9)) ] }
-sequence s { all noise }
+sequence s { everywhere noise }
 sequence main {
     resize(4, 4)
-    some(max=3) s  when (enabled == 1)
-    all noise
+    settle(3) s  when (enabled == 1)
+    everywhere noise
 }
 )", R"(
 layers { tiles: grid of number }
@@ -513,26 +513,26 @@ params { enabled: number = 0 }
 rule noise { tiles[*] => tiles[ (random(0, 9)) ] }
 sequence main {
     resize(4, 4)
-    all noise
+    everywhere noise
 }
 )");
 }
 
 TEST_CASE("sequence Q22: an application guard is evaluated once") {
     check_equivalent(noise_poke + R"(
-sequence s { one poke }
+sequence s { once poke }
 sequence main {
     resize(4, 4)
-    some(max=3) s  when (random(0, 0) == 0)
-    all noise
+    settle(3) s  when (random(0, 0) == 0)
+    everywhere noise
 }
 )", noise_poke + R"(
 sequence main {
     resize(4, 4)
-    one poke  when (random(0, 0) == 0)
-    one poke
-    one poke
-    all noise
+    once poke  when (random(0, 0) == 0)
+    once poke
+    once poke
+    everywhere noise
 }
 )");
 }
@@ -545,41 +545,42 @@ layers { g: grid of t }
 rule fill { g[.] => g[a] }
 )";
 
-TEST_CASE("sequence Q23-Q26: a sequence application takes a count only (check 37)") {
-    for (char const* stmt : {"all(policy=incremental) s", "one(policy=snapshot) s",
-                             "some(max=3, policy=stabilize) s"}) {
+TEST_CASE("sequence Q23-Q26: a sequence takes once or settle only (check 37)") {
+    for (char const* stmt : {"everywhere s", "grow s", "grow(3) s", "scatter(3) s", "scatter(50%) s"}) {
         INFO(stmt);
-        CHECK(compile_result(fill_decls + "sequence s { all fill }\nsequence main { resize(2, 2)  " +
+        CHECK(compile_result(fill_decls + "sequence s { everywhere fill }\nsequence main { resize(2, 2)  " +
                              stmt + " }\n")
-              .has_error("'policy=' is not valid on sequence 's'"));
+              .has_error("is not valid on sequence 's'; a sequence takes 'once' or 'settle'"));
     }
-    CHECK(compile_result(fill_decls + "sequence s { all fill }\n"
-                         "sequence main { resize(2, 2)  some(percent=50) s }\n")
-          .has_error("'some(percent=...)' is not valid on sequence 's'"));
+    for (char const* stmt : {"once s", "settle s", "settle(3) s"}) {
+        INFO(stmt);
+        CHECK(compile_result(fill_decls + "sequence s { everywhere fill }\nsequence main { resize(2, 2)  " +
+                             stmt + " }\n").ok);
+    }
 }
 
 TEST_CASE("sequence Q27: a direct cycle is rejected even when never applied (check 38)") {
-    CHECK(compile_result("sequence s { one s }\nlayers { }\nsequence main { resize(1, 1) }\n")
+    CHECK(compile_result("sequence s { once s }\nlayers { }\nsequence main { resize(1, 1) }\n")
           .has_error("sequence 's' applies itself"));
 }
 
 TEST_CASE("sequence Q28: an indirect cycle (check 38)") {
-    CHECK(compile_result("sequence a { one b }\nsequence b { some(max=2) a }\n"
-                         "layers { }\nsequence main { resize(1, 1)  one a }\n")
+    CHECK(compile_result("sequence a { once b }\nsequence b { settle(2) a }\n"
+                         "layers { }\nsequence main { resize(1, 1)  once a }\n")
           .has_error("sequence cycle: 'a' -> 'b' -> 'a'"));
 }
 
 TEST_CASE("sequence Q29-Q30: rules and sequences share one namespace (check 39)") {
     CHECK(compile_result(fill_decls + "sequence fill { resize(1, 1) }\nsequence main { resize(1, 1) }\n")
           .has_error("already declared as a rule on line 4"));
-    CHECK(compile_result(fill_decls + "sequence s { all fill }\nsequence s { one fill }\n"
+    CHECK(compile_result(fill_decls + "sequence s { everywhere fill }\nsequence s { once fill }\n"
                          "sequence main { resize(1, 1) }\n")
           .has_error("duplicate sequence 's'"));
 }
 
 TEST_CASE("sequence Q31: unknown name, with a suggestion across both kinds (check 8)") {
-    CHECK(compile_result(fill_decls + "sequence smooth { all fill }\n"
-                         "sequence main { resize(2, 2)  all smoth }\n")
+    CHECK(compile_result(fill_decls + "sequence smooth { everywhere fill }\n"
+                         "sequence main { resize(2, 2)  everywhere smoth }\n")
           .has_error("undeclared rule or sequence 'smoth'; did you mean sequence 'smooth'?"));
 }
 
@@ -590,43 +591,43 @@ TEST_CASE("sequence Q32: 'sequence' is a keyword") {
 
 TEST_CASE("sequence Q33: no inline rules in a body") {
     compile_result r("tag t { a }\nlayers { g: grid of t }\nsequence s {\n    g[.] => g[a]\n}\n"
-                     "sequence main { resize(1, 1)  one s }\n");
+                     "sequence main { resize(1, 1)  once s }\n");
     CHECK(r.has_error("expected a statement in sequence 's'; rules are declared with 'rule'"));
     CHECK(r.diags.all.size() == 1);   // one diagnostic for the bad line
 }
 
 TEST_CASE("sequence Q34: sequences take no attributes") {
-    CHECK(compile_result(fill_decls + "sequence s(rotation=all) { all fill }\n"
-                         "sequence main { resize(1, 1)  one s }\n")
+    CHECK(compile_result(fill_decls + "sequence s(rotation=all) { everywhere fill }\n"
+                         "sequence main { resize(1, 1)  once s }\n")
           .has_error("expected '{' after sequence name 's'; sequences take no attributes"));
 }
 
-TEST_CASE("sequence Q35: rule-level checks still apply inside a body (check 28)") {
-    CHECK(compile_result(fill_decls + "sequence s { one(policy=stabilize) fill }\n"
-                         "sequence main { resize(1, 1)  one s }\n")
-          .has_error("contradictory (a single application cannot reach a sweep fixpoint) (sequence 's')"));
+TEST_CASE("sequence Q35: rule-level checks still apply inside a body (check 30)") {
+    CHECK(compile_result(fill_decls + "sequence s { scatter(101%) fill }\n"
+                         "sequence main { resize(1, 1)  once s }\n")
+          .has_error("percentage 101% is above 100 (sequence 's')"));
 }
 
 // ── 6. The dimension warning (compile-only) ───────────────────────────────────
 
-TEST_CASE("sequence Q36-Q38: all over a dimension-changing sequence warns") {
-    compile_result q36("layers { }\nsequence grow { upscale(2, 2) }\nsequence main { resize(1, 1)  all grow }\n");
+TEST_CASE("sequence Q36-Q38: settle over a dimension-changing sequence warns") {
+    compile_result q36("layers { }\nsequence widen { upscale(2, 2) }\nsequence main { resize(1, 1)  settle widen }\n");
     CHECK(q36.ok);
-    CHECK(has_warning(q36, "'all' over sequence 'grow' may never terminate: 'upscale' changes "
+    CHECK(has_warning(q36, "'settle' over sequence 'widen' may never terminate: 'upscale' changes "
                            "the grid dimensions on every iteration, so no iteration can be stable"));
 
-    compile_result q37("layers { }\nsequence frame { pad(1) }\nsequence main { resize(1, 1)  all frame }\n");
-    CHECK(has_warning(q37, "'all' over sequence 'frame' may never terminate: 'pad'"));
+    compile_result q37("layers { }\nsequence frame { pad(1) }\nsequence main { resize(1, 1)  settle frame }\n");
+    CHECK(has_warning(q37, "'settle' over sequence 'frame' may never terminate: 'pad'"));
 
-    compile_result q38("layers { }\nsequence inner { upscale(2, 1) }\nsequence outer { one inner }\n"
-                       "sequence main { resize(1, 1)  all outer }\n");
-    CHECK(has_warning(q38, "'all' over sequence 'outer' may never terminate: 'upscale'"));
+    compile_result q38("layers { }\nsequence inner { upscale(2, 1) }\nsequence outer { once inner }\n"
+                       "sequence main { resize(1, 1)  settle outer }\n");
+    CHECK(has_warning(q38, "'settle' over sequence 'outer' may never terminate: 'upscale'"));
     CHECK(!has_warning(q38, "sequence 'inner'"));
 }
 
 TEST_CASE("sequence Q39: identity factors and a zero margin do not warn") {
     std::string src = "layers { }\nsequence s {\n    upscale(1, 1)\n    pad(0)\n}\n"
-                      "sequence main { resize(2, 2)  all s }\n";
+                      "sequence main { resize(2, 2)  settle s }\n";
     compile_result r(src);
     CHECK(r.ok);
     CHECK(!has_warning(r));
@@ -636,27 +637,27 @@ TEST_CASE("sequence Q39: identity factors and a zero margin do not warn") {
 TEST_CASE("sequence Q40-Q41: a guard suppresses the warning") {
     compile_result q40("layers { }\nparams { big: number = 0 }\n"
                        "sequence s { upscale(2, 2)  when (big == 1) }\n"
-                       "sequence main { resize(1, 1)  all s }\n");
+                       "sequence main { resize(1, 1)  settle s }\n");
     CHECK(q40.ok);
     CHECK(!has_warning(q40));
     compile_result q41("layers { }\nparams { big: number = 0 }\n"
                        "sequence inner { upscale(2, 2) }\n"
-                       "sequence outer { one inner  when (big == 1) }\n"
-                       "sequence main { resize(1, 1)  all outer }\n");
+                       "sequence outer { once inner  when (big == 1) }\n"
+                       "sequence main { resize(1, 1)  settle outer }\n");
     CHECK(q41.ok);
     CHECK(!has_warning(q41));
 }
 
-// Q42 removed from the suite: some(max=0) is a compile error (check 28).
-TEST_CASE("sequence Q42 (replaced): some(max=0) of a sequence is rejected") {
+// Q42 removed from the suite: a literal zero count is a compile error (check 28).
+TEST_CASE("sequence Q42 (replaced): settle(0) of a sequence is rejected") {
     CHECK(compile_result("layers { }\nsequence s { resize(1, 1) }\n"
-                         "sequence main { resize(1, 1)  some(max=0) s }\n")
-          .has_error("'some(max=0)'"));
+                         "sequence main { resize(1, 1)  settle(0) s }\n")
+          .has_error("a count of 0 applies nothing"));
 }
 
 TEST_CASE("sequence Q43: bounded counts are never warned") {
-    compile_result r("layers { }\nsequence grow { upscale(2, 2) }\n"
-                     "sequence main {\n    resize(1, 1)\n    one grow\n    some(max=3) grow\n}\n");
+    compile_result r("layers { }\nsequence widen { upscale(2, 2) }\n"
+                     "sequence main {\n    resize(1, 1)\n    once widen\n    settle(3) widen\n}\n");
     CHECK(r.ok);
     CHECK(!has_warning(r));
 }
@@ -670,14 +671,14 @@ layers { g: grid of t }
 rule fill { g[.] => g[a] }
 rule flip { g[a] => g[b] }
 sequence s {
-    all fill
-    all flip
-    all fill
+    everywhere fill
+    everywhere flip
+    everywhere fill
 }
 sequence main {
     resize(2, 2)
-    some(max=3) s
-    all flip
+    settle(3) s
+    everywhere flip
 }
 )");
     REQUIRE(static_cast<bool>(gen));
@@ -686,12 +687,12 @@ sequence main {
 
 static std::string const q45 = counter(100) + R"(
 sequence s {
-    all inc
-    all inc
+    everywhere inc
+    everywhere inc
 }
 sequence main {
     resize(1, 1)
-    some(max=2) s
+    settle(2) s
 }
 )";
 
@@ -728,10 +729,10 @@ TEST_CASE("sequence Q47: stmt_stack() through two levels of nesting") {
 
 TEST_CASE("sequence Q48: step_mode::application inside a sequence") {
     auto t = run_trace(make(counter(100) + R"(
-sequence s { some(max=3, policy=incremental) inc }
+sequence s { grow(3) inc }
 sequence main {
     resize(1, 1)
-    some(max=2) s
+    settle(2) s
 }
 )"), 1, ls::step_mode::application);
     // A "working" step did work: an application, or a whole statement
@@ -771,7 +772,7 @@ rule erode {
         * floor *
         * *     * ]
 }
-rule grow {
+rule dilate {
     level[
         wall wall  wall
         wall floor wall
@@ -787,20 +788,20 @@ rule grow {
 TEST_CASE("sequence Q49: cellular cave with a fixpoint sequence") {
     auto gen = make(cave_decls + R"(
 sequence smooth {
-    all erode
-    all grow
+    everywhere erode
+    everywhere dilate
 }
 sequence main {
     resize(40, 25)
-    all fill
-    all smooth
+    everywhere fill
+    settle smooth
 }
 )");
     INFO(gen.error());
     REQUIRE(static_cast<bool>(gen));
     int wall = gen.tag("terrain.wall");
     // The same fill on its own: identical draws, so the identical grid.
-    auto fill_only = make(cave_decls + "sequence main {\n resize(40, 25)\n all fill\n}\n");
+    auto fill_only = make(cave_decls + "sequence main {\n resize(40, 25)\n everywhere fill\n}\n");
     REQUIRE(static_cast<bool>(fill_only));
     auto isolated = [&](ls::grid g) {
         int n = 0;
@@ -837,16 +838,16 @@ sequence main {
 
 TEST_CASE("sequence Q50: an early stop is unobservable when nothing follows") {
     std::string a = cave_decls + R"(
-sequence smooth { all erode  all grow }
+sequence smooth { everywhere erode  everywhere dilate }
 sequence main {
     resize(40, 25)
-    all fill
-    some(max=3) smooth
+    everywhere fill
+    settle(3) smooth
 }
 )";
     check_equivalent(a, cave_decls + R"(
 sequence main {
-    resize(40, 25)  all fill  all erode  all grow  all erode  all grow  all erode  all grow
+    resize(40, 25)  everywhere fill  everywhere erode  everywhere dilate  everywhere erode  everywhere dilate  everywhere erode  everywhere dilate
 }
 )");
     CHECK(iterations(run_trace(make(a), 1), {2}) == 2);

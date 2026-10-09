@@ -18,13 +18,13 @@ layers {
     level: grid of geometry
 }
 
-rule scatter { where[ (random(0, 1) == 0) ] => level[wall] }
+rule speckle { where[ (random(0, 1) == 0) ] => level[wall] }
 rule doors   { level[.] => level[door] }
 rule breach  { level[blocker] => level[open] }
 
 sequence main {
     resize(4, 4)
-    all scatter   // ~half become wall
-    all doors     // the rest become door
-    all breach    // blocker matches both → open
+    everywhere speckle   // ~half become wall
+    everywhere doors     // the rest become door
+    everywhere breach    // blocker matches both → open
 }

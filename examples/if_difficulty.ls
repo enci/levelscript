@@ -42,6 +42,6 @@ rule reward {
 
 sequence main {
     resize(3, 3)
-    all paint
-    all reward
+    everywhere paint
+    everywhere reward
 }

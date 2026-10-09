@@ -25,5 +25,5 @@ rule fill { loot[.] => loot[ (budget) ] }
 
 sequence main {
     resize(2, 2)
-    all fill
+    everywhere fill
 }

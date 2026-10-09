@@ -13,7 +13,7 @@ rule step3 { g[Y] => g[Z] }
 
 sequence main {
     resize(3, 4)
-    all step1
-    all step2
-    all step3
+    everywhere step1
+    everywhere step2
+    everywhere step3
 }

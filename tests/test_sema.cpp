@@ -14,7 +14,7 @@ layers {
 TEST_CASE("sema: skeleton compiles into tables") {
     compile_result r(prelude + R"(
 rule fill { level[.] => level[floor] }
-sequence main { resize(4, 3)  all fill }
+sequence main { resize(4, 3)  everywhere fill }
 )");
     INFO(r.diags.format_all());
     REQUIRE(r.ok);
@@ -42,7 +42,7 @@ TEST_CASE("sema: unknown references") {
           .has_error("undeclared grid"));
     CHECK(compile_result(prelude + "rule r { level[lava] => level[wall] }\nsequence main { }")
           .has_error("unknown tag value"));
-    CHECK(compile_result(prelude + "rule r { level[.] => level[wall] }\nsequence main { all nope }")
+    CHECK(compile_result(prelude + "rule r { level[.] => level[wall] }\nsequence main { everywhere nope }")
           .has_error("undeclared rule"));
 }
 
@@ -80,10 +80,12 @@ TEST_CASE("sema: operation table") {
     CHECK(compile_result(prelude + "sequence main { resize(0, 5) }").has_error("must be positive"));
 }
 
-TEST_CASE("sema: some(max=0) is rejected") {
-    CHECK(compile_result(prelude +
-        "rule r { level[.] => level[wall] }\nsequence main { some(max=0) r }")
-        .has_error("some(max=0)"));
+TEST_CASE("sema: a literal zero count is rejected (check 28)") {
+    for (char const* stmt : {"scatter(0) r", "scatter(0%) r", "grow(0) r", "settle(0) r"}) {
+        INFO(stmt);
+        CHECK(compile_result(prelude + "rule r { level[.] => level[wall] }\nsequence main { " +
+                             stmt + " }").has_error("a count of 0"));
+    }
 }
 
 // -- step 2: write trees, attributes, variant expansion --
@@ -213,24 +215,25 @@ sequence main { }
     CHECK(r.prog.rules[0].pairs[1].sub_rule_idx == 1);
 }
 
-// -- step 3: count x policy validity, reductivity --
+// -- step 3: modes, counts, reductivity --
 
 static const std::string rfill =
     "rule fill { level[.] => level[floor] }\n";
 
-TEST_CASE("sema: count/policy combinations") {
-    CHECK(compile_result(prelude + rfill + "sequence main { all(policy=ranked) fill }")
-          .has_error("unknown policy 'ranked'"));
-    CHECK(compile_result(prelude + rfill +
-          "sequence main { some(percent=50, policy=incremental) fill }")
-          .has_error("'percent' requires the default 'snapshot' policy"));
-    CHECK(compile_result(prelude + rfill + "sequence main { one(policy=stabilize) fill }")
-          .has_error("contradictory"));
+TEST_CASE("sema: modes and literal counts (check 30)") {
+    CHECK(compile_result(prelude + rfill + "sequence main { scatter(101%) fill }")
+          .has_error("percentage 101% is above 100"));
     compile_result ok(prelude + rfill + R"(
 sequence main {
     resize(4, 4)
-    some(max=3, policy=stabilize) fill
-    all(policy=incremental) fill
+    settle(3) fill
+    grow fill
+    scatter(100%) fill
+    scatter(3) fill
+    grow(2) fill
+    once fill
+    everywhere fill
+    settle fill
 }
 )");
     INFO(ok.diags.format_all());
@@ -248,21 +251,21 @@ TEST_CASE("sema: reductivity warning for a self-sustaining fixpoint") {
     // The write never touches the matched cell ??? the anchor re-matches forever.
     compile_result bad(prelude + R"(
 rule mark { level[floor] => tiles[1] }
-sequence main { all(policy=incremental) mark }
+sequence main { grow mark }
 )");
     REQUIRE(bad.ok);   // a warning, not an error
     CHECK(has_warning(bad, "may never terminate"));
 
     // The write invalidates its own match ??? reductive, no warning.
     compile_result good(prelude + rfill +
-        "sequence main { all(policy=incremental) fill }");
+        "sequence main { grow fill }");
     REQUIRE(good.ok);
     CHECK(!has_warning(good, "may never terminate"));
 
     // Bounded counts never warn, even for the self-sustaining rule.
     compile_result bounded(prelude + R"(
 rule mark { level[floor] => tiles[1] }
-sequence main { some(max=5, policy=incremental) mark }
+sequence main { grow(5) mark }
 )");
     REQUIRE(bounded.ok);
     CHECK(!has_warning(bounded, "may never terminate"));
@@ -347,13 +350,13 @@ TEST_CASE("sema: param scopes") {
 TEST_CASE("sema: when guard discipline") {
     std::string pre = prelude + rfill + "params { d: number = 0 }\n";
     CHECK(compile_result(prelude + rfill +
-          "params { d: number = 0 }\nsequence main { all fill when (d + 1) }")
+          "params { d: number = 0 }\nsequence main { everywhere fill when (d + 1) }")
           .has_error("must be a boolean expression"));
     CHECK(compile_result(prelude + rfill +
-          "sequence main { all fill when ((level == floor)) }")
+          "sequence main { everywhere fill when ((level == floor)) }")
           .has_error("cannot be read here"));
     CHECK(compile_result(prelude + rfill +
-          "sequence main { all fill when (x > 0) }")
+          "sequence main { everywhere fill when (x > 0) }")
           .has_error("cannot be read here"));
 }
 
@@ -529,7 +532,7 @@ params { abs: number = 3  if = abs * 2 }
 rule r { min[.] => min[random] }
 rule s { min[random] n[.] where[ (max(abs, if) == 6) ] => n[ (min(abs, 7)) ] }
 rule u { min[max] => min[ (if(abs > 1, random, max)) ] }
-sequence main { resize(2, 2) all r all s all u }
+sequence main { resize(2, 2) everywhere r everywhere s everywhere u }
 )");
         INFO(r.diags.format_all());
         REQUIRE(r.ok);

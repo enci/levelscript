@@ -1,5 +1,5 @@
 // T32: Body-level 'any' combinator — exactly one sub-rule fires per application.
-// 'one choose' picks one match from either sub-rule; 8 cells stay 'a'.
+// 'once choose' picks one match from either sub-rule; 8 cells stay 'a'.
 // @expect grid g count(a) == 8
 // @seed 42
 tag t { a, b, c }
@@ -11,6 +11,6 @@ rule choose { any
 }
 sequence main {
     resize(3, 3)
-    all fill
-    one choose
+    everywhere fill
+    once choose
 }
