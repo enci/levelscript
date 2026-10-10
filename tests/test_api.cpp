@@ -1095,3 +1095,166 @@ sequence main {
     CHECK(render(1)  == "783 567 169 277 180 563 833 610 188 400 307 523 | bccccbcbcmcc");
     CHECK(render(42) == "74 406 309 392 358 609 425 392 210 662 659 351 | bcmcbcbcccbc");
 }
+
+// ── pattern variables (0.9, section 5.11) ────────────────────────────────────
+
+TEST_CASE("api: variables relate cells - a wall between different regions") {
+    auto gen = make(R"(
+tag geo { wall }
+layers {
+    regions: grid of number
+    level: grid of geo
+}
+rule split { regions[.] => regions[ (if(x < 3, 7, 40)) ] }
+rule wall_between(rotation=all) {
+    regions[?a *]
+    where[* (regions != ?a)]
+    =>
+    level[* wall]
+}
+sequence main {
+    resize(6, 3)
+    everywhere split
+    everywhere wall_between
+}
+)");
+    INFO(gen.error());
+    REQUIRE(static_cast<bool>(gen));
+    ls::level lv = gen.generate(gen.sequence("main"), 1);
+    int wall = gen.tag("geo.wall");
+    for (int y = 0; y < 3; ++y)
+        for (int x = 0; x < 6; ++x)
+            CHECK(lv["level"].at(x, y) == (x == 2 || x == 3 ? wall : -1));
+}
+
+TEST_CASE("api: variables move whatever is there - fall under grow") {
+    auto gen = make(R"(
+tag stuff { box, gem }
+layers { items: grid of stuff }
+rule seed_box { items[.] where[ (x == 0 && y == 0) ] => items[box] }
+rule seed_gem { items[.] where[ (x == 1 && y == 1) ] => items[gem] }
+rule fall {
+    items[?v, .]
+    =>
+    items[., ?v]
+}
+sequence main {
+    resize(3, 4)
+    once seed_box
+    once seed_gem
+    grow fall
+}
+)");
+    INFO(gen.error());
+    REQUIRE(static_cast<bool>(gen));
+    ls::level lv = gen.generate(gen.sequence("main"), 1);
+    int box = gen.tag("stuff.box"), gem = gen.tag("stuff.gem");
+    for (int y = 0; y < 4; ++y)
+        for (int x = 0; x < 3; ++x) {
+            int want = y < 3 ? -1 : x == 0 ? box : x == 1 ? gem : -1;
+            CHECK(lv["items"].at(x, y) == want);
+        }
+}
+
+TEST_CASE("api: binding cells in different grids must agree") {
+    auto gen = make(R"(
+tag geo { wall, floor }
+layers {
+    level: grid of geo
+    backup: grid of geo
+    marks: grid of number
+}
+rule fill { level[.] backup[.] => { all level[wall] backup[ (if(x < 2, wall, floor)) ] } }
+rule same { level[?t] backup[?t] => marks[1] }
+sequence main {
+    resize(4, 2)
+    everywhere fill
+    everywhere same
+}
+)");
+    INFO(gen.error());
+    REQUIRE(static_cast<bool>(gen));
+    ls::level lv = gen.generate(gen.sequence("main"), 1);
+    for (int y = 0; y < 2; ++y)
+        for (int x = 0; x < 4; ++x)
+            CHECK(lv["marks"].at(x, y) == (x < 2 ? 1 : -1));
+}
+
+TEST_CASE("api: variable equality is exact on multi-bit masks, and writes copy them") {
+    auto gen = make(R"(
+tag geo { wall, floor }
+layers {
+    level: grid of geo
+    copy: grid of geo
+    marks: grid of number
+}
+rule paint { level[.] => level[ (if(x == 2, wall, wall | floor)) ] }
+rule pair { level[?a ?a] => marks[1 *] }
+rule dup { level[?a] => copy[?a] }
+sequence main {
+    resize(4, 1)
+    everywhere paint
+    everywhere pair
+    everywhere dup
+}
+)");
+    INFO(gen.error());
+    REQUIRE(static_cast<bool>(gen));
+    ls::level lv = gen.generate(gen.sequence("main"), 1);
+    int wall = gen.tag("geo.wall"), both = wall | gen.tag("geo.floor");
+    // (wall|floor, wall) overlaps but is not equal
+    CHECK(dump(lv, "marks") == std::vector<int>{1, -1, -1, -1});
+    CHECK(dump(lv, "copy") == std::vector<int>{both, both, wall, both});
+}
+
+TEST_CASE("api: a binding cell never matches empty; a stored 0 is not empty") {
+    auto gen = make(R"(
+layers {
+    tiles: grid of number
+    marks: grid of number
+}
+rule zero { tiles[.] where[ (x == 1) ] => tiles[0] }
+rule five { tiles[.] where[ (x == 2) ] => tiles[5] }
+rule seen { tiles[?v] => marks[ (?v + 10) ] }
+sequence main {
+    resize(4, 1)
+    everywhere zero
+    everywhere five
+    everywhere seen
+}
+)");
+    INFO(gen.error());
+    REQUIRE(static_cast<bool>(gen));
+    CHECK(dump(gen.generate(gen.sequence("main"), 1), "marks") ==
+          std::vector<int>{-1, 10, 15, -1});
+}
+
+TEST_CASE("api: variants carry variables - bound on one side, used on the other") {
+    // Mark a cell whose neighbour in some direction holds exactly one less.
+    // With regions = 10 - x only the right-hand neighbour qualifies, which
+    // only the 180-degree variant sees: its site must follow the transform.
+    auto gen = make(R"(
+layers {
+    regions: grid of number
+    marks: grid of number
+}
+rule ramp { regions[.] => regions[ (10 - x) ] }
+rule step(rotation=all) {
+    regions[?a *]
+    where[* (regions == ?a + 1)]
+    =>
+    marks[* 1]
+}
+sequence main {
+    resize(5, 3)
+    everywhere ramp
+    everywhere step
+}
+)");
+    INFO(gen.error());
+    REQUIRE(static_cast<bool>(gen));
+    ls::level lv = gen.generate(gen.sequence("main"), 1);
+    for (int y = 0; y < 3; ++y)
+        for (int x = 0; x < 5; ++x)
+            CHECK(lv["marks"].at(x, y) == (x < 4 ? 1 : -1));
+}
