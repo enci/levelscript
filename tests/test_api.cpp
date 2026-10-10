@@ -645,6 +645,32 @@ sequence main {
         }
 }
 
+TEST_CASE("api: a '*' where cell places no condition (0.9, 5.9)") {
+    auto gen = make(R"(
+tag geo { wall, floor }
+layers { level: grid of geo }
+rule pave { level[.] => level[floor] }
+rule mark {
+    level[floor floor]
+    where[* (x == 3)]
+    =>
+    level[* wall]
+}
+sequence main {
+    resize(6, 2)
+    everywhere pave
+    everywhere mark
+}
+)");
+    INFO(gen.error());
+    REQUIRE(static_cast<bool>(gen));
+    ls::level lv = gen.generate(gen.sequence("main"), 1);
+    int wall = gen.tag("geo.wall"), floor = gen.tag("geo.floor");
+    for (int y = 0; y < 2; ++y)
+        for (int x = 0; x < 6; ++x)
+            CHECK(lv["level"].at(x, y) == (x == 3 ? wall : floor));
+}
+
 TEST_CASE("api: random cells are deterministic per seed and in range") {
     auto gen = make(R"(
 tag geo { floor }
