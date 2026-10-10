@@ -633,18 +633,10 @@ TEST_CASE("sema: inline rules get every rule check, located at the rule") {
 
 // ── pattern variables (0.9, section 5.11) ────────────────────────────────────
 
-// Until the matcher binds variables, a program that uses them correctly
-// fails with the one placeholder error and nothing else.
 static bool variables_check_ok(std::string const& src) {
     compile_result r(prelude + src + rprog);
     INFO(r.diags.format_all());
-    bool any = false;
-    for (auto const& d : r.diags.all) {
-        if (!d.is_error) continue;
-        if (d.message != "pattern variables are not supported yet") return false;
-        any = true;
-    }
-    return any;
+    return r.ok;
 }
 
 TEST_CASE("sema: pattern variables bind, type, and are used (0.9, 5.11)") {

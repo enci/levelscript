@@ -114,6 +114,13 @@ struct compiled_pair {
     compiled_write_term           rhs;
     int                           sub_rule_idx{0};
     std::vector<std::string>      var_names;   // by slot, '?' included (section 5.11)
+    // Filled per variant: each variable's first binding cell (its site, which
+    // also supplies its value) and every other binding cell, which must
+    // equal the site. Offsets are from the anchor.
+    struct var_site  { int grid{-1}; int r{0}, c{0}; };
+    struct var_check { int slot{0}; var_site at; };
+    std::vector<var_site>         var_sites;    // by slot
+    std::vector<var_check>        var_checks;
     // Which transform of the declared sub-rule this variant is (section 5.6), as the
     // attributes produced it: rotation= then symmetry=. Identity is 0 / none.
     // Display and tooling only; the runtime never reads them.

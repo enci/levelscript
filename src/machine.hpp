@@ -131,6 +131,13 @@ private:
 
     std::vector<match> collect(compiled_rule const& rule);
     bool match_at(compiled_pair const& pair, int row, int col);
+    // A pattern variable's value: its site in the snapshot, from the anchor.
+    // The front buffer is frozen between collection and application, so it
+    // is the value the candidate bound (section 5.11).
+    int64_t var_value(compiled_pair const& pair, int slot, int row, int col) const {
+        auto const& s = pair.var_sites[(size_t)slot];
+        return grids_[(size_t)s.grid].get(row + s.r, col + s.c);
+    }
     bool conflicts(compiled_pair const& pair, match const& m,
                    std::unordered_set<uint64_t> const& written) const;
     void apply(compiled_pair const& pair, match const& m,
@@ -172,6 +179,10 @@ private:
     std::vector<long long>          params_;   // indexed by param id
     std::vector<char>               param_supplied_;
     bool                            in_batch_{false};
+    // The pair and anchor whose cells are being evaluated - what `var_read`
+    // resolves against.
+    compiled_pair const*            cur_pair_{nullptr};
+    int                             anchor_row_{0}, anchor_col_{0};
     bool                            observe_{false};
     std::vector<highlight>          highlights_;
 };

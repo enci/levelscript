@@ -52,6 +52,25 @@ void index_probes(compiled_pattern& p) {
         }
 }
 
+// Index a variant for the matcher: per-pattern phase lists, then the
+// variables' sites and the equality checks of their other binding cells.
+void index_pair(compiled_pair& pair) {
+    pair.var_sites.assign(pair.var_names.size(), {});
+    pair.var_checks.clear();
+    for (auto& pat : pair.lhs) {
+        index_probes(pat);
+        if (pat.is_where || pat.grid_id < 0) continue;
+        for (int r = 0; r < pat.rows; ++r)
+            for (int c = 0; c < pat.cols; ++c) {
+                auto const& cell = pat.at(r, c);
+                if (cell.what != compiled_cell::kind::variable) continue;
+                auto& site = pair.var_sites[(size_t)cell.var];
+                if (site.grid < 0) site = {pat.grid_id, r, c};
+                else pair.var_checks.push_back({cell.var, {pat.grid_id, r, c}});
+            }
+    }
+}
+
 compiled_write_term transform_write_term(transform k, compiled_write_term const& t) {
     compiled_write_term out;
     out.what   = t.what;
@@ -793,8 +812,6 @@ struct analyzer {
         cp.rhs = compile_write_term(pr.rhs, rows, cols);
         vars_ = outer;
         for (auto const& v : pv.vars) cp.var_names.push_back(v.name);
-        if (!pv.vars.empty())   // TODO(0.9.0): the matcher binds them in the next step
-            error(pr.loc, "pattern variables are not supported yet");
         return cp;
     }
 
@@ -867,8 +884,7 @@ struct analyzer {
                         if (pairs_equal(v, cand)) { dup = true; break; }
                     if (!dup) variants.push_back(std::move(cand));
                 }
-            for (auto& v : variants)
-                for (auto& pat : v.lhs) index_probes(pat);
+            for (auto& v : variants) index_pair(v);
             for (auto& v : variants) cr.pairs.push_back(std::move(v));
         }
         return cr;

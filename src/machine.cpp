@@ -53,7 +53,8 @@ long long machine::eval(int idx, int x, int y) {
         if (g.is_number && raw == num_empty) return 0;   // empty number reads as 0
         return raw;
     }
-    case ce_kind::var_read: return 0;   // TODO(0.9.0): sema rejects variables until the matcher binds them
+    case ce_kind::var_read:
+        return cur_pair_ ? var_value(*cur_pair_, e.ref, anchor_row_, anchor_col_) : 0;
     case ce_kind::is_empty:
     case ce_kind::is_not_empty: {
         bool empty = true;
@@ -620,6 +621,9 @@ std::vector<machine::match> machine::collect(compiled_rule const& rule) {
 // order, row-major. Only phase 2 can draw, so a candidate its bare cells
 // reject consumes no draws.
 bool machine::match_at(compiled_pair const& pair, int row, int col) {
+    cur_pair_ = &pair;
+    anchor_row_ = row;
+    anchor_col_ = col;
     for (auto const& pat : pair.lhs) {
         if (pat.is_where) continue;
         if (pat.grid_id < 0) return false;
@@ -633,6 +637,16 @@ bool machine::match_at(compiled_pair const& pair, int row, int col) {
                 if ((g.get(row + p.r, col + p.c) & p.val) == 0) return false;
         }
     }
+    // Binding cells: each site is non-empty, every other binding cell equals
+    // its site exactly (section 5.11). Their patterns' bounds were checked above.
+    for (auto const& s : pair.var_sites) {
+        grid_state const& g = grids_[(size_t)s.grid];
+        int64_t v = g.get(row + s.r, col + s.c);
+        if (g.is_number ? v == num_empty : (v & tag_empty) != 0) return false;
+    }
+    for (auto const& k : pair.var_checks)
+        if (grids_[(size_t)k.at.grid].get(row + k.at.r, col + k.at.c) !=
+            var_value(pair, k.slot, row, col)) return false;
     for (auto const& pat : pair.lhs) {
         if (pat.computed.empty()) continue;
         if (pat.is_where) {   // section 5.9: every cell's boolean must hold
@@ -702,6 +716,9 @@ void machine::resolve_write(compiled_write_term const& t,
 
 void machine::apply(compiled_pair const& pair, match const& m,
                     std::unordered_set<uint64_t>& written) {
+    cur_pair_ = &pair;
+    anchor_row_ = m.row;
+    anchor_col_ = m.col;
     std::vector<compiled_pattern const*> writes;
     resolve_write(pair.rhs, writes);
     for (auto const* pp : writes) {
@@ -715,6 +732,8 @@ void machine::apply(compiled_pair const& pair, match const& m,
                 int flat = (m.row + r) * g.cols + (m.col + c);
                 g.back[flat] = cell.what == compiled_cell::kind::expr
                              ? eval(cell.expr, m.col + c, m.row + r)
+                             : cell.what == compiled_cell::kind::variable
+                             ? var_value(pair, cell.var, m.row, m.col)
                              : cell.val;
                 written.insert(mask_key(pat.grid_id, flat));
             }
