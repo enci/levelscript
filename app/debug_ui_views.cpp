@@ -318,6 +318,7 @@ static cell_view pattern_cell_view(compiled const& meta, compiled_pattern const&
             break;
     }
     if (pat.is_number || pat.is_where) {
+        if (cc.ne) return { IM_COL32(80, 80, 80, 255), "!." };
         if (cc.val == num_empty) return { IM_COL32(80, 80, 80, 255), "." };
         return { tag_color(-1, (int)cc.val, nullptr), std::to_string(cc.val) };
     }

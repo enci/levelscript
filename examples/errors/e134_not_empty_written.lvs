@@ -1,0 +1,7 @@
+// E134 (0.9.1, check 15): `!.` is match-side only.
+// @expect error
+// @expect stderr-contains not allowed on the write side
+tag t { a }
+layers { g: grid of t }
+rule r { g[a] => g[!.] }
+sequence main { resize(2, 2) once r }

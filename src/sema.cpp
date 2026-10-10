@@ -41,12 +41,13 @@ compiled_pattern transform_pattern(transform k, compiled_pattern const& p) {
 // 5.11), in the variant's row-major order.
 void index_probes(compiled_pattern& p) {
     p.bare.clear();
+    p.bare_ne.clear();
     p.computed.clear();
     for (int r = 0; r < p.rows; ++r)
         for (int c = 0; c < p.cols; ++c) {
             auto const& cell = p.at(r, c);
             if (cell.what == compiled_cell::kind::value && !p.is_where)
-                p.bare.push_back({r, c, cell.val, -1});
+                (cell.ne ? p.bare_ne : p.bare).push_back({r, c, cell.val, -1});
             else if (cell.expr >= 0)
                 p.computed.push_back({r, c, 0, cell.expr});
         }
@@ -98,7 +99,8 @@ bool patterns_equal(compiled_pattern const& a, compiled_pattern const& b) {
     for (int i = 0; i < (int)a.cells.size(); ++i)
         if (a.cells[i].what != b.cells[i].what || a.cells[i].val != b.cells[i].val ||
             a.cells[i].expr != b.cells[i].expr ||  // transforms share arena indices
-            a.cells[i].var != b.cells[i].var)      // and variable slots, i.e. names
+            a.cells[i].var != b.cells[i].var ||    // and variable slots, i.e. names
+            a.cells[i].ne != b.cells[i].ne)
             return false;
     return true;
 }
@@ -673,16 +675,31 @@ struct analyzer {
             cc.val = in.number;
             break;
         case cell_kind::tag_mask: {
-            if (is_number) {
-                error(in.loc, "expected an integer or wildcard in a 'number' grid cell");
+            bool has_empty = false;
+            for (auto const& a : in.atoms) has_empty |= a.name == ".";
+            if (is_number) {   // only '.' and '!.' (section 4.1, check 47)
+                if (in.atoms.size() == 1 && in.atoms[0].name == "." && in.atoms[0].negate) {
+                    if (is_rhs)   // check 15
+                        error(in.loc, "'!.' is not allowed on the write side");
+                    cc.val = num_empty;
+                    cc.ne = true;
+                } else if (has_empty) {
+                    error(in.loc, "a 'number' grid has no masks: '.' combines with "
+                          "nothing here (write '.' or '!.')");
+                } else {
+                    error(in.loc, "expected an integer or wildcard in a 'number' grid cell");
+                }
                 break;
             }
+            if (is_rhs && has_empty && in.atoms.size() > 1)   // check 47
+                error(in.loc, "'.' cannot be written in a union: a cell holds empty or "
+                      "values, never both");
             int64_t full = 0;
             for (int i = 0; i < (int)out.tag_values[tag].size(); ++i)
                 full |= tag_bit(i);
             int64_t mask = 0;
             for (auto const& a : in.atoms) {
-                int64_t m = out.mask_of(tag, a.name);
+                int64_t m = a.name == "." ? tag_empty : out.mask_of(tag, a.name);
                 if (m == 0) {
                     error(a.loc, "unknown tag value '" + a.name + "' for this grid");
                     continue;
@@ -934,7 +951,7 @@ struct analyzer {
                             if (req.what == compiled_cell::kind::variable ||
                                 w.what == compiled_cell::kind::expr ||
                                 w.what == compiled_cell::kind::variable) { invalidates = true; break; }
-                            bool still = lp.is_number ? (w.val == req.val)
+                            bool still = lp.is_number ? ((w.val == req.val) != req.ne)
                                                       : ((w.val & req.val) != 0);
                             if (!still) { invalidates = true; break; }
                         }

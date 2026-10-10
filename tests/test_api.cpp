@@ -1258,3 +1258,80 @@ sequence main {
         for (int x = 0; x < 5; ++x)
             CHECK(lv["marks"].at(x, y) == (x < 4 ? 1 : -1));
 }
+
+// ── '.' as a mask atom (0.9.1) ───────────────────────────────────────────────
+
+TEST_CASE("api: '!.' matches non-empty cells, a stored 0 included (0.9.1)") {
+    auto gen = make(R"(
+tag geo { wall }
+layers {
+    level: grid of geo
+    tiles: grid of number
+    marks: grid of number
+}
+rule zero { tiles[.] where[ (x == 1) ] => tiles[0] }
+rule five { tiles[.] where[ (x == 2) ] => tiles[5] }
+rule wall { level[.] where[ (x == 3) ] => level[wall] }
+rule seen_n { tiles[!.] => marks[1] }
+rule seen_t { level[!.] => marks[2] }
+sequence main {
+    resize(5, 1)
+    everywhere zero
+    everywhere five
+    once wall
+    everywhere seen_n
+    everywhere seen_t
+}
+)");
+    INFO(gen.error());
+    REQUIRE(static_cast<bool>(gen));
+    CHECK(dump(gen.generate(gen.sequence("main"), 1), "marks") ==
+          std::vector<int>{-1, 1, 1, 2, -1});
+}
+
+TEST_CASE("api: '.|t' matches empty or t (0.9.1)") {
+    auto gen = make(R"(
+tag geo { wall, door }
+layers {
+    level: grid of geo
+    marks: grid of number
+}
+rule paint { level[.] => level[ (if(x == 1, wall, if(x == 2, door, .))) ] }
+rule open { level[.|door] => marks[1] }
+sequence main {
+    resize(4, 1)
+    everywhere paint
+    everywhere open
+}
+)");
+    INFO(gen.error());
+    REQUIRE(static_cast<bool>(gen));
+    CHECK(dump(gen.generate(gen.sequence("main"), 1), "marks") ==
+          std::vector<int>{1, -1, 1, 1});
+}
+
+TEST_CASE("api: '!.' under every variant (0.9.1)") {
+    // Mark the non-empty neighbours of the wall, in whichever direction.
+    auto gen = make(R"(
+tag geo { wall, door }
+layers {
+    level: grid of geo
+    tiles: grid of number
+}
+rule core { level[.] where[ (x == 1 && y == 1) ] => level[wall] }
+rule doors { level[.] where[ ((x == 2 && y == 1) || (x == 1 && y == 0)) ] => level[door] }
+rule touch(rotation=all) { level[wall !.] => tiles[* 1] }
+sequence main {
+    resize(3, 3)
+    once core
+    everywhere doors
+    everywhere touch
+}
+)");
+    INFO(gen.error());
+    REQUIRE(static_cast<bool>(gen));
+    CHECK(dump(gen.generate(gen.sequence("main"), 1), "tiles") ==
+          std::vector<int>{-1, 1, -1,
+                           -1, -1, 1,
+                           -1, -1, -1});
+}

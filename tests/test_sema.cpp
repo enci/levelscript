@@ -717,3 +717,51 @@ TEST_CASE("sema: reductivity with pattern variables (0.9, 6.9)") {
     CHECK(!warns("rule r { level[?v ?v] => level[* wall] }"));
     CHECK(!warns("rule r { level[?v wall] => level[* ?v] }"));
 }
+
+// ── '.' as a mask atom (0.9.1) ───────────────────────────────────────────────
+
+TEST_CASE("sema: '.' composes in match-side masks (0.9.1, 2.5)") {
+    for (char const* rule : {"rule r { level[!.] => level[*] }",
+                             "rule r { level[.|wall] => level[floor] }",
+                             "rule r { level[wall|.] => level[.] }",
+                             "rule r { level[!.|wall] => level[*] }",
+                             "rule r { tiles[!.] => tiles[.] }",
+                             "rule r { tiles[.] => tiles[0] }"}) {
+        compile_result r(prelude + rule + "\n" + rprog);
+        INFO(rule << "\n" << r.diags.format_all());
+        CHECK(r.ok);
+    }
+}
+
+TEST_CASE("sema: misplaced empty masks (0.9.1, checks 15 and 47)") {
+    CHECK(compile_result(prelude + "rule r { level[wall] => level[!.] }\n" + rprog)
+          .has_error("tag complement '!.' is not allowed on the write side"));
+    CHECK(compile_result(prelude + "rule r { tiles[1] => tiles[!.] }\n" + rprog)
+          .has_error("'!.' is not allowed on the write side"));
+    CHECK(compile_result(prelude + "rule r { level[wall] => level[.|floor] }\n" + rprog)
+          .has_error("'.' cannot be written in a union"));
+    CHECK(compile_result(prelude + "rule r { level[wall] => level[floor|.] }\n" + rprog)
+          .has_error("'.' cannot be written in a union"));
+    for (char const* cell : {"wall|.", ".|.", "!.|."}) {
+        INFO(cell);
+        CHECK(compile_result(prelude + "rule r { tiles[" + cell + "] => tiles[*] }\n" + rprog)
+              .has_error("a 'number' grid has no masks"));
+    }
+    // a plain tag value in a number grid keeps its message
+    CHECK(compile_result(prelude + "rule r { tiles[wall] => tiles[*] }\n" + rprog)
+          .has_error("expected an integer or wildcard in a 'number' grid cell"));
+}
+
+TEST_CASE("sema: reductivity sees through '!.' (0.9.1)") {
+    auto warns = [](std::string const& rule) {
+        compile_result r(prelude + rule + "\nsequence main { grow r }\n");
+        INFO(r.diags.format_all());
+        REQUIRE(r.ok);
+        return has_warning(r, "may never terminate");
+    };
+    CHECK(warns("rule r { level[!.] => level[wall] }"));    // still non-empty
+    CHECK(warns("rule r { tiles[!.] => tiles[5] }"));
+    CHECK(!warns("rule r { level[!.] => level[.] }"));
+    CHECK(!warns("rule r { tiles[!.] => tiles[.] }"));
+    CHECK(!warns("rule r { level[.|wall] => level[floor] }"));
+}

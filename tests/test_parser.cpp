@@ -465,6 +465,23 @@ TEST_CASE("parser: a variable is not a bare mask atom (0.9, 2.5)") {
     CHECK(parse_fails("rule r { g[? a] => g[*] }"));
 }
 
+TEST_CASE("parser: '.' is a mask atom (0.9.1, 5.3)") {
+    auto ast = parse_ok("rule r { g[!. .|door wall|. . !wall] => g[* * * * *] }");
+    auto const& row = ast.rules[0].pairs[0].lhs[0].cells[0];
+    REQUIRE(row.size() == 5);
+    REQUIRE(row[0].kind == cell_kind::tag_mask);
+    CHECK(row[0].atoms[0].name == ".");
+    CHECK(row[0].atoms[0].negate);
+    REQUIRE(row[1].atoms.size() == 2);
+    CHECK(row[1].atoms[0].name == ".");
+    CHECK(row[1].atoms[1].name == "door");
+    CHECK(row[2].atoms[1].name == ".");
+    CHECK(row[3].kind == cell_kind::empty);   // a lone '.' keeps its own node
+    CHECK(row[4].atoms[0].negate);
+    CHECK(parse_fails("rule r { g[! .] => g[*] }"));   // '!' is adjacent
+    CHECK(parse_fails("rule r { g[. | door] => g[*] }"));
+}
+
 TEST_CASE("parser: expression cells and precedence") {
     auto ast = parse_ok("rule r { g[ (tiles + 2 * 3 > 7) ] => g[ (if(d > 1, wall, floor)) ] }");
     auto const& c = ast.rules[0].pairs[0].lhs[0].cells[0][0];

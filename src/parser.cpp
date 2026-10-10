@@ -293,17 +293,24 @@ struct parser {
 
     // ── patterns ─────────────────────────────────────────────────────────────
 
-    // One whitespace-free mask atom: IDENT or !IDENT (adjacent).
+    // One whitespace-free mask atom: IDENT, '.', or either after '!' (adjacent).
+    // '.' is bit 0, empty (section 2.5); its name is ".".
     bool parse_mask_atom(cell& c) {
         mask_atom a;
         a.loc = loc();
         if (at(token_type::bang)) {
             token const& b = eat();
             a.negate = true;
-            if (!at(token_type::ident) || !adjacent(b, peek())) {
-                error_at(peek(), "expected a tag value right after '!'");
+            if (!(at(token_type::ident) || at(token_type::dot)) || !adjacent(b, peek())) {
+                error_at(peek(), "expected a tag value or '.' right after '!'");
                 return false;
             }
+        }
+        if (at(token_type::dot)) {
+            eat();
+            a.name = ".";
+            c.atoms.push_back(std::move(a));
+            return true;
         }
         if (at(token_type::variable)) {
             error_at(peek(), "a pattern variable does not combine into a bare mask; "
@@ -322,7 +329,11 @@ struct parser {
     bool parse_cell(cell& c) {
         c.loc = loc();
         if (accept(token_type::star)) { c.kind = cell_kind::any;   return true; }
-        if (accept(token_type::dot))  { c.kind = cell_kind::empty; return true; }
+        if (at(token_type::dot) && !(peek(1).is(token_type::pipe) && adjacent(peek(), peek(1)))) {
+            eat();
+            c.kind = cell_kind::empty;
+            return true;
+        }
         if (at(token_type::integer))  { c.kind = cell_kind::number; c.number = eat().int_val; return true; }
         if (at(token_type::lparen)) {   // '( expr )' — computed cell (section 5.8)
             eat();
@@ -341,7 +352,7 @@ struct parser {
             }
             return true;
         }
-        if (at(token_type::ident) || at(token_type::bang)) {
+        if (at(token_type::ident) || at(token_type::bang) || at(token_type::dot)) {
             c.kind = cell_kind::tag_mask;
             if (!parse_mask_atom(c)) return false;
             // whitespace-free unions: a|b|c (each '|' adjacent on both sides)
