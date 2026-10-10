@@ -37,11 +37,16 @@
       "patterns": [
         { "include": "#comment" },
         { "include": "#wildcard" },
+        { "include": "#variable" },
         { "include": "#builtin" },
         { "include": "#operator" },
         { "include": "#number" },
         { "include": "#identifier" }
       ]
+    },
+    "variable": {
+      "name": "variable.other.pattern.levelscript",
+      "match": "\\?[A-Za-z_][A-Za-z0-9_]*"
     },
     "builtin": {
       "name": "support.function.builtin.levelscript",
