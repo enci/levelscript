@@ -1,0 +1,7 @@
+// E135 (0.9.1, check 47): a cell holds empty or values, never both.
+// @expect error
+// @expect stderr-contains cannot be written in a union
+tag t { a }
+layers { g: grid of t }
+rule r { g[a] => g[.|a] }
+sequence main { resize(2, 2) once r }

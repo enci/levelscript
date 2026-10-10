@@ -83,8 +83,16 @@ void emit_pattern_tokens(std::string& o, comma_list& cl,
                      ",\"tag\":-3,\"value\":" + std::to_string(c.number) + "}";
                 continue;
             }
-            if (c.kind != cell_kind::tag_mask || tid < 0) continue;
+            if (c.kind != cell_kind::tag_mask) continue;
             for (auto const& a : c.atoms) {
+                if (a.name == ".") {   // '.' atom (0.9.1): painted like a lone '.'
+                    cl.next();
+                    o += "{\"line\":" + std::to_string(a.loc.line) +
+                         ",\"col\":" + std::to_string(a.loc.col + (a.negate ? 1 : 0)) +
+                         ",\"len\":1,\"tag\":-2,\"value\":-2}";
+                    continue;
+                }
+                if (tid < 0) continue;
                 int vid = prog.value_id(tid, a.name);
                 if (vid < 0) vid = union_slot(prog, tid, a.name);
                 if (vid < 0) continue;   // unknown names stay unpainted

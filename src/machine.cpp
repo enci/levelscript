@@ -632,6 +632,8 @@ bool machine::match_at(compiled_pair const& pair, int row, int col) {
         if (pat.is_number) {
             for (auto const& p : pat.bare)   // by value
                 if (g.get(row + p.r, col + p.c) != p.val) return false;
+            for (auto const& p : pat.bare_ne)   // `!.`: any stored number
+                if (g.get(row + p.r, col + p.c) == p.val) return false;
         } else {
             for (auto const& p : pat.bare)   // mask overlap (section 4.1)
                 if ((g.get(row + p.r, col + p.c) & p.val) == 0) return false;

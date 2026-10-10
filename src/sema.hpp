@@ -63,6 +63,8 @@ struct compiled_cell {
     int     expr{-1};  // kind::expr — arena index (matches/writes computed)
     int     var{-1};   // kind::variable — the pair's variable slot (section 5.11):
                        // binds on the match side, writes its value on the write side
+    bool    ne{false}; // kind::value in a number grid: matches any value but `val`
+                       // (`!.` = not the empty sentinel, section 4.1)
 };
 
 // One cell the matcher tests, at its offset from the anchor.
@@ -82,6 +84,7 @@ struct compiled_pattern {
     // Match side only, filled per variant: the cells of each matching phase
     // (section 5.11) in row-major order, wildcards dropped.
     std::vector<match_probe> bare;       // value cells
+    std::vector<match_probe> bare_ne;    // number grids: cells that must differ from val (`!.`)
     std::vector<match_probe> computed;   // expression and `where` cells
 
     compiled_cell const& at(int r, int c) const { return cells[r * cols + c]; }
