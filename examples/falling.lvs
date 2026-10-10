@@ -1,0 +1,34 @@
+// Showcase (v0.9.0): pattern variables move whatever is there.
+//
+// `?v` binds the falling item and writes it one cell lower, so a single
+// `fall` rule moves boxes and gems alike. A binding cell never matches
+// empty, so `grow fall` stops once nothing has empty space below it.
+//
+// @seed 5
+// @expect run-ok
+// @expect grid items count(.) == 52   // 64 cells, 12 items: nothing is lost on the way down
+
+tag stuff { box, gem }
+
+layers {
+    items: grid of stuff
+}
+
+rule drop {
+    items[.]
+    where[ (y < 3) ]
+    =>
+    items[ (if(random(0, 1) == 0, box, gem)) ]
+}
+
+rule fall {
+    items[?v, .]
+    =>
+    items[., ?v]
+}
+
+sequence main {
+    resize(8, 8)
+    scatter(12) drop
+    grow fall
+}

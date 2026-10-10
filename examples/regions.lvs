@@ -1,0 +1,38 @@
+// Showcase (v0.9.0): pattern variables relate cells by value.
+//
+// `?r` binds whatever a cell holds, so one rule grows every region outward
+// without listing region numbers. `wall_between` then marks each cell next
+// to a different region: `?a` binds the first cell, the `where` cell tests
+// its neighbour against it, and `*` leaves that column unconstrained.
+//
+// @seed 3
+// @expect run-ok
+
+tag geo { wall }
+
+layers {
+    regions: grid of number
+    level: grid of geo
+}
+
+rule seed { regions[.] => regions[ (random(1, 99)) ] }
+
+rule spread(rotation=all) {
+    regions[?r .]
+    =>
+    regions[?r ?r]
+}
+
+rule wall_between(rotation=all) {
+    regions[?a *]
+    where[* (regions != ?a)]
+    =>
+    level[* wall]
+}
+
+sequence main {
+    resize(16, 10)
+    scatter(5) seed
+    grow spread
+    everywhere wall_between
+}

@@ -696,3 +696,24 @@ TEST_CASE("sema: 'where' cells are '*' or parenthesized booleans (0.9, 5.9)") {
     CHECK(compile_result(prelude + "rule r { level[*] where[.] => level[*] }\n" + rprog)
           .has_error("'where' cells must be '*' or a parenthesized boolean expression"));
 }
+
+TEST_CASE("sema: reductivity with pattern variables (0.9, 6.9)") {
+    auto warns = [](std::string const& rule) {
+        compile_result r(prelude + rule + "\nsequence main { grow r }\n");
+        INFO(r.diags.format_all());
+        REQUIRE(r.ok);
+        return has_warning(r, "may never terminate");
+    };
+    // binding cells no write touches keep their values: a certain loop
+    CHECK(warns("rule r { level[?v] => tiles[1] }"));
+    CHECK(warns("rule r { level[?v] tiles[?n] => tiles[*] }"));
+    CHECK(warns("rule r { tiles[?n ?n] => level[floor *] }"));
+    // certain invalidation: '.' over a binding cell, a variable over a '.' cell
+    CHECK(!warns("rule r { level[?v, .] => level[., ?v] }"));   // fall
+    CHECK(!warns("rule r { level[?v] => level[.] }"));
+    CHECK(!warns("rule r { level[?v .] => level[* ?v] }"));
+    // uncertain: any other write over a binding cell, or of a variable
+    CHECK(!warns("rule r { level[?v] => level[?v] }"));
+    CHECK(!warns("rule r { level[?v ?v] => level[* wall] }"));
+    CHECK(!warns("rule r { level[?v wall] => level[* ?v] }"));
+}

@@ -1,6 +1,6 @@
 # LevelScript
 
-**Status**: Draft 0.8.3
+**Status**: Draft 0.9.0
 **File extension**: `.lvs`
 **CLI**: `levelscript [--seed N] [--entry name] [--param name=value ...] <file.lvs>` (`--entry` defaults to `main`, a tool convention; section 6)
 **Embedding**: namespace `ls::` (see Appendix A)
@@ -57,10 +57,11 @@ IDENT          ::= IDENT_START IDENT_CONTINUE*
 IDENT_START    ::= [A-Za-z_]
 IDENT_CONTINUE ::= [A-Za-z0-9_]
 INTEGER        ::= [0-9]+
+VARIABLE       ::= '?' IDENT_START IDENT_CONTINUE*
 STRING         ::= '"' <any chars except '"' and NEWLINE> '"'
 COMMENT        ::= '//' <any chars> NEWLINE
 ```
-A `STRING` has no escape sequences and is ASCII (section 2.1). Its only use is the module path of a `use` declaration (section 2.6).
+A `STRING` has no escape sequences and is ASCII (section 2.1). Its only use is the module path of a `use` declaration (section 2.6). A `VARIABLE` is a single token - no whitespace separates `?` from the name - and names a pattern variable (section 5.11).
 
 ### 2.4 Reserved keywords
 
@@ -76,10 +77,10 @@ Keywords are ASCII and match exactly.
 
 ```
 RESERVED_CHARS ::= '[' | ']' | '{' | '}' | '(' | ')' | ',' | '='
-                 | '*' | '.' | '"' | '%' | WS | NEWLINE
+                 | '*' | '.' | '"' | '%' | '?' | WS | NEWLINE
                  | <ASCII letters, digits, and '_'>
 ```
-`?` is not reserved; it is held for future syntax and lexes as an error.
+`?` begins a pattern variable (`VARIABLE`, section 2.3) and is valid nowhere else.
 
 **Contextual names.** A few grammar terminals are matched by identifier text rather than reserved: the attribute names and values of section 5.6 (`symmetry`, `rotation`, `none`, `horizontal`, `vertical`). They lex as `IDENT` and may also be used as names, since each slot resolves them against its own table.
 
@@ -89,7 +90,7 @@ RESERVED_CHARS ::= '[' | ']' | '{' | '}' | '(' | ')' | ',' | '='
 
 ### 2.5 Pattern tokens
 
-A pattern cell is an **expression** (section 5.8). Cells are whitespace-separated; line breaks are row breaks (section 5.3). Two surface forms exist:
+A pattern cell is an **expression** (section 5.8). Cells are whitespace-separated; line breaks are row breaks (section 5.3). Three surface forms exist:
 
 - **Bare mask literal** - written without internal whitespace:
 
@@ -104,7 +105,9 @@ A pattern cell is an **expression** (section 5.8). Cells are whitespace-separate
 
 - **Parenthesized expression** - `( ... )`, which may contain whitespace and uses the full expression grammar (section 5.8). Required for any computed form (comparison, arithmetic, logical, function call, multi-token reads). Example: `( tiles > 5 )`.
 
-A bare `*` is always the wildcard; the multiplication operator `*` occurs only inside `( ... )`. A spaced operator (e.g. `wall | floor` with spaces) is **not** a bare cell - wrap it: `(wall | floor)`, or write it whitespace-free: `wall|floor`. `?` remains reserved.
+- **Pattern variable** - `?`*name*, written bare. On the match side it binds the variable or must equal its value; on the write side it writes that value (section 5.11). Inside `( ... )`, `?`*name* is an expression operand.
+
+A bare `*` is always the wildcard; the multiplication operator `*` occurs only inside `( ... )`. A spaced operator (e.g. `wall | floor` with spaces) is **not** a bare cell - wrap it: `(wall | floor)`, or write it whitespace-free: `wall|floor`. A variable does not combine into a bare mask: `?a|wall` is a parse error; write `(?a | wall)`.
 
 A `mask_atom`'s `IDENT` (section 5.3) may be a `tag_value` or a `tag_union` (section 3); both resolve to masks and compose under `|` and `!` identically.
 
@@ -408,11 +411,11 @@ pattern_head ::= IDENT | 'where'
 cell_grid    ::= cell_row (row_sep cell_row)*
 row_sep      ::= ',' WS* NEWLINE? | NEWLINE
 cell_row     ::= WS* cell (WS+ cell)* WS*
-cell         ::= '*' | '.' | INTEGER | tag_mask | '(' expr ')'
+cell         ::= '*' | '.' | INTEGER | tag_mask | VARIABLE | '(' expr ')'
 tag_mask     ::= mask_atom ('|' mask_atom)*
 mask_atom    ::= '!'? IDENT
 ```
-A `tag_mask` is whitespace-free (the cell ends at the next whitespace or comma). A comma inside `( ... )` belongs to the expression; only a comma outside parentheses separates rows. `expr` inside `( ... )` follows section 5.8 and may contain whitespace. `tag_mask` and the bare-`*`/`.` forms are exactly the mask literals; every other expression must be parenthesized.
+A `tag_mask` is whitespace-free (the cell ends at the next whitespace or comma). A comma inside `( ... )` belongs to the expression; only a comma outside parentheses separates rows. `expr` inside `( ... )` follows section 5.8 and may contain whitespace. `tag_mask` and the bare-`*`/`.` forms are exactly the mask literals, and a bare `VARIABLE` is a pattern variable (section 5.11); every other expression must be parenthesized.
 
 The opening `[` may be followed immediately by content on the same line or by a newline starting the first row. The closing `]` may follow the last row or sit on its own line.
 
@@ -498,16 +501,16 @@ These are checks, not productions: the parser accepts any `attr` of section 5.1,
 
 Each pattern carries two compile-time footprints, derived from its cells:
 
-- **Read footprint**: the set of cell offsets the matcher actually reads. Every cell other than `*` contributes to the read footprint: a tag value, a complement, an inline or named union, an integer literal, or `.` (empty). Expression cells are covered below. Cells marked `*` (any) are *not* in the read footprint, since the matcher never inspects them.
-- **Write footprint**: the set of cell offsets the rewriter actually writes. Every cell other than `*` contributes to the write footprint: a tag value, an inline or named union, an integer literal, or `.` (which clears the cell). Expression cells are covered below. Cells marked `*` are *not* in the write footprint, since they preserve whatever was matched.
+- **Read footprint**: the set of cell offsets the matcher actually reads. Every cell other than `*` contributes to the read footprint: a tag value, a complement, an inline or named union, an integer literal, `.` (empty), or a pattern variable (section 5.11). Expression cells are covered below. Cells marked `*` (any) are *not* in the read footprint, since the matcher never inspects them.
+- **Write footprint**: the set of cell offsets the rewriter actually writes. Every cell other than `*` contributes to the write footprint: a tag value, an inline or named union, an integer literal, `.` (which clears the cell), or a pattern variable (which writes its value). Expression cells are covered below. Cells marked `*` are *not* in the write footprint, since they preserve whatever was matched.
 
 Footprints are defined relative to the pattern's origin (top-left corner). When the rule fires at grid position (x, y), each footprint is translated by (x, y) to identify which grid cells are read or written.
 
 The bounding rectangle of a pattern is its W x H region, but the footprints may be sparse subsets (a 3x3 pattern with `*` corners has plus-shaped footprints). The write footprint drives the write-protection mask (section 6.8). The read footprint does not participate in conflict handling; it defines which cells a match inspects, and which cells the observe channel reports as matched (Appendix A).
 
-**Expression cells.** An expression cell's read footprint is the set of grid cells its expression reads at the current position. Same-position cross-grid reads (a bare grid name, section 5.8) contribute the referenced grid's cell at this offset. Reads of `x`, `y`, `width`, `height`, and params read no grid cell and contribute nothing. `where` cells contribute to the read footprint only (never the write footprint). On the RHS, an expression cell's write footprint is its own grid cell.
+**Expression cells.** An expression cell's read footprint is the set of grid cells its expression reads at the current position. Same-position cross-grid reads (a bare grid name, section 5.8) contribute the referenced grid's cell at this offset. Reads of `x`, `y`, `width`, `height`, params, and pattern variables read no grid cell and contribute nothing (a variable's binding cells are already in the read footprint). `where` cells contribute to the read footprint only (never the write footprint); a `*` `where` cell contributes nothing. On the RHS, an expression cell's write footprint is its own grid cell.
 
-Because there is no coordinate indexing (section 5.8), every read offset is statically known, so footprints are compile-time static.
+Because there is no coordinate indexing (section 5.8), every read offset is statically known, so footprints are compile-time static. Pattern variables carry values, not positions, and preserve this.
 
 ### 5.8 Expressions
 
@@ -527,6 +530,7 @@ unary_expr  ::= ('!' | '-') unary_expr | primary
 primary     ::= INTEGER
               | '.'                         (* empty literal - section 4.1; polymorphic *)
               | IDENT                       (* grid read @ current position | param | x/y/width/height *)
+              | VARIABLE                    (* pattern variable - section 5.11 *)
               | IDENT '(' arg_list? ')'     (* built-in function call - section 5.10 *)
               | '(' expr ')'
 arg_list    ::= expr (',' expr)*
@@ -540,6 +544,7 @@ Precedence follows C conventions (lowest to highest): `||`, `&&`, `|`, equality,
 - Number operators: `+ - * /` -> number; `== != < <= > >=` -> bool. `number` is a signed 32-bit integer. `/` is integer division truncating toward zero; **`n / 0` is defined as `0`**. Arithmetic overflow wraps (two's complement). Every expression is therefore **total**: it always evaluates to a value, never a fault.
 - Bool operators: `&& || !` -> bool.
 - A grid read yields tag-mask (tag grid) or number (number grid). `x`/`y`/`width`/`height` and params yield number.
+- A pattern variable yields the type of its binding cells' grid: a tag-mask of that tagset, or a number (section 5.11).
 - Mixing kinds (e.g. `|` on numbers, `+` on tags, comparing tag to number) is a compile error.
 
 **The empty literal `.`** denotes the empty value (section 4.1). It is **polymorphic**: in a tag context it is the empty mask `0x1`; in a number context it is the empty sentinel. Its type is inferred from context - the other operand of a comparison, the sibling branch of an `if`, or the grid of the cell it is written into. A `.` with no inferable type (e.g. `(. == .)`) is an expression type error (section 7.3, check 14).
@@ -549,19 +554,19 @@ Precedence follows C conventions (lowest to highest): `||`, `&&`, `|`, equality,
 
 `*` is **not** an expression value (inside `( )` it is multiplication); only `.` crosses from mask literal into the expression grammar.
 
-**Same-position reads only.** An expression reads other grids exclusively at the current cell's position. There is no coordinate indexing; neighbour structure is expressed by the surrounding pattern grid, not by expressions. This keeps read footprints static (section 5.7).
+**Same-position reads only.** An expression reads other grids exclusively at the current cell's position. There is no coordinate indexing; neighbour structure is expressed by the surrounding pattern grid, not by expressions. This keeps read footprints static (section 5.7). To relate a cell to the value of another cell of the pattern, bind that value with a pattern variable (section 5.11).
 
 **`random` and footprints.** A `random` call reads no grid cell, so it contributes nothing to the read footprint; footprints stay compile-time static. `random`'s only effect is advancing the PRNG.
 
 ### 5.9 The `where` pseudo-layer
 
-`where` is a reserved pseudo-grid usable as a pattern head on the **LHS only**. It is not declared in `layers`. Each `where` cell holds a **boolean** expression (section 5.8) and is therefore always parenthesized:
+`where` is a reserved pseudo-grid usable as a pattern head on the **LHS only**. It is not declared in `layers`. Each `where` cell holds a **boolean** expression (section 5.8) and is therefore parenthesized, or is `*`, which places no condition:
 
 ```ls
 where[ (y < height/2)  (tiles > 5) ]
 ```
 
-A `where` cell matches at a position iff its expression evaluates to true there. `where` cells read but never write - they contribute to the read footprint (section 5.7) and never to the write footprint. A `where` pattern conjoins with real-grid patterns on the match side (section 5.2):
+A `where` cell matches at a position iff its expression evaluates to true there; a `*` cell matches everywhere and reads nothing. `where` cells read but never write - they contribute to the read footprint (section 5.7) and never to the write footprint. A `where` pattern conjoins with real-grid patterns on the match side (section 5.2):
 
 ```ls
 rule deep_water {
@@ -572,7 +577,7 @@ rule deep_water {
 }
 ```
 
-A `where` pattern on the RHS is a compile error. Numeric range/comparison matching is expressed through `where`; there is no numeric-cell comparison syntax.
+A `where` pattern on the RHS is a compile error. Numeric range/comparison matching is expressed through `where`; there is no numeric-cell comparison syntax. A `where` cell may reference pattern variables bound on the same match side, e.g. `where[ (?depth > 3) ]` (section 5.11).
 
 ### 5.10 Built-in functions
 
@@ -592,6 +597,49 @@ Arities are fixed. `min`/`max` are binary; nest for more operands (`min(a, min(b
 **Built-in names are not reserved.** A call is recognised syntactically (an identifier followed by `(`, section 5.8), and tag values, grids, and params are never called, so `if`, `min`, `max`, `abs`, `clamp`, and `random` may also be used as tag value, grid, or param names. Followed by `(`, such a name always denotes the built-in; otherwise it resolves per section 5.8. Like operation names (section 2.4), built-in names are not keywords.
 
 **`random` is impure; the others are pure.** Because `if` is eager, `if(c, random(0,9), random(0,9))` evaluates **both** branches and therefore draws **twice**, in left-to-right order, discarding the unused value. This is defined behaviour, not a fault; if exactly one draw is wanted, place the `random` outside the `if`. (Eager `if` is deliberate: totality makes the dead branch safe, and the fixed two-draw cost keeps the draw sequence trivially pinned.) `random` may appear in any expression position (match cells, `where`, write cells, `when` guards, param expressions): it reads no grid, position, or dimension, so the config-scope restrictions of sections 4.2/6 do not exclude it. It draws once each time its expression is evaluated.
+
+### 5.11 Pattern variables
+
+A **pattern variable** relates cells of one pattern pair to each other by value. Without variables, a pattern tests each cell only against constants, so "these two cells differ" or "move whatever is here" must enumerate every value, which is impossible for a number grid. A variable is written `?`*name* (the `VARIABLE` token, section 2.3).
+
+```ls
+// A wall between two adjacent cells of different regions, whatever the
+// region numbers are. `?a` is never empty, so neither is a cell that differs.
+rule wall_between(rotation=all) {
+    regions[?a *]
+    where[* (regions != ?a)]
+    =>
+    level[* wall]
+}
+
+// Move any item down into an empty cell.
+rule fall {
+    items[?v, .]
+    =>
+    items[., ?v]
+}
+```
+
+**Scope.** A variable belongs to one pattern pair: its match side and its write tree. The sub-rules of one body share no variables, and an inline rule's variables are its own. Variables are a namespace of their own - the `?` marks them - so they never collide with tag values, grids, params, or built-ins.
+
+**Binding.** Every bare `?a` cell on the match side is a **binding cell** of `a`. A candidate matches only if all binding cells of `a` hold **non-empty** values that are **equal**; `a` then denotes that value. Binding is order-free: no binding cell is privileged, and equality is symmetric and transitive, so the cell order a symmetry or rotation variant produces (section 5.6) cannot change the outcome.
+
+- **Equality** is exact: two tag masks are equal iff they are bitwise identical (a cell holding `wall|floor` equals only another `wall|floor`), and two numbers iff they are the same integer. This is the `==` of section 5.8, not the overlap test of a mask cell.
+- **Non-empty.** A binding cell never matches an empty cell (section 4.1); match empty with `.`. Capturing empty would add nothing a `.` write cannot do, and it would let a moving rule such as `fall` match empty over empty forever. In a number grid, a stored `0` is non-empty.
+- **Type.** All binding cells of one variable lie in grids of one type: the same tagset, or all `number` (check 45). They may lie in different grids: `level[?t] backup[?t]` matches where the two grids agree.
+
+A parenthesized `(?a)` is an expression cell, not a binding cell: it binds nothing and matches by the rules of section 5.3 (the overlap test on a tag grid).
+
+**Use.** Inside `( ... )`, `?a` is an expression operand (section 5.8) in any cell of the same pair: match-side expression cells, `where` cells, and write-side expression cells. A bare `?a` on the write side writes the captured value, multi-bit masks included, into its cell; the target grid must have the variable's type (check 45). Every variable used in an expression or on the write side must have at least one binding cell on the match side of its pair (check 44). Like binding, this range restriction does not depend on cell order. Variables exist only in patterns: a variable in a guard, a count, a param expression, or an operation argument is an error (check 46).
+
+**Evaluation order.** Because an expression may read a variable, testing a candidate runs in two phases:
+
+1. **Bare cells.** Every match-side cell that is not an expression - `*`, `.`, integers, tag masks, and binding cells - in every match-side pattern. These cells are pure, so their order is unobservable. Any mismatch, including binding cells that disagree, rejects the candidate.
+2. **Expression cells.** The parenthesized cells of real-grid patterns and the non-`*` cells of `where` patterns, with every variable bound. They evaluate pattern by pattern in match-side order and, within a pattern, in row-major order of the variant being tested, stopping at the first that fails.
+
+The two phases apply to every rule, with or without variables. Only phase 2 can draw (`random`), so a candidate rejected by its bare cells consumes no draws (section 10.6).
+
+**Variants.** A symmetry or rotation variant moves cells together with the variables in them; names are unchanged. De-duplication (section 10.2) compares variables by name.
 
 ---
 
@@ -804,7 +852,7 @@ Consequence, stated normatively: **the search algorithm is unobservable.** Any c
 
 An application over a rule pairs a **mode** (section 6) with the rule. The mode bounds how many applications occur and governs what each application sees and how conflicts are handled. (An application over a sequence takes `once` or `settle` only; see section 6.10.)
 
-All modes share **candidate collection**: for each anchor position in row-major `(y, x)` order, the rule's match side is tested - every sub-rule and every symmetry/rotation variant (section 5.6) - at that anchor. Each matching `(anchor, sub-rule, variant)` is a **candidate**. The anchor is the pattern's top-left origin (section 5.7); a candidate exists only where the (possibly reshaped) variant fits entirely within the grid - **matching is bounded, never wrapped**.
+All modes share **candidate collection**: for each anchor position in row-major `(y, x)` order, the rule's match side is tested - every sub-rule and every symmetry/rotation variant (section 5.6) - at that anchor. Testing one variant at one anchor runs the two phases of section 5.11: bare cells first, then expression cells. Each matching `(anchor, sub-rule, variant)` is a **candidate**. The anchor is the pattern's top-left origin (section 5.7); a candidate exists only where the (possibly reshaped) variant fits entirely within the grid - **matching is bounded, never wrapped**.
 
 **Batch modes** (`scatter`, `everywhere`) - one frozen snapshot, one pass:
 1. Snapshot the grid stack (section 7.1); collect all candidates against it.
@@ -852,7 +900,7 @@ The language does not verify reductivity in general - a fixpoint mode is a loop 
 **The reductivity warning.** The compiler does, however, flag the *guaranteed*-divergent case. For a `grow` statement without a count, consider each sub-rule's **unconditional** writes - the write leaves that occur on every resolution of the write tree; leaves under an `{ any }` do **not** count, since the pick may avoid them. If some sub-rule has no unconditional write that **invalidates its own LHS** - i.e. no write that overwrites an LHS-constrained cell of the same grid with a value that no longer matches that cell's requirement - then an applied anchor re-matches forever and the fixpoint is unreachable: the compiler emits the warning *"'grow' over rule '<name>' may never terminate: a sub-rule's write leaves its own match intact, so the fixpoint is unreachable."* For an inline rule, `<name>` is its source position.
 
 The analysis is conservative in both directions:
-- **Uncertainty suppresses the warning.** A computed (expression) match or write cell, and any `where` guard, make the invalidation question undecidable at compile time; such a sub-rule is assumed to invalidate and produces no warning. Only the statically certain case warns.
+- **Uncertainty suppresses the warning.** A computed (expression) match or write cell, and any `where` guard, make the invalidation question undecidable at compile time; such a sub-rule is assumed to invalidate and produces no warning. Only the statically certain case warns. Pattern variables (section 5.11) are decided only where the answer is certain: a binding cell requires a non-empty value, so a `.` written over it invalidates; a written variable is non-empty, so it invalidates a `.` cell. Any other case involving a variable is uncertain.
 - **Silence proves nothing.** Passing the check does not prove termination; a rule can still diverge through interactions the per-sub-rule check cannot see.
 
 `settle` is **exempt**: its loop exits on a no-change sweep, so an idempotent write (one that re-matches but rewrites the same value) still reaches the fixpoint - the guaranteed-loop argument does not apply.
@@ -978,6 +1026,9 @@ The compiler must reject:
 41. **Duplicate use.** A module with two `use` declarations that resolve to the same canonical name.
 42. **Duplicate tagset, grid, or param name.** Two tagsets, two grids, or two params with the same name anywhere in the closure, in one module or in different ones (section 2.6).
 43. **Duplicate layers block.** More than one `layers` block in a module.
+44. **Unbound variable.** A pattern variable used in an expression or on the write side with no binding cell (a bare occurrence) on the match side of its pattern pair (section 5.11).
+45. **Variable type.** Binding cells of one variable in grids of different types (distinct tagsets, or a tag grid and a `number` grid); or a bare variable written into a grid whose type differs from the variable's.
+46. **Variable outside a pattern.** A pattern variable in a `when` guard, a count, a param expression, or an operation argument; or a bare variable cell in a `where` pattern (`where` cells are boolean expressions, section 5.9).
 
 ### 7.4 Warnings
 
@@ -1132,7 +1183,7 @@ This section is non-normative; it records how the reference implementation is bu
 
 ### 10.2 Symmetry expansion
 
-Symmetry and rotation are expanded at compile time. `symmetry` contributes up to four dimension-preserving flips (identity, H, V, both-axis); `rotation` contributes turns (identity, 90, 180, 270, or a set). The two are composed and the resulting variant set is **de-duplicated by structural equality of the transformed (match side, write tree) pair, scoped per sub-rule** (so two sub-rules with the same LHS both survive). Structural equality means the same pattern cells (expression cells compared as expression trees), the same `{ any }`/`{ all }` nesting in the same item order, and the same weights. The both-axis flip and the 180-degree rotation are the same transform, so `symmetry=all, rotation=all` collapses to the 8 variants of D4 (fewer when the rule is itself symmetric). The runtime treats each surviving variant as an independent pattern (section 6.7). Elimination happens at compile time, but its result is observable, because each variant is a separate candidate weighting its anchor in the shuffle and in the step-mode pick. That is why the key is normative (section 5.6.2).
+Symmetry and rotation are expanded at compile time. `symmetry` contributes up to four dimension-preserving flips (identity, H, V, both-axis); `rotation` contributes turns (identity, 90, 180, 270, or a set). The two are composed and the resulting variant set is **de-duplicated by structural equality of the transformed (match side, write tree) pair, scoped per sub-rule** (so two sub-rules with the same LHS both survive). Structural equality means the same pattern cells (expression cells compared as expression trees, pattern variables by name), the same `{ any }`/`{ all }` nesting in the same item order, and the same weights. The both-axis flip and the 180-degree rotation are the same transform, so `symmetry=all, rotation=all` collapses to the 8 variants of D4 (fewer when the rule is itself symmetric). The runtime treats each surviving variant as an independent pattern (section 6.7). Elimination happens at compile time, but its result is observable, because each variant is a separate candidate weighting its anchor in the shuffle and in the step-mode pick. That is why the key is normative (section 5.6.2).
 
 ### 10.3 Snapshot implementation
 
@@ -1144,7 +1195,7 @@ The per-pass snapshot (section 7.1) is implementable several ways; a pass is the
 
 All modes build from one structure: a vector of **candidate slots**, each a small record of indices - `(anchor_x, anchor_y, sub_rule_idx, variant_idx)`. The chosen `{ any }` alternative is **not** stored; it is drawn at application (section 10.6). Slots reference compile-time tables (sub-rules, expanded variants), so a candidate is a few small integers.
 
-**Eager collection.** The reference implementation collects and matches the whole candidate vector per pass (row-major anchors; cells tested with short-circuit per candidate; `where`/expression cells - including `random` draws - evaluate during this scan). A semi-lazy split (enumerate slots cheaply, match only when pulled, so `once`/`scatter`/`grow` never match the whole grid) is an available optimization - note that it would move match-side `random` draw sites, which the per-implementation-version determinism claim (section 7.2) permits but a golden-output corpus will notice.
+**Eager collection.** The reference implementation collects and matches the whole candidate vector per pass (row-major anchors; per candidate, bare cells and then expression cells, with short-circuit (section 5.11); `where`/expression cells - including `random` draws - evaluate during this scan). A semi-lazy split (enumerate slots cheaply, match only when pulled, so `once`/`scatter`/`grow` never match the whole grid) is an available optimization - note that it would move match-side `random` draw sites, which the per-implementation-version determinism claim (section 7.2) permits but a golden-output corpus will notice.
 
 **Selection per mode:**
 - Batch modes, and each `settle` sweep: collect, seeded-shuffle, pull in shuffle order under the (grid, cell) write mask, stop at count. Shuffling is what gives variants equal priority.
@@ -1155,9 +1206,9 @@ All modes build from one structure: a vector of **candidate slots**, each a smal
 
 ### 10.5 Match enumeration
 
-For small patterns and small grids (the common case), a per-position brute-force match is adequate: test each pulled slot cell-by-cell against the snapshot, short-circuiting on first mismatch. Optimization (indexing, bitmap-accelerated scans) is deferred until profiling justifies it.
+For small patterns and small grids (the common case), a per-position brute-force match is adequate: test each pulled slot cell-by-cell against the snapshot - bare cells, then expression cells (section 5.11) - short-circuiting on first mismatch. Binding cells need no fixed order: compare each against its variable's **site**, its first binding cell in the variant's row-major order. The snapshot does not change between collection and application, so the site also supplies the variable's value to expressions and writes; nothing is stored per candidate. Optimization (indexing, bitmap-accelerated scans) is deferred until profiling justifies it.
 
-When a `where` or match cell contains `random`, the matcher's cell-test order, variant-test order, and short-circuit behaviour become **observable** (they determine which draws fire and in what sequence, section 10.6); such a rule cannot have its slots matched in parallel or reordered without changing output. Rules with no `random` on the match side keep that freedom.
+When a `where` or match cell contains `random`, the matcher's expression-cell order, variant-test order, and short-circuit behaviour become **observable** (they determine which draws fire and in what sequence, section 10.6); such a rule cannot have its slots matched in parallel or reordered without changing output. The order of bare cells is never observable, because phase 1 draws nothing (section 5.11). Rules with no `random` on the match side keep that freedom.
 
 ### 10.6 Random seeding and draw order
 
@@ -1165,7 +1216,7 @@ A single PRNG stream (`mt19937_64` in the reference implementation), seeded from
 
 1. **Param expressions** (section 4.2) evaluate once at startup, in canonical declaration order (section 2.6), an input's default only when the param was not supplied - their draws come first.
 2. A **`when` guard** (section 6) evaluates once when its statement is reached, in statement order; if it passes, the statement's **count** (section 6), if any, evaluates next.
-3. **Match-cell and `where`-cell** expressions evaluate during the collection scan, in row-major anchor order and, within an anchor, in sub-rule/variant declaration order; cells test in row-major order, short-circuiting on first mismatch - a `random` in a cell not reached does not draw.
+3. **Match-cell and `where`-cell** expressions evaluate during the collection scan, in row-major anchor order and, within an anchor, in sub-rule/variant declaration order. For each candidate, bare cells are tested first and draw nothing; only if all of them match do expression cells evaluate, pattern by pattern in match-side order and row-major within each pattern as the variant lays it out, short-circuiting on the first that fails (section 5.11) - a `random` in a cell not reached does not draw.
 4. **Candidate ordering** draws next: the pass's seeded shuffle (batch modes and `settle` sweeps) or the single uniform pick (step modes), per section 10.4.
 5. **At application**: one draw per `{ any }` node on the resolved write path, outer before inner, earlier sibling first (a single-item `{ any }` still draws, section 5.2); then write-cell expressions, row-major per resolved leaf.
 6. **`path` statements** follow the section 6.6 draw contract: predicate passes (`from`, `to`, `passable`), per-cell `cost`, exactly one tie-key draw, then the start-to-goal `write` stamps.

@@ -920,14 +920,19 @@ struct analyzer {
                         auto const& req = lp.at(r, c);
                         if (req.what == compiled_cell::kind::wildcard) continue;
                         // computed matches are uncertain — never a guaranteed loop
-                        if (req.what == compiled_cell::kind::expr ||
-                            req.what == compiled_cell::kind::variable) { invalidates = true; break; }
+                        if (req.what == compiled_cell::kind::expr) { invalidates = true; break; }
+                        // A binding cell no write touches keeps its value, and so
+                        // its equality with the others (section 6.9).
                         for (auto const* wp : writes) {
                             if (wp->grid_id != lp.grid_id) continue;
                             auto const& w = wp->at(r, c);
                             if (w.what == compiled_cell::kind::wildcard) continue;
-                            // computed writes are uncertain too
-                            if (w.what == compiled_cell::kind::expr ||
+                            // computed writes are uncertain too. Any write over a
+                            // binding cell, or of a variable, invalidates: for
+                            // certain with a '.' over a binding cell or a variable
+                            // over a '.' cell (both non-empty), else uncertainly.
+                            if (req.what == compiled_cell::kind::variable ||
+                                w.what == compiled_cell::kind::expr ||
                                 w.what == compiled_cell::kind::variable) { invalidates = true; break; }
                             bool still = lp.is_number ? (w.val == req.val)
                                                       : ((w.val & req.val) != 0);
