@@ -630,3 +630,67 @@ TEST_CASE("sema: inline rules get every rule check, located at the rule") {
     CHECK(u.has_error("undeclared rule or sequence 'inlin'"));
     CHECK(!u.has_error("did you mean"));
 }
+
+// ── pattern variables (0.9, section 5.11) ────────────────────────────────────
+
+// Until the matcher binds variables, a program that uses them correctly
+// fails with the one placeholder error and nothing else.
+static bool variables_check_ok(std::string const& src) {
+    compile_result r(prelude + src + rprog);
+    INFO(r.diags.format_all());
+    bool any = false;
+    for (auto const& d : r.diags.all) {
+        if (!d.is_error) continue;
+        if (d.message != "pattern variables are not supported yet") return false;
+        any = true;
+    }
+    return any;
+}
+
+TEST_CASE("sema: pattern variables bind, type, and are used (0.9, 5.11)") {
+    CHECK(variables_check_ok("rule r { tiles[?a *] where[ (tiles != .) (tiles != ?a) ] => level[* wall] }"));
+    CHECK(variables_check_ok("rule r { tiles[?v .] => tiles[. ?v] }"));
+    CHECK(variables_check_ok("rule r { level[?t ?t] => level[. ?t] }"));
+    CHECK(variables_check_ok("rule r { tiles[?d] where[ (?d > 3) ] => tiles[ (?d - 1) ] }"));
+    CHECK(variables_check_ok("rule r { level[?t] => level[ (?t | wall) ] }"));
+    CHECK(variables_check_ok("rule r { level[(?t)] level[?t] => level[*] }"));   // a use before the binding cell
+    CHECK(variables_check_ok("rule r { level[?all] => level[?all] }"));           // own namespace
+    CHECK(variables_check_ok("rule r { level[?level] tiles[?tiles] => tiles[?tiles] }"));
+}
+
+TEST_CASE("sema: unbound pattern variables (0.9, check 44)") {
+    compile_result write(prelude + "rule r { level[.] => level[?v] }\n" + rprog);
+    CHECK(write.has_error("'?v' is never bound"));
+    compile_result paren(prelude + "rule r { level[(?v)] => level[*] }\n" + rprog);
+    CHECK(paren.has_error("'?v' is never bound"));
+    CHECK(!paren.has_error("must evaluate to"));   // no cascade
+    compile_result where(prelude + "rule r { level[*] where[ (?v > 1) ] => level[*] }\n" + rprog);
+    CHECK(where.has_error("'?v' is never bound"));
+    // the sub-rules of one body share no variables
+    compile_result sub(prelude + "rule r { all\n level[?v] => level[.]\n level[.] => level[?v]\n}\n" + rprog);
+    CHECK(sub.has_error("'?v' is never bound"));
+}
+
+TEST_CASE("sema: pattern variable types (0.9, check 45)") {
+    CHECK(compile_result(prelude + "rule r { level[?v] tiles[?v] => level[*] }\n" + rprog)
+          .has_error("binds a number cell here but a tagset 'geo' cell elsewhere"));
+    CHECK(compile_result(prelude + "rule r { tiles[?v] => level[?v] }\n" + rprog)
+          .has_error("holds a number value but is written into a tagset 'geo' grid"));
+    CHECK(compile_result(prelude + "rule r { level[?v] => tiles[?v] }\n" + rprog)
+          .has_error("is written into a number grid"));
+    CHECK(compile_result(prelude + "rule r { tiles[?v] => level[ (?v) ] }\n" + rprog)
+          .has_error("must evaluate to a tag value"));
+}
+
+TEST_CASE("sema: pattern variables outside a pattern (0.9, check 46)") {
+    auto outside = [](std::string const& src) {
+        return compile_result(prelude + src).has_error("outside a pattern");
+    };
+    CHECK(outside("rule r { level[.] => level[wall] }\nsequence main { once r when (?v > 0) }"));
+    CHECK(outside("rule r { level[.] => level[wall] }\nsequence main { scatter(?v) r }"));
+    CHECK(outside("params { p: number = ?v }\nsequence main { }"));
+    CHECK(outside("sequence main { path(from=wall, to=floor, into=level, write=floor, "
+                  "passable=(level == ?v)) }"));
+    CHECK(compile_result(prelude + "rule r { tiles[?v] where[?v] => tiles[.] }\n" + rprog)
+          .has_error("cannot be a bare pattern variable"));
+}
