@@ -41,12 +41,13 @@ enum class ce_kind {
     random_,       // the one impure built-in: one PRNG draw per evaluation
     // emptiness tests (read the cell raw, bypassing number→0 coercion)
     is_empty, is_not_empty,   // ref = grid id; val = 1 when a number grid
+    var_read,      // ref = the pair's variable slot (section 5.11)
 };
 
 struct compiled_expr {
     ce_kind   kind{ce_kind::int_lit};
     long long val{0};
-    int       ref{-1};            // grid_read / param_read / is_empty
+    int       ref{-1};            // grid_read / param_read / is_empty / var_read
     int       a{-1}, b{-1}, c{-1};   // child indices into the arena
 };
 
@@ -57,9 +58,11 @@ struct compiled_expr {
 // after analyze() and shared (const) by generators, runs, and levels.
 
 struct compiled_cell {
-    enum class kind { wildcard, value, expr } what{kind::value};
+    enum class kind { wildcard, value, expr, variable } what{kind::value};
     int64_t val{0};    // kind::value — mask (tag grid) or number
     int     expr{-1};  // kind::expr — arena index (matches/writes computed)
+    int     var{-1};   // kind::variable — the pair's variable slot (section 5.11):
+                       // binds on the match side, writes its value on the write side
 };
 
 // One cell the matcher tests, at its offset from the anchor.
@@ -110,6 +113,7 @@ struct compiled_pair {
     std::vector<compiled_pattern> lhs;
     compiled_write_term           rhs;
     int                           sub_rule_idx{0};
+    std::vector<std::string>      var_names;   // by slot, '?' included (section 5.11)
     // Which transform of the declared sub-rule this variant is (section 5.6), as the
     // attributes produced it: rotation= then symmetry=. Identity is 0 / none.
     // Display and tooling only; the runtime never reads them.

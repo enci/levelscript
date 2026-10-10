@@ -53,6 +53,7 @@ long long machine::eval(int idx, int x, int y) {
         if (g.is_number && raw == num_empty) return 0;   // empty number reads as 0
         return raw;
     }
+    case ce_kind::var_read: return 0;   // TODO(0.9.0): sema rejects variables until the matcher binds them
     case ce_kind::is_empty:
     case ce_kind::is_not_empty: {
         bool empty = true;

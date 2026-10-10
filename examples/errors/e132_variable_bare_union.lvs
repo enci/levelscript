@@ -1,0 +1,7 @@
+// E132 (0.9, 2.5): a variable does not combine into a bare mask.
+// @expect error
+// @expect stderr-contains does not combine into a bare mask
+tag t { a }
+layers { g: grid of t }
+rule r { g[?v|a] => g[.] }
+sequence main { resize(2, 2) once r }

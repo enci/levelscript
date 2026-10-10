@@ -67,6 +67,7 @@ compiled_write_term transform_write_term(transform k, compiled_write_term const&
 compiled_pair transform_pair(transform k, compiled_pair const& pair) {
     compiled_pair out;
     out.sub_rule_idx = pair.sub_rule_idx;
+    out.var_names = pair.var_names;
     for (auto const& pat : pair.lhs)
         out.lhs.push_back(transform_pattern(k, pat));
     out.rhs = transform_write_term(k, pair.rhs);
@@ -77,7 +78,8 @@ bool patterns_equal(compiled_pattern const& a, compiled_pattern const& b) {
     if (a.grid_id != b.grid_id || a.rows != b.rows || a.cols != b.cols) return false;
     for (int i = 0; i < (int)a.cells.size(); ++i)
         if (a.cells[i].what != b.cells[i].what || a.cells[i].val != b.cells[i].val ||
-            a.cells[i].expr != b.cells[i].expr)   // transforms share arena indices
+            a.cells[i].expr != b.cells[i].expr ||  // transforms share arena indices
+            a.cells[i].var != b.cells[i].var)      // and variable slots, i.e. names
             return false;
     return true;
 }
@@ -125,6 +127,48 @@ struct analyzer {
         int  param_limit{-1};      // -1 = any param; else only ids < limit
     };
     scope scope_{};
+
+    // Pattern variables of the pair being compiled (section 5.11); null outside
+    // a pattern pair, where any variable is check 46. A slot's type is the
+    // binding cells' grid type: a tag id, or -1 for number.
+    struct pair_vars {
+        struct var {
+            std::string name;          // '?name'
+            int         type{-1};
+            bool        bound{false};  // has a binding cell (check 44)
+            bool        reported{false};
+        };
+        std::vector<var> vars;
+        int slot(std::string const& name) {
+            for (int i = 0; i < (int)vars.size(); ++i)
+                if (vars[i].name == name) return i;
+            vars.push_back({name});
+            return (int)vars.size() - 1;
+        }
+    };
+    pair_vars* vars_{nullptr};
+
+    std::string type_name(int type) const {
+        return type < 0 ? "number" : "tagset '" + out.tag_names[(size_t)type] + "'";
+    }
+
+    // A use of `name` in an expression or a write: its slot, or -1 after
+    // reporting it (check 44, check 46).
+    int use_variable(std::string const& name, source_loc loc) {
+        if (!vars_) {
+            error(loc, "pattern variable '" + name + "' outside a pattern; variables "
+                  "exist only in pattern and 'where' cells");
+            return -1;
+        }
+        int s = vars_->slot(name);
+        auto& v = vars_->vars[(size_t)s];
+        if (v.bound) return s;
+        if (!v.reported)
+            error(loc, "pattern variable '" + name + "' is never bound; it needs a "
+                  "bare '" + name + "' cell on the match side");
+        v.reported = true;
+        return -1;
+    }
 
     std::string const& label(source_loc loc) const { return mods.names[(size_t)loc.mod]; }
     void error(source_loc loc, std::string msg) {
@@ -302,10 +346,15 @@ struct analyzer {
             return typed_empty(val_type::num);
         case expr_kind::ident:
             return compile_ident(e, ctx_tag, t);
-        case expr_kind::variable:   // TODO(0.9.0): section 5.11
-            error(e.loc, "pattern variables are not supported yet");
-            t = val_type::num;
-            return num_lit();
+        case expr_kind::variable: {   // section 5.11
+            int s = use_variable(e.ident, e.loc);
+            if (s < 0) {   // reported; type it as wanted so nothing cascades
+                t = hint == (int)val_type::mask ? val_type::mask : val_type::num;
+                return typed_empty(t);
+            }
+            t = vars_->vars[(size_t)s].type < 0 ? val_type::num : val_type::mask;
+            return add_expr({ce_kind::var_read, 0, s, -1, -1, -1});
+        }
         case expr_kind::call:
             return compile_call(e, ctx_tag, t, hint);
         case expr_kind::neg: {
@@ -567,6 +616,13 @@ struct analyzer {
         compiled_cell cc;
 
         if (is_where) {   // where cells are always parenthesized booleans (section 5.9)
+            if (in.kind == cell_kind::variable) {   // check 46
+                error(in.loc, "a 'where' cell cannot be a bare pattern variable; "
+                      "'where' cells are boolean expressions, e.g. (" + in.variable + " > 0)");
+                cc.what = compiled_cell::kind::expr;
+                cc.expr = num_lit(1);
+                return cc;
+            }
             if (in.kind != cell_kind::expr_cell) {
                 error(in.loc, "'where' cells must be a parenthesized boolean expression");
                 cc.what = compiled_cell::kind::expr;
@@ -620,10 +676,18 @@ struct analyzer {
             cc.val = mask;
             break;
         }
-        case cell_kind::variable:   // TODO(0.9.0): section 5.11
-            error(in.loc, "pattern variables are not supported yet");
-            cc.what = compiled_cell::kind::wildcard;
+        case cell_kind::variable: {   // section 5.11; bound and typed by bind_variables
+            int s = is_rhs ? use_variable(in.variable, in.loc) : vars_->slot(in.variable);
+            if (s < 0) { cc.what = compiled_cell::kind::wildcard; break; }
+            int type = vars_->vars[(size_t)s].type;
+            if (is_rhs && type != tag)   // check 45
+                error(in.loc, "pattern variable '" + in.variable + "' holds a " +
+                      type_name(type) + " value but is written into a " +
+                      type_name(tag) + " grid");
+            cc.what = compiled_cell::kind::variable;
+            cc.var = s;
             break;
+        }
         case cell_kind::expr_cell: {
             cc.what = compiled_cell::kind::expr;
             val_type t;
@@ -687,14 +751,46 @@ struct analyzer {
         }
     }
 
+    // Every bare variable cell of a real-grid match-side pattern binds; all of
+    // one variable's binding cells must share a grid type (check 45). Runs
+    // before any cell compiles, so uses are order-free (section 5.11).
+    void bind_variables(rule_pair const& pr, pair_vars& pv) {
+        for (auto const& p : pr.lhs) {
+            if (p.is_where) continue;   // a bare variable there is check 46
+            int gid = out.layer_id(p.grid);
+            if (gid < 0) continue;      // reported by compile_pattern
+            int type = out.layers[gid].tag_id;
+            for (auto const& row : p.cells)
+                for (auto const& c : row) {
+                    if (c.kind != cell_kind::variable) continue;
+                    auto& v = pv.vars[(size_t)pv.slot(c.variable)];
+                    if (!v.bound) { v.bound = true; v.type = type; continue; }
+                    if (v.type != type && !v.reported) {
+                        error(c.loc, "pattern variable '" + c.variable + "' binds a " +
+                              type_name(type) + " cell here but a " +
+                              type_name(v.type) + " cell elsewhere");
+                        v.reported = true;
+                    }
+                }
+        }
+    }
+
     compiled_pair compile_base_pair(rule_pair const& pr) {
         compiled_pair cp;
+        pair_vars pv;
+        pair_vars* outer = vars_;
+        vars_ = &pv;
+        bind_variables(pr, pv);
         int rows = 0, cols = 0;
         for (auto const& p : pr.lhs) {
             cp.lhs.push_back(compile_pattern(p, rows, cols, /*is_rhs=*/false));
             if (rows == 0) { rows = cp.lhs.back().rows; cols = cp.lhs.back().cols; }
         }
         cp.rhs = compile_write_term(pr.rhs, rows, cols);
+        vars_ = outer;
+        for (auto const& v : pv.vars) cp.var_names.push_back(v.name);
+        if (!pv.vars.empty())   // TODO(0.9.0): the matcher binds them in the next step
+            error(pr.loc, "pattern variables are not supported yet");
         return cp;
     }
 
@@ -804,13 +900,15 @@ struct analyzer {
                         auto const& req = lp.at(r, c);
                         if (req.what == compiled_cell::kind::wildcard) continue;
                         // computed matches are uncertain — never a guaranteed loop
-                        if (req.what == compiled_cell::kind::expr) { invalidates = true; break; }
+                        if (req.what == compiled_cell::kind::expr ||
+                            req.what == compiled_cell::kind::variable) { invalidates = true; break; }
                         for (auto const* wp : writes) {
                             if (wp->grid_id != lp.grid_id) continue;
                             auto const& w = wp->at(r, c);
                             if (w.what == compiled_cell::kind::wildcard) continue;
                             // computed writes are uncertain too
-                            if (w.what == compiled_cell::kind::expr) { invalidates = true; break; }
+                            if (w.what == compiled_cell::kind::expr ||
+                                w.what == compiled_cell::kind::variable) { invalidates = true; break; }
                             bool still = lp.is_number ? (w.val == req.val)
                                                       : ((w.val & req.val) != 0);
                             if (!still) { invalidates = true; break; }

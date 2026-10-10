@@ -1,0 +1,7 @@
+// E126 (0.9, check 44): a written variable needs a bare match-side cell.
+// @expect error
+// @expect stderr-contains never bound
+tag t { a }
+layers { g: grid of t }
+rule r { g[.] => g[?v] }
+sequence main { resize(2, 2) once r }

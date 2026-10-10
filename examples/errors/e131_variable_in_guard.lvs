@@ -1,0 +1,7 @@
+// E131 (0.9, check 46): variables exist only in patterns.
+// @expect error
+// @expect stderr-contains outside a pattern
+tag t { a }
+layers { g: grid of t }
+rule r { g[.] => g[a] }
+sequence main { resize(2, 2) once r when (?v > 0) }

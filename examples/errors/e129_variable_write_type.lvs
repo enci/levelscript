@@ -1,0 +1,10 @@
+// E129 (0.9, check 45): a variable is written only into a grid of its type.
+// @expect error
+// @expect stderr-contains is written into a tagset
+tag t { a }
+layers {
+    g: grid of t
+    n: grid of number
+}
+rule r { n[?v] => g[?v] }
+sequence main { resize(2, 2) once r }

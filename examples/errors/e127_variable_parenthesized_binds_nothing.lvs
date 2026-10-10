@@ -1,0 +1,7 @@
+// E127 (0.9, check 44): `(?v)` is an expression cell; it binds nothing.
+// @expect error
+// @expect stderr-contains never bound
+tag t { a }
+layers { g: grid of t }
+rule r { g[(?v)] => g[.] }
+sequence main { resize(2, 2) once r }

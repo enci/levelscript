@@ -1,0 +1,11 @@
+// E128 (0.9, check 45): binding cells of one variable share a grid type.
+// @expect error
+// @expect stderr-contains binds a tagset
+tag t { a }
+tag u { b }
+layers {
+    g: grid of t
+    h: grid of u
+}
+rule r { g[?v] h[?v] => g[.] }
+sequence main { resize(2, 2) once r }

@@ -1,0 +1,6 @@
+// E130 (0.9, check 46): `where` cells are boolean expressions, never a bare variable.
+// @expect error
+// @expect stderr-contains cannot be a bare pattern variable
+layers { n: grid of number }
+rule r { n[?v] where[?v] => n[.] }
+sequence main { resize(2, 2) once r }

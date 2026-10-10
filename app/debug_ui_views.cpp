@@ -312,6 +312,8 @@ static cell_view pattern_cell_view(compiled const& meta, compiled_pattern const&
             return { IM_COL32(50, 50, 50, 255), "*" };
         case compiled_cell::kind::expr:
             return { IM_COL32(70, 70, 95, 255), "()" };
+        case compiled_cell::kind::variable:
+            return { IM_COL32(70, 95, 70, 255), "?" };
         case compiled_cell::kind::value:
             break;
     }
