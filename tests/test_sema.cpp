@@ -648,7 +648,7 @@ static bool variables_check_ok(std::string const& src) {
 }
 
 TEST_CASE("sema: pattern variables bind, type, and are used (0.9, 5.11)") {
-    CHECK(variables_check_ok("rule r { tiles[?a *] where[ (tiles != .) (tiles != ?a) ] => level[* wall] }"));
+    CHECK(variables_check_ok("rule r { tiles[?a *] where[* (tiles != ?a)] => level[* wall] }"));
     CHECK(variables_check_ok("rule r { tiles[?v .] => tiles[. ?v] }"));
     CHECK(variables_check_ok("rule r { level[?t ?t] => level[. ?t] }"));
     CHECK(variables_check_ok("rule r { tiles[?d] where[ (?d > 3) ] => tiles[ (?d - 1) ] }"));
@@ -693,4 +693,14 @@ TEST_CASE("sema: pattern variables outside a pattern (0.9, check 46)") {
                   "passable=(level == ?v)) }"));
     CHECK(compile_result(prelude + "rule r { tiles[?v] where[?v] => tiles[.] }\n" + rprog)
           .has_error("cannot be a bare pattern variable"));
+}
+
+TEST_CASE("sema: 'where' cells are '*' or parenthesized booleans (0.9, 5.9)") {
+    compile_result star(prelude + "rule r { level[floor floor] where[* (x > 1)] => level[* wall] }\n" + rprog);
+    INFO(star.diags.format_all());
+    CHECK(star.ok);
+    CHECK(compile_result(prelude + "rule r { level[*] where[wall] => level[*] }\n" + rprog)
+          .has_error("'where' cells must be '*' or a parenthesized boolean expression"));
+    CHECK(compile_result(prelude + "rule r { level[*] where[.] => level[*] }\n" + rprog)
+          .has_error("'where' cells must be '*' or a parenthesized boolean expression"));
 }

@@ -615,7 +615,11 @@ struct analyzer {
                                bool is_where, bool is_rhs) {
         compiled_cell cc;
 
-        if (is_where) {   // where cells are always parenthesized booleans (section 5.9)
+        if (is_where) {   // where cells are parenthesized booleans or '*' (section 5.9)
+            if (in.kind == cell_kind::any) {   // no condition
+                cc.what = compiled_cell::kind::wildcard;
+                return cc;
+            }
             if (in.kind == cell_kind::variable) {   // check 46
                 error(in.loc, "a 'where' cell cannot be a bare pattern variable; "
                       "'where' cells are boolean expressions, e.g. (" + in.variable + " > 0)");
@@ -624,7 +628,7 @@ struct analyzer {
                 return cc;
             }
             if (in.kind != cell_kind::expr_cell) {
-                error(in.loc, "'where' cells must be a parenthesized boolean expression");
+                error(in.loc, "'where' cells must be '*' or a parenthesized boolean expression");
                 cc.what = compiled_cell::kind::expr;
                 cc.expr = num_lit();
                 return cc;
