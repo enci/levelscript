@@ -8,6 +8,7 @@ namespace ls {
 
 enum class token_type {
     ident, integer, string, newline, end, bad,
+    variable,   // '?name', a pattern variable (section 5.11); text keeps the '?'
     // keywords (spec section 2.4); contextual names such as `symmetry` or
     // `horizontal` lex as ident and are matched by text in the parser
     kw_tag, kw_layers, kw_grid, kw_of, kw_number, kw_rule, kw_sequence,

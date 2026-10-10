@@ -16,6 +16,7 @@ enum class expr_kind {
     int_lit,       // integer literal
     empty_lit,     // '.' — polymorphic empty value (typed from context)
     ident,         // grid read / param / x,y,width,height / tag value or union
+    variable,      // '?name' pattern variable (section 5.11); ident holds '?name'
     call,          // built-in function call
     neg, not_,
     add, sub, mul, div_,
@@ -88,13 +89,14 @@ struct mask_atom {
     bool        negate{false};
 };
 
-enum class cell_kind { any, empty, number, tag_mask, expr_cell };
+enum class cell_kind { any, empty, number, tag_mask, variable, expr_cell };
 
 struct cell {
     cell_kind              kind{cell_kind::any};
     source_loc             loc;
     long long              number{0};   // number
     std::vector<mask_atom> atoms;       // tag_mask: atoms OR'd together
+    std::string            variable;    // variable: '?name' (section 5.11)
     expr_ptr               value;       // expr_cell: '(' expr ')'
 };
 

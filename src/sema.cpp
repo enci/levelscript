@@ -302,6 +302,10 @@ struct analyzer {
             return typed_empty(val_type::num);
         case expr_kind::ident:
             return compile_ident(e, ctx_tag, t);
+        case expr_kind::variable:   // TODO(0.9.0): section 5.11
+            error(e.loc, "pattern variables are not supported yet");
+            t = val_type::num;
+            return num_lit();
         case expr_kind::call:
             return compile_call(e, ctx_tag, t, hint);
         case expr_kind::neg: {
@@ -616,6 +620,10 @@ struct analyzer {
             cc.val = mask;
             break;
         }
+        case cell_kind::variable:   // TODO(0.9.0): section 5.11
+            error(in.loc, "pattern variables are not supported yet");
+            cc.what = compiled_cell::kind::wildcard;
+            break;
         case cell_kind::expr_cell: {
             cc.what = compiled_cell::kind::expr;
             val_type t;
