@@ -72,6 +72,21 @@ std::vector<token> lex(std::string_view src, std::string_view file,
             continue;
         }
 
+        // VARIABLE (section 2.3): '?' and the name, no whitespace between.
+        if (c == '?') {
+            if (i + 1 >= n || !ident_start(src[i + 1])) {
+                diags.error(file, tl, tc, "expected a variable name right after '?'");
+                push(token_type::bad, "?", tl, tc);
+                ++i; ++col;
+                continue;
+            }
+            size_t s = i++;
+            ++col;
+            while (i < n && ident_cont(src[i])) { ++i; ++col; }
+            push(token_type::variable, std::string(src.substr(s, i - s)), tl, tc);
+            continue;
+        }
+
         // STRING (section 2.3): no escapes, single line - only the path of a `use`.
         // The token's text is the contents, without the quotes.
         if (c == '"') {

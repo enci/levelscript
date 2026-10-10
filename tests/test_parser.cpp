@@ -443,6 +443,28 @@ TEST_CASE("parser: mask cells — unions and complements are whitespace-free") {
     CHECK(parse_fails("rule r { g[wall | door] => g[floor] }"));
 }
 
+TEST_CASE("parser: pattern variables (0.9, 5.11)") {
+    auto ast = parse_ok("rule r { g[?a (g != ?a) (?a)] => g[?a * *] }");
+    auto const& row = ast.rules[0].pairs[0].lhs[0].cells[0];
+    REQUIRE(row.size() == 3);
+    CHECK(row[0].kind == cell_kind::variable);
+    CHECK(row[0].variable == "?a");
+    REQUIRE(row[1].kind == cell_kind::expr_cell);
+    CHECK(row[1].value->args[1]->kind == expr_kind::variable);
+    CHECK(row[1].value->args[1]->ident == "?a");
+    REQUIRE(row[2].kind == cell_kind::expr_cell);   // parenthesized: an operand, not a binding
+    CHECK(row[2].value->kind == expr_kind::variable);
+    CHECK(ast.rules[0].pairs[0].rhs.pat.cells[0][0].kind == cell_kind::variable);
+    parse_ok("rule r { g[?a] where[ (?a > 3) ] => g[ (?a | wall) ] }");
+}
+
+TEST_CASE("parser: a variable is not a bare mask atom (0.9, 2.5)") {
+    CHECK(parse_fails("rule r { g[?a|wall] => g[*] }"));
+    CHECK(parse_fails("rule r { g[wall|?a] => g[*] }"));
+    CHECK(parse_fails("rule r { g[!?a] => g[*] }"));
+    CHECK(parse_fails("rule r { g[? a] => g[*] }"));
+}
+
 TEST_CASE("parser: expression cells and precedence") {
     auto ast = parse_ok("rule r { g[ (tiles + 2 * 3 > 7) ] => g[ (if(d > 1, wall, floor)) ] }");
     auto const& c = ast.rules[0].pairs[0].lhs[0].cells[0][0];

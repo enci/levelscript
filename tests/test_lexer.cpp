@@ -51,6 +51,29 @@ TEST_CASE("lexer: positions are 1-based line:col") {
     CHECK(t[2].col == 3);
 }
 
+TEST_CASE("lexer: '?name' is one VARIABLE token (0.9, 2.3)") {
+    auto t = lex_ok("?a ?all ?x_1(");
+    REQUIRE(t.size() == 5);
+    CHECK(t[0].is(token_type::variable));
+    CHECK(t[0].text == "?a");
+    CHECK(t[1].is(token_type::variable));   // keywords are names here too
+    CHECK(t[1].text == "?all");
+    CHECK(t[2].text == "?x_1");
+    CHECK(t[3].is(token_type::lparen));
+    CHECK(t[2].col == 9);
+    CHECK(t[3].col == 13);
+}
+
+TEST_CASE("lexer: '?' without an adjacent name is an error (0.9, 2.4)") {
+    for (char const* src : {"? a", "?", "?1", "?("}) {
+        diagnostics diags;
+        auto t = lex(src, "test", diags);
+        INFO(src);
+        CHECK(diags.has_errors());
+        CHECK(t[0].is(token_type::bad));
+    }
+}
+
 TEST_CASE("lexer: unexpected character is an error") {
     diagnostics diags;
     auto t = lex("a ? b", "test", diags);

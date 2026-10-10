@@ -102,6 +102,11 @@ struct parser {
             expect(token_type::rparen, "')'");
             return e;
         }
+        if (at(token_type::variable)) {
+            auto e = make_expr(expr_kind::variable);
+            e->ident = eat().text;
+            return e;
+        }
         if (at(token_type::ident)) {
             bool is_call = peek(1).is(token_type::lparen);
             auto e = make_expr(is_call ? expr_kind::call : expr_kind::ident);
@@ -300,6 +305,11 @@ struct parser {
                 return false;
             }
         }
+        if (at(token_type::variable)) {
+            error_at(peek(), "a pattern variable does not combine into a bare mask; "
+                     "write (... | " + peek().text + ")");
+            return false;
+        }
         if (!at(token_type::ident)) {
             error_at(peek(), "expected a tag value");
             return false;
@@ -320,6 +330,17 @@ struct parser {
             c.value = parse_expr();
             return expect(token_type::rparen, "')'");
         }
+        if (at(token_type::variable)) {   // pattern variable (section 5.11)
+            c.kind = cell_kind::variable;
+            c.variable = eat().text;
+            if (at(token_type::pipe) && adjacent(toks[pos - 1], peek())) {
+                error_at(peek(), "a pattern variable does not combine into a bare mask; "
+                         "write (" + c.variable + " | ...)");
+                eat();   // the '|'; recovery skips the atom after it
+                return false;
+            }
+            return true;
+        }
         if (at(token_type::ident) || at(token_type::bang)) {
             c.kind = cell_kind::tag_mask;
             if (!parse_mask_atom(c)) return false;
@@ -336,7 +357,7 @@ struct parser {
             return true;
         }
         error_at(peek(), "expected a pattern cell (*, ., a tag value, an integer, "
-                 "or a parenthesized expression)");
+                 "a pattern variable, or a parenthesized expression)");
         return false;
     }
 
