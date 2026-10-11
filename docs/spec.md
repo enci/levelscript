@@ -1,6 +1,6 @@
 # LevelScript
 
-**Status**: Draft 0.9.1
+**Status**: Draft 0.9.2
 **File extension**: `.lvs`
 **CLI**: `levelscript [--seed N] [--entry name] [--param name=value ...] <file.lvs>` (`--entry` defaults to `main`, a tool convention; section 6)
 **Embedding**: namespace `ls::` (see Appendix A)
@@ -90,7 +90,7 @@ RESERVED_CHARS ::= '[' | ']' | '{' | '}' | '(' | ')' | ',' | '='
 
 ### 2.5 Pattern tokens
 
-A pattern cell is an **expression** (section 5.8). Cells are whitespace-separated; line breaks are row breaks (section 5.3). Three surface forms exist:
+A pattern cell is an **expression** (section 5.8). Cells are whitespace-separated; line breaks, and commas outside parentheses, are row breaks (section 5.3). Three surface forms exist:
 
 - **Bare mask literal** - written without internal whitespace:
 
@@ -386,7 +386,7 @@ An `{ all }` writes every item; an `{ any }` picks exactly one item (weighted), 
 
 ### 5.3 Pattern bodies
 
-A pattern body is a rectangular grid of cells enclosed in `[ ]`. Whitespace between cells is required; line breaks within `[ ... ]` denote row breaks.
+A pattern body is a rectangular grid of cells enclosed in `[ ]`. Whitespace between cells is required; line breaks within `[ ... ]` denote row breaks, as do commas outside parentheses (below).
 
 ```ls
 algo[
@@ -515,7 +515,13 @@ Because there is no coordinate indexing (section 5.8), every read offset is stat
 
 ### 5.8 Expressions
 
-Expressions are **deterministic for a given seed**. Every built-in is pure except `random` (section 5.10), which advances the shared PRNG (section 10.6); `random` is the one expression form whose repeated evaluation may yield different values within a run. All other functions and operators are pure and side-effect-free. Expressions appear in pattern cells (sections 2.5/5.3), in `where` cells (section 5.9), and in param-dependent positions.
+Expressions are **deterministic for a given seed**. Every built-in is pure except `random` (section 5.10), which advances the shared PRNG (section 10.6); `random` is the one expression form whose repeated evaluation may yield different values within a run. All other functions and operators are pure and side-effect-free. Expressions appear in three **scopes**, which differ in what they may read:
+
+- **Cell scope** - pattern cells (sections 2.5/5.3), `where` cells (section 5.9), and the per-cell arguments of an operation (the `pred`, `value`, and `expr` kinds, section 6.0). May read grids at the current position (below), `x`/`y`, `width`/`height`, and params; pattern and `where` cells may also read pattern variables (section 5.11). Evaluated per cell.
+- **Statement scope** - `when` guards, counts (section 6), and `int` operation arguments (section 6.0). May read params only. Evaluated each time its statement is reached.
+- **Param scope** - param expressions (section 4.2). May read earlier params only. Evaluated once, at startup.
+
+`random` (section 5.10) is allowed in every scope.
 
 **Grammar.**
 ```
@@ -597,7 +603,7 @@ Arities are fixed. `min`/`max` are binary; nest for more operands (`min(a, min(b
 
 **Built-in names are not reserved.** A call is recognised syntactically (an identifier followed by `(`, section 5.8), and tag values, grids, and params are never called, so `if`, `min`, `max`, `abs`, `clamp`, and `random` may also be used as tag value, grid, or param names. Followed by `(`, such a name always denotes the built-in; otherwise it resolves per section 5.8. Like operation names (section 2.4), built-in names are not keywords.
 
-**`random` is impure; the others are pure.** Because `if` is eager, `if(c, random(0,9), random(0,9))` evaluates **both** branches and therefore draws **twice**, in left-to-right order, discarding the unused value. This is defined behaviour, not a fault; if exactly one draw is wanted, place the `random` outside the `if`. (Eager `if` is deliberate: totality makes the dead branch safe, and the fixed two-draw cost keeps the draw sequence trivially pinned.) `random` may appear in any expression position (match cells, `where`, write cells, `when` guards, param expressions): it reads no grid, position, or dimension, so the config-scope restrictions of sections 4.2/6 do not exclude it. It draws once each time its expression is evaluated.
+**`random` is impure; the others are pure.** Because `if` is eager, `if(c, random(0,9), random(0,9))` evaluates **both** branches and therefore draws **twice**, in left-to-right order, discarding the unused value. This is defined behaviour, not a fault; if exactly one draw is wanted, place the `random` outside the `if`. (Eager `if` is deliberate: totality makes the dead branch safe, and the fixed two-draw cost keeps the draw sequence trivially pinned.) `random` may appear in any expression position (match cells, `where`, write cells, `when` guards, param expressions): it reads no grid, position, or dimension, so the statement- and param-scope restrictions (section 5.8) do not exclude it. It draws once each time its expression is evaluated.
 
 ### 5.11 Pattern variables
 
@@ -680,7 +686,7 @@ op_args         ::= positional_args
 positional_args ::= arg_value (',' arg_value)*
 named_args      ::= named_arg (',' named_arg)*
 named_arg       ::= IDENT '=' arg_value
-arg_value       ::= INTEGER | IDENT | '(' expr ')'
+arg_value       ::= expr
 apply_stmt      ::= mode target
 mode            ::= 'once'
                   | 'scatter' '(' scatter_count ')'
@@ -692,7 +698,7 @@ inline_rule     ::= rule_attrs? '{' rule_body '}'
 scatter_count   ::= expr | percent
 percent         ::= (INTEGER | IDENT | '(' expr ')') '%'
 ```
-A statement is either an **operation call** (`op_call` - a built-in operation applied to the grid stack, section 6.0) or an **application** (`apply_stmt` - a mode keyword, with its count where the mode takes one, and a target). In an `op_call`, arguments are **positional first, then named**; the operation name and its arguments resolve **semantically** against the operation table (section 6.0), not by the grammar - there are no per-verb productions and no verb keywords. Newlines are permitted inside an argument list. A target is either a name, which must reference a rule or sequence its module sees (sections 2.6 and 6.10; semantic check; forward references are fine), or an **inline rule**, which begins with `{` or with its attributes. After `grow` or `settle`, a `(` followed by `IDENT '='` begins inline-rule attributes rather than a count. A guard (`when`) may follow any statement.
+A statement is either an **operation call** (`op_call` - a built-in operation applied to the grid stack, section 6.0) or an **application** (`apply_stmt` - a mode keyword, with its count where the mode takes one, and a target). In an `op_call`, arguments are **positional first, then named**; the operation name and its arguments resolve **semantically** against the operation table (section 6.0), not by the grammar - there are no per-verb productions and no verb keywords. Newlines are permitted inside an argument list. Every argument is an expression (section 5.8), resolved by the kind of the parameter it fills (section 6.0); a named argument begins with `IDENT '='`, a single `=` (`==` begins an expression). A target is either a name, which must reference a rule or sequence its module sees (sections 2.6 and 6.10; semantic check; forward references are fine), or an **inline rule**, which begins with `{` or with its attributes. After `grow` or `settle`, a `(` followed by `IDENT '='` begins inline-rule attributes rather than a count. A guard (`when`) may follow any statement.
 
 **Modes.** The mode fixes how many applications occur and what each one sees (section 6.7 for rules, section 6.10 for sequences):
 
@@ -742,12 +748,14 @@ Each parameter has a **kind**, a **binding** (positional or named-only), and req
 
 | kind | written as | resolves to |
 |------|-----------|-------------|
-| `int` | INTEGER | an integer literal |
+| `int` | a number expression, statement scope (section 5.8) | an integer, evaluated once when the statement is reached |
 | `grid` | IDENT | a declared grid name (section 4) |
-| `pred` | a tag value, or `( bool-expr )` | a per-cell predicate (a tag means "cell holds this tag"; an expression means its truth per cell) |
-| `value` | a tag value, INTEGER, or `( expr )` | a cell value to write (typed by the target grid) |
-| `expr` | INTEGER or `( expr )` | a numeric expression evaluated per cell |
+| `pred` | a tag value or union, or a boolean expression, cell scope | a per-cell predicate (a tag or union means "cell overlaps this mask", section 6.6; an expression means its truth per cell) |
+| `value` | a tag value or union, or an expression typed by the target grid, cell scope | a cell value to write |
+| `expr` | a number expression, cell scope | a numeric expression evaluated per cell |
 | `enum{...}` | IDENT or INTEGER | one of a fixed set (validated per operation) |
+
+Every argument is written as an expression (section 6 grammar). A `grid` or `enum` argument must be a bare `IDENT` or `INTEGER`. For `pred` and `value`, a bare `IDENT` is first resolved as a tag value or union (section 6.6); any other argument resolves under section 5.8. Parenthesized forms such as `passable=((0 == 0))` remain valid, since a parenthesized expression is an expression.
 
 **Operation table.**
 
@@ -762,7 +770,7 @@ Each parameter has a **kind**, a **binding** (positional or named-only), and req
 
 **Binding: positional vs. named-only.** Each parameter is declared **positional** or **named-only** by convention: positional when its meaning is obvious from the operation and its order (a single argument, or an unmistakable order like width-then-height); named-only when the operation has several same-kind or optional arguments with no self-evident order. So `resize(10, 20)`, `pad(2)`, `mirror(horizontal)` read clean without names, while `path(from=..., to=..., ...)` is named throughout. A positional parameter may also be supplied by name; a named-only parameter supplied positionally is an error.
 
-**Argument resolution.** Positional arguments come first and fill positional parameters left to right; named arguments follow and fill by name. A parameter may be given at most once; omitted optional parameters take their default. The validator checks, per call: the operation exists; positional args do not exceed the positional parameters; no named-only parameter given positionally; every named argument names a real parameter; no parameter supplied twice; every required parameter present; each argument's kind matches; each `enum` value is in range (section 7.3, checks 32-36). This one check-set covers every operation, present and future - a new operation is a table row plus an executor, with no grammar or keyword change (see section 9 for anticipated entries).
+**Argument resolution.** Positional arguments come first and fill positional parameters left to right; named arguments follow and fill by name. A parameter may be given at most once; omitted optional parameters take their default. The validator checks, per call: the operation exists; positional args do not exceed the positional parameters; no named-only parameter given positionally; every named argument names a real parameter; no parameter supplied twice; every required parameter present; each argument's kind and scope match; each `enum` value is in range (section 7.3, checks 32-36). This one check-set covers every operation, present and future - a new operation is a table row plus an executor, with no grammar or keyword change (see section 9 for anticipated entries).
 
 ### 6.1 `resize(W, H)`
 
@@ -774,11 +782,13 @@ Sets the active grid size to W columns by H rows, across all layers. The grid **
 - **Shrinking** (new W/H smaller): the top-left W x H region is kept; cells outside it are discarded.
 - **Unchanged** dimension: no effect on that axis.
 
-`resize` never clears surviving content. (To discover-and-crop by content, use `trim`, section 6.3; to add margins, use `pad`, section 6.5.) Dimensions must be positive.
+`resize` never clears surviving content. (To discover-and-crop by content, use `trim`, section 6.3; to add margins, use `pad`, section 6.5.)
+
+Dimensions are statement-scope expressions (section 6.0), so a generator can size its grid from its params: `resize(map_w, map_h)`, `resize(size * 2, size)`. A dimension below 1 makes the statement a no-op with a runtime warning (section 7.4); `resize` has no value that would leave the grid unchanged.
 
 ### 6.2 `upscale(N, M)`
 
-Multiplies the current grid size by N in width and M in height. Every existing cell is duplicated into an N x M block across all layers, preserving its value. Empty cells remain empty after upscale. Factors must be positive.
+Multiplies the current grid size by N in width and M in height. Every existing cell is duplicated into an N x M block across all layers, preserving its value. Empty cells remain empty after upscale. Factors are statement-scope expressions (section 6.0). A factor below 1 is treated as 1, leaving that axis unchanged, with a runtime warning (section 7.4).
 
 ### 6.3 `trim()`
 
@@ -818,7 +828,7 @@ The origin-side half (left / top) is the source and is never modified; the far h
 
 ### 6.5 `pad(N)`
 
-Adds `N` empty rows/columns on **all four sides**, across all layers, shifting existing content by (N, N). New size = (W + 2N, H + 2N); added cells are empty. `N` is non-negative.
+Adds `N` empty rows/columns on **all four sides**, across all layers, shifting existing content by (N, N). New size = (W + 2N, H + 2N); added cells are empty. `N` is a statement-scope expression (section 6.0); a margin below 0 is treated as 0, adding nothing, with a runtime warning (section 7.4).
 
 `pad` is the only geometric operation not top-left anchored - a uniform border necessarily moves content off the origin, which is its purpose (framing a generated region, spacing a mirrored arena). To *remove* margins, use `resize` (top-left crop) or `trim` (content crop); `pad` only adds. Uniform-only is deliberate: per-side margins would reserve `left`/`right`/`top`/`bottom`, prime identifier names in generators. If non-square margins are ever needed, `pad(horizontal=N, vertical=M)` reusing the existing axis vocabulary is the keyword-free extension point.
 
@@ -827,7 +837,7 @@ Adds `N` empty rows/columns on **all four sides**, across all layers, shifting e
 Computes a shortest route from any `from` cell to the nearest reachable `to` cell over the traversable cells, and writes `write` into `into` along that route (endpoints included and overwritten). Other cells of `into` are left as they are. The first **structural** operation: the non-local work is one operation; downstream *rules* consume the result with ordinary same-position reads.
 
 Parameters (section 6.0):
-- `from : pred` (required) - start cell(s): a tag or `( bool-expr )`; multi-source allowed.
+- `from : pred` (required) - start cell(s): a tag or union, or a boolean expression; multi-source allowed.
 - `to : pred` (required) - goal cell(s); the route ends at the nearest reachable one.
 - `into : grid` (required) - the grid the route is stamped into.
 - `write : value` (required) - the value stamped on each route cell (typed by `into`).
@@ -952,7 +962,7 @@ The body is a `statement_list` (section 6): rule applications, sequence applicat
 
 **Draw order.** A sequence application has no draw sites of its own, and the stability check draws nothing. Body statements draw per section 10.6 as each one is reached, iteration after iteration.
 
-**The dimension warning.** For `settle S` without a count, the compiler warns when no iteration can be stable because every iteration changes the grid dimensions. This happens when S's body contains an `upscale` whose factors are not both 1, or a `pad` whose margin is greater than 0, and that operation is **reached on every iteration**. That requires two things: neither the operation nor any enclosing nested sequence application carries a `when` guard, and every enclosing nested application runs at least one iteration, which holds for `once`, for `settle` without a count, and for a count written as a literal (a literal `0` is an error, check 28), but not for a computed count, which may be zero. The warning reads: *"'settle' over sequence '<name>' may never terminate: '<operation>' changes the grid dimensions on every iteration, so no iteration can be stable."*
+**The dimension warning.** For `settle S` without a count, the compiler warns when no iteration can be stable because every iteration changes the grid dimensions. This happens when S's body contains an `upscale` whose factors are both written as literals and are not both 1, or a `pad` whose margin is written as a literal greater than 0, and that operation is **reached on every iteration**. A computed factor may be 1 and a computed margin may be 0, so computed arguments suppress the warning. That requires two things: neither the operation nor any enclosing nested sequence application carries a `when` guard, and every enclosing nested application runs at least one iteration, which holds for `once`, for `settle` without a count, and for a count written as a literal (a literal `0` is an error, check 28), but not for a computed count, which may be zero. The warning reads: *"'settle' over sequence '<name>' may never terminate: '<operation>' changes the grid dimensions on every iteration, so no iteration can be stable."*
 
 Like the reductivity warning, this check is conservative. A guard suppresses the warning, because it may be false. Silence proves nothing, because a rule in the body can still keep recreating its own match. Bounded applications (`once`, `settle(N)`) are never warned: `settle(3) grow_and_upscale` is legitimate intended growth.
 
@@ -1004,7 +1014,7 @@ The compiler must reject:
 18. **Invalid transform value.** A `rotation=` value that is not `none`/`all`, a bare `90`/`180`/`270`, or a set `{...}` of those angles; a `symmetry=` value other than `none`/`horizontal`/`vertical`/`all`; or an angle set containing a value other than 90/180/270. (An empty set `{}` and a `symmetry` set are also errors.)
 19. **Function arity.** A built-in call with the wrong number of arguments.
 20. **Function argument type.** A built-in argument of the wrong kind (e.g. `abs` of a tag); or `if` whose two branches differ in type; or `if` whose condition is not bool.
-21. **Count scope.** A count (section 6) that reads a grid, `x`/`y`, or `width`/`height`; or whose expression is not a `number`.
+21. **Statement-scope expression.** A count (section 6) or an `int` operation argument (section 6.0) that reads a grid, `x`/`y`, or `width`/`height`; or whose expression is not a `number`.
 22. **Guard scope.** A `when` guard that reads a grid, `x`/`y`, or `width`/`height`; or whose expression is not boolean.
 23. **Derived param scope.** A derived param expression that reads a grid, `x`/`y`, or `width`/`height`; or that forward-references a later param; or that participates in a cycle.
 24. **Derived param type.** A derived param whose expression is not a `number`.
@@ -1018,8 +1028,8 @@ The compiler must reject:
 32. **Unknown operation.** An `op_call` (section 6.0) whose name is not in the operation table.
 33. **Operation argument arity/binding.** More positional arguments than the operation's positional parameters; a named-only parameter supplied positionally; a named argument preceding a positional one; or a parameter supplied both positionally and by name.
 34. **Missing required operation argument.** A required parameter not supplied.
-35. **Operation argument kind / enum.** An argument whose kind does not match the parameter (e.g. `grid` given a non-grid); an `enum` value outside its set (`mirror` axis not in {horizontal, vertical}; `connectivity` not in {4, 8}); or an ambiguous bare-tag `pred` (no layer the module sees, or more than one, could hold the tag - section 6.6).
-36. **Operation value constraint.** `resize`/`upscale` dimensions must be positive; a `pad` margin must be non-negative. (Value checks applied after kind resolution.)
+35. **Operation argument kind / enum.** An argument whose kind does not match the parameter (e.g. `grid` given a non-grid, or a non-bare expression where a `grid` or `enum` argument is required); an `enum` value outside its set (`mirror` axis not in {horizontal, vertical}; `connectivity` not in {4, 8}); or an ambiguous bare-tag `pred` (no layer the module sees, or more than one, could hold the tag - section 6.6).
+36. **Operation value constraint.** Retired in 0.9.2: out-of-range `resize`, `upscale`, and `pad` values are handled at run time, with a warning (sections 6.1, 6.2, 6.5, 7.4).
 37. **Mode on a sequence.** `scatter`, `everywhere`, or `grow` applied to a sequence (section 6.10).
 38. **Sequence cycle.** A sequence that applies itself, directly or through other sequences.
 39. **Duplicate rule or sequence name.** Rules and sequences share one namespace: two declarations with the same name anywhere in the closure (section 2.6), whether both are rules, both are sequences, or one of each.
@@ -1039,11 +1049,14 @@ Warnings never stop compilation or execution; the runtime degrades with a warnin
 **Compile-time warnings** (surfaced via `generator::warnings()`, Appendix A):
 
 1. **Reductivity.** `grow` without a count over a rule where no unconditional write invalidates its own LHS - "may never terminate" (section 6.9). Not an error: the analysis is conservative, and a build pipeline may still choose to treat warnings as failures.
-2. **Unreachable sequence fixpoint.** `settle` without a count over a sequence where every iteration is certain to change the grid dimensions, through an `upscale` or `pad` reached on every iteration (section 6.10).
+2. **Unreachable sequence fixpoint.** `settle` without a count over a sequence where every iteration is certain to change the grid dimensions, through an `upscale` or `pad` with literal arguments reached on every iteration (section 6.10).
 
 **Runtime warnings** (logged; the statement becomes a no-op):
 
 - `trim()` on an entirely empty stack (section 6.3).
+- `resize(...)` with a dimension below 1; the statement is a no-op (section 6.1).
+- `upscale(...)` with a factor below 1; the factor is treated as 1 (section 6.2).
+- `pad(...)` with a margin below 0; the margin is treated as 0 (section 6.5).
 - `path(...)` with no reachable route, or an empty `from`/`to` set (section 6.6); `path` before any `resize` (zero-sized stack).
 
 ---
@@ -1217,7 +1230,7 @@ When a `where` or match cell contains `random`, the matcher's expression-cell or
 A single PRNG stream (`mt19937_64` in the reference implementation), seeded from the invocation seed, drives all stochastic decisions. Every draw site is ordered by the execution model, so the sequence is fixed per (entry, seed, params):
 
 1. **Param expressions** (section 4.2) evaluate once at startup, in canonical declaration order (section 2.6), an input's default only when the param was not supplied - their draws come first.
-2. A **`when` guard** (section 6) evaluates once when its statement is reached, in statement order; if it passes, the statement's **count** (section 6), if any, evaluates next.
+2. A **`when` guard** (section 6) evaluates once when its statement is reached, in statement order; if it passes, the statement's **count** (section 6), if any, evaluates next, or, for an operation call, its `int` arguments (section 6.0), in written order.
 3. **Match-cell and `where`-cell** expressions evaluate during the collection scan, in row-major anchor order and, within an anchor, in sub-rule/variant declaration order. For each candidate, bare cells are tested first and draw nothing; only if all of them match do expression cells evaluate, pattern by pattern in match-side order and row-major within each pattern as the variant lays it out, short-circuiting on the first that fails (section 5.11) - a `random` in a cell not reached does not draw.
 4. **Candidate ordering** draws next: the pass's seeded shuffle (batch modes and `settle` sweeps) or the single uniform pick (step modes), per section 10.4.
 5. **At application**: one draw per `{ any }` node on the resolved write path, outer before inner, earlier sibling first (a single-item `{ any }` still draws, section 5.2); then write-cell expressions, row-major per resolved leaf.
