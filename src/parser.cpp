@@ -718,33 +718,23 @@ struct parser {
         }
     }
 
-    // One op-call argument value: INTEGER (a leading '-' is accepted so value
-    // constraints stay semantic checks), IDENT, or '(' expr ')'.
+    // One op-call argument (section 6): an expression. A lone INTEGER or IDENT
+    // (the whole argument) keeps its bare form too: `grid` and `enum`
+    // arguments must be bare, and a bare name tries tags first (section 6.0).
+    // `value` always holds the expression.
     bool parse_op_arg_value(op_arg& a) {
-        if (accept(token_type::minus)) {
-            if (!expect(token_type::integer, "an integer")) return false;
-            a.int_val = -toks[pos - 1].int_val;
-            return true;
-        }
-        if (at(token_type::integer)) {
-            a.int_val = eat().int_val;
-            return true;
-        }
-        if (at(token_type::lparen)) {
-            eat();
-            a.what = op_arg::kind::expr;
-            a.value = parse_expr();
-            return expect(token_type::rparen, "')'");
-        }
-        // bare identifier — a grid name, tag value, or enum word
-        if (at(token_type::ident)) {
+        bool ends = peek(1).is(token_type::comma) || peek(1).is(token_type::rparen);
+        if (ends && at(token_type::integer)) {
+            a.what = op_arg::kind::int_;
+            a.int_val = peek().int_val;
+        } else if (ends && at(token_type::ident)) {
             a.what = op_arg::kind::ident;
-            a.ident = eat().text;
-            return true;
+            a.ident = peek().text;
+        } else {
+            a.what = op_arg::kind::expr;
         }
-        error_at(peek(), "expected an argument (an integer, a name, or a "
-                 "parenthesized expression)");
-        return false;
+        a.value = parse_expr();
+        return true;
     }
 
     void parse_op_call(program_stmt& s) {

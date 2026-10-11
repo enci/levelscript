@@ -162,8 +162,12 @@ struct compiled_value {
 
 struct compiled_op {
     op_kind kind{op_kind::trim};
-    // resize/upscale dims; pad margin (w); mirror axis (w: 1 = horizontal)
-    int w{0}, h{0};
+    // The `int` arguments (resize w/h, upscale n/m, pad n): statement-scope
+    // expressions (section 6.0), in written order - the order they evaluate
+    // in when the statement is reached. `param` is the parameter's index.
+    struct int_arg { int param{0}; int expr{-1}; };
+    std::vector<int_arg> int_args;
+    int w{0};   // mirror axis: 1 = horizontal
     // path (section 6.6)
     compiled_pred  from, to;
     compiled_pred  passable;        // !given → default: non-empty in any layer

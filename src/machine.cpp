@@ -371,29 +371,49 @@ static void rebuild(grid_state& g, int nr, int nc, F&& src) {
 }
 
 void machine::exec_op(compiled_op const& op) {
+    // `int` arguments evaluate now, after the guard, in written order
+    // (section 10.6); out-of-range values are handled below (section 7.4).
+    long long arg[2] = {0, 0};
+    for (auto const& ia : op.int_args) arg[ia.param] = eval(ia.expr, 0, 0);
+
     switch (op.kind) {
 
-    case op_kind::resize:   // content-preserving, top-left anchored (section 6.1)
-        rows_ = op.h;
-        cols_ = op.w;
+    case op_kind::resize: { // content-preserving, top-left anchored (section 6.1)
+        if (arg[0] < 1 || arg[1] < 1) {
+            std::cerr << "warning: resize(" << arg[0] << ", " << arg[1]
+                      << ") has a dimension below 1; leaving grids unchanged\n";
+            return;
+        }
+        int w = (int)arg[0], h = (int)arg[1];
+        rows_ = h;
+        cols_ = w;
         for (auto& g : grids_)
-            rebuild(g, op.h, op.w, [&g](int r, int c) {
+            rebuild(g, h, w, [&g](int r, int c) {
                 return r < g.rows && c < g.cols ? g.get(r, c) : g.empty_raw();
             });
         return;
+    }
 
-    case op_kind::upscale:  // duplicate every cell into an n x m block (section 6.2)
-        rows_ *= op.h;
-        cols_ *= op.w;
+    case op_kind::upscale: { // duplicate every cell into an n x m block (section 6.2)
+        if (arg[0] < 1 || arg[1] < 1)
+            std::cerr << "warning: upscale(" << arg[0] << ", " << arg[1]
+                      << ") has a factor below 1; treating it as 1\n";
+        int n = arg[0] < 1 ? 1 : (int)arg[0], m = arg[1] < 1 ? 1 : (int)arg[1];
+        rows_ *= m;
+        cols_ *= n;
         for (auto& g : grids_)
-            rebuild(g, g.rows * op.h, g.cols * op.w, [&g, &op](int r, int c) {
-                return g.get(r / op.h, c / op.w);
+            rebuild(g, g.rows * m, g.cols * n, [&g, n, m](int r, int c) {
+                return g.get(r / m, c / n);
             });
         return;
+    }
 
     case op_kind::pad: {    // uniform empty border on all sides (section 6.5)
-        int n = op.w;
-        if (n <= 0) return;
+        if (arg[0] < 0)
+            std::cerr << "warning: pad(" << arg[0]
+                      << ") has a margin below 0; treating it as 0\n";
+        int n = arg[0] < 0 ? 0 : (int)arg[0];
+        if (n == 0) return;
         rows_ += 2 * n;
         cols_ += 2 * n;
         for (auto& g : grids_)

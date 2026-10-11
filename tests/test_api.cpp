@@ -1335,3 +1335,79 @@ sequence main {
                            -1, -1, 1,
                            -1, -1, -1});
 }
+
+// ── expressions in operation arguments (0.9.2, section 6.0) ──────────────────
+
+static ls::level sized(std::string const& stmts, std::vector<std::pair<std::string, int>> params = {}) {
+    auto gen = make("layers { tiles: grid of number }\n"
+                    "params {\n    w: number = 5\n    h: number = 3\n    size: number = 4\n"
+                    "    f: number = 3\n    margin: number = 2\n}\n"
+                    "sequence main {\n" + stmts + "\n}\n");
+    INFO(gen.error());
+    REQUIRE(static_cast<bool>(gen));
+    return gen.generate(gen.sequence("main"), 1, params);
+}
+
+TEST_CASE("api: int arguments are statement-scope expressions (0.9.2)") {
+    auto a = sized("resize(w, h)");
+    CHECK(a.width() == 5);
+    CHECK(a.height() == 3);
+    auto b = sized("resize(w, h)", {{"w", 7}, {"h", 2}});
+    CHECK(b.width() == 7);
+    CHECK(b.height() == 2);
+    auto c = sized("resize(size * 2, size)");
+    CHECK(c.width() == 8);
+    CHECK(c.height() == 4);
+    auto d = sized("resize(2, 2)\n upscale(f, 1)");
+    CHECK(d.width() == 6);
+    CHECK(d.height() == 2);
+    auto e = sized("resize(2, 2)\n pad(margin)");
+    CHECK(e.width() == 6);
+    CHECK(e.height() == 6);
+    auto named = sized("resize(h=h, w=w)");   // named arguments in any order
+    CHECK(named.width() == 5);
+    CHECK(named.height() == 3);
+}
+
+TEST_CASE("api: out-of-range operation values are handled at run time (0.9.2)") {
+    // resize below 1: a no-op (with a warning on stderr)
+    for (char const* stmts : {"resize(4, 4)\n resize(w, 5)", "resize(4, 4)\n resize(0, 5)",
+                              "resize(4, 4)\n resize(5, -2)"}) {
+        INFO(stmts);
+        auto l = sized(stmts, {{"w", 0}});
+        CHECK(l.width() == 4);
+        CHECK(l.height() == 4);
+    }
+    // pad below 0: treated as 0
+    for (char const* stmts : {"resize(3, 3)\n pad(margin)", "resize(3, 3)\n pad(-1)"}) {
+        INFO(stmts);
+        auto l = sized(stmts, {{"margin", -1}});
+        CHECK(l.width() == 3);
+        CHECK(l.height() == 3);
+    }
+    // upscale below 1: that factor is treated as 1
+    auto u = sized("resize(3, 2)\n upscale(0, 2)");
+    CHECK(u.width() == 3);
+    CHECK(u.height() == 4);
+}
+
+TEST_CASE("api: int arguments evaluate after the guard, drawing like a count (0.9.2)") {
+    // random(4, 4) always yields 4 but still draws once, exactly like a guard
+    auto a = make(counted("resize(random(10, 10), 10)\n    scatter(4) paint"));
+    auto b = make(counted("resize(10, 10)  when (random(1, 1) == 1)\n    scatter(4) paint"));
+    auto c = make(counted("scatter(4) paint"));
+    REQUIRE(static_cast<bool>(a));
+    REQUIRE(static_cast<bool>(b));
+    int differs = 0;
+    for (uint64_t seed = 1; seed <= 10; ++seed) {
+        auto la = dump(a.generate(a.sequence("main"), seed), "level");
+        CHECK(la == dump(b.generate(b.sequence("main"), seed), "level"));
+        if (la != dump(c.generate(c.sequence("main"), seed), "level")) ++differs;
+    }
+    CHECK(differs > 0);   // the extra draw shifts later shuffles
+    // a false guard skips the arguments, and their draws
+    auto skipped = make(counted("resize(random(10, 10), 10)  when (n > 100)\n    scatter(4) paint"));
+    for (uint64_t seed = 1; seed <= 10; ++seed)
+        CHECK(dump(skipped.generate(skipped.sequence("main"), seed), "level") ==
+              dump(c.generate(c.sequence("main"), seed), "level"));
+}

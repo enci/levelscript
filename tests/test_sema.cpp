@@ -77,7 +77,8 @@ sequence main { }
 TEST_CASE("sema: operation table") {
     CHECK(compile_result(prelude + "sequence main { warp(3, 3) }").has_error("unknown operation"));
     CHECK(compile_result(prelude + "sequence main { resize(3) }").has_error("requires argument 'h'"));
-    CHECK(compile_result(prelude + "sequence main { resize(0, 5) }").has_error("must be positive"));
+    // out-of-range values are handled at run time (0.9.2; check 36 retired)
+    CHECK(compile_result(prelude + "sequence main { resize(0, 5) }").ok);
 }
 
 TEST_CASE("sema: a literal zero count is rejected (check 28)") {
@@ -447,10 +448,8 @@ TEST_CASE("sema: operation argument kinds and constraints") {
           .has_error("invalid mirror axis"));
     CHECK(compile_result(prelude + "sequence main { mirror(3) }")
           .has_error("invalid mirror axis '3'"));
-    CHECK(compile_result(prelude + "sequence main { pad(-1) }")
-          .has_error("must be non-negative"));
-    CHECK(compile_result(prelude + "sequence main { upscale(0, 2) }")
-          .has_error("must be positive"));
+    CHECK(compile_result(prelude + "sequence main { pad(-1) }").ok);   // run time (0.9.2)
+    CHECK(compile_result(prelude + "sequence main { upscale(0, 2) }").ok);
     CHECK(compile_result(path_pre +
           "sequence main { path(from=door, to=exit, into=nope, write=road) }")
           .has_error("not a declared grid"));
@@ -764,4 +763,51 @@ TEST_CASE("sema: reductivity sees through '!.' (0.9.1)") {
     CHECK(!warns("rule r { level[!.] => level[.] }"));
     CHECK(!warns("rule r { tiles[!.] => tiles[.] }"));
     CHECK(!warns("rule r { level[.|wall] => level[floor] }"));
+}
+
+// ── expressions in operation arguments (0.9.2) ───────────────────────────────
+
+TEST_CASE("sema: operation arguments are expressions resolved by kind (0.9.2, 6.0)") {
+    auto ok = [](std::string const& src) {
+        compile_result r(src);
+        INFO(r.diags.format_all());
+        return r.ok;
+    };
+    std::string params = prelude + "params { w: number = 4\n h: number = 3\n f: number = 2 }\n";
+    CHECK(ok(params + "sequence main { resize(w, h) }"));
+    CHECK(ok(params + "sequence main { resize(w * 2, h + 1)  upscale(f, 1)  pad(f - 1) }"));
+    CHECK(ok(params + "sequence main { resize(random(2, 9), 4) }"));
+    // statement scope (check 21): params only, a number
+    CHECK(compile_result(params + "sequence main { resize(width, 5) }")
+          .has_error("cannot be read here"));
+    CHECK(compile_result(params + "sequence main { resize(x, 5) }")
+          .has_error("cannot be read here"));
+    CHECK(compile_result(params + "sequence main { resize(level, 5) }")
+          .has_error("cannot be read here"));
+    CHECK(compile_result(params + "sequence main { resize(w > 1, 5) }")
+          .has_error("must be a number"));
+    // grid and enum arguments are bare (check 35)
+    CHECK(compile_result(prelude + "sequence main { mirror((horizontal)) }")
+          .has_error("invalid mirror axis"));
+    CHECK(compile_result(path_pre + "sequence main { path(from=door, to=exit, into=(algo), write=road) }")
+          .has_error("expects a grid name"));
+}
+
+TEST_CASE("sema: path arguments need no parentheses (0.9.2, 6.0)") {
+    auto ok = [](std::string const& src) {
+        compile_result r(src);
+        INFO(r.diags.format_all());
+        return r.ok;
+    };
+    std::string head = path_pre + "params { c: number = 2 }\n";
+    // the old parenthesized forms still parse
+    CHECK(ok(head + "sequence main { path(from=door, to=exit, into=algo, write=road, "
+                    "passable=((0 == 0)), cost=(1 + tiles)) }"));
+    // and the bare forms are the same expressions
+    CHECK(ok(head + "sequence main { path(from=door, to=exit, into=algo, write=road, "
+                    "passable=tiles > 0, cost=1 + tiles) }"));
+    // a bare name that is not a tag value is an expression: a param here
+    CHECK(ok(head + "sequence main { path(from=door, to=exit, into=algo, write=road, cost=c) }"));
+    CHECK(ok(head + "sequence main { path(from=door, to=exit, into=tiles, write=c) }"));
+    CHECK(ok(head + "sequence main { path(from=door, to=exit, into=tiles, write=c * 2) }"));
 }

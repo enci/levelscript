@@ -1,6 +1,7 @@
-// E-op-7 (v0.7): an argument whose kind does not match the parameter (section 7.3, check 35).
+// E112 (0.9.2, check 21): an `int` argument is a statement-scope expression;
+// it reads params only, never a grid.
 // @expect error
-// @expect stderr-contains must be an integer
+// @expect stderr-contains cannot be read here
 tag t { a }
 layers { g: grid of t }
 sequence main { resize(g, 2) }

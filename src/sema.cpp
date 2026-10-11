@@ -1019,14 +1019,23 @@ struct analyzer {
 
     // ── per-kind argument compilers ──────────────────────────────────────────
 
-    bool op_int(op_arg const& a, char const* op, char const* pn, int& v) {
-        if (a.what != op_arg::kind::int_) {
+    // An `int` argument: a statement-scope number expression, like a count
+    // (check 21). Out-of-range values are handled at run time (section 6.0).
+    int op_int(op_arg const& a, char const* op, char const* pn) {
+        scope_ = scope{false, false, -1};
+        val_type t;
+        int e = compile_expr(*a.value, -1, t, (int)val_type::num);
+        scope_ = scope{};
+        if (t != val_type::num)
             error(a.loc, "argument '" + std::string(pn) + "' of '" + op +
-                  "' must be an integer, got '" + arg_render(a) + "'");
-            return false;
-        }
-        v = (int)a.int_val;
-        return true;
+                  "' must be a number");
+        return e;
+    }
+
+    // Is `name` an identifier an expression can read (section 5.8)? A bare
+    // `value`/`expr` argument that is not a tag value falls back to one.
+    bool readable_ident(std::string const& name) const {
+        return is_reserved_ident(name) || out.layer_id(name) >= 0 || out.param_id(name) >= 0;
     }
 
     int op_grid(op_arg const& a, char const* op, char const* pn) {
@@ -1099,7 +1108,10 @@ struct analyzer {
             v.const_val = a.int_val;
             return v;
         }
-        if (a.what == op_arg::kind::ident) {
+        if (a.what == op_arg::kind::ident &&
+                (is_number || out.mask_of(tid, a.ident) == 0) && readable_ident(a.ident)) {
+            // not a tag value: an expression (section 6.0)
+        } else if (a.what == op_arg::kind::ident) {
             if (is_number) {
                 error(a.loc, "'" + std::string(pn) + "=' of '" + op +
                       "' writes into a number grid; expected an integer");
@@ -1129,11 +1141,6 @@ struct analyzer {
     int op_expr(op_arg const& a, char const* op, char const* pn) {
         if (a.what == op_arg::kind::int_)
             return num_lit(a.int_val);
-        if (a.what != op_arg::kind::expr) {
-            error(a.loc, "'" + std::string(pn) + "=' of '" + op +
-                  "' expects an integer or a (numeric expression)");
-            return -1;
-        }
         val_type t;
         int e = compile_expr(*a.value, -1, t, (int)val_type::num);
         if (t != val_type::num)
@@ -1142,7 +1149,7 @@ struct analyzer {
         return e;
     }
 
-    // ── argument binding + per-op compilation (section 7.3, check 32–36) ─────────────────
+    // ── argument binding + per-op compilation (section 7.3, check 32–35) ─────────────────
 
     bool compile_op_call(program_stmt const& s, compiled_op& op) {
         op_spec const* spec = nullptr;
@@ -1218,18 +1225,14 @@ struct analyzer {
         op.kind = spec->kind;
         switch (spec->kind) {
         case op_kind::resize:
-        case op_kind::upscale: {
-            bool k = op_int(*bound[0], spec->name, spec->params[0].name, op.w)
-                   & op_int(*bound[1], spec->name, spec->params[1].name, op.h);
-            if (!k) return false;
-            if (op.w <= 0 || op.h <= 0) {
-                error(s.loc, std::string("'") + spec->name +
-                      "' dimensions must be positive; got " +
-                      std::to_string(op.w) + "x" + std::to_string(op.h));
-                return false;
-            }
+        case op_kind::upscale:
+        case op_kind::pad:
+            // written order (section 10.6), whether positional or named
+            for (auto const& a : s.op_args)
+                for (int i = 0; i < (int)spec->params.size(); ++i)
+                    if (bound[i] == &a)
+                        op.int_args.push_back({i, op_int(a, spec->name, spec->params[i].name)});
             break;
-        }
         case op_kind::trim:
             break;
         case op_kind::mirror: {
@@ -1242,15 +1245,6 @@ struct analyzer {
             op.w = axis == "horizontal" ? 1 : 0;
             break;
         }
-        case op_kind::pad:
-            if (!op_int(*bound[0], spec->name, spec->params[0].name, op.w))
-                return false;
-            if (op.w < 0) {
-                error(s.loc, "invalid pad argument; margin must be non-negative, got " +
-                      std::to_string(op.w));
-                return false;
-            }
-            break;
         case op_kind::path: {
             op.into_grid = op_grid(*bound[2], spec->name, "into");
             op.from      = op_pred(*bound[0], spec->name, "from");
@@ -1485,8 +1479,17 @@ struct analyzer {
         for (auto const& st : out.sequences[sid].stmts) {
             if (st.guard >= 0) continue;
             if (st.what == compiled_stmt::kind::op_call) {
-                if (st.op.kind == op_kind::upscale && (st.op.w != 1 || st.op.h != 1)) return "upscale";
-                if (st.op.kind == op_kind::pad && st.op.w > 0) return "pad";
+                // literal arguments only: a computed factor may be 1, a
+                // computed margin 0 - uncertain, so no warning
+                std::vector<long long> lit;
+                for (auto const& ia : st.op.int_args) {
+                    auto const& e = out.exprs[(size_t)ia.expr];
+                    if (e.kind != ce_kind::int_lit) { lit.clear(); break; }
+                    lit.push_back(e.val);
+                }
+                if (lit.size() != st.op.int_args.size() || lit.empty()) continue;
+                if (st.op.kind == op_kind::upscale && (lit[0] != 1 || lit[1] != 1)) return "upscale";
+                if (st.op.kind == op_kind::pad && lit[0] > 0) return "pad";
             } else if (st.seq_id >= 0 && (st.count < 0 || st.count_lit > 0)) {
                 // a computed count may be zero, so it is not certain to run
                 std::string inner = dims_changer(st.seq_id, seen);
