@@ -892,3 +892,17 @@ sequence main {
 )");
     CHECK(iterations(run_trace(make(a), 1), {2}) == 2);
 }
+
+TEST_CASE("sequence: computed operation arguments do not warn (0.9.2)") {
+    compile_result computed("layers { }\nparams { f: number = 2 }\n"
+                            "sequence widen { upscale(f, f) }\n"
+                            "sequence frame { pad(f) }\n"
+                            "sequence main { resize(1, 1)  settle widen  settle frame }\n");
+    CHECK(computed.ok);
+    CHECK(!has_warning(computed));
+    // a literal argument still warns, beside a computed one or not
+    compile_result literal("layers { }\n"
+                           "sequence widen { upscale(2, 2) }\n"
+                           "sequence main { resize(1, 1)  settle widen }\n");
+    CHECK(has_warning(literal, "'settle' over sequence 'widen' may never terminate: 'upscale'"));
+}
