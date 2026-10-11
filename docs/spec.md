@@ -1,6 +1,6 @@
 # LevelScript
 
-**Status**: Draft 0.9.0
+**Status**: Draft 0.9.1
 **File extension**: `.lvs`
 **CLI**: `levelscript [--seed N] [--entry name] [--param name=value ...] <file.lvs>` (`--entry` defaults to `main`, a tool convention; section 6)
 **Embedding**: namespace `ls::` (see Appendix A)
@@ -98,6 +98,7 @@ A pattern cell is an **expression** (section 5.8). Cells are whitespace-separate
   |------|---------|
   | `*` | match any value, incl. empty (mask = all bits); on the RHS, **preserve** (not in the write footprint, section 5.7) |
   | `.` | empty (mask `0x1`) - match empty, or on the RHS clear the cell |
+  | `!.` | non-empty (every value bit) - match any non-empty cell; **match-side only** |
   | *tag* | a tag value (its single bit) |
   | `!`*tag* | tag complement - **match-side only** |
   | *tag* `\|` *tag* ... | tag union (bitwise OR of masks) |
@@ -109,7 +110,7 @@ A pattern cell is an **expression** (section 5.8). Cells are whitespace-separate
 
 A bare `*` is always the wildcard; the multiplication operator `*` occurs only inside `( ... )`. A spaced operator (e.g. `wall | floor` with spaces) is **not** a bare cell - wrap it: `(wall | floor)`, or write it whitespace-free: `wall|floor`. A variable does not combine into a bare mask: `?a|wall` is a parse error; write `(?a | wall)`.
 
-A `mask_atom`'s `IDENT` (section 5.3) may be a `tag_value` or a `tag_union` (section 3); both resolve to masks and compose under `|` and `!` identically.
+A `mask_atom`'s `IDENT` (section 5.3) may be a `tag_value` or a `tag_union` (section 3); both resolve to masks and compose under `|` and `!` identically. A `mask_atom` may also be `.` (bit 0), which composes the same way on the match side: `!.` matches any non-empty cell, and `.|door` matches an empty cell or a door. On the write side `.` stands alone; a write-side union containing `.` is a compile error (check 47).
 
 ### 2.6 Modules
 
@@ -233,9 +234,9 @@ algo[.]       // match an empty cell
 algo[.]       // (on the RHS) clear the cell
 ```
 
-Numeric grids represent empty separately from `0`; `0` is a distinct stored value (section 10.3).
+Numeric grids represent empty separately from `0`; `0` is a distinct stored value (section 10.3). A number grid has no masks: its only mask forms are `.`, which matches or writes empty, and `!.`, which matches any stored number, `0` included (check 47).
 
-Matching is uniform across all mask forms: a pattern cell carries a mask, and it matches the stored cell when `(stored & pattern_mask) != 0`. Thus `.` (mask `0x1`) matches only empty; a tag `t` (its single bit) matches a cell containing `t`; `*` (all bits, section 2.5) matches anything including empty.
+Matching is uniform across all mask forms: a pattern cell carries a mask, and it matches the stored cell when `(stored & pattern_mask) != 0`. Thus `.` (mask `0x1`) matches only empty; `!.` (every bit except bit 0) matches any non-empty cell; a tag `t` (its single bit) matches a cell containing `t`; `*` (all bits, section 2.5) matches anything including empty.
 
 Empty is also nameable in expressions as the literal `.` (section 5.8): `(g == .)` tests empty, `(g != .)` tests non-empty, and a `.` result on the RHS clears the cell.
 
@@ -411,11 +412,11 @@ pattern_head ::= IDENT | 'where'
 cell_grid    ::= cell_row (row_sep cell_row)*
 row_sep      ::= ',' WS* NEWLINE? | NEWLINE
 cell_row     ::= WS* cell (WS+ cell)* WS*
-cell         ::= '*' | '.' | INTEGER | tag_mask | VARIABLE | '(' expr ')'
+cell         ::= '*' | INTEGER | tag_mask | VARIABLE | '(' expr ')'
 tag_mask     ::= mask_atom ('|' mask_atom)*
-mask_atom    ::= '!'? IDENT
+mask_atom    ::= '!'? (IDENT | '.')
 ```
-A `tag_mask` is whitespace-free (the cell ends at the next whitespace or comma). A comma inside `( ... )` belongs to the expression; only a comma outside parentheses separates rows. `expr` inside `( ... )` follows section 5.8 and may contain whitespace. `tag_mask` and the bare-`*`/`.` forms are exactly the mask literals, and a bare `VARIABLE` is a pattern variable (section 5.11); every other expression must be parenthesized.
+A `tag_mask` is whitespace-free (the cell ends at the next whitespace or comma). A comma inside `( ... )` belongs to the expression; only a comma outside parentheses separates rows. `expr` inside `( ... )` follows section 5.8 and may contain whitespace. `tag_mask` (which includes bare `.` and `!.`) and the bare `*` are exactly the mask literals, and a bare `VARIABLE` is a pattern variable (section 5.11); every other expression must be parenthesized.
 
 The opening `[` may be followed immediately by content on the same line or by a newline starting the first row. The closing `]` may follow the last row or sit on its own line.
 
@@ -625,7 +626,7 @@ rule fall {
 **Binding.** Every bare `?a` cell on the match side is a **binding cell** of `a`. A candidate matches only if all binding cells of `a` hold **non-empty** values that are **equal**; `a` then denotes that value. Binding is order-free: no binding cell is privileged, and equality is symmetric and transitive, so the cell order a symmetry or rotation variant produces (section 5.6) cannot change the outcome.
 
 - **Equality** is exact: two tag masks are equal iff they are bitwise identical (a cell holding `wall|floor` equals only another `wall|floor`), and two numbers iff they are the same integer. This is the `==` of section 5.8, not the overlap test of a mask cell.
-- **Non-empty.** A binding cell never matches an empty cell (section 4.1); match empty with `.`. Capturing empty would add nothing a `.` write cannot do, and it would let a moving rule such as `fall` match empty over empty forever. In a number grid, a stored `0` is non-empty.
+- **Non-empty.** A binding cell never matches an empty cell (section 4.1); match empty with `.`, and match "any non-empty value" without binding one with `!.`. Capturing empty would add nothing a `.` write cannot do, and it would let a moving rule such as `fall` match empty over empty forever. In a number grid, a stored `0` is non-empty.
 - **Type.** All binding cells of one variable lie in grids of one type: the same tagset, or all `number` (check 45). They may lie in different grids: `level[?t] backup[?t]` matches where the two grids agree.
 
 A parenthesized `(?a)` is an expression cell, not a binding cell: it binds nothing and matches by the rules of section 5.3 (the overlap test on a tag grid).
@@ -997,7 +998,7 @@ The compiler must reject:
 12. **Reserved-name collision.** A tag value, grid, or param named `x`, `y`, `width`, or `height`; or a param colliding with a grid name.
 13. **Bare computed expression.** A computed expression (comparison/arithmetic/logical/call) in a cell without enclosing `( ... )`.
 14. **Expression type errors.** An operator applied to the wrong value kind; an expression in a real cell not evaluating to the grid's type; comparing across distinct tagsets; a `.` with no inferable type.
-15. **Complement write.** `!`tag used on the RHS (complement is match-side only).
+15. **Complement write.** `!`tag or `!.` used on the RHS (complement is match-side only).
 16. **Unknown function.** A call to a name that is not a section 5.10 built-in.
 17. **Duplicate params block.** More than one `params` block per module.
 18. **Invalid transform value.** A `rotation=` value that is not `none`/`all`, a bare `90`/`180`/`270`, or a set `{...}` of those angles; a `symmetry=` value other than `none`/`horizontal`/`vertical`/`all`; or an angle set containing a value other than 90/180/270. (An empty set `{}` and a `symmetry` set are also errors.)
@@ -1029,6 +1030,7 @@ The compiler must reject:
 44. **Unbound variable.** A pattern variable used in an expression or on the write side with no binding cell (a bare occurrence) on the match side of its pattern pair (section 5.11).
 45. **Variable type.** Binding cells of one variable in grids of different types (distinct tagsets, or a tag grid and a `number` grid); or a bare variable written into a grid whose type differs from the variable's.
 46. **Variable outside a pattern.** A pattern variable in a `when` guard, a count, a param expression, or an operation argument; or a bare variable cell in a `where` pattern (`where` cells are boolean expressions, section 5.9).
+47. **Misplaced empty mask.** A write-side `tag_mask` that unions `.` with any other atom (e.g. `.|wall`); or, in a number grid, a `tag_mask` other than `.` or `!.` (section 4.1).
 
 ### 7.4 Warnings
 
@@ -1189,7 +1191,7 @@ Symmetry and rotation are expanded at compile time. `symmetry` contributes up to
 
 The per-pass snapshot (section 7.1) is implementable several ways; a pass is the whole statement for a batch mode, one sweep for `settle`, and one application for a step mode. The reference runtime uses a **full copy** (double buffering: matches read the front buffer, writes go to the back, then swap); copy-on-write side tables or per-cell versioning are equivalent and cheaper when few cells are written. A full copy is recommended until profiling says otherwise.
 
-**Empty in number grids.** A `grid of number` stores an **empty sentinel** distinct from every representable integer (a reserved value or a parallel presence bit). Reads coerce the sentinel to `0` for arithmetic and comparison (section 5.8); the `(g == .)` / `(g != .)` tests inspect the sentinel directly, before coercion. Writing `.` stores the sentinel. Tag grids need no sentinel - empty is bit 0 of the mask (section 4.1).
+**Empty in number grids.** A `grid of number` stores an **empty sentinel** distinct from every representable integer (a reserved value or a parallel presence bit). Reads coerce the sentinel to `0` for arithmetic and comparison (section 5.8); the `(g == .)` / `(g != .)` tests and the `.` / `!.` cells inspect the sentinel directly, before coercion. Writing `.` stores the sentinel. Tag grids need no sentinel - empty is bit 0 of the mask (section 4.1).
 
 ### 10.4 Candidate collection and selection
 
