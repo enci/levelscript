@@ -22,7 +22,8 @@ directory):
     resources/icon/levelscript.ico       Windows executables and installer:
                                          flat up to FLAT_MAX px, full above
     extension/icon.png                   128 px, the VS Code extension
-    extension/file-icon.svg              the flat variant, .lvs files in VS Code
+    extension/file-icon.svg              the flat variant with a slimmer ribbon
+                                         (FILE_ICON_THICKNESS), .lvs files in VS Code
     packaging/windows/wizard-*.bmp       Inno Setup wizard images, 100% and 200%
     packaging/macos/background*.png      Installer background (icon bottom-left),
                                          1x and @2x; build_pkg.py joins them
@@ -47,6 +48,9 @@ RIBBON = "A1 A5 E5 E3 C3 C1 E1"
 # inward and the outline stays the same size. All other lengths in cells
 # (radii, shadow widths) use the nominal cell, 1/N of the icon.
 THICKNESS = 1.25
+# The .lvs file icon in VS Code's explorer, which is shown tiny among many
+# others: a slimmer ribbon keeps it from dominating the UI.
+FILE_ICON_THICKNESS = 1.0
 
 # Corner radii of the ribbon outline, in cells (0.5 = semicircular band end).
 # Where two corners share an edge too short for both, a piece's explicit
@@ -217,23 +221,23 @@ def band_lines(spec: str):
     return cols, rows
 
 
-def sizes(bands):
+def sizes(bands, thickness=THICKNESS):
     """Widths of the N columns (or rows), in nominal cells, summing to N."""
     rest = N - len(bands)
-    other = (N - THICKNESS * len(bands)) / rest if rest else 0
+    other = (N - thickness * len(bands)) / rest if rest else 0
     if rest and other <= 0:
-        raise ValueError(f"THICKNESS {THICKNESS} leaves no room between the bands")
-    return [THICKNESS if i in bands else other for i in range(N)]
+        raise ValueError(f"thickness {thickness} leaves no room between the bands")
+    return [thickness if i in bands else other for i in range(N)]
 
 
 class Grid:
-    def __init__(self, canvas=CANVAS, padding=PADDING):
+    def __init__(self, canvas=CANVAS, padding=PADDING, thickness=THICKNESS):
         self.size = canvas * (1 - 2 * padding)
         self.o = canvas * padding
         self.c = self.size / N  # nominal cell, the unit for radii and shadows
         cols, rows = band_lines(RIBBON)
-        self.xs = self._lines(sizes(cols))
-        self.ys = self._lines(sizes(rows))
+        self.xs = self._lines(sizes(cols, thickness))
+        self.ys = self._lines(sizes(rows, thickness))
 
     def _lines(self, widths):
         out, acc = [self.o], self.o
@@ -408,9 +412,9 @@ def visible_folds(pieces, ribbon_set):
     return out
 
 
-def build_svg(canvas=CANVAS, padding=PADDING, flat=False) -> str:
+def build_svg(canvas=CANVAS, padding=PADDING, flat=False, thickness=THICKNESS) -> str:
     """The icon as SVG; flat=True gives the simplified variant for tiny sizes."""
-    g = Grid(canvas, padding)
+    g = Grid(canvas, padding, thickness)
     tl, br = g.pt(0, 0), g.pt(N, N)
     if flat:
         fill = {"front": FLAT["front"], "back": FLAT["back"]}
@@ -498,7 +502,7 @@ def main():
 
     ext = ROOT / "extension"
     (ext / "icon.png").write_bytes(rasterize(svg, 128))
-    (ext / "file-icon.svg").write_text(flat)
+    (ext / "file-icon.svg").write_text(build_svg(flat=True, thickness=FILE_ICON_THICKNESS))
 
     win = ROOT / "packaging" / "windows"
     for scale, suffix in ((1, ""), (2, "@2x")):
