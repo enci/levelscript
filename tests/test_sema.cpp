@@ -81,11 +81,11 @@ TEST_CASE("sema: operation table") {
     CHECK(compile_result(prelude + "sequence main { resize(0, 5) }").ok);
 }
 
-TEST_CASE("sema: a literal zero count is rejected (check 28)") {
+TEST_CASE("sema: a zero count compiles; it applies nothing (check 28 retired)") {
     for (char const* stmt : {"scatter(0) r", "scatter(0%) r", "grow(0) r", "settle(0) r"}) {
         INFO(stmt);
         CHECK(compile_result(prelude + "rule r { level[.] => level[wall] }\nsequence main { " +
-                             stmt + " }").has_error("a count of 0"));
+                             stmt + " }").ok);
     }
 }
 
@@ -221,12 +221,13 @@ sequence main { }
 static const std::string rfill =
     "rule fill { level[.] => level[floor] }\n";
 
-TEST_CASE("sema: modes and literal counts (check 30)") {
-    CHECK(compile_result(prelude + rfill + "sequence main { scatter(101%) fill }")
-          .has_error("percentage 101% is above 100"));
+TEST_CASE("sema: modes and counts; out-of-range counts are run-time warnings") {
     compile_result ok(prelude + rfill + R"(
 sequence main {
     resize(4, 4)
+    scatter(101%) fill
+    scatter(0) fill
+    grow(-1) fill
     settle(3) fill
     grow fill
     scatter(100%) fill
@@ -457,11 +458,13 @@ TEST_CASE("sema: operation argument kinds and constraints") {
           "sequence main { path(from=lava, to=exit, into=algo, write=road) }")
           .has_error("unknown tag value 'lava'"));
     CHECK(compile_result(path_pre +
-          "sequence main { path(from=door, to=exit, into=algo, write=road, connectivity=5) }")
-          .has_error("invalid connectivity"));
+          "sequence main { path(from=door, to=exit, into=algo, write=road, connectivity=5) }").ok);
+    CHECK(compile_result(path_pre +
+          "sequence main { path(from=door, to=exit, into=algo, write=road, connectivity=tiles) }")
+          .has_error("cannot be read here"));   // an `int`: statement scope
     CHECK(compile_result(path_pre +
           "sequence main { path(from=door, to=exit, into=tiles, write=road) }")
-          .has_error("expected an integer"));   // number grid wants a number write
+          .has_error("must be a number"));   // number grid wants a number write
     compile_result ok(path_pre + R"(
 sequence main {
     resize(8, 8)
@@ -786,11 +789,12 @@ TEST_CASE("sema: operation arguments are expressions resolved by kind (0.9.2, 6.
           .has_error("cannot be read here"));
     CHECK(compile_result(params + "sequence main { resize(w > 1, 5) }")
           .has_error("must be a number"));
-    // grid and enum arguments are bare (check 35)
-    CHECK(compile_result(prelude + "sequence main { mirror((horizontal)) }")
+    // grid and enum arguments are names (check 35); parentheses are transparent
+    CHECK(compile_result(prelude + "sequence main { mirror(horizontal + 1) }")
           .has_error("invalid mirror axis"));
-    CHECK(compile_result(path_pre + "sequence main { path(from=door, to=exit, into=(algo), write=road) }")
+    CHECK(compile_result(path_pre + "sequence main { path(from=door, to=exit, into=(algo + 1), write=road) }")
           .has_error("expects a grid name"));
+    CHECK(compile_result(prelude + "sequence main { mirror((horizontal)) }").ok);
 }
 
 TEST_CASE("sema: path arguments need no parentheses (0.9.2, 6.0)") {

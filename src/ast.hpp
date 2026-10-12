@@ -155,15 +155,12 @@ enum class apply_mode { once, scatter, everywhere, grow, settle };
 // modes (scatter, everywhere) and each settle sweep apply one snapshot (6.7).
 inline bool is_step_mode(apply_mode m) { return m == apply_mode::once || m == apply_mode::grow; }
 
-// One operation-call argument (spec section 6.0). Positional when `name` is empty;
-// the value is an integer, a bare identifier (grid, tag value, enum word), or
-// a parenthesized expression.
+// One operation-call argument (spec section 6.0): an expression, positional
+// when `name` is empty. `grid` and `enum` parameters read a bare identifier
+// (value->kind == expr_kind::ident) as a name.
 struct op_arg {
     source_loc  loc;
     std::string name;   // "" = positional
-    enum class kind { int_, ident, expr } what{kind::int_};
-    long long   int_val{0};
-    std::string ident;
     expr_ptr    value;
 };
 

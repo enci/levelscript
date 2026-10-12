@@ -612,8 +612,8 @@ sequence main {
     REQUIRE(s.size() == 3);
     CHECK(lit(s[0].count) == 3);
     REQUIRE(s[1].op_args.size() == 1);
-    CHECK(s[1].op_args[0].ident == "horizontal");
-    CHECK(s[2].op_args[0].ident == "vertical");
+    CHECK(s[1].op_args[0].value->ident == "horizontal");
+    CHECK(s[2].op_args[0].value->ident == "vertical");
 }
 
 TEST_CASE("parser: contextual names are legal declaration names (spec section 2.4)") {

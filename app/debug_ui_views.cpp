@@ -246,14 +246,16 @@ void sync_tilesets(SDL_Renderer* renderer, std::string const& ls_path,
 // spec section 6.0) -- a new operation added there shows up here automatically
 // as `name(arg, ...)`.
 
+// A short label for an argument or count: a literal or a name as written,
+// anything else elided.
+static std::string expr_brief(expr const& e) {
+    if (e.kind == expr_kind::int_lit) return std::to_string(e.int_val);
+    if (e.kind == expr_kind::ident)   return e.ident;
+    return "(...)";
+}
+
 static std::string op_arg_desc(op_arg const& a) {
-    std::string s = a.name.empty() ? "" : a.name + "=";
-    switch (a.what) {
-        case op_arg::kind::int_:  s += std::to_string(a.int_val); break;
-        case op_arg::kind::ident: s += a.ident;                   break;
-        case op_arg::kind::expr:  s += "(...)";                   break;
-    }
-    return s;
+    return (a.name.empty() ? "" : a.name + "=") + expr_brief(*a.value);
 }
 
 std::string stmt_desc(program_stmt const& s) {
@@ -268,9 +270,7 @@ std::string stmt_desc(program_stmt const& s) {
     static char const* const names[] = {"once", "scatter", "everywhere", "grow", "settle"};
     std::string p = names[(int)s.mode];
     if (s.count) {
-        p += s.count->kind == expr_kind::int_lit ? "(" + std::to_string(s.count->int_val)
-                                                 : std::string("((...)");
-        p += s.count_percent ? "%)" : ")";
+        p += "(" + expr_brief(*s.count) + (s.count_percent ? "%)" : ")");
     }
     p += s.inline_rule ? std::string(" { ... }") : " " + s.rule_name;
     if (s.guard) p += "  when (...)";
@@ -632,10 +632,11 @@ struct program_tree {
             if (is_seq && follow && inside) ImGui::SetNextItemOpen(true);
             bool open = ImGui::TreeNodeEx("##stmt", flags, "%s", label.c_str());
             if (inside) {   // which iteration of this sequence is running
-                int it = path[(size_t)depth + 1].iteration + 1;
+                auto const& f = path[(size_t)depth + 1];
+                int it = f.iteration + 1;
                 ImGui::SameLine();
-                if (cs.count_lit >= 0)
-                    ImGui::TextDisabled("iteration %d / %d", it, cs.count_lit);
+                if (f.iterations >= 0)
+                    ImGui::TextDisabled("iteration %d / %d", it, f.iterations);
                 else
                     ImGui::TextDisabled("iteration %d", it);
             }

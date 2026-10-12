@@ -222,7 +222,7 @@ export const completionProvider: vscode.CompletionItemProvider = {
             if (!op) break;
             const positional = op.params.filter(p => p.positional);
             const next = ctx.used.length === 0 ? positional[ctx.index] : undefined;
-            if (next?.kind === 'enum') next.values!.forEach(v => word(v, K.EnumMember));
+            next?.values?.forEach(v => word(v, K.EnumMember));
             for (const p of op.params)
                 if (!p.positional && !ctx.used.includes(p.name))
                     snippet(p.name, `${p.name}=\${1}`, K.Property, p.required ? p.kind : `${p.kind}, optional`);
@@ -232,7 +232,7 @@ export const completionProvider: vscode.CompletionItemProvider = {
             const p = OPS.find(o => o.name === ctx.op)?.params.find(q => q.name === ctx.param);
             if (p?.kind === 'grid') grids();
             else if (p?.kind === 'pred' || p?.kind === 'value') allTagValues();
-            else if (p?.kind === 'enum') p.values!.forEach(v => word(v, K.EnumMember));
+            else p?.values?.forEach(v => word(v, K.EnumMember));
             break;
         }
         }

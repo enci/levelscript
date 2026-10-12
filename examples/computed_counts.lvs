@@ -1,7 +1,7 @@
 // Showcase: counts are statement-scope expressions over params (section 6).
 // `budget` scales how many rocks scatter and how far the walkers grow;
-// `cover` is a percentage of one batch. A computed count below 0 acts as 0
-// and a percentage above 100 as 100, without an error.
+// `cover` is a percentage of one batch. A count below 0 acts as 0 and a
+// percentage above 100 as 100, with a runtime warning.
 // @expect grid ground count(rock) == 6
 tag geo { dirt, rock, path }
 layers { ground: grid of geo }

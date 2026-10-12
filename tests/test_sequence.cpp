@@ -617,30 +617,23 @@ TEST_CASE("sequence Q34: sequences take no attributes") {
           .has_error("expected '{' after sequence name 's'; sequences take no attributes"));
 }
 
-TEST_CASE("sequence Q35: rule-level checks still apply inside a body (check 30)") {
-    CHECK(compile_result(fill_decls + "sequence s { scatter(101%) fill }\n"
+TEST_CASE("sequence Q35: rule-level checks still apply inside a body (check 21)") {
+    CHECK(compile_result(fill_decls + "sequence s { scatter(1 > 0) fill }\n"
                          "sequence main { resize(1, 1)  once s }\n")
-          .has_error("percentage 101% is above 100 (sequence 's')"));
+          .has_error("a count must be a number (sequence 's')"));
 }
 
-// ── 6. The dimension warning (compile-only) ───────────────────────────────────
+// ── 6. Dimension changes are not checked at compile time ────────────────────
 
-TEST_CASE("sequence Q36-Q38: settle over a dimension-changing sequence warns") {
-    compile_result q36("layers { }\nsequence widen { upscale(2, 2) }\nsequence main { resize(1, 1)  settle widen }\n");
-    CHECK(q36.ok);
-    CHECK(has_warning(q36, "'settle' over sequence 'widen' may never terminate: 'upscale' changes "
-                           "the grid dimensions on every iteration, so no iteration can be stable"));
-
-    compile_result q37("layers { }\nsequence frame { pad(1) }\nsequence main { resize(1, 1)  settle frame }\n");
-    CHECK(has_warning(q37, "'settle' over sequence 'frame' may never terminate: 'pad'"));
-
-    compile_result q38("layers { }\nsequence inner { upscale(2, 1) }\nsequence outer { once inner }\n"
-                       "sequence main { resize(1, 1)  settle outer }\n");
-    CHECK(has_warning(q38, "'settle' over sequence 'outer' may never terminate: 'upscale'"));
-    CHECK(!has_warning(q38, "sequence 'inner'"));
+TEST_CASE("sequence Q36-Q38: settle over a dimension-changing sequence compiles silently") {
+    // the arguments are expressions evaluated at run time (section 6.10)
+    compile_result r("layers { }\nsequence widen { upscale(2, 2) }\nsequence frame { pad(1) }\n"
+                     "sequence main { resize(1, 1)  settle(2) widen  settle(2) frame }\n");
+    CHECK(r.ok);
+    CHECK(!has_warning(r));
 }
 
-TEST_CASE("sequence Q39: identity factors and a zero margin do not warn") {
+TEST_CASE("sequence Q39: identity factors and a zero margin are stable") {
     std::string src = "layers { }\nsequence s {\n    upscale(1, 1)\n    pad(0)\n}\n"
                       "sequence main { resize(2, 2)  settle s }\n";
     compile_result r(src);
@@ -649,39 +642,12 @@ TEST_CASE("sequence Q39: identity factors and a zero margin do not warn") {
     CHECK(iterations(run_trace(make(src), 1), {1}) == 1);
 }
 
-TEST_CASE("sequence Q40-Q41: a guard suppresses the warning") {
-    compile_result q40("layers { }\nparams { big: number = 0 }\n"
-                       "sequence s { upscale(2, 2)  when (big == 1) }\n"
-                       "sequence main { resize(1, 1)  settle s }\n");
-    CHECK(q40.ok);
-    CHECK(!has_warning(q40));
-    compile_result q41("layers { }\nparams { big: number = 0 }\n"
-                       "sequence inner { upscale(2, 2) }\n"
-                       "sequence outer { once inner  when (big == 1) }\n"
-                       "sequence main { resize(1, 1)  settle outer }\n");
-    CHECK(q41.ok);
-    CHECK(!has_warning(q41));
-}
-
-// Q42 removed from the suite: a literal zero count is a compile error (check 28).
-TEST_CASE("sequence Q42 (replaced): settle(0) of a sequence is rejected") {
-    CHECK(compile_result("layers { }\nsequence s { resize(1, 1) }\n"
-                         "sequence main { resize(1, 1)  settle(0) s }\n")
-          .has_error("a count of 0 applies nothing"));
-}
-
-TEST_CASE("sequence: a nested computed count is not certain to run, so it does not warn") {
-    compile_result computed("layers { }\nparams { n: number = 1 }\n"
-                            "sequence widen { upscale(2, 2) }\n"
-                            "sequence outer { settle(n) widen }\n"
-                            "sequence main { resize(1, 1)  settle outer }\n");
-    CHECK(computed.ok);
-    CHECK(!has_warning(computed));
-    compile_result literal("layers { }\n"
-                           "sequence widen { upscale(2, 2) }\n"
-                           "sequence outer { settle(1) widen }\n"
-                           "sequence main { resize(1, 1)  settle outer }\n");
-    CHECK(has_warning(literal, "'settle' over sequence 'outer'"));
+TEST_CASE("sequence Q42: settle(0) of a sequence compiles and runs no iteration") {
+    std::string src = "layers { }\nsequence s { resize(3, 3) }\n"
+                      "sequence main { resize(1, 1)  settle(0) s }\n";
+    CHECK(compile_result(src).ok);
+    auto gen = make(src);
+    CHECK(gen.generate(gen.sequence("main"), 1).width() == 1);
 }
 
 TEST_CASE("sequence: a computed count of 0 or below runs no iteration") {
@@ -893,16 +859,3 @@ sequence main {
     CHECK(iterations(run_trace(make(a), 1), {2}) == 2);
 }
 
-TEST_CASE("sequence: computed operation arguments do not warn (0.9.2)") {
-    compile_result computed("layers { }\nparams { f: number = 2 }\n"
-                            "sequence widen { upscale(f, f) }\n"
-                            "sequence frame { pad(f) }\n"
-                            "sequence main { resize(1, 1)  settle widen  settle frame }\n");
-    CHECK(computed.ok);
-    CHECK(!has_warning(computed));
-    // a literal argument still warns, beside a computed one or not
-    compile_result literal("layers { }\n"
-                           "sequence widen { upscale(2, 2) }\n"
-                           "sequence main { resize(1, 1)  settle widen }\n");
-    CHECK(has_warning(literal, "'settle' over sequence 'widen' may never terminate: 'upscale'"));
-}

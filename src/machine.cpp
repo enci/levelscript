@@ -30,6 +30,35 @@ void machine::bind_params() {
     }
 }
 
+// The pure operators (neg .. clamp_) over already-evaluated operands; unused
+// operands are 0.
+static long long ce_pure(ce_kind k, long long a, long long b, long long c) {
+    auto w32 = [](long long v) { return (long long)(int32_t)v; };
+    switch (k) {
+    case ce_kind::neg:    return w32(-a);
+    case ce_kind::not_:   return a == 0;
+    case ce_kind::add:    return w32(a + b);
+    case ce_kind::sub:    return w32(a - b);
+    case ce_kind::mul:    return w32(a * b);
+    case ce_kind::div_:   return b == 0 ? 0 : w32(a / b);   // n / 0 == 0 (G2)
+    case ce_kind::lt:     return a <  b;
+    case ce_kind::le:     return a <= b;
+    case ce_kind::gt:     return a >  b;
+    case ce_kind::ge:     return a >= b;
+    case ce_kind::eq:     return a == b;
+    case ce_kind::ne:     return a != b;
+    case ce_kind::and_:   return a != 0 && b != 0;
+    case ce_kind::or_:    return a != 0 || b != 0;
+    case ce_kind::bit_or: return a | b;
+    case ce_kind::if_:    return a != 0 ? b : c;
+    case ce_kind::min_:   return a < b ? a : b;
+    case ce_kind::max_:   return a > b ? a : b;
+    case ce_kind::abs_:   return w32(a < 0 ? -a : a);
+    case ce_kind::clamp_: return std::max(b, std::min(a, c));
+    default:              return 0;   // leaves and random_: not pure operators
+    }
+}
+
 // ── expression evaluation (section 5.8) — total, deterministic per seed ─────────────
 
 long long machine::eval(int idx, int x, int y) {
@@ -67,44 +96,22 @@ long long machine::eval(int idx, int x, int y) {
         }
         return (e.kind == ce_kind::is_empty) == empty ? 1 : 0;
     }
-    case ce_kind::neg:  return w32(-eval(e.a, x, y));
-    case ce_kind::not_: return eval(e.a, x, y) == 0 ? 1 : 0;
-    case ce_kind::add:  return w32(eval(e.a, x, y) + eval(e.b, x, y));
-    case ce_kind::sub:  return w32(eval(e.a, x, y) - eval(e.b, x, y));
-    case ce_kind::mul:  return w32(eval(e.a, x, y) * eval(e.b, x, y));
-    case ce_kind::div_: {
-        long long d = eval(e.b, x, y);
-        long long n = eval(e.a, x, y);
-        return d == 0 ? 0 : w32(n / d);   // n / 0 == 0 (G2)
-    }
-    case ce_kind::lt:  return eval(e.a, x, y) <  eval(e.b, x, y) ? 1 : 0;
-    case ce_kind::le:  return eval(e.a, x, y) <= eval(e.b, x, y) ? 1 : 0;
-    case ce_kind::gt:  return eval(e.a, x, y) >  eval(e.b, x, y) ? 1 : 0;
-    case ce_kind::ge:  return eval(e.a, x, y) >= eval(e.b, x, y) ? 1 : 0;
-    case ce_kind::eq:  return eval(e.a, x, y) == eval(e.b, x, y) ? 1 : 0;
-    case ce_kind::ne:  return eval(e.a, x, y) != eval(e.b, x, y) ? 1 : 0;
-    case ce_kind::and_: return (eval(e.a, x, y) != 0 && eval(e.b, x, y) != 0) ? 1 : 0;
-    case ce_kind::or_:  return (eval(e.a, x, y) != 0 || eval(e.b, x, y) != 0) ? 1 : 0;
-    case ce_kind::bit_or: return eval(e.a, x, y) | eval(e.b, x, y);
-    case ce_kind::if_:   // eager: both branches evaluate (a random in the dead
-                         // branch still draws — defined behaviour, section 5.10)
-        return eval(e.a, x, y) != 0 ? eval(e.b, x, y) : eval(e.c, x, y);
-    case ce_kind::min_: { auto a = eval(e.a, x, y), b = eval(e.b, x, y); return a < b ? a : b; }
-    case ce_kind::max_: { auto a = eval(e.a, x, y), b = eval(e.b, x, y); return a > b ? a : b; }
-    case ce_kind::abs_: { auto a = eval(e.a, x, y); return w32(a < 0 ? -a : a); }
-    case ce_kind::clamp_: {
-        auto v = eval(e.a, x, y), lo = eval(e.b, x, y), hi = eval(e.c, x, y);
-        auto m = v < hi ? v : hi;
-        return lo > m ? lo : m;
-    }
+    case ce_kind::and_: return eval(e.a, x, y) != 0 && eval(e.b, x, y) != 0;   // lazy
+    case ce_kind::or_:  return eval(e.a, x, y) != 0 || eval(e.b, x, y) != 0;
     case ce_kind::random_: {   // inclusive [lo, hi]; exactly one draw per call
         auto lo = eval(e.a, x, y), hi = eval(e.b, x, y);
         // an empty range still draws once (uniform(1)) and yields lo (section 5.10)
         uint64_t range = hi < lo ? 1 : (uint64_t)(hi - lo) + 1;
         return w32(lo + (long long)uniform(range));
     }
+    default: {   // the pure operators; operands left to right (an eager `if`
+                 // evaluates both branches, section 5.10)
+        long long a = e.a >= 0 ? eval(e.a, x, y) : 0;
+        long long b = e.b >= 0 ? eval(e.b, x, y) : 0;
+        long long c = e.c >= 0 ? eval(e.c, x, y) : 0;
+        return ce_pure(e.kind, a, b, c);
     }
-    return 0;
+    }
 }
 
 // The one execution core (spec section 6.7). Statements run top to bottom; the
@@ -133,7 +140,7 @@ sequence<step_event> machine::run() {
     auto const& body = prog_->sequences[(size_t)entry_].stmts;
     for (int si = 0; si < (int)body.size(); ++si) {
         auto const& st = body[(size_t)si];
-        frames_.assign(1, frame{si, 0});
+        frames_.assign(1, frame{si, 0, 1});
         bool seq = st.what == compiled_stmt::kind::apply && st.seq_id >= 0;
 
         // A false `when` guard skips the statement in full (section 6). A skipped
@@ -159,8 +166,15 @@ sequence<step_event> machine::run() {
 int machine::eval_count(compiled_stmt const& st) {
     if (st.count < 0) return -1;
     long long v = eval(st.count, 0, 0);
-    if (v < 0) v = 0;
-    if (st.percent && v > 100) v = 100;
+    char const* pct = st.percent ? "%" : "";
+    if (v < 0) {
+        std::cerr << "warning: a count of " << v << pct << " is below 0; treating it as 0\n";
+        v = 0;
+    }
+    if (st.percent && v > 100) {
+        std::cerr << "warning: a percentage of " << v << "% is above 100; treating it as 100%\n";
+        v = 100;
+    }
     return (int)v;
 }
 
@@ -237,7 +251,7 @@ sequence<step_event> machine::run_sequence(compiled_stmt const& st, int top, int
         for (int j = 0; j < (int)body.size(); ++j) {
             auto const& bs = body[j];
             frames_.resize(depth);
-            frames_.push_back(frame{j, it});
+            frames_.push_back(frame{j, it, cap});
             bool seq = bs.what == compiled_stmt::kind::apply && bs.seq_id >= 0;
             if (bs.guard >= 0 && eval(bs.guard, 0, 0) == 0) {   // once per iteration
                 if (!seq) co_yield step_event{step_event::kind::statement, top};
@@ -373,7 +387,7 @@ static void rebuild(grid_state& g, int nr, int nc, F&& src) {
 void machine::exec_op(compiled_op const& op) {
     // `int` arguments evaluate now, after the guard, in written order
     // (section 10.6); out-of-range values are handled below (section 7.4).
-    long long arg[2] = {0, 0};
+    long long arg[8] = {};   // by the parameter's position in the operation table
     for (auto const& ia : op.int_args) arg[ia.param] = eval(ia.expr, 0, 0);
 
     switch (op.kind) {
@@ -468,7 +482,10 @@ void machine::exec_op(compiled_op const& op) {
         return;
 
     case op_kind::path:
-        run_path(op);
+        if (arg[6] != 4 && arg[6] != 8)
+            std::cerr << "warning: path() connectivity " << arg[6]
+                      << " is not 4 or 8; treating it as 4\n";
+        run_path(op, arg[6] == 8 ? 8 : 4);
         return;
     }
 }
@@ -490,7 +507,7 @@ static uint64_t mix64(uint64_t v) {
 // from the distance field alone — walk from the goal through the min-key
 // optimal predecessor — so any correct shortest-path search yields the same
 // output, and a future A* is a pure optimization.
-void machine::run_path(compiled_op const& op) {
+void machine::run_path(compiled_op const& op, int ndirs) {
     if (grids_.empty() || grids_[0].rows <= 0 || op.into_grid < 0) {
         std::cerr << "warning: path() before any resize; leaving grids unchanged\n";
         return;
@@ -551,7 +568,6 @@ void machine::run_path(compiled_op const& op) {
 
     static const int dx[] = {1, -1, 0, 0, 1, 1, -1, -1};
     static const int dy[] = {0, 0, 1, -1, 1, -1, 1, -1};
-    int ndirs = op.connectivity == 8 ? 8 : 4;
 
     while (!pq.empty()) {
         auto [d, i] = pq.top();
@@ -604,8 +620,7 @@ void machine::run_path(compiled_op const& op) {
 
     grid_state& g = grids_[op.into_grid];
     for (int i : route) {
-        long long v = op.write.is_expr ? eval(op.write.expr, i % W, i / W)
-                                       : op.write.const_val;
+        long long v = eval(op.write, i % W, i / W);
         g.front[i] = v;
     }
     g.back = g.front;

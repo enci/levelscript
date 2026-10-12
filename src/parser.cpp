@@ -718,25 +718,6 @@ struct parser {
         }
     }
 
-    // One op-call argument (section 6): an expression. A lone INTEGER or IDENT
-    // (the whole argument) keeps its bare form too: `grid` and `enum`
-    // arguments must be bare, and a bare name tries tags first (section 6.0).
-    // `value` always holds the expression.
-    bool parse_op_arg_value(op_arg& a) {
-        bool ends = peek(1).is(token_type::comma) || peek(1).is(token_type::rparen);
-        if (ends && at(token_type::integer)) {
-            a.what = op_arg::kind::int_;
-            a.int_val = peek().int_val;
-        } else if (ends && at(token_type::ident)) {
-            a.what = op_arg::kind::ident;
-            a.ident = peek().text;
-        } else {
-            a.what = op_arg::kind::expr;
-        }
-        a.value = parse_expr();
-        return true;
-    }
-
     void parse_op_call(program_stmt& s) {
         s.what = program_stmt::kind::op_call;
         s.op_name = eat().text;   // IDENT
@@ -749,7 +730,7 @@ struct parser {
                 a.name = eat().text;
                 eat();   // '='
             }
-            if (!parse_op_arg_value(a)) { eat_bad(); continue; }
+            a.value = parse_expr();
             s.op_args.push_back(std::move(a));
             if (!accept(token_type::comma)) break;
         }
