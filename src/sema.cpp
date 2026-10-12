@@ -1,6 +1,7 @@
 #include "sema.hpp"
 #include "modules.hpp"
 #include <algorithm>
+#include <cassert>
 #include <unordered_set>
 
 namespace ls {
@@ -130,6 +131,97 @@ bool pairs_equal(compiled_pair const& a, compiled_pair const& b) {
 // Expression value kinds (section 5.8).
 enum class val_type { num, mask, boolean };
 
+// ── name tables ───────────────────────────────────────────────────────────────
+//
+// Every closed set the language resolves by name (built-ins, operations,
+// attribute values, enum words) is a table of rows keyed by `name`; one
+// lookup serves them all, and diagnostics list the allowed keys from the
+// same rows.
+
+template <class Table, class Key>
+auto lookup(Table const& table, Key const& key) -> decltype(&*std::begin(table)) {
+    for (auto const& row : table)
+        if (row.name == key) return &row;
+    return nullptr;
+}
+
+inline std::string key_text(char const* k) { return k; }
+inline std::string key_text(long long k)   { return std::to_string(k); }
+
+template <class Table>
+std::string allowed_keys(Table const& table) {
+    std::string out;
+    for (auto const& row : table) out += (out.empty() ? "" : ", ") + key_text(row.name);
+    return out;
+}
+
+// Rule attributes (section 5.6). symmetry=all is four variants: identity + H +
+// V + both-axis; the both-axis flip IS the 180° rotation, and the
+// per-sub-rule dedup collapses the coincidence (section 5.6.1, v0.6.2).
+using mirror = compiled_pair::mirror;
+struct symmetry_row {
+    char const* name;
+    std::vector<std::pair<transform, mirror>> variants;
+};
+static const symmetry_row symmetries[] = {
+    {"none",       {{transform::identity, mirror::none}}},
+    {"horizontal", {{transform::identity, mirror::none}, {transform::flip_h, mirror::h}}},
+    {"vertical",   {{transform::identity, mirror::none}, {transform::flip_v, mirror::v}}},
+    {"all",        {{transform::identity, mirror::none}, {transform::flip_h, mirror::h},
+                    {transform::flip_v, mirror::v}, {transform::flip_both, mirror::both}}},
+};
+struct rotation_row { long long name; transform k; };
+static const rotation_row rotations[] = {
+    {90, transform::rot90}, {180, transform::flip_both}, {270, transform::rot270},
+};
+
+// The unary and binary operators (section 5.8): operand and result types. A
+// `same_kind` operator takes two numbers or two tag values.
+struct operator_row {
+    expr_kind   name;
+    ce_kind     code;
+    val_type    operand;
+    bool        same_kind;
+    val_type    result;
+    char const* message;
+};
+static constexpr char const* arith = "arithmetic operator requires numeric operands";
+static constexpr char const* rel   = "relational operator requires numeric operands";
+static constexpr char const* logic = "'&&' / '||' require boolean operands";
+static constexpr char const* equal = "'==' / '!=' require two numbers or two tag values";
+static const operator_row operators[] = {
+    {expr_kind::neg,    ce_kind::neg,    val_type::num,     false, val_type::num,     "unary '-' requires a number"},
+    {expr_kind::not_,   ce_kind::not_,   val_type::boolean, false, val_type::boolean, "'!' requires a boolean"},
+    {expr_kind::add,    ce_kind::add,    val_type::num,     false, val_type::num,     arith},
+    {expr_kind::sub,    ce_kind::sub,    val_type::num,     false, val_type::num,     arith},
+    {expr_kind::mul,    ce_kind::mul,    val_type::num,     false, val_type::num,     arith},
+    {expr_kind::div_,   ce_kind::div_,   val_type::num,     false, val_type::num,     arith},
+    {expr_kind::lt,     ce_kind::lt,     val_type::num,     false, val_type::boolean, rel},
+    {expr_kind::le,     ce_kind::le,     val_type::num,     false, val_type::boolean, rel},
+    {expr_kind::gt,     ce_kind::gt,     val_type::num,     false, val_type::boolean, rel},
+    {expr_kind::ge,     ce_kind::ge,     val_type::num,     false, val_type::boolean, rel},
+    {expr_kind::eq,     ce_kind::eq,     val_type::num,     true,  val_type::boolean, equal},
+    {expr_kind::ne,     ce_kind::ne,     val_type::num,     true,  val_type::boolean, equal},
+    {expr_kind::and_,   ce_kind::and_,   val_type::boolean, false, val_type::boolean, logic},
+    {expr_kind::or_,    ce_kind::or_,    val_type::boolean, false, val_type::boolean, logic},
+    {expr_kind::bit_or, ce_kind::bit_or, val_type::mask,    false, val_type::mask,
+     "'|' (tag union) requires tag-valued operands"},
+};
+
+// The `mirror` operation's axis (section 6.4): 1 = horizontal.
+struct axis_row { char const* name; int w; };
+static const axis_row mirror_axes[] = {{"horizontal", 1}, {"vertical", 0}};
+
+// Identifier scope for the position being compiled. Cell/where exprs are
+// permissive; `when` guards and param exprs are restricted (section 4.2/section 6).
+struct scope {
+    bool allow_grids{true};
+    bool allow_pos{true};      // x / y / width / height
+    int  param_limit{-1};      // -1 = any param; else only ids < limit
+};
+// Statement scope (section 6): guards, counts, `int` arguments - params only.
+constexpr scope stmt_scope{false, false, -1};
+
 struct analyzer {
     ast_file const&       ast;   // the closure's merged declarations
     compiled&             out;
@@ -140,13 +232,6 @@ struct analyzer {
     // out.layers and out.param_names (rules and sequences align with the AST).
     std::vector<int> tag_mod, layer_mod, param_mod;
 
-    // Identifier scope for the position being compiled. Cell/where exprs are
-    // permissive; `when` guards and param exprs are restricted (section 4.2/section 6).
-    struct scope {
-        bool allow_grids{true};
-        bool allow_pos{true};      // x / y / width / height
-        int  param_limit{-1};      // -1 = any param; else only ids < limit
-    };
     scope scope_{};
 
     // Pattern variables of the pair being compiled (section 5.11); null outside
@@ -195,6 +280,12 @@ struct analyzer {
     void error(source_loc loc, std::string msg) {
         diags.error(label(loc), loc.line, loc.col, std::move(msg));
     }
+    // A word or number outside its table: "invalid <what> '<got>'; allowed: ...".
+    template <class Table>
+    void invalid(source_loc loc, char const* what, std::string const& got, Table const& table) {
+        error(loc, std::string("invalid ") + what + " '" + got + "'; allowed: " +
+              allowed_keys(table));
+    }
     void warning(source_loc loc, std::string msg) {
         diags.warning(label(loc), loc.line, loc.col, std::move(msg));
     }
@@ -223,36 +314,48 @@ struct analyzer {
              : add_expr({ce_kind::int_lit, num_empty, -1, -1, -1, -1});
     }
 
+    // Report an expression error and stand in a number so nothing cascades.
+    int poison(source_loc loc, std::string msg, val_type& t) {
+        error(loc, std::move(msg));
+        t = val_type::num;
+        return num_lit();
+    }
+
+    // Compile `e` under scope `sc`, reporting `msg` at `at` unless it has
+    // type `want`. A bare '.' takes `want` as its type when `type_empty`.
+    int compile_as(expr const& e, val_type want, source_loc at, std::string const& msg,
+                   scope sc = {}, int ctx_tag = -1, bool type_empty = true) {
+        scope saved = scope_;
+        scope_ = sc;
+        val_type t;
+        int c = compile_expr(e, ctx_tag, t, type_empty ? (int)want : -1);
+        scope_ = saved;
+        if (t != want) error(at, msg);
+        return c;
+    }
+
     static bool is_reserved_ident(std::string const& n) {
         return n == "x" || n == "y" || n == "width" || n == "height";
     }
 
     struct builtin_spec { char const* name; ce_kind kind; int arity; };
-    static builtin_spec const* find_builtin(std::string const& name) {
-        static const builtin_spec table[] = {
-            {"if",     ce_kind::if_,     3},
-            {"min",    ce_kind::min_,    2},
-            {"max",    ce_kind::max_,    2},
-            {"abs",    ce_kind::abs_,    1},
-            {"clamp",  ce_kind::clamp_,  3},
-            {"random", ce_kind::random_, 2},
-        };
-        for (auto const& s : table)
-            if (name == s.name) return &s;
-        return nullptr;
-    }
+    static constexpr builtin_spec builtins[] = {
+        {"if",     ce_kind::if_,     3},
+        {"min",    ce_kind::min_,    2},
+        {"max",    ce_kind::max_,    2},
+        {"abs",    ce_kind::abs_,    1},
+        {"clamp",  ce_kind::clamp_,  3},
+        {"random", ce_kind::random_, 2},
+    };
 
     // Resolve a bare identifier (section 5.8): x/y/width/height → param → tag
     // value or union of the enclosing cell's tagset → grid → a unique tag value.
     int compile_ident(expr const& e, int ctx_tag, val_type& t) {
         auto const& name = e.ident;
         if (is_reserved_ident(name)) {
-            if (!scope_.allow_pos) {
-                error(e.loc, "'" + name + "' cannot be read here "
-                      "(position/dimension is not available at this scope)");
-                t = val_type::num;
-                return num_lit();
-            }
+            if (!scope_.allow_pos)
+                return poison(e.loc, "'" + name + "' cannot be read here "
+                      "(position/dimension is not available at this scope)", t);
             t = val_type::num;
             ce_kind k = name == "x" ? ce_kind::pos_x
                       : name == "y" ? ce_kind::pos_y
@@ -262,11 +365,8 @@ struct analyzer {
         int pid = out.param_id(name);
         if (pid >= 0) {
             require_visible(e.loc, "param", name, param_mod[(size_t)pid]);
-            if (scope_.param_limit >= 0 && pid >= scope_.param_limit) {
-                error(e.loc, "param '" + name + "' is referenced before it is declared");
-                t = val_type::num;
-                return num_lit();
-            }
+            if (scope_.param_limit >= 0 && pid >= scope_.param_limit)
+                return poison(e.loc, "param '" + name + "' is referenced before it is declared", t);
             t = val_type::num;
             return add_expr({ce_kind::param_read, 0, pid, -1, -1, -1});
         }
@@ -280,12 +380,9 @@ struct analyzer {
         int gid = out.layer_id(name);
         if (gid >= 0) {
             require_visible(e.loc, "grid", name, layer_mod[(size_t)gid]);
-            if (!scope_.allow_grids) {
-                error(e.loc, "grid '" + name + "' cannot be read here "
-                      "(only params are available at this scope)");
-                t = val_type::num;
-                return num_lit();
-            }
+            if (!scope_.allow_grids)
+                return poison(e.loc, "grid '" + name + "' cannot be read here "
+                              "(only params are available at this scope)", t);
             t = out.layers[gid].tag_id < 0 ? val_type::num : val_type::mask;
             return add_expr({ce_kind::grid_read, 0, gid, -1, -1, -1});
         }
@@ -299,18 +396,12 @@ struct analyzer {
             t = val_type::mask;
             return add_expr({ce_kind::mask_lit, mask, -1, -1, -1, -1});
         }
-        error(e.loc, "unknown identifier '" + name + "' in expression");
-        t = val_type::num;
-        return num_lit();
+        return poison(e.loc, "unknown identifier '" + name + "' in expression", t);
     }
 
     int compile_call(expr const& e, int ctx_tag, val_type& t, int hint) {
-        builtin_spec const* spec = find_builtin(e.ident);
-        auto fail = [&](std::string msg) {
-            error(e.loc, std::move(msg));
-            t = val_type::num;
-            return num_lit();
-        };
+        auto spec = lookup(builtins, e.ident);
+        auto fail = [&](std::string msg) { return poison(e.loc, std::move(msg), t); };
         if (!spec) return fail("unknown function '" + e.ident + "'");
         if ((int)e.args.size() != spec->arity)
             return fail("built-in '" + e.ident + "' takes " +
@@ -378,20 +469,6 @@ struct analyzer {
         }
         case expr_kind::call:
             return compile_call(e, ctx_tag, t, hint);
-        case expr_kind::neg: {
-            val_type ta;
-            int a = compile_expr(*e.args[0], ctx_tag, ta);
-            if (ta != val_type::num) error(e.loc, "unary '-' requires a number");
-            t = val_type::num;
-            return add_expr({ce_kind::neg, 0, -1, a, -1, -1});
-        }
-        case expr_kind::not_: {
-            val_type ta;
-            int a = compile_expr(*e.args[0], ctx_tag, ta);
-            if (ta != val_type::boolean) error(e.loc, "'!' requires a boolean");
-            t = val_type::boolean;
-            return add_expr({ce_kind::not_, 0, -1, a, -1, -1});
-        }
         default:
             break;
         }
@@ -402,9 +479,9 @@ struct analyzer {
             bool a_empty = e.args[0]->kind == expr_kind::empty_lit;
             bool b_empty = e.args[1]->kind == expr_kind::empty_lit;
             if (a_empty && b_empty) {
-                error(e.loc, "'. == .' has no inferable type");
+                int c = poison(e.loc, "'. == .' has no inferable type", t);
                 t = val_type::boolean;
-                return num_lit();
+                return c;
             }
             if (a_empty || b_empty) {
                 val_type to;
@@ -423,50 +500,19 @@ struct analyzer {
             }
         }
 
-        val_type lt_, rt_;
-        int a = compile_expr(*e.args[0], ctx_tag, lt_);
-        int b = compile_expr(*e.args[1], ctx_tag, rt_);
-        auto bin = [&](ce_kind k, val_type rt) {
-            t = rt;
-            return add_expr({k, 0, -1, a, b, -1});
-        };
-        switch (e.kind) {
-        case expr_kind::add: case expr_kind::sub:
-        case expr_kind::mul: case expr_kind::div_:
-            if (lt_ != val_type::num || rt_ != val_type::num)
-                error(e.loc, "arithmetic operator requires numeric operands");
-            return bin(e.kind == expr_kind::add ? ce_kind::add
-                     : e.kind == expr_kind::sub ? ce_kind::sub
-                     : e.kind == expr_kind::mul ? ce_kind::mul : ce_kind::div_,
-                       val_type::num);
-        case expr_kind::lt: case expr_kind::le:
-        case expr_kind::gt: case expr_kind::ge:
-            if (lt_ != val_type::num || rt_ != val_type::num)
-                error(e.loc, "relational operator requires numeric operands");
-            return bin(e.kind == expr_kind::lt ? ce_kind::lt
-                     : e.kind == expr_kind::le ? ce_kind::le
-                     : e.kind == expr_kind::gt ? ce_kind::gt : ce_kind::ge,
-                       val_type::boolean);
-        case expr_kind::eq: case expr_kind::ne:
-            if (!(lt_ == val_type::num && rt_ == val_type::num) &&
-                !(lt_ == val_type::mask && rt_ == val_type::mask))
-                error(e.loc, "'==' / '!=' require two numbers or two tag values");
-            return bin(e.kind == expr_kind::eq ? ce_kind::eq : ce_kind::ne,
-                       val_type::boolean);
-        case expr_kind::and_: case expr_kind::or_:
-            if (lt_ != val_type::boolean || rt_ != val_type::boolean)
-                error(e.loc, "'&&' / '||' require boolean operands");
-            return bin(e.kind == expr_kind::and_ ? ce_kind::and_ : ce_kind::or_,
-                       val_type::boolean);
-        case expr_kind::bit_or:
-            if (lt_ != val_type::mask || rt_ != val_type::mask)
-                error(e.loc, "'|' (tag union) requires tag-valued operands");
-            return bin(ce_kind::bit_or, val_type::mask);
-        default:
-            error(e.loc, "unsupported expression");
-            t = val_type::num;
-            return num_lit();
-        }
+        auto op = lookup(operators, e.kind);
+        if (!op) return poison(e.loc, "unsupported expression", t);
+        int c[2] = {-1, -1};
+        val_type ts[2];
+        for (size_t i = 0; i < e.args.size(); ++i)
+            c[i] = compile_expr(*e.args[i], ctx_tag, ts[i]);
+        bool ok = true;
+        for (size_t i = 0; i < e.args.size(); ++i)
+            ok &= op->same_kind ? ts[i] == ts[0] && ts[0] != val_type::boolean
+                                : ts[i] == op->operand;
+        if (!ok) error(e.loc, op->message);
+        t = op->result;
+        return add_expr({op->code, 0, -1, c[0], c[1], -1});
     }
 
     // One collision discipline for every named declaration (the MGSL retro's
@@ -569,15 +615,11 @@ struct analyzer {
         for (int i = 0; i < (int)ast.params.size(); ++i) {
             auto const& p = ast.params[i];
             if (!p.value) continue;   // missing default already reported
-            scope_ = scope{false, false, i};
-            val_type t;
-            int e = compile_expr(*p.value, -1, t, (int)val_type::num);
-            if (t != val_type::num)
-                error(p.loc, std::string(p.is_derived ? "derived param '" : "default for param '")
-                      + p.name + "' must evaluate to a number");
+            int e = compile_as(*p.value, val_type::num, p.loc,
+                               std::string(p.is_derived ? "derived param '" : "default for param '")
+                               + p.name + "' must evaluate to a number", scope{false, false, i});
             out.startup_exprs.push_back({i, e, !p.is_derived});
         }
-        scope_ = scope{};
     }
 
     // ── rules ────────────────────────────────────────────────────────────────
@@ -654,11 +696,9 @@ struct analyzer {
                 cc.expr = num_lit();
                 return cc;
             }
-            val_type t;
             cc.what = compiled_cell::kind::expr;
-            cc.expr = compile_expr(*in.value, -1, t);
-            if (t != val_type::boolean)
-                error(in.loc, "'where' cell must evaluate to a boolean");
+            cc.expr = compile_as(*in.value, val_type::boolean, in.loc,
+                                 "'where' cell must evaluate to a boolean", scope_);
             return cc;
         }
 
@@ -730,13 +770,10 @@ struct analyzer {
         }
         case cell_kind::expr_cell: {
             cc.what = compiled_cell::kind::expr;
-            val_type t;
-            int hint = (int)(is_number ? val_type::num : val_type::mask);
-            cc.expr = compile_expr(*in.value, tag, t, hint);
-            if (is_number && t != val_type::num)
-                error(in.loc, "expression in a 'number' grid cell must evaluate to a number");
-            if (!is_number && t != val_type::mask)
-                error(in.loc, "expression in a tag grid cell must evaluate to a tag value");
+            cc.expr = compile_as(*in.value, is_number ? val_type::num : val_type::mask, in.loc,
+                                 is_number ? "expression in a 'number' grid cell must evaluate to a number"
+                                           : "expression in a tag grid cell must evaluate to a tag value",
+                                 scope_, tag);
             break;
         }
         }
@@ -844,31 +881,16 @@ struct analyzer {
 
     // One rule's attributes and body, expanded into its variants.
     compiled_rule compile_rule(rule_decl const& r) {
-        // attribute validation (spec section 7.3, checks 7/18)
-        if (r.symmetry != "none" && r.symmetry != "horizontal" &&
-            r.symmetry != "vertical" && r.symmetry != "all")
-            error(r.loc, "invalid value '" + r.symmetry +
-                  "' for attribute 'symmetry'; allowed: none, horizontal, vertical, all");
-        for (long long a : r.rotation_angles)
-            if (a != 90 && a != 180 && a != 270)
-                error(r.loc, "invalid rotation angle '" + std::to_string(a) +
-                      "'; allowed angles are 90, 180, 270");
-
-        // symmetry=all is four variants: identity + H + V + both-axis; the
-        // both-axis/180° coincidence dedups below (spec section 5.6.1, v0.6.2).
-        std::vector<transform> syms = {transform::identity};
-        if (r.symmetry == "horizontal") syms.push_back(transform::flip_h);
-        else if (r.symmetry == "vertical") syms.push_back(transform::flip_v);
-        else if (r.symmetry == "all")
-            syms = {transform::identity, transform::flip_h,
-                    transform::flip_v, transform::flip_both};
-
-        std::vector<transform> rots = {transform::identity};
+        // attributes (spec section 7.3, checks 7/18); an invalid one adds nothing
+        auto sym = lookup(symmetries, r.symmetry);
+        if (!sym) invalid(r.loc, "symmetry", r.symmetry, symmetries);
+        std::vector<std::pair<transform, int16_t>> rots = {{transform::identity, 0}};
         for (long long a : r.rotation_angles) {
-            if (a == 90)       rots.push_back(transform::rot90);
-            else if (a == 180) rots.push_back(transform::flip_both);   // rot180
-            else if (a == 270) rots.push_back(transform::rot270);
+            auto rot = lookup(rotations, a);
+            if (rot) rots.push_back({rot->k, (int16_t)a});
+            else     invalid(r.loc, "rotation angle", std::to_string(a), rotations);
         }
+        auto const& syms = sym ? sym->variants : symmetries[0].variants;
 
         compiled_rule cr;
         cr.body = r.body;
@@ -879,23 +901,12 @@ struct analyzer {
             compiled_pair base = compile_base_pair(r.pairs[bi]);
             base.sub_rule_idx = bi;
             std::vector<compiled_pair> variants;
-            using mirror = compiled_pair::mirror;
-            auto rot_deg = [](transform k) -> int16_t {   // flip_both doubles as rot180
-                return k == transform::rot90     ? 90
-                     : k == transform::flip_both ? 180
-                     : k == transform::rot270    ? 270 : 0;
-            };
-            auto sym_of = [](transform k) {
-                return k == transform::flip_h    ? mirror::h
-                     : k == transform::flip_v    ? mirror::v
-                     : k == transform::flip_both ? mirror::both : mirror::none;
-            };
-            for (auto rk : rots)
-                for (auto sk : syms) {
+            for (auto [rk, deg] : rots)
+                for (auto [sk, flip] : syms) {
                     compiled_pair cand = transform_pair(sk, transform_pair(rk, base));
                     cand.sub_rule_idx = bi;
-                    cand.rotation = rot_deg(rk);
-                    cand.flip = sym_of(sk);
+                    cand.rotation = deg;
+                    cand.flip = flip;
                     bool dup = false;
                     for (auto const& v : variants)
                         if (pairs_equal(v, cand)) { dup = true; break; }
@@ -915,17 +926,10 @@ struct analyzer {
     //    `grow` without a count never terminates. Conservative: warns only
     //    on the guaranteed case. ─────────────────────────────────────────────
 
-    static void collect_unconditional_leaves(compiled_write_term const& t,
-                                             std::vector<compiled_pattern const*>& out) {
-        if (t.what == compiled_write_term::kind::leaf) { out.push_back(&t.pattern); return; }
-        if (t.what == compiled_write_term::kind::any) return;   // may not happen
-        for (auto const& it : t.items) collect_unconditional_leaves(it, out);
-    }
-
     void check_reductive(compiled_rule const& rule, source_loc loc) {
         for (auto const& pair : rule.pairs) {
             std::vector<compiled_pattern const*> writes;
-            collect_unconditional_leaves(pair.rhs, writes);
+            collect_write_leaves(pair.rhs, writes, /*certain=*/true);
 
             bool invalidates = false;
             for (auto const& lp : pair.lhs) {
@@ -988,7 +992,7 @@ struct analyzer {
     };
 
     static std::vector<op_spec> const& op_table() {
-        static const std::vector<op_spec> table = {
+        static const std::vector<op_spec> table = {   // keyed by name
             {"resize",  op_kind::resize,  {{"w", arg_kind::int_, true, true},
                                            {"h", arg_kind::int_, true, true}}},
             {"upscale", op_kind::upscale, {{"n", arg_kind::int_, true, true},
@@ -1008,6 +1012,11 @@ struct analyzer {
         return table;
     }
 
+    // "'into=' of 'path'" - how argument diagnostics name an argument.
+    static std::string arg_ctx(char const* op, char const* pn) {
+        return "'" + std::string(pn) + "=' of '" + op + "'";
+    }
+
     // A bare-identifier argument's name (a `grid` or `enum` value), else null.
     static std::string const* bare_name(op_arg const& a) {
         return a.value->kind == expr_kind::ident ? &a.value->ident : nullptr;
@@ -1024,27 +1033,21 @@ struct analyzer {
     // path connectivity) are
     // statement-scope expressions, like a count (check 21); out-of-range
     // values are handled at run time (section 6.0). `cost` is per cell.
-    int op_num(op_arg const& a, char const* op, char const* pn, bool stmt_scope) {
-        if (stmt_scope) scope_ = scope{false, false, -1};
-        val_type t;
-        int e = compile_expr(*a.value, -1, t, (int)val_type::num);
-        scope_ = scope{};
-        if (t != val_type::num)
-            error(a.loc, "'" + std::string(pn) + "' of '" + op + "' must be a number");
-        return e;
+    int op_num(op_arg const& a, char const* op, char const* pn, bool statement) {
+        return compile_as(*a.value, val_type::num, a.loc,
+                          "'" + std::string(pn) + "' of '" + op + "' must be a number",
+                          statement ? stmt_scope : scope{});
     }
 
     int op_grid(op_arg const& a, char const* op, char const* pn) {
         auto name = bare_name(a);
         if (!name) {
-            error(a.loc, "'" + std::string(pn) + "=' of '" + op +
-                  "' expects a grid name, got '" + arg_render(a) + "'");
+            error(a.loc, arg_ctx(op, pn) + " expects a grid name, got '" + arg_render(a) + "'");
             return -1;
         }
         int id = out.layer_id(*name);
         if (id < 0)
-            error(a.loc, "'" + std::string(pn) + "=' of '" + op + "': '" +
-                  *name + "' is not a declared grid");
+            error(a.loc, arg_ctx(op, pn) + ": '" + *name + "' is not a declared grid");
         else
             require_visible(a.loc, "grid", *name, layer_mod[(size_t)id]);
         return id;
@@ -1067,14 +1070,12 @@ struct analyzer {
                 if (m != 0) { ++matches; found_layer = li; mask = m; }
             }
             if (matches == 0)
-                error(a.loc, "unknown tag value '" + *name + "' in '" +
-                      std::string(pn) + "=' of '" + op +
-                      "' (no layer this module sees has a tagset declaring it)");
+                error(a.loc, "unknown tag value '" + *name + "' in " + arg_ctx(op, pn) +
+                      " (no layer this module sees has a tagset declaring it)");
             else if (matches > 1)
-                error(a.loc, "predicate '" + *name + "' in '" + std::string(pn) +
-                      "=' of '" + op + "' is ambiguous (several layers could hold "
-                      "it); use an expression naming the grid, e.g. " + pn +
-                      "=(grid == " + *name + ")");
+                error(a.loc, "predicate '" + *name + "' in " + arg_ctx(op, pn) +
+                      " is ambiguous (several layers could hold it); use an expression "
+                      "naming the grid, e.g. " + pn + "=(grid == " + *name + ")");
             else {
                 p.grid_id = found_layer;
                 p.mask = mask;
@@ -1082,11 +1083,8 @@ struct analyzer {
             return p;
         }
         p.is_expr = true;
-        val_type t;
-        p.expr = compile_expr(*a.value, -1, t);
-        if (t != val_type::boolean)
-            error(a.loc, "'" + std::string(pn) + "=' of '" + op +
-                  "' must be a tag value or a boolean expression");
+        p.expr = compile_as(*a.value, val_type::boolean, a.loc,
+                            arg_ctx(op, pn) + " must be a tag value or a boolean expression");
         return p;
     }
 
@@ -1094,22 +1092,17 @@ struct analyzer {
     // name resolves against its tagset first (section 6.0).
     int op_value(op_arg const& a, char const* op, char const* pn, int into_grid) {
         int tid = out.layers[into_grid].tag_id;
-        val_type want = tid < 0 ? val_type::num : val_type::mask;
-        val_type t;
-        int e = compile_expr(*a.value, tid, t, (int)want);
-        if (t != want)
-            error(a.loc, "'" + std::string(pn) + "=' of '" + op + "' must be " +
-                  (tid < 0 ? "a number (the target grid is a number grid)"
-                           : "a tag value (the target grid is a tag grid)"));
-        return e;
+        return compile_as(*a.value, tid < 0 ? val_type::num : val_type::mask, a.loc,
+                          arg_ctx(op, pn) + " must be " +
+                          (tid < 0 ? "a number (the target grid is a number grid)"
+                                   : "a tag value (the target grid is a tag grid)"),
+                          scope{}, tid);
     }
 
     // ── argument binding + per-op compilation (section 7.3, check 32–35) ─────────────────
 
     bool compile_op_call(program_stmt const& s, compiled_op& op) {
-        op_spec const* spec = nullptr;
-        for (auto const& t : op_table())
-            if (s.op_name == t.name) { spec = &t; break; }
+        op_spec const* spec = lookup(op_table(), s.op_name);
         if (!spec) {
             error(s.loc, "unknown operation '" + s.op_name + "'");
             return false;
@@ -1150,9 +1143,8 @@ struct analyzer {
                 bound[next_pos++] = &a;
             } else {
                 seen_named = true;
-                int idx = -1;
-                for (int i = 0; i < (int)spec->params.size(); ++i)
-                    if (a.name == spec->params[i].name) { idx = i; break; }
+                auto p = lookup(spec->params, a.name);
+                int idx = p ? (int)(p - spec->params.data()) : -1;
                 if (idx < 0) {
                     error(a.loc, "unknown parameter '" + a.name + "' of operation '" +
                           s.op_name + "'");
@@ -1190,25 +1182,30 @@ struct analyzer {
         case op_kind::trim:
             break;
         case op_kind::mirror: {
-            std::string axis = arg_render(*bound[0]);
-            if (axis != "horizontal" && axis != "vertical") {
-                error(bound[0]->loc, "invalid mirror axis '" + axis +
-                      "'; expected horizontal or vertical");
+            auto axis = lookup(mirror_axes, arg_render(*bound[0]));   // its one parameter
+            if (!axis) {
+                invalid(bound[0]->loc, "mirror axis", arg_render(*bound[0]), mirror_axes);
                 return false;
             }
-            op.w = axis == "horizontal" ? 1 : 0;
+            op.w = axis->w;
             break;
         }
         case op_kind::path: {
-            op.into_grid = op_grid(*bound[2], spec->name, "into");
-            op.from      = op_pred(*bound[0], spec->name, "from");
-            op.to        = op_pred(*bound[1], spec->name, "to");
+            auto index = [&](std::string_view n) {
+                return (int)(lookup(spec->params, n) - spec->params.data());
+            };
+            auto arg = [&](char const* n) { return bound[(size_t)index(n)]; };
+            op.into_grid = op_grid(*arg("into"), spec->name, "into");
+            op.from      = op_pred(*arg("from"), spec->name, "from");
+            op.to        = op_pred(*arg("to"), spec->name, "to");
             if (op.into_grid >= 0)
-                op.write = op_value(*bound[3], spec->name, "write", op.into_grid);
-            if (bound[4]) op.over_grid = op_grid(*bound[4], spec->name, "over");
-            if (bound[5]) op.passable  = op_pred(*bound[5], spec->name, "passable");
-            if (!bound[6]) op.int_args.push_back({6, num_lit(4)});   // connectivity
-            if (bound[7]) op.cost = op_num(*bound[7], spec->name, "cost", false);
+                op.write = op_value(*arg("write"), spec->name, "write", op.into_grid);
+            if (arg("over"))     op.over_grid = op_grid(*arg("over"), spec->name, "over");
+            if (arg("passable")) op.passable  = op_pred(*arg("passable"), spec->name, "passable");
+            if (arg("cost"))     op.cost      = op_num(*arg("cost"), spec->name, "cost", false);
+            assert(index("connectivity") == compiled_op::path_connectivity);
+            if (!arg("connectivity"))   // the default, as an `int` argument
+                op.int_args.push_back({compiled_op::path_connectivity, num_lit(4)});
             break;
         }
         }
@@ -1217,27 +1214,13 @@ struct analyzer {
 
     // ── statements (section 6): the program body and every sequence body ──────────
 
-    static std::string mode_name(apply_mode m) {
-        switch (m) {
-        case apply_mode::once:       return "once";
-        case apply_mode::scatter:    return "scatter";
-        case apply_mode::everywhere: return "everywhere";
-        case apply_mode::grow:       return "grow";
-        case apply_mode::settle:     return "settle";
-        }
-        return "";
-    }
-
     // A count (section 6): a statement-scope expression like a guard - params
     // only, a number (check 21). Out-of-range values are clamped, with a
     // warning, at run time.
     void compile_count(program_stmt const& s, compiled_stmt& cs, std::string const& ctx) {
-        scope_ = scope{false, false, -1};
-        val_type t;
-        cs.count = compile_expr(*s.count, -1, t);
-        scope_ = scope{};
-        if (t != val_type::num)
-            error(s.count_loc, "a count must be a number" + ctx);
+        cs.count = compile_as(*s.count, val_type::num, s.count_loc,
+                              "a count must be a number" + ctx, stmt_scope, -1,
+                              /*type_empty=*/false);
     }
 
     // Levenshtein distance - did-you-mean for unknown rule/sequence names.
@@ -1343,7 +1326,7 @@ struct analyzer {
                 if (cs.seq_id >= 0) {
                     // section 7.3, check 37: rule-only modes on a sequence.
                     if (s.mode != apply_mode::once && s.mode != apply_mode::settle)
-                        error(s.loc, "'" + mode_name(s.mode) + "' is not valid on sequence '" +
+                        error(s.loc, std::string("'") + mode_name(s.mode) + "' is not valid on sequence '" +
                               s.rule_name + "'; a sequence takes 'once' or 'settle'" +
                               (s.mode == apply_mode::scatter
                                    ? ", and 'scatter' belongs on the statements inside it" : ""));
@@ -1357,14 +1340,10 @@ struct analyzer {
             // `when (expr)` guard (section 6): boolean, params only — no grids, no
             // position/dimensions (there is no candidate position or committed
             // size at statement scope).
-            if (s.guard) {
-                scope_ = scope{false, false, -1};
-                val_type t;
-                cs.guard = compile_expr(*s.guard, -1, t);
-                if (t != val_type::boolean)
-                    error(s.loc, "'when' guard must be a boolean expression" + ctx);
-                scope_ = scope{};
-            }
+            if (s.guard)
+                cs.guard = compile_as(*s.guard, val_type::boolean, s.loc,
+                                      "'when' guard must be a boolean expression" + ctx,
+                                      stmt_scope);
             outv.push_back(cs);
         }
     }

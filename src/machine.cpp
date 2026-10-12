@@ -481,12 +481,14 @@ void machine::exec_op(compiled_op const& op) {
         }
         return;
 
-    case op_kind::path:
-        if (arg[6] != 4 && arg[6] != 8)
-            std::cerr << "warning: path() connectivity " << arg[6]
+    case op_kind::path: {
+        long long conn = arg[compiled_op::path_connectivity];
+        if (conn != 4 && conn != 8)
+            std::cerr << "warning: path() connectivity " << conn
                       << " is not 4 or 8; treating it as 4\n";
-        run_path(op, arg[6] == 8 ? 8 : 4);
+        run_path(op, conn == 8 ? 8 : 4);
         return;
+    }
     }
 }
 

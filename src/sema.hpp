@@ -101,12 +101,15 @@ struct compiled_write_term {
     std::vector<compiled_write_term> items;     // all / any
 };
 
-// Collect every leaf pattern anywhere in a write tree (the conservative write
-// footprint used by the conflict mask).
+// Collect the leaf patterns of a write tree: every leaf (the conservative
+// write footprint used by the conflict mask), or with `certain` only the
+// leaves every resolution writes ({ any } branches skipped).
 inline void collect_write_leaves(compiled_write_term const& t,
-                                 std::vector<compiled_pattern const*>& out) {
+                                 std::vector<compiled_pattern const*>& out,
+                                 bool certain = false) {
     if (t.what == compiled_write_term::kind::leaf) { out.push_back(&t.pattern); return; }
-    for (auto const& it : t.items) collect_write_leaves(it, out);
+    if (certain && t.what == compiled_write_term::kind::any) return;
+    for (auto const& it : t.items) collect_write_leaves(it, out, certain);
 }
 
 // One match-write pair, post-expansion: LHS patterns conjoined at one anchor,
@@ -158,7 +161,8 @@ struct compiled_op {
     // The `int` arguments (resize w/h, upscale n/m, pad n): statement-scope
     // expressions (section 6.0), in written order - the order they evaluate
     // in when the statement is reached. `param` is the parameter's index.
-    struct int_arg { int param{0}; int expr{-1}; };   // also path's connectivity
+    struct int_arg { int param{0}; int expr{-1}; };
+    static constexpr int path_connectivity = 6;   // its `param` (table position)
     std::vector<int_arg> int_args;
     int w{0};   // mirror axis: 1 = horizontal
     // path (section 6.6)

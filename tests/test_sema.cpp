@@ -138,7 +138,7 @@ sequence main { }
 TEST_CASE("sema: invalid attribute values") {
     CHECK(compile_result(prelude +
         "rule r(symmetry=diagonal) { level[.] => level[wall] }\nsequence main { }")
-        .has_error("invalid value 'diagonal'"));
+        .has_error("invalid symmetry 'diagonal'"));
     CHECK(compile_result(prelude +
         "rule r(rotation=45) { level[.] => level[wall] }\nsequence main { }")
         .has_error("invalid rotation angle"));
@@ -575,7 +575,7 @@ sequence main { resize(2, 2) everywhere r everywhere s everywhere u }
     }
     SECTION("attribute and axis values are still validated") {
         CHECK(compile_result(trio + "rule r(symmetry=rotation) { g[.] => g[a] }\n" + rprog)
-              .has_error("invalid value 'rotation'"));
+              .has_error("invalid symmetry 'rotation'"));
         CHECK(compile_result(trio + "sequence main { mirror(none) }\n").has_error("none"));
     }
 }
@@ -622,7 +622,7 @@ TEST_CASE("sema: inline rules get every rule check, located at the rule") {
     CHECK(compile_result(prelude + "sequence main { everywhere { level[lava] => level[floor] } }")
           .has_error("unknown tag value 'lava'"));
     CHECK(compile_result(prelude + "sequence main { everywhere (symmetry=diagonal) { level[.] => level[floor] } }")
-          .has_error("invalid value 'diagonal'"));
+          .has_error("invalid symmetry 'diagonal'"));
     // the reductivity warning names the rule by its position
     compile_result w(prelude + "sequence main {\n    grow { level[floor] => tiles[1] }\n}");
     CHECK(w.ok);

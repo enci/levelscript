@@ -267,8 +267,7 @@ std::string stmt_desc(program_stmt const& s) {
         }
         return d + ")";
     }
-    static char const* const names[] = {"once", "scatter", "everywhere", "grow", "settle"};
-    std::string p = names[(int)s.mode];
+    std::string p = mode_name(s.mode);
     if (s.count) {
         p += "(" + expr_brief(*s.count) + (s.count_percent ? "%)" : ")");
     }
