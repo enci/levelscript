@@ -544,7 +544,7 @@ arg_list    ::= expr (',' expr)*
 ```
 Precedence follows C conventions (lowest to highest): `||`, `&&`, `|`, equality, relational, additive, multiplicative, unary, primary.
 
-**Identifier resolution** (in order): a name followed by `(` is a built-in function call (section 5.10); else `x`/`y`/`width`/`height` are the reserved position/dimension values (section 2.4); else a declared param - input or derived (section 4.2); else, **inside a tag-grid cell**, a `tag_value` or `tag_union` of that grid's tagset (a union resolves to its members' combined mask, section 3); else a grid name, which reads **that grid's value at the current cell position** (same-position cross-grid read - no indices). A name resolving to none of these is a compile error.
+**Identifier resolution** (in order): a name followed by `(` is a built-in function call (section 5.10); else `x`/`y`/`width`/`height` are the reserved position/dimension values (section 2.4); else a declared param - input or derived (section 4.2); else, **inside a tag-grid cell**, a `tag_value` or `tag_union` of that grid's tagset (a union resolves to its members' combined mask, section 3); else a grid name, which reads **that grid's value at the current cell position** (same-position cross-grid read - no indices); else a `tag_value` or `tag_union` of the **one** tagset, among those the module sees (section 2.6), that declares the name - outside a tag-grid cell (a `where` cell, a guard, an operation argument) this is how tag names resolve, and a name that several such tagsets declare is ambiguous there. A name resolving to none of these is a compile error.
 
 **Types.** Three value kinds: **tag-mask**, **number**, **bool**.
 - Tag operators: `|` (union), `!` (complement, match-side only), `==`/`!=` between same-tagset operands -> bool.
@@ -1053,7 +1053,7 @@ Warnings never stop compilation or execution; the runtime degrades with a warnin
 1. **Reductivity.** `grow` without a count over a rule where no unconditional write invalidates its own LHS - "may never terminate" (section 6.9). Not an error: the analysis is conservative, and a build pipeline may still choose to treat warnings as failures.
 2. **Unreachable sequence fixpoint.** Retired: it could only see literal operation arguments (section 6.10).
 
-**Runtime warnings** (logged; the statement becomes a no-op):
+**Runtime warnings** (logged; the run continues, with the value clamped or the statement skipped as noted):
 
 - `trim()` on an entirely empty stack (section 6.3).
 - `resize(...)` with a dimension below 1; the statement is a no-op (section 6.1).
