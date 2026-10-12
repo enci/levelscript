@@ -124,10 +124,12 @@ struct cell_highlight {
 /// One level of run::stmt_stack(): `index` is the statement's position in
 /// its enclosing list (the entry's body, or a nested sequence body);
 /// `iteration` is the 0-based iteration of the enclosing sequence
-/// application (always 0 for frame 0 - the entry runs once).
+/// application (always 0 for frame 0 - the entry runs once); `iterations`
+/// is that application's evaluated count, -1 when it runs until stable.
 struct stmt_frame {
     int index;
     int iteration;
+    int iterations;
 };
 
 class run {

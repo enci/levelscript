@@ -31,6 +31,7 @@ export type CompletionContext =
 // Operation parameter schemas (spec section 6.0). The op names are checked
 // against the compiler's inspect `ops` list by scripts/check-completion.js.
 export type OpParamKind = 'int' | 'grid' | 'pred' | 'value' | 'expr' | 'enum';
+// `values`: the suggested words (an enum's whole set; an int's meaningful values)
 export interface OpParam { name: string; kind: OpParamKind; positional: boolean; required: boolean; values?: string[] }
 export const OPS: { name: string; params: OpParam[]; snippet: string }[] = [
     { name: 'resize',  snippet: 'resize(${1:w}, ${2:h})',
@@ -51,7 +52,7 @@ export const OPS: { name: string; params: OpParam[]; snippet: string }[] = [
                { name: 'write', kind: 'value', positional: false, required: true },
                { name: 'over', kind: 'grid', positional: false, required: false },
                { name: 'passable', kind: 'pred', positional: false, required: false },
-               { name: 'connectivity', kind: 'enum', positional: false, required: false, values: ['4', '8'] },
+               { name: 'connectivity', kind: 'int', positional: false, required: false, values: ['4', '8'] },
                { name: 'cost', kind: 'expr', positional: false, required: false }] },
 ];
 

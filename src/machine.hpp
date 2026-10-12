@@ -37,6 +37,7 @@ struct step_event {
 struct frame {
     int index{0};
     int iteration{0};
+    int iterations{1};   // the enclosing application's evaluated count; -1 = until stable
 };
 
 struct grid_state {
@@ -106,7 +107,7 @@ private:
     bool unchanged_since(stack_state const& s) const;
 
     void exec_op(compiled_op const& op);
-    void run_path(compiled_op const& op);   // section 6.6
+    void run_path(compiled_op const& op, int ndirs);   // section 6.6; ndirs = 4 or 8
     // Evaluate an arena expression at position (x, y). Total (section 5.8): /0 = 0,
     // wrap at 32 bits, empty number cells read as 0. `random` draws — which is
     // why the whole matching path is non-const.

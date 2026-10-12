@@ -153,28 +153,20 @@ struct compiled_pred {
     int     expr{-1};      // expr form (arena index)
 };
 
-// A `value` argument, typed by the target grid.
-struct compiled_value {
-    bool    is_expr{false};
-    int64_t const_val{0};
-    int     expr{-1};
-};
-
 struct compiled_op {
     op_kind kind{op_kind::trim};
     // The `int` arguments (resize w/h, upscale n/m, pad n): statement-scope
     // expressions (section 6.0), in written order - the order they evaluate
     // in when the statement is reached. `param` is the parameter's index.
-    struct int_arg { int param{0}; int expr{-1}; };
+    struct int_arg { int param{0}; int expr{-1}; };   // also path's connectivity
     std::vector<int_arg> int_args;
     int w{0};   // mirror axis: 1 = horizontal
     // path (section 6.6)
     compiled_pred  from, to;
     compiled_pred  passable;        // !given → default: non-empty in any layer
     int            into_grid{-1};
-    compiled_value write;
+    int            write{-1};       // expr arena index, typed by into_grid
     int            over_grid{-1};   // the graph seam: validated, no effect yet
-    int            connectivity{4};
     int            cost{-1};        // expr arena index; -1 → constant 1 (BFS)
 };
 
@@ -187,7 +179,6 @@ struct compiled_stmt {
     apply_mode  mode{apply_mode::everywhere};   // apply (sections 6, 6.7)
     int         count{-1};        // count expr arena index; -1 = none: once = 1,
                                   // everywhere = all, grow/settle = fixpoint
-    int         count_lit{-1};    // the count's value when written as a literal; else -1
     bool        percent{false};   // scatter(P%): the count is P
     int         rule_id{-1};   // apply over a rule
     int         seq_id{-1};    // apply over a sequence (section 6.10): once or settle

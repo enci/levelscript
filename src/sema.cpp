@@ -242,8 +242,8 @@ struct analyzer {
         return nullptr;
     }
 
-    // Resolve a bare identifier: x/y/width/height → param → grid → tag value
-    // or union (the enclosing cell's tagset first, else a unique value match).
+    // Resolve a bare identifier (section 5.8): x/y/width/height → param → tag
+    // value or union of the enclosing cell's tagset → grid → a unique tag value.
     int compile_ident(expr const& e, int ctx_tag, val_type& t) {
         auto const& name = e.ident;
         if (is_reserved_ident(name)) {
@@ -270,6 +270,13 @@ struct analyzer {
             t = val_type::num;
             return add_expr({ce_kind::param_read, 0, pid, -1, -1, -1});
         }
+        if (ctx_tag >= 0) {   // tag value or union of the enclosing cell's tagset
+            int64_t m = out.mask_of(ctx_tag, name);
+            if (m != 0) {
+                t = val_type::mask;
+                return add_expr({ce_kind::mask_lit, m, -1, -1, -1, -1});
+            }
+        }
         int gid = out.layer_id(name);
         if (gid >= 0) {
             require_visible(e.loc, "grid", name, layer_mod[(size_t)gid]);
@@ -281,13 +288,6 @@ struct analyzer {
             }
             t = out.layers[gid].tag_id < 0 ? val_type::num : val_type::mask;
             return add_expr({ce_kind::grid_read, 0, gid, -1, -1, -1});
-        }
-        if (ctx_tag >= 0) {   // tag value or union of the enclosing cell's tagset
-            int64_t m = out.mask_of(ctx_tag, name);
-            if (m != 0) {
-                t = val_type::mask;
-                return add_expr({ce_kind::mask_lit, m, -1, -1, -1, -1});
-            }
         }
         // unique tag value anywhere
         int found = 0; int64_t mask = 0;
@@ -1002,150 +1002,105 @@ struct analyzer {
                                            {"write",        arg_kind::value, false, true},
                                            {"over",         arg_kind::grid,  false, false},
                                            {"passable",     arg_kind::pred,  false, false},
-                                           {"connectivity", arg_kind::enum_, false, false},
+                                           {"connectivity", arg_kind::int_,  false, false},
                                            {"cost",         arg_kind::expr,  false, false}}},
         };
         return table;
     }
 
+    // A bare-identifier argument's name (a `grid` or `enum` value), else null.
+    static std::string const* bare_name(op_arg const& a) {
+        return a.value->kind == expr_kind::ident ? &a.value->ident : nullptr;
+    }
     static std::string arg_render(op_arg const& a) {
-        switch (a.what) {
-        case op_arg::kind::int_:  return std::to_string(a.int_val);
-        case op_arg::kind::ident: return a.ident;
-        case op_arg::kind::expr:  return "(expr)";
-        }
-        return "?";
+        if (a.value->kind == expr_kind::int_lit) return std::to_string(a.value->int_val);
+        if (auto n = bare_name(a)) return *n;
+        return "(expr)";
     }
 
     // ── per-kind argument compilers ──────────────────────────────────────────
 
-    // An `int` argument: a statement-scope number expression, like a count
-    // (check 21). Out-of-range values are handled at run time (section 6.0).
-    int op_int(op_arg const& a, char const* op, char const* pn) {
-        scope_ = scope{false, false, -1};
+    // A number argument. `int` arguments (resize w/h, upscale n/m, pad n,
+    // path connectivity) are
+    // statement-scope expressions, like a count (check 21); out-of-range
+    // values are handled at run time (section 6.0). `cost` is per cell.
+    int op_num(op_arg const& a, char const* op, char const* pn, bool stmt_scope) {
+        if (stmt_scope) scope_ = scope{false, false, -1};
         val_type t;
         int e = compile_expr(*a.value, -1, t, (int)val_type::num);
         scope_ = scope{};
         if (t != val_type::num)
-            error(a.loc, "argument '" + std::string(pn) + "' of '" + op +
-                  "' must be a number");
+            error(a.loc, "'" + std::string(pn) + "' of '" + op + "' must be a number");
         return e;
     }
 
-    // Is `name` an identifier an expression can read (section 5.8)? A bare
-    // `value`/`expr` argument that is not a tag value falls back to one.
-    bool readable_ident(std::string const& name) const {
-        return is_reserved_ident(name) || out.layer_id(name) >= 0 || out.param_id(name) >= 0;
-    }
-
     int op_grid(op_arg const& a, char const* op, char const* pn) {
-        if (a.what != op_arg::kind::ident) {
+        auto name = bare_name(a);
+        if (!name) {
             error(a.loc, "'" + std::string(pn) + "=' of '" + op +
                   "' expects a grid name, got '" + arg_render(a) + "'");
             return -1;
         }
-        int id = out.layer_id(a.ident);
+        int id = out.layer_id(*name);
         if (id < 0)
             error(a.loc, "'" + std::string(pn) + "=' of '" + op + "': '" +
-                  a.ident + "' is not a declared grid");
+                  *name + "' is not a declared grid");
         else
-            require_visible(a.loc, "grid", a.ident, layer_mod[(size_t)id]);
+            require_visible(a.loc, "grid", *name, layer_mod[(size_t)id]);
         return id;
     }
 
     // A bare tag must belong to exactly ONE tag layer's tagset; ambiguity
-    // needs the expression form naming the grid.
+    // needs the expression form naming the grid. Any other argument is a
+    // per-cell boolean expression.
     compiled_pred op_pred(op_arg const& a, char const* op, char const* pn) {
         compiled_pred p;
         p.given = true;
-        if (a.what == op_arg::kind::ident) {
+        auto name = bare_name(a);
+        if (name) {
             int found_layer = -1, matches = 0;
             int64_t mask = 0;
             for (int li = 0; li < (int)out.layers.size(); ++li) {
                 int tid = out.layers[li].tag_id;
                 if (tid < 0 || !sees(a.loc.mod, layer_mod[(size_t)li])) continue;
-                int64_t m = out.mask_of(tid, a.ident);
+                int64_t m = out.mask_of(tid, *name);
                 if (m != 0) { ++matches; found_layer = li; mask = m; }
             }
             if (matches == 0)
-                error(a.loc, "unknown tag value '" + a.ident + "' in '" +
+                error(a.loc, "unknown tag value '" + *name + "' in '" +
                       std::string(pn) + "=' of '" + op +
                       "' (no layer this module sees has a tagset declaring it)");
             else if (matches > 1)
-                error(a.loc, "predicate '" + a.ident + "' in '" + std::string(pn) +
+                error(a.loc, "predicate '" + *name + "' in '" + std::string(pn) +
                       "=' of '" + op + "' is ambiguous (several layers could hold "
                       "it); use an expression naming the grid, e.g. " + pn +
-                      "=((grid == " + a.ident + "))");
+                      "=(grid == " + *name + ")");
             else {
                 p.grid_id = found_layer;
                 p.mask = mask;
             }
             return p;
         }
-        if (a.what == op_arg::kind::expr) {
-            p.is_expr = true;
-            val_type t;
-            p.expr = compile_expr(*a.value, -1, t);
-            if (t != val_type::boolean)
-                error(a.loc, "'" + std::string(pn) + "=' of '" + op +
-                      "' must be a boolean expression");
-            return p;
-        }
-        error(a.loc, "'" + std::string(pn) + "=' of '" + op +
-              "' expects a tag value or a (boolean expression)");
+        p.is_expr = true;
+        val_type t;
+        p.expr = compile_expr(*a.value, -1, t);
+        if (t != val_type::boolean)
+            error(a.loc, "'" + std::string(pn) + "=' of '" + op +
+                  "' must be a tag value or a boolean expression");
         return p;
     }
 
-    compiled_value op_value(op_arg const& a, char const* op, char const* pn,
-                            int into_grid) {
-        compiled_value v;
-        int tid = into_grid >= 0 ? out.layers[into_grid].tag_id : -1;
-        bool is_number = tid < 0;
-        if (a.what == op_arg::kind::int_) {
-            if (!is_number)
-                error(a.loc, "'" + std::string(pn) + "=' of '" + op +
-                      "' writes into a tag grid; expected a tag value");
-            v.const_val = a.int_val;
-            return v;
-        }
-        if (a.what == op_arg::kind::ident &&
-                (is_number || out.mask_of(tid, a.ident) == 0) && readable_ident(a.ident)) {
-            // not a tag value: an expression (section 6.0)
-        } else if (a.what == op_arg::kind::ident) {
-            if (is_number) {
-                error(a.loc, "'" + std::string(pn) + "=' of '" + op +
-                      "' writes into a number grid; expected an integer");
-                return v;
-            }
-            int64_t m = out.mask_of(tid, a.ident);
-            if (m == 0)
-                error(a.loc, "unknown tag value '" + a.ident +
-                      "' for the target grid in '" + std::string(pn) + "=' of '" +
-                      op + "'");
-            v.const_val = m;
-            return v;
-        }
-        v.is_expr = true;
+    // A `value` argument: an expression typed by the target grid, so a bare
+    // name resolves against its tagset first (section 6.0).
+    int op_value(op_arg const& a, char const* op, char const* pn, int into_grid) {
+        int tid = out.layers[into_grid].tag_id;
+        val_type want = tid < 0 ? val_type::num : val_type::mask;
         val_type t;
-        v.expr = compile_expr(*a.value, tid, t,
-                              (int)(is_number ? val_type::num : val_type::mask));
-        if (is_number && t != val_type::num)
-            error(a.loc, "'" + std::string(pn) + "=' of '" + op +
-                  "' must be a number (the target grid is a number grid)");
-        if (!is_number && t != val_type::mask)
-            error(a.loc, "'" + std::string(pn) + "=' of '" + op +
-                  "' must be a tag value (the target grid is a tag grid)");
-        return v;
-    }
-
-    int op_expr(op_arg const& a, char const* op, char const* pn) {
-        if (a.what == op_arg::kind::int_)
-            return num_lit(a.int_val);
-        val_type t;
-        int e = compile_expr(*a.value, -1, t, (int)val_type::num);
-        if (t != val_type::num)
-            error(a.loc, "'" + std::string(pn) + "=' of '" + op +
-                  "' must be a numeric expression");
+        int e = compile_expr(*a.value, tid, t, (int)want);
+        if (t != want)
+            error(a.loc, "'" + std::string(pn) + "=' of '" + op + "' must be " +
+                  (tid < 0 ? "a number (the target grid is a number grid)"
+                           : "a tag value (the target grid is a tag grid)"));
         return e;
     }
 
@@ -1223,16 +1178,15 @@ struct analyzer {
         if (!ok) return false;
 
         op.kind = spec->kind;
+        // `int` arguments in written order (section 10.6), positional or named
+        for (auto const& a : s.op_args)
+            for (int i = 0; i < (int)spec->params.size(); ++i)
+                if (bound[i] == &a && spec->params[i].kind == arg_kind::int_)
+                    op.int_args.push_back({i, op_num(a, spec->name, spec->params[i].name, true)});
         switch (spec->kind) {
         case op_kind::resize:
         case op_kind::upscale:
         case op_kind::pad:
-            // written order (section 10.6), whether positional or named
-            for (auto const& a : s.op_args)
-                for (int i = 0; i < (int)spec->params.size(); ++i)
-                    if (bound[i] == &a)
-                        op.int_args.push_back({i, op_int(a, spec->name, spec->params[i].name)});
-            break;
         case op_kind::trim:
             break;
         case op_kind::mirror: {
@@ -1253,16 +1207,8 @@ struct analyzer {
                 op.write = op_value(*bound[3], spec->name, "write", op.into_grid);
             if (bound[4]) op.over_grid = op_grid(*bound[4], spec->name, "over");
             if (bound[5]) op.passable  = op_pred(*bound[5], spec->name, "passable");
-            if (bound[6]) {
-                auto const& a = *bound[6];
-                long long cv = a.what == op_arg::kind::int_ ? a.int_val : -1;
-                if (cv != 4 && cv != 8)
-                    error(a.loc, "invalid connectivity '" + arg_render(a) +
-                          "'; expected 4 or 8");
-                else
-                    op.connectivity = (int)cv;
-            }
-            if (bound[7]) op.cost = op_expr(*bound[7], spec->name, "cost");
+            if (!bound[6]) op.int_args.push_back({6, num_lit(4)});   // connectivity
+            if (bound[7]) op.cost = op_num(*bound[7], spec->name, "cost", false);
             break;
         }
         }
@@ -1283,9 +1229,8 @@ struct analyzer {
     }
 
     // A count (section 6): a statement-scope expression like a guard - params
-    // only, a number (check 21). A literal 0 applies nothing (check 28); a
-    // literal percentage may not exceed 100 (check 30). Computed values are
-    // clamped at run time instead.
+    // only, a number (check 21). Out-of-range values are clamped, with a
+    // warning, at run time.
     void compile_count(program_stmt const& s, compiled_stmt& cs, std::string const& ctx) {
         scope_ = scope{false, false, -1};
         val_type t;
@@ -1293,17 +1238,6 @@ struct analyzer {
         scope_ = scope{};
         if (t != val_type::num)
             error(s.count_loc, "a count must be a number" + ctx);
-        // literal-ness from the source: a count that failed to compile also
-        // compiles to a literal
-        auto const& e = *s.count;
-        if (e.kind != expr_kind::int_lit) return;
-        cs.count_lit = (int)e.int_val;
-        if (e.int_val == 0)
-            error(s.count_loc, std::string("a count of 0") +
-                  (s.count_percent ? "%" : "") + " applies nothing" + ctx);
-        if (s.count_percent && e.int_val > 100)
-            error(s.count_loc, "percentage " + std::to_string(e.int_val) +
-                  "% is above 100" + ctx);
     }
 
     // Levenshtein distance - did-you-mean for unknown rule/sequence names.
@@ -1469,52 +1403,6 @@ struct analyzer {
             if (state[i] == 0) dfs(dfs, i);
     }
 
-    // The operation that changes the grid dimensions on every iteration of
-    // sequence `sid` ("" if none is certain): an unguarded non-identity
-    // upscale/pad, directly or through unguarded nested applications that are
-    // certain to run an iteration (no count, or a literal one). section 6.10.
-    std::string dims_changer(int sid, std::vector<char>& seen) const {
-        if (seen[sid]) return "";
-        seen[sid] = 1;
-        for (auto const& st : out.sequences[sid].stmts) {
-            if (st.guard >= 0) continue;
-            if (st.what == compiled_stmt::kind::op_call) {
-                // literal arguments only: a computed factor may be 1, a
-                // computed margin 0 - uncertain, so no warning
-                std::vector<long long> lit;
-                for (auto const& ia : st.op.int_args) {
-                    auto const& e = out.exprs[(size_t)ia.expr];
-                    if (e.kind != ce_kind::int_lit) { lit.clear(); break; }
-                    lit.push_back(e.val);
-                }
-                if (lit.size() != st.op.int_args.size() || lit.empty()) continue;
-                if (st.op.kind == op_kind::upscale && (lit[0] != 1 || lit[1] != 1)) return "upscale";
-                if (st.op.kind == op_kind::pad && lit[0] > 0) return "pad";
-            } else if (st.seq_id >= 0 && (st.count < 0 || st.count_lit > 0)) {
-                // a computed count may be zero, so it is not certain to run
-                std::string inner = dims_changer(st.seq_id, seen);
-                if (!inner.empty()) return inner;
-            }
-        }
-        return "";
-    }
-
-    // section 7.4 warning 2: `settle S` (no count) where no iteration can be stable.
-    void warn_unstable_fixpoints(std::vector<compiled_stmt> const& stmts) {
-        for (auto const& st : stmts) {
-            if (st.what != compiled_stmt::kind::apply || st.seq_id < 0 ||
-                st.mode != apply_mode::settle || st.count >= 0)
-                continue;
-            std::vector<char> seen(out.sequences.size(), 0);
-            std::string op = dims_changer(st.seq_id, seen);
-            if (!op.empty())
-                warning(st.loc,
-                    "'settle' over sequence '" + out.sequences[st.seq_id].name +
-                    "' may never terminate: '" + op + "' changes the grid dimensions "
-                    "on every iteration, so no iteration can be stable");
-        }
-    }
-
     void run(bool best_effort) {
         for (int id : mods.order) out.modules.push_back(mods.names[(size_t)id]);
         build_tables();
@@ -1527,8 +1415,6 @@ struct analyzer {
         for (size_t i = 0; i < ast.sequences.size(); ++i)
             compile_stmts(ast.sequences[i].stmts, out.sequences[i].stmts, ast.sequences[i].name);
         check_sequence_cycles();
-        if (diags.has_errors()) return;   // the warning walks sequences: cycle-free only
-        for (auto const& sq : out.sequences) warn_unstable_fixpoints(sq.stmts);
     }
 };
 

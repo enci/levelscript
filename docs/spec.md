@@ -554,6 +554,8 @@ Precedence follows C conventions (lowest to highest): `||`, `&&`, `|`, equality,
 - A pattern variable yields the type of its binding cells' grid: a tag-mask of that tagset, or a number (section 5.11).
 - Mixing kinds (e.g. `|` on numbers, `+` on tags, comparing tag to number) is a compile error.
 
+Operands evaluate left to right; `&&` and `||` short-circuit, and `if` is eager (section 5.10). Order is observable only through `random` draws.
+
 **The empty literal `.`** denotes the empty value (section 4.1). It is **polymorphic**: in a tag context it is the empty mask `0x1`; in a number context it is the empty sentinel. Its type is inferred from context - the other operand of a comparison, the sibling branch of an `if`, or the grid of the cell it is written into. A `.` with no inferable type (e.g. `(. == .)`) is an expression type error (section 7.3, check 14).
 
 - **Tag context:** `(g == .)` is true iff the cell is empty; `(g != .)` iff non-empty. `.` composes in `if` (`if(c, floor, .)` -> tag), and on the RHS writes empty (a conditional clear).
@@ -712,7 +714,7 @@ A statement is either an **operation call** (`op_call` - a built-in operation ap
 
 A rule-only mode on a sequence is an error (check 37). Over a rule the modes fall into two kinds, plus `settle`: the **batch modes** (`scatter`, `everywhere`) apply from one snapshot in one shuffled pass under the write mask; the **step modes** (`once`, `grow`) re-snapshot after every application and use no mask; `settle` repeats batch sweeps until nothing changes.
 
-**Counts.** A count is a statement-scope expression (section 5.8). Like a guard, it reads params only: a grid read, `x`/`y`, or `width`/`height` in a count is a compile error, as is a count that is not a number (check 21). It is evaluated each time its statement is reached, after the guard and only if the guard passed; a `random` in it draws on every evaluation. A count written as the literal `0` is an error (check 28), as is a `scatter` percentage written as a literal above `100` (check 30). A computed count below `0` is treated as `0`, so the statement applies nothing (over a sequence, it runs no iteration); a computed percentage above `100` is treated as `100`. Neither warns. The `%` follows a literal, a param name, or a parenthesized expression (`50%`, `density%`, `(n * 2)%`), so it always applies to the whole count; `n * 2%` is a parse error. It is part of `scatter`'s count, not of the expression: it selects a percentage of the batch (section 6.7) and is not a value.
+**Counts.** A count is a statement-scope expression (section 5.8). Like a guard, it reads params only: a grid read, `x`/`y`, or `width`/`height` in a count is a compile error, as is a count that is not a number (check 21). It is evaluated each time its statement is reached, after the guard and only if the guard passed; a `random` in it draws on every evaluation. A count of `0` applies nothing (over a sequence, it runs no iteration). A count below `0` is treated as `0`, and a percentage above `100` as `100`, each with a runtime warning (section 7.4). The checks happen at run time because counts are expressions: a literal and a computed count are treated alike. The `%` follows a literal, a param name, or a parenthesized expression (`50%`, `density%`, `(n * 2)%`), so it always applies to the whole count; `n * 2%` is a parse error. It is part of `scatter`'s count, not of the expression: it selects a percentage of the batch (section 6.7) and is not a value.
 
 **Inline rules.** A target may be a rule written in place, with the grammar of a named rule minus `rule IDENT` (section 5.1): optional attributes, then a braced body. An inline rule behaves exactly as a named rule with the same attributes and body, declared in the enclosing sequence's module and applied by name; its names resolve in that module. To apply one rule from several places, declare it with `rule`. Diagnostics and the debugger locate an inline rule by its source position (section 10.8); the observe channel identifies statements by position, not by rule name (Appendix A).
 
@@ -749,13 +751,13 @@ Each parameter has a **kind**, a **binding** (positional or named-only), and req
 | kind | written as | resolves to |
 |------|-----------|-------------|
 | `int` | a number expression, statement scope (section 5.8) | an integer, evaluated once when the statement is reached |
-| `grid` | IDENT | a declared grid name (section 4) |
+| `grid` | a name | a declared grid name (section 4) |
 | `pred` | a tag value or union, or a boolean expression, cell scope | a per-cell predicate (a tag or union means "cell overlaps this mask", section 6.6; an expression means its truth per cell) |
-| `value` | a tag value or union, or an expression typed by the target grid, cell scope | a cell value to write |
+| `value` | an expression typed by the target grid, cell scope | a cell value to write |
 | `expr` | a number expression, cell scope | a numeric expression evaluated per cell |
-| `enum{...}` | IDENT or INTEGER | one of a fixed set (validated per operation) |
+| `enum{...}` | a name | one of a fixed set of words (validated per operation) |
 
-Every argument is written as an expression (section 6 grammar). A `grid` or `enum` argument must be a bare `IDENT` or `INTEGER`. For `pred` and `value`, a bare `IDENT` is first resolved as a tag value or union (section 6.6); any other argument resolves under section 5.8. Parenthesized forms such as `passable=((0 == 0))` remain valid, since a parenthesized expression is an expression.
+Every argument is written as an expression (section 6 grammar), and parentheses around it change nothing: `into=(tiles)` is `into=tiles`. Where a parameter takes a *name* - a `grid` or an `enum` - the argument must be a single `IDENT`. A `pred` that is a single `IDENT` is a tag value or union (section 6.6). A `value` is an expression in a cell of the target grid, so under section 5.8 a name resolves first as a tag value or union of that grid's tagset. Every other argument resolves under section 5.8.
 
 **Operation table.**
 
@@ -766,7 +768,7 @@ Every argument is written as an expression (section 6 grammar). A `grid` or `enu
 | `trim` | *(none)* | crop all layers to the content bounding box (section 6.3) |
 | `mirror` | `axis:enum{horizontal,vertical}` (positional) | fold one half onto the other, all layers (section 6.4) |
 | `pad` | `n:int` (positional) | uniform empty border of N on all sides (section 6.5) |
-| `path` | `from:pred`, `to:pred`, `into:grid`, `write:value`, `over:grid?`, `passable:pred?`, `connectivity:enum{4,8}?=4`, `cost:expr?=1` (**all named**) | write a shortest route between predicates into a grid (section 6.6) |
+| `path` | `from:pred`, `to:pred`, `into:grid`, `write:value`, `over:grid?`, `passable:pred?`, `connectivity:int?=4`, `cost:expr?=1` (**all named**) | write a shortest route between predicates into a grid (section 6.6) |
 
 **Binding: positional vs. named-only.** Each parameter is declared **positional** or **named-only** by convention: positional when its meaning is obvious from the operation and its order (a single argument, or an unmistakable order like width-then-height); named-only when the operation has several same-kind or optional arguments with no self-evident order. So `resize(10, 20)`, `pad(2)`, `mirror(horizontal)` read clean without names, while `path(from=..., to=..., ...)` is named throughout. A positional parameter may also be supplied by name; a named-only parameter supplied positionally is an error.
 
@@ -843,7 +845,7 @@ Parameters (section 6.0):
 - `write : value` (required) - the value stamped on each route cell (typed by `into`).
 - `over : grid?` (optional) - the **connectivity substrate**. Omitted, the route runs over the implicit grid adjacency of the coordinate space. This is the **seam** for the planned graph layers (section 9): a graph reference here will route over its edges - the same operation, one swapped input. Until graphs land, only grid adjacency is defined.
 - `passable : pred?` (optional, default: any non-empty cell) - traversable cells. `from`/`to` cells are always traversable.
-- `connectivity : enum{4,8}?` (optional, default `4`) - 4- or 8-neighbour grid adjacency; ignored when `over` is a graph.
+- `connectivity : int?` (optional, default `4`) - 4- or 8-neighbour grid adjacency; any other value is treated as `4`, with a runtime warning (section 7.4). Ignored when `over` is a graph.
 - `cost : expr?` (optional, default `1`) - per-step weight at the entered cell. Default 1 is breadth-first (uniform shortest path); a non-constant cost is weighted (Dijkstra). Non-positive cost is treated as 1.
 
 Semantics: the route is the minimum-total-cost sequence of adjacent traversable cells from a `from` cell to the nearest `to` cell, **overwriting** `into` on the route cells. Ties break deterministically by seed (section 7.2). If no `to` is reachable (including an empty `from` or `to` set), `path` is a **no-op and emits a warning** (like `trim` on empty content, section 7.4), not an error. It writes only the route and exposes no distance field. Because a grid is an implicit graph, `path` also underlies connectivity guarantees, corridor carving, and room-linking; it generalizes to explicit graphs through `over`.
@@ -962,7 +964,7 @@ The body is a `statement_list` (section 6): rule applications, sequence applicat
 
 **Draw order.** A sequence application has no draw sites of its own, and the stability check draws nothing. Body statements draw per section 10.6 as each one is reached, iteration after iteration.
 
-**The dimension warning.** For `settle S` without a count, the compiler warns when no iteration can be stable because every iteration changes the grid dimensions. This happens when S's body contains an `upscale` whose factors are both written as literals and are not both 1, or a `pad` whose margin is written as a literal greater than 0, and that operation is **reached on every iteration**. A computed factor may be 1 and a computed margin may be 0, so computed arguments suppress the warning. That requires two things: neither the operation nor any enclosing nested sequence application carries a `when` guard, and every enclosing nested application runs at least one iteration, which holds for `once`, for `settle` without a count, and for a count written as a literal (a literal `0` is an error, check 28), but not for a computed count, which may be zero. The warning reads: *"'settle' over sequence '<name>' may never terminate: '<operation>' changes the grid dimensions on every iteration, so no iteration can be stable."*
+**Dimension changes.** A `settle S` without a count whose every iteration changes the grid dimensions (an unguarded `upscale` or `pad` that always grows the stack) can never reach a stable iteration, and so never terminates. The compiler does not detect this: the factors and margins are expressions evaluated at run time. Give such a `settle` a count.
 
 Like the reductivity warning, this check is conservative. A guard suppresses the warning, because it may be false. Silence proves nothing, because a rule in the body can still keep recreating its own match. Bounded applications (`once`, `settle(N)`) are never warned: `settle(3) grow_and_upscale` is legitimate intended growth.
 
@@ -1021,14 +1023,14 @@ The compiler must reject:
 25. **Invalid union.** A `tag_union` whose member is not a `tag_value` or earlier `tag_union` of the same tagset; a member that forward-references a later union; or a union cycle. (A union name colliding with a `tag_value` name, a grid, a param, a reserved identifier, or a built-in is caught by the existing duplicate/collision checks - a union shares the tagset's value namespace.)
 26. **Default param scope.** A default expression (section 4.2) that reads a grid, `x`/`y`, or `width`/`height`; that forward-references a later param; or that participates in a cycle. (Same discipline as check 23; a default may reference earlier params and may call `random`.)
 27. **Input param without a default.** An `input_param` written as `name : number` with no `= expr` (every input param must carry a default, section 4.2).
-28. **Zero count.** A count written as the literal `0` (or `0%`), which applies nothing.
+28. **Zero count.** Retired: a count is an expression, and an out-of-range one is clamped at run time with a warning (sections 6, 7.4).
 29. **`ordered` misplacement.** `ordered` used as a write-side combinator (it is body-level only).
-30. **Percentage over 100.** A `scatter` percentage written as a literal above `100`.
+30. **Percentage over 100.** Retired: clamped at run time with a warning, like check 28 (sections 6, 7.4).
 31. **Same-grid simultaneous write.** Within one `{ all }` write block, two items whose write footprints overlap on the **same grid** at the same cell (e.g. `{ all g[wall] g[floor] }`). Simultaneous writes to one cell are ambiguous; use a union `|` (section 5.5) to store multiple values. (Different grids at the same position are fine - the mask is (grid, cell)-keyed, section 6.8.)
 32. **Unknown operation.** An `op_call` (section 6.0) whose name is not in the operation table.
 33. **Operation argument arity/binding.** More positional arguments than the operation's positional parameters; a named-only parameter supplied positionally; a named argument preceding a positional one; or a parameter supplied both positionally and by name.
 34. **Missing required operation argument.** A required parameter not supplied.
-35. **Operation argument kind / enum.** An argument whose kind does not match the parameter (e.g. `grid` given a non-grid, or a non-bare expression where a `grid` or `enum` argument is required); an `enum` value outside its set (`mirror` axis not in {horizontal, vertical}; `connectivity` not in {4, 8}); or an ambiguous bare-tag `pred` (no layer the module sees, or more than one, could hold the tag - section 6.6).
+35. **Operation argument kind / enum.** An argument whose kind does not match the parameter (e.g. `grid` given a non-grid, or an expression that is not a single name where a name is required); an `enum` value outside its set (`mirror` axis not in {horizontal, vertical}); or an ambiguous bare-tag `pred` (no layer the module sees, or more than one, could hold the tag - section 6.6).
 36. **Operation value constraint.** Retired in 0.9.2: out-of-range `resize`, `upscale`, and `pad` values are handled at run time, with a warning (sections 6.1, 6.2, 6.5, 7.4).
 37. **Mode on a sequence.** `scatter`, `everywhere`, or `grow` applied to a sequence (section 6.10).
 38. **Sequence cycle.** A sequence that applies itself, directly or through other sequences.
@@ -1049,7 +1051,7 @@ Warnings never stop compilation or execution; the runtime degrades with a warnin
 **Compile-time warnings** (surfaced via `generator::warnings()`, Appendix A):
 
 1. **Reductivity.** `grow` without a count over a rule where no unconditional write invalidates its own LHS - "may never terminate" (section 6.9). Not an error: the analysis is conservative, and a build pipeline may still choose to treat warnings as failures.
-2. **Unreachable sequence fixpoint.** `settle` without a count over a sequence where every iteration is certain to change the grid dimensions, through an `upscale` or `pad` with literal arguments reached on every iteration (section 6.10).
+2. **Unreachable sequence fixpoint.** Retired: it could only see literal operation arguments (section 6.10).
 
 **Runtime warnings** (logged; the statement becomes a no-op):
 
@@ -1057,6 +1059,8 @@ Warnings never stop compilation or execution; the runtime degrades with a warnin
 - `resize(...)` with a dimension below 1; the statement is a no-op (section 6.1).
 - `upscale(...)` with a factor below 1; the factor is treated as 1 (section 6.2).
 - `pad(...)` with a margin below 0; the margin is treated as 0 (section 6.5).
+- A count below 0, treated as 0, or a `scatter` percentage above 100, treated as 100 (section 6).
+- `path(...)` with a `connectivity` other than 4 or 8; it is treated as 4 (section 6.6).
 - `path(...)` with no reachable route, or an empty `from`/`to` set (section 6.6); `path` before any `resize` (zero-sized stack).
 
 ---

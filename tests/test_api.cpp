@@ -424,7 +424,8 @@ TEST_CASE("api: scatter(P%) applies the exact fraction of the applied set") {
     auto one = make(src(1));
     CHECK(count_val(one.generate(one.sequence("main"), 1), "level", one.tag("geo.floor")) == 1);
 
-    CHECK(!make(src(0)));   // a literal 0% is check 28
+    auto none = make(src(0));   // 0% applies nothing
+    CHECK(count_val(none.generate(none.sequence("main"), 1), "level", none.tag("geo.floor")) == 0);
 
     auto full = make(src(100));
     CHECK(count_val(full.generate(full.sequence("main"), 1), "level", full.tag("geo.floor")) == 100);
