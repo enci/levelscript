@@ -138,12 +138,6 @@ enum class val_type { num, mask, boolean };
 // lookup serves them all, and diagnostics list the allowed keys from the
 // same rows.
 
-template <class Table, class Key>
-auto lookup(Table const& table, Key const& key) -> decltype(&*std::begin(table)) {
-    for (auto const& row : table)
-        if (row.name == key) return &row;
-    return nullptr;
-}
 
 inline std::string key_text(char const* k) { return k; }
 inline std::string key_text(long long k)   { return std::to_string(k); }
@@ -246,8 +240,8 @@ struct analyzer {
         };
         std::vector<var> vars;
         int slot(std::string const& name) {
-            for (int i = 0; i < (int)vars.size(); ++i)
-                if (vars[i].name == name) return i;
+            int i = index_of(vars, name, &var::name);
+            if (i >= 0) return i;
             vars.push_back({name});
             return (int)vars.size() - 1;
         }
@@ -256,6 +250,15 @@ struct analyzer {
 
     std::string type_name(int type) const {
         return type < 0 ? "number" : "tagset '" + out.tag_names[(size_t)type] + "'";
+    }
+
+    // The tagsets this module sees that declare `name` as a value or union.
+    std::vector<int> tagsets_declaring(std::string const& name, int mod) const {
+        std::vector<int> found;
+        for (int ti = 0; ti < (int)out.tag_names.size(); ++ti)
+            if (sees(mod, tag_mod[(size_t)ti]) && out.mask_of(ti, name) != 0)
+                found.push_back(ti);
+        return found;
     }
 
     // A use of `name` in an expression or a write: its slot, or -1 after
@@ -349,7 +352,8 @@ struct analyzer {
     };
 
     // Resolve a bare identifier (section 5.8): x/y/width/height → param → tag
-    // value or union of the enclosing cell's tagset → grid → a unique tag value.
+    // value or union of the enclosing cell's tagset → grid → a tag value or
+    // union of the one tagset that declares it.
     int compile_ident(expr const& e, int ctx_tag, val_type& t) {
         auto const& name = e.ident;
         if (is_reserved_ident(name)) {
@@ -386,15 +390,17 @@ struct analyzer {
             t = out.layers[gid].tag_id < 0 ? val_type::num : val_type::mask;
             return add_expr({ce_kind::grid_read, 0, gid, -1, -1, -1});
         }
-        // unique tag value anywhere
-        int found = 0; int64_t mask = 0;
-        for (int ti = 0; ti < (int)out.tag_names.size(); ++ti) {
-            int vid = out.value_id(ti, name);
-            if (vid >= 0) { ++found; mask = tag_bit(vid); }
-        }
-        if (found == 1) {
+        // a tag value or union of the one tagset this module sees that declares it
+        auto tagsets = tagsets_declaring(name, e.loc.mod);
+        if (tagsets.size() == 1) {
             t = val_type::mask;
-            return add_expr({ce_kind::mask_lit, mask, -1, -1, -1, -1});
+            return add_expr({ce_kind::mask_lit, out.mask_of(tagsets[0], name), -1, -1, -1, -1});
+        }
+        if (tagsets.size() > 1) {
+            std::string list;
+            for (int ti : tagsets) list += (list.empty() ? "'" : ", '") + out.tag_names[(size_t)ti] + "'";
+            return poison(e.loc, "tag value '" + name + "' is ambiguous: it is declared by " +
+                          "tagsets " + list + "; compare it in a cell of the grid it belongs to", t);
         }
         return poison(e.loc, "unknown identifier '" + name + "' in expression", t);
     }
@@ -539,11 +545,8 @@ struct analyzer {
             std::vector<std::string> vals;
             for (auto const& v : t.values) {
                 check_name(v.loc, "tag value", v.name);
-                for (auto const& seen : vals)
-                    if (seen == v.name) {
-                        error(v.loc, "duplicate tag value '" + v.name + "' in '" + t.name + "'");
-                        break;
-                    }
+                if (index_of(vals, v.name) >= 0)
+                    error(v.loc, "duplicate tag value '" + v.name + "' in '" + t.name + "'");
                 vals.push_back(v.name);
             }
             out.tag_names.push_back(t.name);
@@ -871,9 +874,8 @@ struct analyzer {
 
     void compile_rules() {
         for (auto const& r : ast.rules) {
-            for (auto const& seen : out.rules)
-                if (seen.name == r.name)
-                    error(r.loc, "duplicate rule '" + r.name + "'");
+            if (index_of(out.rules, r.name, &compiled_rule::name) >= 0)
+                error(r.loc, "duplicate rule '" + r.name + "'");
             out.rules.push_back(compile_rule(r));
             out.rules.back().name = r.name;
         }
@@ -1056,36 +1058,29 @@ struct analyzer {
     // A bare tag must belong to exactly ONE tag layer's tagset; ambiguity
     // needs the expression form naming the grid. Any other argument is a
     // per-cell boolean expression.
-    compiled_pred op_pred(op_arg const& a, char const* op, char const* pn) {
-        compiled_pred p;
-        p.given = true;
+    int op_pred(op_arg const& a, char const* op, char const* pn) {
         auto name = bare_name(a);
-        if (name) {
-            int found_layer = -1, matches = 0;
-            int64_t mask = 0;
-            for (int li = 0; li < (int)out.layers.size(); ++li) {
-                int tid = out.layers[li].tag_id;
-                if (tid < 0 || !sees(a.loc.mod, layer_mod[(size_t)li])) continue;
-                int64_t m = out.mask_of(tid, *name);
-                if (m != 0) { ++matches; found_layer = li; mask = m; }
-            }
-            if (matches == 0)
-                error(a.loc, "unknown tag value '" + *name + "' in " + arg_ctx(op, pn) +
-                      " (no layer this module sees has a tagset declaring it)");
-            else if (matches > 1)
-                error(a.loc, "predicate '" + *name + "' in " + arg_ctx(op, pn) +
-                      " is ambiguous (several layers could hold it); use an expression "
-                      "naming the grid, e.g. " + pn + "=(grid == " + *name + ")");
-            else {
-                p.grid_id = found_layer;
-                p.mask = mask;
-            }
-            return p;
+        if (!name)
+            return compile_as(*a.value, val_type::boolean, a.loc,
+                              arg_ctx(op, pn) + " must be a tag value or a boolean expression");
+        auto tagsets = tagsets_declaring(*name, a.loc.mod);
+        std::vector<int> layers;
+        for (int li = 0; li < (int)out.layers.size(); ++li)
+            if (sees(a.loc.mod, layer_mod[(size_t)li]) &&
+                std::count(tagsets.begin(), tagsets.end(), out.layers[li].tag_id))
+                layers.push_back(li);
+        if (layers.size() == 1) {
+            int64_t m = out.mask_of(out.layers[(size_t)layers[0]].tag_id, *name);
+            return add_expr({ce_kind::has, m, layers[0], -1, -1, -1});
         }
-        p.is_expr = true;
-        p.expr = compile_as(*a.value, val_type::boolean, a.loc,
-                            arg_ctx(op, pn) + " must be a tag value or a boolean expression");
-        return p;
+        if (layers.empty())
+            error(a.loc, "unknown tag value '" + *name + "' in " + arg_ctx(op, pn) +
+                  " (no layer this module sees has a tagset declaring it)");
+        else
+            error(a.loc, "predicate '" + *name + "' in " + arg_ctx(op, pn) +
+                  " is ambiguous (several layers could hold it); use an expression "
+                  "naming the grid, e.g. " + pn + "=(grid == " + *name + ")");
+        return -1;
     }
 
     // A `value` argument: an expression typed by the target grid, so a bare
@@ -1260,21 +1255,15 @@ struct analyzer {
     // name lookups find the first declaration.
     void register_sequences() {
         for (auto const& sq : ast.sequences) {
-            bool dup = false;
-            for (auto const& r : ast.rules)
-                if (r.name == sq.name) {
-                    error(sq.loc, "duplicate name '" + sq.name + "': already declared as a "
-                          "rule on line " + std::to_string(r.loc.line) +
-                          " - rules and sequences share one namespace");
-                    dup = true;
-                    break;
-                }
-            for (size_t k = 0; !dup && k < out.sequences.size(); ++k)
-                if (out.sequences[k].name == sq.name) {
-                    error(sq.loc, "duplicate sequence '" + sq.name + "' (first declared on line " +
-                          std::to_string(ast.sequences[k].loc.line) + ")");
-                    dup = true;
-                }
+            int r = index_of(ast.rules, sq.name, &rule_decl::name);
+            int k = index_of(out.sequences, sq.name, &compiled_sequence::name);
+            if (r >= 0)
+                error(sq.loc, "duplicate name '" + sq.name + "': already declared as a "
+                      "rule on line " + std::to_string(ast.rules[(size_t)r].loc.line) +
+                      " - rules and sequences share one namespace");
+            else if (k >= 0)
+                error(sq.loc, "duplicate sequence '" + sq.name + "' (first declared on line " +
+                      std::to_string(ast.sequences[(size_t)k].loc.line) + ")");
             out.sequences.push_back({sq.name, {}});
         }
     }
@@ -1304,11 +1293,10 @@ struct analyzer {
                     out.rules.push_back(std::move(cr));
                     cs.rule_id = (int)out.rules.size() - 1;
                 }
-                for (int i = 0; cs.rule_id < 0 && i < (int)out.rules.size(); ++i)
-                    if (out.rules[i].name == s.rule_name) { cs.rule_id = i; break; }
                 if (cs.rule_id < 0)
-                    for (int i = 0; i < (int)out.sequences.size(); ++i)
-                        if (out.sequences[i].name == s.rule_name) { cs.seq_id = i; break; }
+                    cs.rule_id = index_of(out.rules, s.rule_name, &compiled_rule::name);
+                if (cs.rule_id < 0)
+                    cs.seq_id = index_of(out.sequences, s.rule_name, &compiled_sequence::name);
                 if (cs.rule_id < 0 && cs.seq_id < 0) {
                     error(s.loc, "undeclared rule or sequence '" + s.rule_name + "'" +
                           did_you_mean(s.rule_name));

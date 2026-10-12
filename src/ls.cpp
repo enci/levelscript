@@ -234,9 +234,7 @@ int generator::tag(const std::string& qualified) const {
 
 int generator::sequence(const std::string& name) const {
     if (!prog_) return -1;
-    for (int i = 0; i < (int)prog_->sequences.size(); ++i)
-        if (prog_->sequences[(size_t)i].name == name) return i;
-    return -1;
+    return index_of(prog_->sequences, name, &compiled_sequence::name);
 }
 
 int generator::sequence_count() const {

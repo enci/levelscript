@@ -96,6 +96,12 @@ long long machine::eval(int idx, int x, int y) {
         }
         return (e.kind == ce_kind::is_empty) == empty ? 1 : 0;
     }
+    case ce_kind::has: {
+        if (e.ref < 0 || e.ref >= (int)grids_.size()) return 0;
+        grid_state const& g = grids_[e.ref];
+        if (y < 0 || y >= g.rows || x < 0 || x >= g.cols) return 0;
+        return (g.get(y, x) & e.val) != 0;
+    }
     case ce_kind::and_: return eval(e.a, x, y) != 0 && eval(e.b, x, y) != 0;   // lazy
     case ce_kind::or_:  return eval(e.a, x, y) != 0 || eval(e.b, x, y) != 0;
     case ce_kind::random_: {   // inclusive [lo, hi]; exactly one draw per call
@@ -517,11 +523,7 @@ void machine::run_path(compiled_op const& op, int ndirs) {
     int W = grids_[0].cols, H = grids_[0].rows;
     size_t n = (size_t)W * H;
 
-    auto pred_at = [&](compiled_pred const& p, int x, int y) -> bool {
-        if (p.is_expr) return p.expr >= 0 && eval(p.expr, x, y) != 0;
-        if (p.grid_id < 0) return false;
-        return (grids_[p.grid_id].get(y, x) & p.mask) != 0;
-    };
+    auto pred_at = [&](int expr, int x, int y) { return expr >= 0 && eval(expr, x, y) != 0; };
     auto default_passable = [&](int x, int y) -> bool {
         for (auto const& g : grids_)   // non-empty in at least one layer (section 6.3)
             if (g.get(y, x) != g.empty_raw()) return true;
@@ -539,7 +541,7 @@ void machine::run_path(compiled_op const& op, int ndirs) {
     for (int y = 0; y < H; ++y)
         for (int x = 0; x < W; ++x) {
             size_t i = (size_t)y * W + x;
-            bool p = op.passable.given ? pred_at(op.passable, x, y)
+            bool p = op.passable >= 0 ? pred_at(op.passable, x, y)
                                        : default_passable(x, y);
             pass[i] = p || is_from[i] || is_to[i];   // endpoints always traversable
         }

@@ -2,10 +2,34 @@
 #include "ast.hpp"
 #include "diagnostic.hpp"
 #include <cstdint>
+#include <functional>
 #include <string_view>
 #include <vector>
 
 namespace ls {
+
+// ── name lookup ───────────────────────────────────────────────────────────────
+//
+// Every table the compiler resolves by name is a short sequence searched
+// linearly: `index_of` finds a position (-1 = none), `lookup` a row keyed by
+// its `name` member (null = none).
+
+template <class Range, class Key, class Proj = std::identity>
+int index_of(Range const& range, Key const& key, Proj proj = {}) {
+    int i = 0;
+    for (auto const& x : range) {
+        if (std::invoke(proj, x) == key) return i;
+        ++i;
+    }
+    return -1;
+}
+
+template <class Table, class Key>
+auto lookup(Table const& table, Key const& key) -> decltype(&*std::begin(table)) {
+    for (auto const& row : table)
+        if (row.name == key) return &row;
+    return nullptr;
+}
 
 // ── cell encoding ─────────────────────────────────────────────────────────────
 //
@@ -41,6 +65,7 @@ enum class ce_kind {
     random_,       // the one impure built-in: one PRNG draw per evaluation
     // emptiness tests (read the cell raw, bypassing number→0 coercion)
     is_empty, is_not_empty,   // ref = grid id; val = 1 when a number grid
+    has,           // ref = tag grid id, val = mask: the cell overlaps it (a bare-tag pred)
     var_read,      // ref = the pair's variable slot (section 5.11)
 };
 
@@ -146,16 +171,6 @@ struct compiled_rule {
 
 enum class op_kind { resize, upscale, trim, mirror, pad, path };
 
-// A compiled per-cell predicate (section 6.0 `pred`): a bare tag reads its unique
-// layer with mask-overlap semantics; an expression is a boolean per cell.
-struct compiled_pred {
-    bool    given{false};
-    bool    is_expr{false};
-    int     grid_id{-1};   // tag form
-    int64_t mask{0};
-    int     expr{-1};      // expr form (arena index)
-};
-
 struct compiled_op {
     op_kind kind{op_kind::trim};
     // The `int` arguments (resize w/h, upscale n/m, pad n): statement-scope
@@ -166,8 +181,9 @@ struct compiled_op {
     std::vector<int_arg> int_args;
     int w{0};   // mirror axis: 1 = horizontal
     // path (section 6.6)
-    compiled_pred  from, to;
-    compiled_pred  passable;        // !given → default: non-empty in any layer
+    // `pred` arguments: boolean expressions per cell (a bare tag compiles to `has`)
+    int            from{-1}, to{-1};
+    int            passable{-1};    // -1 → default: non-empty in any layer
     int            into_grid{-1};
     int            write{-1};       // expr arena index, typed by into_grid
     int            over_grid{-1};   // the graph seam: validated, no effect yet
@@ -218,37 +234,24 @@ struct compiled {
     struct startup_expr { int param; int expr; bool is_default; };
     std::vector<startup_expr> startup_exprs;
 
-    int param_id(std::string_view name) const {
-        for (int i = 0; i < (int)param_names.size(); ++i)
-            if (param_names[i] == name) return i;
-        return -1;
-    }
+    int param_id(std::string_view name) const { return index_of(param_names, name); }
     // A name's mask within a tagset: a value's bit or a union's mask; 0 = unknown.
     int64_t mask_of(int tag, std::string_view name) const {
         int vid = value_id(tag, name);
         if (vid >= 0) return tag_bit(vid);
-        if (tag >= 0 && tag < (int)tag_unions.size())
-            for (auto const& [uname, mask] : tag_unions[tag])
-                if (uname == name) return mask;
-        return 0;
+        int u = union_id(tag, name);
+        return u >= 0 ? tag_unions[(size_t)tag][(size_t)u].second : 0;
     }
 
-    int layer_id(std::string_view name) const {
-        for (int i = 0; i < (int)layers.size(); ++i)
-            if (layers[i].name == name) return i;
-        return -1;
-    }
-    int tag_id(std::string_view name) const {
-        for (int i = 0; i < (int)tag_names.size(); ++i)
-            if (tag_names[i] == name) return i;
-        return -1;
-    }
+    int layer_id(std::string_view name) const { return index_of(layers, name, &compiled_layer::name); }
+    int tag_id(std::string_view name) const   { return index_of(tag_names, name); }
     int value_id(int tag, std::string_view name) const {
         if (tag < 0 || tag >= (int)tag_values.size()) return -1;
-        auto const& vals = tag_values[tag];
-        for (int i = 0; i < (int)vals.size(); ++i)
-            if (vals[i] == name) return i;
-        return -1;
+        return index_of(tag_values[(size_t)tag], name);
+    }
+    int union_id(int tag, std::string_view name) const {
+        if (tag < 0 || tag >= (int)tag_unions.size()) return -1;
+        return index_of(tag_unions[(size_t)tag], name, &std::pair<std::string, int64_t>::first);
     }
 };
 

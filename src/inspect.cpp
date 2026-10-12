@@ -43,11 +43,8 @@ struct comma_list {
 // Palette slot of a named union: the "next colors" after its tag's values,
 // so a union reads as its own swatch rather than a blend of its members.
 int union_slot(compiled const& prog, int tid, std::string const& name) {
-    if (tid < 0 || tid >= (int)prog.tag_unions.size()) return -1;
-    auto const& us = prog.tag_unions[tid];
-    for (int i = 0; i < (int)us.size(); ++i)
-        if (us[i].first == name) return (int)prog.tag_values[tid].size() + i;
-    return -1;
+    int u = prog.union_id(tid, name);
+    return u < 0 ? -1 : (int)prog.tag_values[(size_t)tid].size() + u;
 }
 
 // One colorable occurrence in a pattern cell — what the colored-pattern
@@ -211,11 +208,8 @@ std::string inspect_json(std::string const& source, std::string const& name,
         auto stmt_refs = [&](std::vector<program_stmt> const& stmts) {
             for (auto const& s : stmts) {
                 if (s.what != program_stmt::kind::apply || s.inline_rule) continue;
-                bool is_seq = false;
-                for (auto const& sq : ast->sequences)
-                    if (sq.name == s.rule_name) is_seq = true;
-                for (auto const& r : ast->rules)
-                    if (r.name == s.rule_name) is_seq = false;   // rules win lookups
+                bool is_seq = !lookup(ast->rules, s.rule_name) &&   // rules win lookups
+                              lookup(ast->sequences, s.rule_name);
                 cl.next();
                 o += "{\"line\":" + std::to_string(s.rule_name_loc.line) +
                      ",\"col\":" + std::to_string(s.rule_name_loc.col) +
@@ -269,9 +263,8 @@ std::string inspect_json(std::string const& source, std::string const& name,
                     ul.next();
                     o += "{\"name\":";
                     js(o, uname);
-                    if (td)
-                        for (auto const& au : td->unions)
-                            if (au.name == uname) { emit_loc(o, mods, au.loc, au.name.size()); break; }
+                    if (auto au = td ? lookup(td->unions, uname) : nullptr)
+                        emit_loc(o, mods, au->loc, au->name.size());
                     o += "}";
                 }
             o += "]}";
@@ -286,8 +279,8 @@ std::string inspect_json(std::string const& source, std::string const& name,
             js(o, l.name);
             o += ",\"type\":";
             js(o, l.tag_id >= 0 ? prog.tag_names[(size_t)l.tag_id] : "number");
-            for (auto const& al : ast->layers.layers)   // first declaration wins
-                if (al.name == l.name) { emit_loc(o, mods, al.loc, al.name.size()); break; }
+            if (auto al = lookup(ast->layers.layers, l.name))   // first declaration wins
+                emit_loc(o, mods, al->loc, al->name.size());
             o += "}";
         }
     }
@@ -303,11 +296,8 @@ std::string inspect_json(std::string const& source, std::string const& name,
             js(o, prog.param_names[(size_t)pi]);
             o += ",\"derived\":";
             o += derived ? "true" : "false";
-            for (auto const& ap : ast->params)
-                if (ap.name == prog.param_names[(size_t)pi]) {
-                    emit_loc(o, mods, ap.loc, ap.name.size());
-                    break;
-                }
+            if (auto ap = lookup(ast->params, prog.param_names[(size_t)pi]))
+                emit_loc(o, mods, ap->loc, ap->name.size());
             o += "}";
         }
     }

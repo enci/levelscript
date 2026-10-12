@@ -797,6 +797,17 @@ TEST_CASE("sema: operation arguments are expressions resolved by kind (0.9.2, 6.
     CHECK(compile_result(prelude + "sequence main { mirror((horizontal)) }").ok);
 }
 
+TEST_CASE("sema: a tag name outside a tag cell names the one tagset declaring it (5.8)") {
+    // a union resolves like a value (a 'where' cell has no tagset of its own)
+    CHECK(compile_result("tag t { a, b, ab = a | b }\nlayers { g: grid of t }\n"
+                         "rule r { g[*] where[(g == ab)] => g[b] }\nsequence main { }\n").ok);
+    // two tagsets declaring the name make it ambiguous; inside a cell it is not
+    std::string two = "tag t { a }\ntag u { a }\nlayers { g: grid of t }\n";
+    CHECK(compile_result(two + "rule r { g[*] where[(g == a)] => g[a] }\nsequence main { }\n")
+          .has_error("tag value 'a' is ambiguous"));
+    CHECK(compile_result(two + "rule r { g[.] => g[(a)] }\nsequence main { }\n").ok);
+}
+
 TEST_CASE("sema: path arguments need no parentheses (0.9.2, 6.0)") {
     auto ok = [](std::string const& src) {
         compile_result r(src);
