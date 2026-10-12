@@ -141,68 +141,36 @@ struct parser {
         return parse_primary();
     }
 
-    expr_ptr parse_mul() {
+    // Binary operators by precedence, lowest first (C conventions, section 5.8);
+    // all are left-associative.
+    struct binary_op { token_type tok; expr_kind kind; int prec; };
+    static constexpr binary_op binary_ops[] = {
+        {token_type::pipe_pipe, expr_kind::or_,    1},
+        {token_type::amp_amp,   expr_kind::and_,   2},
+        {token_type::pipe,      expr_kind::bit_or, 3},   // tag union
+        {token_type::eq_eq,     expr_kind::eq,     4},
+        {token_type::bang_eq,   expr_kind::ne,     4},
+        {token_type::lt,        expr_kind::lt,     5},
+        {token_type::le,        expr_kind::le,     5},
+        {token_type::gt,        expr_kind::gt,     5},
+        {token_type::ge,        expr_kind::ge,     5},
+        {token_type::plus,      expr_kind::add,    6},
+        {token_type::minus,     expr_kind::sub,    6},
+        {token_type::star,      expr_kind::mul,    7},
+        {token_type::slash,     expr_kind::div_,   7},
+    };
+
+    // Precedence climbing: operators binding at least as tightly as `min_prec`.
+    expr_ptr parse_expr(int min_prec = 1) {
         auto e = parse_unary();
-        while (at(token_type::star) || at(token_type::slash)) {
-            auto k = at(token_type::star) ? expr_kind::mul : expr_kind::div_;
+        for (;;) {
+            binary_op const* op = nullptr;
+            for (auto const& o : binary_ops)
+                if (at(o.tok)) { op = &o; break; }
+            if (!op || op->prec < min_prec) return e;
             source_loc l = loc(); eat();
-            e = make_binary(k, std::move(e), parse_unary(), l);
+            e = make_binary(op->kind, std::move(e), parse_expr(op->prec + 1), l);
         }
-        return e;
-    }
-    expr_ptr parse_add() {
-        auto e = parse_mul();
-        while (at(token_type::plus) || at(token_type::minus)) {
-            auto k = at(token_type::plus) ? expr_kind::add : expr_kind::sub;
-            source_loc l = loc(); eat();
-            e = make_binary(k, std::move(e), parse_mul(), l);
-        }
-        return e;
-    }
-    expr_ptr parse_rel() {
-        auto e = parse_add();
-        while (at(token_type::lt) || at(token_type::le) ||
-               at(token_type::gt) || at(token_type::ge)) {
-            auto k = at(token_type::lt) ? expr_kind::lt
-                   : at(token_type::le) ? expr_kind::le
-                   : at(token_type::gt) ? expr_kind::gt : expr_kind::ge;
-            source_loc l = loc(); eat();
-            e = make_binary(k, std::move(e), parse_add(), l);
-        }
-        return e;
-    }
-    expr_ptr parse_eq() {
-        auto e = parse_rel();
-        while (at(token_type::eq_eq) || at(token_type::bang_eq)) {
-            auto k = at(token_type::eq_eq) ? expr_kind::eq : expr_kind::ne;
-            source_loc l = loc(); eat();
-            e = make_binary(k, std::move(e), parse_rel(), l);
-        }
-        return e;
-    }
-    expr_ptr parse_bor() {   // '|' tag union
-        auto e = parse_eq();
-        while (at(token_type::pipe)) {
-            source_loc l = loc(); eat();
-            e = make_binary(expr_kind::bit_or, std::move(e), parse_eq(), l);
-        }
-        return e;
-    }
-    expr_ptr parse_and() {
-        auto e = parse_bor();
-        while (at(token_type::amp_amp)) {
-            source_loc l = loc(); eat();
-            e = make_binary(expr_kind::and_, std::move(e), parse_bor(), l);
-        }
-        return e;
-    }
-    expr_ptr parse_expr() {
-        auto e = parse_and();
-        while (at(token_type::pipe_pipe)) {
-            source_loc l = loc(); eat();
-            e = make_binary(expr_kind::or_, std::move(e), parse_and(), l);
-        }
-        return e;
     }
 
     // ── declarations ─────────────────────────────────────────────────────────

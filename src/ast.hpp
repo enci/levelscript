@@ -151,6 +151,11 @@ struct rule_decl {
 //   settle      - batch sweeps (or sequence iterations) until one changes nothing
 enum class apply_mode { once, scatter, everywhere, grow, settle };
 
+inline char const* mode_name(apply_mode m) {
+    static char const* const names[] = {"once", "scatter", "everywhere", "grow", "settle"};
+    return names[(int)m];
+}
+
 // Step modes re-snapshot after every application and use no mask; the batch
 // modes (scatter, everywhere) and each settle sweep apply one snapshot (6.7).
 inline bool is_step_mode(apply_mode m) { return m == apply_mode::once || m == apply_mode::grow; }
