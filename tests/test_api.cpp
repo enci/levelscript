@@ -36,7 +36,7 @@ TEST_CASE("api: compile success and failure") {
     CHECK(!bad);
     CHECK(!bad.error().empty());
 
-    // a module with no sequences compiles; it just has no entry to run (section 6)
+    // a module with no sequences compiles; it just has no entry to run
     auto lib = make("tag t { a }");
     CHECK(static_cast<bool>(lib));
     CHECK(lib.sequence_count() == 0);
@@ -72,9 +72,9 @@ TEST_CASE("api: generate fills the level") {
 
 TEST_CASE("api: tag resolution") {
     auto gen = make(fill_src);
-    // tag() returns the value's bit mask (spec section 3: bit 1..30 in declaration
-    // order), not a 0-based id; 0 means unknown (not -1), so an unresolved
-    // name ORed into a composite mask degrades correctly.
+    // tag() returns the value's bit mask (bit 1..30 in declaration order), not
+    // a 0-based id; 0 means unknown (not -1), so an unresolved name ORed into a
+    // composite mask degrades correctly.
     CHECK(gen.tag("geo.wall") == (1 << 1));
     CHECK(gen.tag("geo.floor") == (1 << 2));
     CHECK(gen.tag("geo.lava") == 0);
@@ -431,7 +431,7 @@ TEST_CASE("api: scatter(P%) applies the exact fraction of the applied set") {
     CHECK(count_val(full.generate(full.sequence("main"), 1), "level", full.tag("geo.floor")) == 100);
 }
 
-// ── computed counts (section 6) ────────────────────────────────────────────────
+// ── computed counts ──────────────────────────────────────────────────────────
 
 static std::string counted(std::string const& stmt) {
     return "tag geo { floor }\n"
@@ -646,7 +646,7 @@ sequence main {
         }
 }
 
-TEST_CASE("api: a '*' where cell places no condition (0.9, 5.9)") {
+TEST_CASE("api: a '*' where cell places no condition") {
     auto gen = make(R"(
 tag geo { wall, floor }
 layers { level: grid of geo }
@@ -695,7 +695,7 @@ sequence main {
 
 TEST_CASE("api: bare cells test before expression cells and draw nothing") {
     // Every candidate is rejected by a bare cell (`5` on an empty grid, `wall`
-    // where there is none), which section 5.11 tests before any expression or
+    // where there is none), which matching tests before any expression or
     // `where` cell, so the gates must not draw: `roll` sees the same stream as
     // a program without them.
     auto rolled = [](char const* gates, char const* steps) {
@@ -980,7 +980,7 @@ TEST_CASE("api: snapshot mid-run sees committed statements only") {
     g.finish();
 }
 
-// -- spec 0.5 delta Δ3: a same-LHS variant with different writes is its own
+// -- a same-LHS variant with different writes is its own
 //    candidate. Statistical over seeds; each seed is deterministic, so these
 //    are stable, and the failure odds of a correct build are < 2^-100. --
 
@@ -1054,7 +1054,7 @@ sequence main {
     }
 }
 
-// ── cross-platform determinism (section 7.2, section 10.6) ─────────────────────────────────
+// ── cross-platform determinism ───────────────────────────────────────────────
 // The draw primitives are plain 64-bit integer arithmetic over mt19937_64, so
 // these exact outputs must come out on every platform and compiler. A
 // failure here on one platform only is a portability bug, not a golden to
@@ -1097,7 +1097,7 @@ sequence main {
     CHECK(render(42) == "74 406 309 392 358 609 425 392 210 662 659 351 | bcmcbcbcccbc");
 }
 
-// ── pattern variables (0.9, section 5.11) ────────────────────────────────────
+// ── pattern variables ────────────────────────────────────────────────────────
 
 TEST_CASE("api: variables relate cells - a wall between different regions") {
     auto gen = make(R"(
@@ -1260,9 +1260,9 @@ sequence main {
             CHECK(lv["marks"].at(x, y) == (x < 4 ? 1 : -1));
 }
 
-// ── '.' as a mask atom (0.9.1) ───────────────────────────────────────────────
+// ── '.' as a mask atom ───────────────────────────────────────────────────────
 
-TEST_CASE("api: '!.' matches non-empty cells, a stored 0 included (0.9.1)") {
+TEST_CASE("api: '!.' matches non-empty cells, a stored 0 included") {
     auto gen = make(R"(
 tag geo { wall }
 layers {
@@ -1290,7 +1290,7 @@ sequence main {
           std::vector<int>{-1, 1, 1, 2, -1});
 }
 
-TEST_CASE("api: '.|t' matches empty or t (0.9.1)") {
+TEST_CASE("api: '.|t' matches empty or t") {
     auto gen = make(R"(
 tag geo { wall, door }
 layers {
@@ -1311,7 +1311,7 @@ sequence main {
           std::vector<int>{1, -1, 1, 1});
 }
 
-TEST_CASE("api: '!.' under every variant (0.9.1)") {
+TEST_CASE("api: '!.' under every variant") {
     // Mark the non-empty neighbours of the wall, in whichever direction.
     auto gen = make(R"(
 tag geo { wall, door }
@@ -1337,7 +1337,7 @@ sequence main {
                            -1, -1, -1});
 }
 
-// ── expressions in operation arguments (0.9.2, section 6.0) ──────────────────
+// ── expressions in operation arguments ───────────────────────────────────────
 
 static ls::level sized(std::string const& stmts, std::vector<std::pair<std::string, int>> params = {}) {
     auto gen = make("layers { tiles: grid of number }\n"
@@ -1349,7 +1349,7 @@ static ls::level sized(std::string const& stmts, std::vector<std::pair<std::stri
     return gen.generate(gen.sequence("main"), 1, params);
 }
 
-TEST_CASE("api: int arguments are statement-scope expressions (0.9.2)") {
+TEST_CASE("api: int arguments are statement-scope expressions") {
     auto a = sized("resize(w, h)");
     CHECK(a.width() == 5);
     CHECK(a.height() == 3);
@@ -1370,7 +1370,7 @@ TEST_CASE("api: int arguments are statement-scope expressions (0.9.2)") {
     CHECK(named.height() == 3);
 }
 
-TEST_CASE("api: out-of-range operation values are handled at run time (0.9.2)") {
+TEST_CASE("api: out-of-range operation values are handled at run time") {
     // resize below 1: a no-op (with a warning on stderr)
     for (char const* stmts : {"resize(4, 4)\n resize(w, 5)", "resize(4, 4)\n resize(0, 5)",
                               "resize(4, 4)\n resize(5, -2)"}) {
@@ -1392,7 +1392,7 @@ TEST_CASE("api: out-of-range operation values are handled at run time (0.9.2)") 
     CHECK(u.height() == 4);
 }
 
-TEST_CASE("api: int arguments evaluate after the guard, drawing like a count (0.9.2)") {
+TEST_CASE("api: int arguments evaluate after the guard, drawing like a count") {
     // random(4, 4) always yields 4 but still draws once, exactly like a guard
     auto a = make(counted("resize(random(10, 10), 10)\n    scatter(4) paint"));
     auto b = make(counted("resize(10, 10)  when (random(1, 1) == 1)\n    scatter(4) paint"));

@@ -13,8 +13,8 @@ function findTokenAt(tokens: any[], line: number, col: number) {
     return null;
 }
 
-// A symbol may be declared in another module of the closure (section 2.6);
-// its loc then names that module's file.
+// A symbol may be declared in another module of the closure; its loc then names
+// that module's file.
 function spanToLocation(uri: vscode.Uri, loc: { line: number, col: number, len: number, module?: string }): vscode.Location {
     if (loc.module && loc.module !== uri.fsPath) uri = vscode.Uri.file(loc.module);
     const start = new vscode.Position(loc.line - 1, loc.col - 1);

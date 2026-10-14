@@ -592,7 +592,7 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
                 ImGui::SetTooltip("Seed, hex (used on the next Reset)");
             ImGui::SameLine();
 
-            // Entry (section 6): any sequence; choosing one restarts the run.
+            // Entry: any sequence; choosing one restarts the run.
             ImGui::SetNextItemWidth(160.f);
             if (ImGui::BeginCombo("##entry", sc.entry_name.c_str())) {
                 for (int i = 0; i < sc.gen.sequence_count(); ++i) {

@@ -7,16 +7,16 @@ namespace ls {
 
 struct source_loc {
     int line{0}, col{0};
-    int mod{0};   // module id within a compile (section 2.6); labels diagnostics
+    int mod{0};   // module id within a compile; labels diagnostics
 };
 
-// ── expressions (spec section 5.8) ──────────────────────────────────────────────────
+// ── expressions ──────────────────────────────────────────────────────────────
 
 enum class expr_kind {
     int_lit,       // integer literal
     empty_lit,     // '.' — polymorphic empty value (typed from context)
     ident,         // grid read / param / x,y,width,height / tag value or union
-    variable,      // '?name' pattern variable (section 5.11); ident holds '?name'
+    variable,      // '?name' pattern variable; ident holds '?name'
     call,          // built-in function call
     neg, not_,
     add, sub, mul, div_,
@@ -38,7 +38,7 @@ struct expr {
 
 // ── declarations ─────────────────────────────────────────────────────────────
 
-// A named union (spec section 3): `blocker = wall | door` — a mask alias over the
+// A named union: `blocker = wall | door` — a mask alias over the
 // tagset's own members (values or earlier unions). Consumes no bit.
 struct tag_union {
     source_loc               loc;
@@ -69,7 +69,7 @@ struct layers_decl {
     std::vector<layer_decl> layers;
 };
 
-// ── params (spec section 4.2) ───────────────────────────────────────────────────────
+// ── params ───────────────────────────────────────────────────────────────────
 
 // input:   `name: number = expr` — supplied at runtime, default is mandatory
 // derived: `name = expr`         — computed once at startup
@@ -96,7 +96,7 @@ struct cell {
     source_loc             loc;
     long long              number{0};   // number
     std::vector<mask_atom> atoms;       // tag_mask: atoms OR'd together
-    std::string            variable;    // variable: '?name' (section 5.11)
+    std::string            variable;    // variable: '?name'
     expr_ptr               value;       // expr_cell: '(' expr ')'
 };
 
@@ -109,7 +109,7 @@ struct pattern {
     std::vector<std::vector<cell>> cells;   // [row][col]; row widths checked in sema
 };
 
-// A recursive write-side term (spec section 5.2): a leaf pattern, an `{ all }` block
+// A recursive write-side term: a leaf pattern, an `{ all }` block
 // (write every item simultaneously), or an `{ any }` block (pick one weighted
 // item). Items nest to any depth.
 struct write_term {
@@ -142,7 +142,7 @@ struct rule_decl {
 
 // ── program ──────────────────────────────────────────────────────────────────
 
-// The mode of an application (spec section 6): how many applications occur and
+// The mode of an application: how many applications occur and
 // what each one sees. Over a sequence only `once` and `settle` are valid.
 //   once        - one application (a single uniform pick) / one iteration
 //   scatter     - batch: up to N applications of one snapshot, or P% of it
@@ -157,12 +157,12 @@ inline char const* mode_name(apply_mode m) {
 }
 
 // Step modes re-snapshot after every application and use no mask; the batch
-// modes (scatter, everywhere) and each settle sweep apply one snapshot (6.7).
+// modes (scatter, everywhere) and each settle sweep apply one snapshot.
 inline bool is_step_mode(apply_mode m) { return m == apply_mode::once || m == apply_mode::grow; }
 
-// One operation-call argument (spec section 6.0): an expression, positional
-// when `name` is empty. `grid` and `enum` parameters read a bare identifier
-// (value->kind == expr_kind::ident) as a name.
+// One operation-call argument: an expression, positional when `name` is empty.
+// `grid` and `enum` parameters read a bare identifier (value->kind ==
+// expr_kind::ident) as a name.
 struct op_arg {
     source_loc  loc;
     std::string name;   // "" = positional
@@ -175,19 +175,19 @@ struct program_stmt {
     // op_call — resolved against the operation table in sema
     std::string         op_name;
     std::vector<op_arg> op_args;
-    // apply — a mode, its count where it takes one, and a target (section 6)
+    // apply — a mode, its count where it takes one, and a target
     apply_mode  mode{apply_mode::everywhere};
     expr_ptr    count;                // the parenthesized count; null = none
     bool        count_percent{false}; // scatter(P%)
     source_loc  count_loc;
-    std::string rule_name;            // a rule or a sequence (section 6.10); resolved in sema
+    std::string rule_name;            // a rule or a sequence; resolved in sema
     source_loc  rule_name_loc;
-    std::unique_ptr<rule_decl> inline_rule;   // target written in place (section 6); else null
-    // optional `when (expr)` guard (section 6): boolean, params only
+    std::unique_ptr<rule_decl> inline_rule;   // target written in place; else null
+    // optional `when (expr)` guard: boolean, params only
     expr_ptr    guard;
 };
 
-// A named statement list, applied by name like a rule (section 6.10).
+// A named statement list, applied by name like a rule.
 struct sequence_decl {
     source_loc                loc;
     source_loc                name_loc;
@@ -197,7 +197,7 @@ struct sequence_decl {
 
 // ── file ─────────────────────────────────────────────────────────────────────
 
-// `use "path"` (section 2.6) - resolved by the module loader, not the analyzer.
+// `use "path"` - resolved by the module loader, not the analyzer.
 struct use_decl {
     source_loc  loc;
     std::string path;

@@ -77,11 +77,11 @@ sequence main { }
 TEST_CASE("sema: operation table") {
     CHECK(compile_result(prelude + "sequence main { warp(3, 3) }").has_error("unknown operation"));
     CHECK(compile_result(prelude + "sequence main { resize(3) }").has_error("requires argument 'h'"));
-    // out-of-range values are handled at run time (0.9.2; check 36 retired)
+    // out-of-range values are handled at run time
     CHECK(compile_result(prelude + "sequence main { resize(0, 5) }").ok);
 }
 
-TEST_CASE("sema: a zero count compiles; it applies nothing (check 28 retired)") {
+TEST_CASE("sema: a zero count compiles; it applies nothing") {
     for (char const* stmt : {"scatter(0) r", "scatter(0%) r", "grow(0) r", "settle(0) r"}) {
         INFO(stmt);
         CHECK(compile_result(prelude + "rule r { level[.] => level[wall] }\nsequence main { " +
@@ -242,7 +242,7 @@ sequence main {
     CHECK(ok.ok);
 }
 
-TEST_CASE("sema: counts read params only and are numbers (check 21)") {
+TEST_CASE("sema: counts read params only and are numbers") {
     std::string params = "params { n: number = 4 }\n";
     for (char const* stmt : {"scatter(tiles) fill", "grow(x) fill", "settle(width - 1) fill",
                              "scatter((height)%) fill"}) {
@@ -355,7 +355,7 @@ TEST_CASE("sema: complement is match-side only") {
 }
 
 TEST_CASE("sema: param scopes") {
-    // input param without a default (section 7.3, check 27)
+    // input param without a default
     CHECK(compile_result("params { d: number }\n" + rprog)
           .has_error("must have a default"));
     // derived params read earlier params only
@@ -449,7 +449,7 @@ TEST_CASE("sema: operation argument kinds and constraints") {
           .has_error("invalid mirror axis"));
     CHECK(compile_result(prelude + "sequence main { mirror(3) }")
           .has_error("invalid mirror axis '3'"));
-    CHECK(compile_result(prelude + "sequence main { pad(-1) }").ok);   // run time (0.9.2)
+    CHECK(compile_result(prelude + "sequence main { pad(-1) }").ok);   // run time
     CHECK(compile_result(prelude + "sequence main { upscale(0, 2) }").ok);
     CHECK(compile_result(path_pre +
           "sequence main { path(from=door, to=exit, into=nope, write=road) }")
@@ -495,14 +495,14 @@ TEST_CASE("sema: tagset over the 30-value cap") {
     CHECK(compile_result(big).has_error("maximum is 30"));
 }
 
-// -- spec 0.5 delta: Δ3 variant dedup key, Δ1 contextual names --
+// -- variant dedup key, contextual names --
 
 static const std::string trio = R"(
 tag t3 { a, b, c }
 layers { g: grid of t3 }
 )";
 
-TEST_CASE("sema: variant dedup keys on the (match, write) pair (spec section 5.6.2)") {
+TEST_CASE("sema: variant dedup keys on the (match, write) pair") {
     SECTION("same LHS, different writes: the H-flip survives") {
         compile_result r(trio + "rule r(symmetry=horizontal) { g[a a] => g[b c] }\n" + rprog);
         REQUIRE(r.ok);
@@ -528,7 +528,7 @@ rule r(rotation=all) {
         REQUIRE(r.ok);
         CHECK(r.prog.rules[0].pairs.size() == 4);
     }
-    SECTION("{ any } item order is part of the key (accepted cost, section 10.2)") {
+    SECTION("{ any } item order is part of the key (an accepted cost)") {
         compile_result r(trio +
             "rule r(symmetry=horizontal) { g[a a] => { any g[b c] g[c b] } }\n" + rprog);
         REQUIRE(r.ok);
@@ -542,7 +542,7 @@ rule r(rotation=all) {
     }
 }
 
-TEST_CASE("sema: contextual names (spec section 2.4)") {
+TEST_CASE("sema: contextual names") {
     SECTION("none/horizontal/vertical/symmetry/rotation are legal names") {
         compile_result r(R"(
 tag none { horizontal, vertical }
@@ -554,7 +554,7 @@ sequence main { mirror(horizontal) }
         INFO(r.diags.format_all());
         CHECK(r.ok);
     }
-    SECTION("built-in names are not reserved (0.8, section 5.10)") {
+    SECTION("built-in names are not reserved") {
         compile_result r(R"(
 tag t { max, random }
 layers { min: grid of t  n: grid of number }
@@ -580,12 +580,12 @@ sequence main { resize(2, 2) everywhere r everywhere s everywhere u }
     }
 }
 
-TEST_CASE("sema: a module needs no entry - an empty file compiles (0.7)") {
+TEST_CASE("sema: a module needs no entry - an empty file compiles") {
     CHECK(compile_result(prelude).ok);
     CHECK(compile_result("").ok);
 }
 
-TEST_CASE("sema: variants record the rotation and flip that produced them (5.6)") {
+TEST_CASE("sema: variants record the rotation and flip that produced them") {
     using mirror = ls::compiled_pair::mirror;
     // an asymmetric 1x2: symmetry=all keeps identity and the H flip (the V flip
     // of one row is the identity); rotation=90 adds its rotated variants
@@ -599,7 +599,7 @@ TEST_CASE("sema: variants record the rotation and flip that produced them (5.6)"
         {0, mirror::none}, {0, mirror::h}, {90, mirror::none}, {90, mirror::v}});
 }
 
-TEST_CASE("sema: inline rules compile as anonymous rules named by position (0.8)") {
+TEST_CASE("sema: inline rules compile as anonymous rules named by position") {
     compile_result r(prelude + R"(
 rule fill { level[.] => level[floor] }
 sequence main {
@@ -633,7 +633,7 @@ TEST_CASE("sema: inline rules get every rule check, located at the rule") {
     CHECK(!u.has_error("did you mean"));
 }
 
-// ── pattern variables (0.9, section 5.11) ────────────────────────────────────
+// ── pattern variables ────────────────────────────────────────────────────────
 
 static bool variables_check_ok(std::string const& src) {
     compile_result r(prelude + src + rprog);
@@ -641,7 +641,7 @@ static bool variables_check_ok(std::string const& src) {
     return r.ok;
 }
 
-TEST_CASE("sema: pattern variables bind, type, and are used (0.9, 5.11)") {
+TEST_CASE("sema: pattern variables bind, type, and are used") {
     CHECK(variables_check_ok("rule r { tiles[?a *] where[* (tiles != ?a)] => level[* wall] }"));
     CHECK(variables_check_ok("rule r { tiles[?v .] => tiles[. ?v] }"));
     CHECK(variables_check_ok("rule r { level[?t ?t] => level[. ?t] }"));
@@ -652,7 +652,7 @@ TEST_CASE("sema: pattern variables bind, type, and are used (0.9, 5.11)") {
     CHECK(variables_check_ok("rule r { level[?level] tiles[?tiles] => tiles[?tiles] }"));
 }
 
-TEST_CASE("sema: unbound pattern variables (0.9, check 44)") {
+TEST_CASE("sema: unbound pattern variables") {
     compile_result write(prelude + "rule r { level[.] => level[?v] }\n" + rprog);
     CHECK(write.has_error("'?v' is never bound"));
     compile_result paren(prelude + "rule r { level[(?v)] => level[*] }\n" + rprog);
@@ -665,7 +665,7 @@ TEST_CASE("sema: unbound pattern variables (0.9, check 44)") {
     CHECK(sub.has_error("'?v' is never bound"));
 }
 
-TEST_CASE("sema: pattern variable types (0.9, check 45)") {
+TEST_CASE("sema: pattern variable types") {
     CHECK(compile_result(prelude + "rule r { level[?v] tiles[?v] => level[*] }\n" + rprog)
           .has_error("binds a number cell here but a tagset 'geo' cell elsewhere"));
     CHECK(compile_result(prelude + "rule r { tiles[?v] => level[?v] }\n" + rprog)
@@ -676,7 +676,7 @@ TEST_CASE("sema: pattern variable types (0.9, check 45)") {
           .has_error("must evaluate to a tag value"));
 }
 
-TEST_CASE("sema: pattern variables outside a pattern (0.9, check 46)") {
+TEST_CASE("sema: pattern variables outside a pattern") {
     auto outside = [](std::string const& src) {
         return compile_result(prelude + src).has_error("outside a pattern");
     };
@@ -689,7 +689,7 @@ TEST_CASE("sema: pattern variables outside a pattern (0.9, check 46)") {
           .has_error("cannot be a bare pattern variable"));
 }
 
-TEST_CASE("sema: 'where' cells are '*' or parenthesized booleans (0.9, 5.9)") {
+TEST_CASE("sema: 'where' cells are '*' or parenthesized booleans") {
     compile_result star(prelude + "rule r { level[floor floor] where[* (x > 1)] => level[* wall] }\n" + rprog);
     INFO(star.diags.format_all());
     CHECK(star.ok);
@@ -699,7 +699,7 @@ TEST_CASE("sema: 'where' cells are '*' or parenthesized booleans (0.9, 5.9)") {
           .has_error("'where' cells must be '*' or a parenthesized boolean expression"));
 }
 
-TEST_CASE("sema: reductivity with pattern variables (0.9, 6.9)") {
+TEST_CASE("sema: reductivity with pattern variables") {
     auto warns = [](std::string const& rule) {
         compile_result r(prelude + rule + "\nsequence main { grow r }\n");
         INFO(r.diags.format_all());
@@ -720,9 +720,9 @@ TEST_CASE("sema: reductivity with pattern variables (0.9, 6.9)") {
     CHECK(!warns("rule r { level[?v wall] => level[* ?v] }"));
 }
 
-// ── '.' as a mask atom (0.9.1) ───────────────────────────────────────────────
+// ── '.' as a mask atom ───────────────────────────────────────────────────────
 
-TEST_CASE("sema: '.' composes in match-side masks (0.9.1, 2.5)") {
+TEST_CASE("sema: '.' composes in match-side masks") {
     for (char const* rule : {"rule r { level[!.] => level[*] }",
                              "rule r { level[.|wall] => level[floor] }",
                              "rule r { level[wall|.] => level[.] }",
@@ -735,7 +735,7 @@ TEST_CASE("sema: '.' composes in match-side masks (0.9.1, 2.5)") {
     }
 }
 
-TEST_CASE("sema: misplaced empty masks (0.9.1, checks 15 and 47)") {
+TEST_CASE("sema: misplaced empty masks") {
     CHECK(compile_result(prelude + "rule r { level[wall] => level[!.] }\n" + rprog)
           .has_error("tag complement '!.' is not allowed on the write side"));
     CHECK(compile_result(prelude + "rule r { tiles[1] => tiles[!.] }\n" + rprog)
@@ -754,7 +754,7 @@ TEST_CASE("sema: misplaced empty masks (0.9.1, checks 15 and 47)") {
           .has_error("expected an integer or wildcard in a 'number' grid cell"));
 }
 
-TEST_CASE("sema: reductivity sees through '!.' (0.9.1)") {
+TEST_CASE("sema: reductivity sees through '!.'") {
     auto warns = [](std::string const& rule) {
         compile_result r(prelude + rule + "\nsequence main { grow r }\n");
         INFO(r.diags.format_all());
@@ -768,9 +768,9 @@ TEST_CASE("sema: reductivity sees through '!.' (0.9.1)") {
     CHECK(!warns("rule r { level[.|wall] => level[floor] }"));
 }
 
-// ── expressions in operation arguments (0.9.2) ───────────────────────────────
+// ── expressions in operation arguments ───────────────────────────────────────
 
-TEST_CASE("sema: operation arguments are expressions resolved by kind (0.9.2, 6.0)") {
+TEST_CASE("sema: operation arguments are expressions resolved by kind") {
     auto ok = [](std::string const& src) {
         compile_result r(src);
         INFO(r.diags.format_all());
@@ -780,7 +780,7 @@ TEST_CASE("sema: operation arguments are expressions resolved by kind (0.9.2, 6.
     CHECK(ok(params + "sequence main { resize(w, h) }"));
     CHECK(ok(params + "sequence main { resize(w * 2, h + 1)  upscale(f, 1)  pad(f - 1) }"));
     CHECK(ok(params + "sequence main { resize(random(2, 9), 4) }"));
-    // statement scope (check 21): params only, a number
+    // statement scope: params only, a number
     CHECK(compile_result(params + "sequence main { resize(width, 5) }")
           .has_error("cannot be read here"));
     CHECK(compile_result(params + "sequence main { resize(x, 5) }")
@@ -789,7 +789,7 @@ TEST_CASE("sema: operation arguments are expressions resolved by kind (0.9.2, 6.
           .has_error("cannot be read here"));
     CHECK(compile_result(params + "sequence main { resize(w > 1, 5) }")
           .has_error("must be a number"));
-    // grid and enum arguments are names (check 35); parentheses are transparent
+    // grid and enum arguments are names; parentheses are transparent
     CHECK(compile_result(prelude + "sequence main { mirror(horizontal + 1) }")
           .has_error("invalid mirror axis"));
     CHECK(compile_result(path_pre + "sequence main { path(from=door, to=exit, into=(algo + 1), write=road) }")
@@ -797,7 +797,7 @@ TEST_CASE("sema: operation arguments are expressions resolved by kind (0.9.2, 6.
     CHECK(compile_result(prelude + "sequence main { mirror((horizontal)) }").ok);
 }
 
-TEST_CASE("sema: a tag name outside a tag cell names the one tagset declaring it (5.8)") {
+TEST_CASE("sema: a tag name outside a tag cell names the one tagset declaring it") {
     // a union resolves like a value (a 'where' cell has no tagset of its own)
     CHECK(compile_result("tag t { a, b, ab = a | b }\nlayers { g: grid of t }\n"
                          "rule r { g[*] where[(g == ab)] => g[b] }\nsequence main { }\n").ok);
@@ -808,7 +808,7 @@ TEST_CASE("sema: a tag name outside a tag cell names the one tagset declaring it
     CHECK(compile_result(two + "rule r { g[.] => g[(a)] }\nsequence main { }\n").ok);
 }
 
-TEST_CASE("sema: path arguments need no parentheses (0.9.2, 6.0)") {
+TEST_CASE("sema: path arguments need no parentheses") {
     auto ok = [](std::string const& src) {
         compile_result r(src);
         INFO(r.diags.format_all());

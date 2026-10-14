@@ -31,7 +31,7 @@ struct level_data;
 struct run_state;
 }
 
-// ── modules (spec section 2.6) ──────────────────────────────────────────────────────
+// ── modules ──────────────────────────────────────────────────────────────────
 
 /// A resolved module: its canonical name (identifies it within one compile
 /// and labels its diagnostics) and its source text.
@@ -41,7 +41,7 @@ struct module_source {
 };
 
 /// Maps a `use` path, written in the module whose canonical name is `from`,
-/// to a module - or std::nullopt when it cannot (section 7.3, check 9). The game
+/// to a module - or std::nullopt when it cannot. The game
 /// owns all IO; it must return the same canonical name for every path that
 /// denotes the same module.
 using resolver = std::function<std::optional<module_source>(const std::string& path,
@@ -92,7 +92,7 @@ public:
 
     int  layer_count() const;
     grid operator[](const std::string& layer_name) const;
-    grid layer(int index) const;              // layer order (section 4): canonical module order
+    grid layer(int index) const;              // layer order: canonical module order
     std::string layer_name(int index) const;
 
 private:
@@ -185,7 +185,7 @@ class generator {
 public:
     generator() = default;
 
-    /// Compile `source` as the root module (section 2.6), with canonical name
+    /// Compile `source` as the root module, with canonical name
     /// `name`. The game owns file/asset IO: each `use` is mapped to a module
     /// by `resolve`; with no resolver every `use` is unresolved. Diagnostics
     /// are labelled with canonical module names ("dungeon.lvs:12:3: error: ...").
@@ -207,7 +207,7 @@ public:
     /// would).
     int tag(const std::string& qualified) const;
 
-    /// Sequence id, for use as an entry (section 6); -1 if unknown. Ids are
+    /// Sequence id, for use as an entry; -1 if unknown. Ids are
     /// 0 .. sequence_count() - 1 in canonical declaration order.
     int sequence(const std::string& name) const;
     int sequence_count() const;
@@ -218,7 +218,7 @@ public:
     /// a host can watch a broken file and retry (hot reload).
     std::vector<std::string> modules() const { return modules_; }
 
-    /// Run sequence `entry` as the entry (section 6): (entry, seed, params) -> level,
+    /// Run sequence `entry` as the entry: (entry, seed, params) -> level,
     /// deterministically. Params override the declared defaults; unknown
     /// names are ignored. An invalid entry id yields an empty level.
     level generate(int entry, uint64_t seed,

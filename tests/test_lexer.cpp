@@ -51,7 +51,7 @@ TEST_CASE("lexer: positions are 1-based line:col") {
     CHECK(t[2].col == 3);
 }
 
-TEST_CASE("lexer: '?name' is one VARIABLE token (0.9, 2.3)") {
+TEST_CASE("lexer: '?name' is one VARIABLE token") {
     auto t = lex_ok("?a ?all ?x_1(");
     REQUIRE(t.size() == 5);
     CHECK(t[0].is(token_type::variable));
@@ -64,7 +64,7 @@ TEST_CASE("lexer: '?name' is one VARIABLE token (0.9, 2.3)") {
     CHECK(t[3].col == 13);
 }
 
-TEST_CASE("lexer: '?' without an adjacent name is an error (0.9, 2.4)") {
+TEST_CASE("lexer: '?' without an adjacent name is an error") {
     for (char const* src : {"? a", "?", "?1", "?("}) {
         diagnostics diags;
         auto t = lex(src, "test", diags);
@@ -81,7 +81,7 @@ TEST_CASE("lexer: unexpected character is an error") {
     CHECK(t[1].is(token_type::bad));
 }
 
-TEST_CASE("lexer: contextual names lex as identifiers (spec section 2.4)") {
+TEST_CASE("lexer: contextual names lex as identifiers") {
     auto t = lex_ok("max symmetry rotation horizontal vertical none");
     REQUIRE(t.size() == 7);
     for (int i = 0; i < 6; ++i) CHECK(t[i].is(token_type::ident));
@@ -98,7 +98,7 @@ TEST_CASE("lexer: contextual names lex as identifiers (spec section 2.4)") {
     CHECK(k[6].is(token_type::kw_weight));
 }
 
-TEST_CASE("lexer: the 0.7 count and policy words are plain names (0.8)") {
+TEST_CASE("lexer: retired count and policy words are plain names") {
     auto t = lex_ok("one some policy snapshot incremental stabilize percent max");
     REQUIRE(t.size() == 9);
     for (int i = 0; i < 8; ++i) CHECK(t[i].is(token_type::ident));

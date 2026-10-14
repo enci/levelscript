@@ -34,17 +34,17 @@ auto lookup(Table const& table, Key const& key) -> decltype(&*std::begin(table))
 // ── cell encoding ─────────────────────────────────────────────────────────────
 //
 // Tag grid cells store a 32-bit mask: bit 0 = empty, value i on bit i+1;
-// matching is any-overlap `(stored & mask) != 0` (spec section 4.1). Number grid
+// matching is any-overlap `(stored & mask) != 0`. Number grid
 // cells store the integer directly with a dedicated empty sentinel.
 constexpr int64_t tag_empty = 0x1;
 constexpr int64_t num_empty = INT64_MIN;
 
 inline int64_t tag_bit(int value_id) { return int64_t{1} << (value_id + 1); }
 
-// The where pseudo-layer has no real grid id (section 5.9).
+// The where pseudo-layer has no real grid id.
 constexpr int where_grid = -2;
 
-// ── compiled expressions (section 5.8) ───────────────────────────────────────────────
+// ── compiled expressions ─────────────────────────────────────────────────────
 //
 // Nodes live in one flat arena (`compiled::exprs`), referenced by index — no
 // pointer ownership, trivially copyable, and variant transforms share nodes
@@ -60,13 +60,13 @@ enum class ce_kind {
     add, sub, mul, div_,
     lt, le, gt, ge, eq, ne,
     and_, or_, bit_or,
-    // built-ins (section 5.10): if is eager — both branches always evaluate
+    // built-ins: if is eager — both branches always evaluate
     if_, min_, max_, abs_, clamp_,
     random_,       // the one impure built-in: one PRNG draw per evaluation
     // emptiness tests (read the cell raw, bypassing number→0 coercion)
     is_empty, is_not_empty,   // ref = grid id; val = 1 when a number grid
     has,           // ref = tag grid id, val = mask: the cell overlaps it (a bare-tag pred)
-    var_read,      // ref = the pair's variable slot (section 5.11)
+    var_read,      // ref = the pair's variable slot
 };
 
 struct compiled_expr {
@@ -86,10 +86,10 @@ struct compiled_cell {
     enum class kind { wildcard, value, expr, variable } what{kind::value};
     int64_t val{0};    // kind::value — mask (tag grid) or number
     int     expr{-1};  // kind::expr — arena index (matches/writes computed)
-    int     var{-1};   // kind::variable — the pair's variable slot (section 5.11):
+    int     var{-1};   // kind::variable — the pair's variable slot:
                        // binds on the match side, writes its value on the write side
     bool    ne{false}; // kind::value in a number grid: matches any value but `val`
-                       // (`!.` = not the empty sentinel, section 4.1)
+                       // (`!.` = not the empty sentinel)
 };
 
 // One cell the matcher tests, at its offset from the anchor.
@@ -100,14 +100,14 @@ struct match_probe {
 };
 
 struct compiled_pattern {
-    int  grid_id{-1};        // layer index, or where_grid (section 5.9)
+    int  grid_id{-1};        // layer index, or where_grid
     bool is_number{false};
     bool is_where{false};
     int  rows{0}, cols{0};
     std::vector<compiled_cell> cells;   // flat, row-major
 
     // Match side only, filled per variant: the cells of each matching phase
-    // (section 5.11) in row-major order, wildcards dropped.
+    // in row-major order, wildcards dropped.
     std::vector<match_probe> bare;       // value cells
     std::vector<match_probe> bare_ne;    // number grids: cells that must differ from val (`!.`)
     std::vector<match_probe> computed;   // expression and `where` cells
@@ -115,7 +115,7 @@ struct compiled_pattern {
     compiled_cell const& at(int r, int c) const { return cells[r * cols + c]; }
 };
 
-// Compiled recursive write term (spec section 5.2). The runtime resolves a tree to
+// Compiled recursive write term. The runtime resolves a tree to
 // its applied leaves per application ({ all } = every item, { any } = one
 // weighted draw per node); footprints/conflicts use every leaf, conservative
 // across { any } branches.
@@ -144,7 +144,7 @@ struct compiled_pair {
     std::vector<compiled_pattern> lhs;
     compiled_write_term           rhs;
     int                           sub_rule_idx{0};
-    std::vector<std::string>      var_names;   // by slot, '?' included (section 5.11)
+    std::vector<std::string>      var_names;   // by slot, '?' included
     // Filled per variant: each variable's first binding cell (its site, which
     // also supplies its value) and every other binding cell, which must
     // equal the site. Offsets are from the anchor.
@@ -152,7 +152,7 @@ struct compiled_pair {
     struct var_check { int slot{0}; var_site at; };
     std::vector<var_site>         var_sites;    // by slot
     std::vector<var_check>        var_checks;
-    // Which transform of the declared sub-rule this variant is (section 5.6), as the
+    // Which transform of the declared sub-rule this variant is, as the
     // attributes produced it: rotation= then symmetry=. Identity is 0 / none.
     // Display and tooling only; the runtime never reads them.
     enum class mirror : uint8_t { none, h, v, both };
@@ -162,25 +162,25 @@ struct compiled_pair {
 
 struct compiled_rule {
     std::string                name;      // an inline rule's is its source position, "inline@L:C"
-    bool                       is_inline{false};   // written in a statement (section 6)
+    bool                       is_inline{false};   // written in a statement
     body_combinator            body{body_combinator::none};   // `ordered` matters at runtime
     std::vector<compiled_pair> pairs;   // all symmetry/rotation variants, deduped
 };
 
-// ── operations (spec section 6.0) ────────────────────────────────────────────────────
+// ── operations ───────────────────────────────────────────────────────────────
 
 enum class op_kind { resize, upscale, trim, mirror, pad, path };
 
 struct compiled_op {
     op_kind kind{op_kind::trim};
     // The `int` arguments (resize w/h, upscale n/m, pad n): statement-scope
-    // expressions (section 6.0), in written order - the order they evaluate
+    // expressions, in written order - the order they evaluate
     // in when the statement is reached. `param` is the parameter's index.
     struct int_arg { int param{0}; int expr{-1}; };
     static constexpr int path_connectivity = 6;   // its `param` (table position)
     std::vector<int_arg> int_args;
     int w{0};   // mirror axis: 1 = horizontal
-    // path (section 6.6)
+    // path
     // `pred` arguments: boolean expressions per cell (a bare tag compiles to `has`)
     int            from{-1}, to{-1};
     int            passable{-1};    // -1 → default: non-empty in any layer
@@ -196,16 +196,16 @@ struct compiled_stmt {
     enum class kind { op_call, apply } what{kind::apply};
     source_loc  loc;
     compiled_op op;                       // op_call
-    apply_mode  mode{apply_mode::everywhere};   // apply (sections 6, 6.7)
+    apply_mode  mode{apply_mode::everywhere};   // how many applications, and what each sees
     int         count{-1};        // count expr arena index; -1 = none: once = 1,
                                   // everywhere = all, grow/settle = fixpoint
     bool        percent{false};   // scatter(P%): the count is P
     int         rule_id{-1};   // apply over a rule
-    int         seq_id{-1};    // apply over a sequence (section 6.10): once or settle
+    int         seq_id{-1};    // apply over a sequence: once or settle
     int         guard{-1};   // `when` expr arena index; -1 = unguarded
 };
 
-// A named statement list (section 6.10), applied by name like a rule; one run of
+// A named statement list, applied by name like a rule; one run of
 // the body is an iteration.
 struct compiled_sequence {
     std::string                name;
@@ -220,15 +220,15 @@ struct compiled_layer {
 struct compiled {
     std::vector<std::string>              tag_names;
     std::vector<std::vector<std::string>> tag_values;   // [tag_id][value_id]
-    // named unions per tagset: (name, resolved mask) — section 3
+    // named unions per tagset: (name, resolved mask)
     std::vector<std::vector<std::pair<std::string, int64_t>>> tag_unions;
     std::vector<compiled_layer>           layers;
     std::vector<compiled_rule>            rules;
     std::vector<compiled_sequence>        sequences;   // canonical order = API ids
-    std::vector<std::string>              modules;     // canonical names, canonical order (section 2.6)
+    std::vector<std::string>              modules;     // canonical names, canonical order
     std::vector<compiled_expr>            exprs;   // the expression arena
 
-    // params (section 4.2): startup_exprs run once, in declaration order, when the
+    // params: startup_exprs run once, in declaration order, when the
     // inputs bind — a default only when its param was not supplied.
     std::vector<std::string> param_names;
     struct startup_expr { int param; int expr; bool is_default; };
@@ -257,7 +257,7 @@ struct compiled {
 
 struct module_closure;
 
-// Analyze a loaded module closure (section 2.6) into a self-contained compiled
+// Analyze a loaded module closure into a self-contained compiled
 // artifact. Returns false (with diagnostics) on any error. `best_effort`
 // keeps going through later phases despite errors — editor tooling wants
 // every table the closure still supports (plus the extra diagnostics), not a

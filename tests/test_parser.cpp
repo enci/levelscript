@@ -109,7 +109,7 @@ TEST_CASE("parser: a stray top-level block is one diagnostic; parsing resumes") 
     CHECK(ast->rules.size() == 1);
 }
 
-TEST_CASE("parser: use declarations head the file (2.6)") {
+TEST_CASE("parser: use declarations head the file") {
     auto ast = parse_ok("use \"schema.lvs\"\nuse \"lib/rules.lvs\"\ntag t { a }\n");
     REQUIRE(ast.uses.size() == 2);
     CHECK(ast.uses[0].path == "schema.lvs");
@@ -121,7 +121,7 @@ TEST_CASE("parser: use declarations head the file (2.6)") {
 
 // ── step 2: match blocks, write trees, attributes, body combinators ──────────
 
-TEST_CASE("parser: consecutive patterns conjoin on the match side (0.8, 5.2)") {
+TEST_CASE("parser: consecutive patterns conjoin on the match side") {
     auto ast = parse_ok(R"(
 rule place {
     algo[F]
@@ -190,14 +190,14 @@ rule r {
 )"));
 }
 
-TEST_CASE("parser: the match side takes no combinator or commas (0.8, 5.2)") {
+TEST_CASE("parser: the match side takes no combinator or commas") {
     CHECK(parse_fails("rule r { { any g[a] h[b] } => g[c] }"));
     CHECK(parse_fails("rule r { g[a], h[b] => g[c] }"));
     CHECK(parse_fails("rule r { { g[a], h[b] } => g[c] }"));
     CHECK(parse_fails("rule r { { all g[a] h[b] } => g[c] }"));
 }
 
-TEST_CASE("parser: braces may group a match side and change nothing (0.8, 5.2)") {
+TEST_CASE("parser: braces may group a match side and change nothing") {
     auto a = parse_ok("rule r { all\n { g[a] h[b] } => g[c]\n { g[b]\n h[.] } => { all g[d] h[e] }\n g[c] => g[d] }");
     REQUIRE(a.rules[0].pairs.size() == 3);
     CHECK(a.rules[0].pairs[0].lhs.size() == 2);
@@ -258,7 +258,7 @@ TEST_CASE("parser: commas separate body pairs like newlines (list_sep)") {
     CHECK(ast.rules[0].pairs.size() == 2);
 }
 
-TEST_CASE("parser: list commas are optional; newlines are whitespace (0.8, section 3)") {
+TEST_CASE("parser: list commas are optional; newlines are whitespace") {
     // comma-only, on one line
     auto a = parse_ok("tag t { a, b, c }\nlayers { g: grid of t, h: grid of number }\n"
                       "params { n: number = 2, m = n * 2 }\n"
@@ -283,7 +283,7 @@ TEST_CASE("parser: list commas are optional; newlines are whitespace (0.8, secti
     CHECK(c.rules[0].pairs[0].rhs.items.size() == 2);
 }
 
-TEST_CASE("parser: statements are delimited by the grammar, not by newlines (0.8)") {
+TEST_CASE("parser: statements are delimited by the grammar, not by newlines") {
     auto ast = parse_ok("rule r { g[.] => g[a] }\n"
                         "sequence main { resize(4, 4) everywhere r once r\n"
                         "  path(from=a,\n to=a, into=g, write=a)\n"
@@ -306,7 +306,7 @@ TEST_CASE("parser: a single sub-rule under a body combinator is allowed") {
 
 // ── step 3: modes, counts, ordered ────────────────────────────────────────────
 
-TEST_CASE("parser: modes and counts (0.8, section 6)") {
+TEST_CASE("parser: modes and counts") {
     auto ast = parse_ok(R"(
 sequence main {
     everywhere fill
@@ -337,7 +337,7 @@ sequence main {
     CHECK(s[7].rule_name == "carve");
 }
 
-TEST_CASE("parser: counts are expressions; '%' binds to an atom (0.8, section 6)") {
+TEST_CASE("parser: counts are expressions; '%' binds to an atom") {
     auto ast = parse_ok(R"(
 sequence main {
     scatter(budget / 10) a
@@ -364,7 +364,7 @@ sequence main {
     CHECK(parse_fails("sequence main { scatter(f(1)%) a }"));
 }
 
-TEST_CASE("parser: count forms each mode rejects (0.8, section 6)") {
+TEST_CASE("parser: count forms each mode rejects") {
     CHECK(parse_fails("sequence main { scatter r }"));       // scatter needs a count
     CHECK(parse_fails("sequence main { once(2) r }"));       // once takes none
     CHECK(parse_fails("sequence main { everywhere(2) r }"));
@@ -379,7 +379,7 @@ TEST_CASE("parser: the 0.7 count and policy forms are not statements") {
     CHECK(parse_fails("sequence main { all(policy=stabilize) r }"));
 }
 
-TEST_CASE("parser: inline rules as statement targets (0.8, section 6)") {
+TEST_CASE("parser: inline rules as statement targets") {
     auto ast = parse_ok(R"(
 sequence main {
     everywhere { g[.] => g[a] }
@@ -443,7 +443,7 @@ TEST_CASE("parser: mask cells — unions and complements are whitespace-free") {
     CHECK(parse_fails("rule r { g[wall | door] => g[floor] }"));
 }
 
-TEST_CASE("parser: pattern variables (0.9, 5.11)") {
+TEST_CASE("parser: pattern variables") {
     auto ast = parse_ok("rule r { g[?a (g != ?a) (?a)] => g[?a * *] }");
     auto const& row = ast.rules[0].pairs[0].lhs[0].cells[0];
     REQUIRE(row.size() == 3);
@@ -458,14 +458,14 @@ TEST_CASE("parser: pattern variables (0.9, 5.11)") {
     parse_ok("rule r { g[?a] where[ (?a > 3) ] => g[ (?a | wall) ] }");
 }
 
-TEST_CASE("parser: a variable is not a bare mask atom (0.9, 2.5)") {
+TEST_CASE("parser: a variable is not a bare mask atom") {
     CHECK(parse_fails("rule r { g[?a|wall] => g[*] }"));
     CHECK(parse_fails("rule r { g[wall|?a] => g[*] }"));
     CHECK(parse_fails("rule r { g[!?a] => g[*] }"));
     CHECK(parse_fails("rule r { g[? a] => g[*] }"));
 }
 
-TEST_CASE("parser: '.' is a mask atom (0.9.1, 5.3)") {
+TEST_CASE("parser: '.' is a mask atom") {
     auto ast = parse_ok("rule r { g[!. .|door wall|. . !wall] => g[* * * * *] }");
     auto const& row = ast.rules[0].pairs[0].lhs[0].cells[0];
     REQUIRE(row.size() == 5);
@@ -512,7 +512,7 @@ rule edge {
     CHECK(pair.lhs[1].cells[0][0].kind == cell_kind::expr_cell);
 }
 
-TEST_CASE("parser: 'where' is a pattern head on either side of a single pair (0.8, 5.3)") {
+TEST_CASE("parser: 'where' is a pattern head on either side of a single pair") {
     auto ast = parse_ok("rule r { where[(x == 0), (y == 0)] => g[a] }");
     auto const& p = ast.rules[0].pairs[0].lhs[0];
     CHECK(p.is_where);
@@ -520,7 +520,7 @@ TEST_CASE("parser: 'where' is a pattern head on either side of a single pair (0.
     CHECK(p.cols == 1);
 }
 
-TEST_CASE("parser: commas separate pattern rows (0.8, 5.3)") {
+TEST_CASE("parser: commas separate pattern rows") {
     auto ast = parse_ok("rule r { algo[* * *, * S W, * * *] => g[a, b, c] }");
     auto const& lhs = ast.rules[0].pairs[0].lhs[0];
     CHECK(lhs.rows == 3);
@@ -531,7 +531,7 @@ TEST_CASE("parser: commas separate pattern rows (0.8, 5.3)") {
     CHECK(rhs.cols == 1);
 }
 
-TEST_CASE("parser: a comma followed by a newline is one row break (0.8, 5.3)") {
+TEST_CASE("parser: a comma followed by a newline is one row break") {
     auto ast = parse_ok("rule r {\n g[a b,\n   c d,   \n   e f]\n =>\n g[* *\n * *\n * *] }");
     auto const& lhs = ast.rules[0].pairs[0].lhs[0];
     CHECK(lhs.rows == 3);
@@ -592,7 +592,7 @@ TEST_CASE("parser: named unions in the tag block") {
     CHECK(ast.tags[0].unions[0].members == std::vector<std::string>{"wall", "door"});
 }
 
-TEST_CASE("parser: contextual names in their grammar slots (spec section 2.4)") {
+TEST_CASE("parser: contextual names in their grammar slots") {
     auto ast = parse_ok(R"(
 rule a(symmetry=none, rotation=none) { g[.] => g[x] }
 rule b(rotation=all, symmetry=vertical) { g[.] => g[x] }
@@ -616,7 +616,7 @@ sequence main {
     CHECK(s[2].op_args[0].value->ident == "vertical");
 }
 
-TEST_CASE("parser: contextual names are legal declaration names (spec section 2.4)") {
+TEST_CASE("parser: contextual names are legal declaration names") {
     auto ast = parse_ok(R"(
 tag none { horizontal, vertical, symmetry, rotation }
 layers { none: grid of none }
@@ -633,7 +633,7 @@ TEST_CASE("parser: an unclosed pattern reports the missing ']' once") {
     CHECK(diags.all[0].message.find("expected ']'") != std::string::npos);
 }
 
-TEST_CASE("parser: an unknown attribute is parsed whole — one diagnostic (section 5.1)") {
+TEST_CASE("parser: an unknown attribute is parsed whole — one diagnostic") {
     for (char const* attrs : {"colour=red", "colour=3", "colour=all", "colour={90, 180}"}) {
         diagnostics diags;
         parse(std::string("rule r(") + attrs + ") { g[.] => g[a] }\n", "test", diags);

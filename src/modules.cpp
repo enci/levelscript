@@ -37,16 +37,16 @@ struct loader {
             };
             std::optional<module_source> src;
             if (resolve) src = resolve(u.path, name);
-            if (!src) {   // section 7.3, check 9
+            if (!src) {
                 loc_err("cannot resolve module \"" + u.path + "\"");
                 continue;
             }
             int dep = find(src->name);
             if (dep >= 0 && std::find(used.begin(), used.end(), dep) != used.end()) {
-                loc_err("module '" + src->name + "' is already used by this module");   // #41
+                loc_err("module '" + src->name + "' is already used by this module");
                 continue;
             }
-            if (dep >= 0 && state[dep] == 0) {   // section 7.3, check 40: on the walk = a cycle
+            if (dep >= 0 && state[dep] == 0) {   // on the walk = a cycle
                 std::string chain;
                 auto from = std::find(path.begin(), path.end(), dep);
                 for (auto it = from; it != path.end(); ++it)
@@ -71,7 +71,7 @@ struct loader {
         out.sees.assign(n, std::vector<char>(n, 0));
         for (int i = 0; i < n; ++i) {
             out.sees[i][i] = 1;
-            for (int d : uses_of[i]) out.sees[i][d] = 1;   // direct uses only (D3)
+            for (int d : uses_of[i]) out.sees[i][d] = 1;   // direct uses only; a use is not re-exported
         }
         // merge in canonical order
         auto& m = out.merged;

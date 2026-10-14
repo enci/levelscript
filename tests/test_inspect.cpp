@@ -126,7 +126,7 @@ sequence main { }
     CHECK(has(j, "{\"line\":6,\"col\":46,\"len\":1,\"tag\":-3,\"value\":3}"));
 }
 
-TEST_CASE("inspect: inline rules are colored and their grids referenced (0.8)") {
+TEST_CASE("inspect: inline rules are colored and their grids referenced") {
     std::string j = ls::inspect_json(R"(tag t { F, W }
 layers { g: grid of t }
 sequence main { everywhere { g[F] => g[W] } }

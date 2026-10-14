@@ -39,7 +39,7 @@ struct session {
     ls::run       r;
     unsigned int  seed{0};
     bool          done{false};
-    int           entry{-1};   // the sequence this run applies (section 6)
+    int           entry{-1};   // the sequence this run applies
     // Applications pulled for the statement currently being worked on — same
     // bookkeeping as the debugger's debug_run::advance() (app/debug_ui_internal.hpp),
     // recomputed as we go since a step can land mid-statement.
@@ -58,9 +58,8 @@ bool advance(session& s) {
     return true;
 }
 
-// A JS resolver (path, from) => {name, source} | null, as an ls::resolver
-// (section 2.6). Called synchronously during compile; `undefined` means no `use`
-// resolves.
+// A JS resolver (path, from) => {name, source} | null, as an ls::resolver.
+// Called synchronously during compile; `undefined` means no `use` resolves.
 ls::resolver js_resolver(val resolve) {
     if (resolve.isUndefined() || resolve.isNull()) return {};
     return [resolve](std::string const& path, std::string const& from)

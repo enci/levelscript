@@ -40,7 +40,7 @@ static long long ce_pure(ce_kind k, long long a, long long b, long long c) {
     case ce_kind::add:    return w32(a + b);
     case ce_kind::sub:    return w32(a - b);
     case ce_kind::mul:    return w32(a * b);
-    case ce_kind::div_:   return b == 0 ? 0 : w32(a / b);   // n / 0 == 0 (G2)
+    case ce_kind::div_:   return b == 0 ? 0 : w32(a / b);   // n / 0 == 0
     case ce_kind::lt:     return a <  b;
     case ce_kind::le:     return a <= b;
     case ce_kind::gt:     return a >  b;
@@ -59,7 +59,7 @@ static long long ce_pure(ce_kind k, long long a, long long b, long long c) {
     }
 }
 
-// ── expression evaluation (section 5.8) — total, deterministic per seed ─────────────
+// ── expression evaluation — total, deterministic per seed ────────────────────
 
 long long machine::eval(int idx, int x, int y) {
     auto const& e = prog_->exprs[idx];
@@ -106,12 +106,12 @@ long long machine::eval(int idx, int x, int y) {
     case ce_kind::or_:  return eval(e.a, x, y) != 0 || eval(e.b, x, y) != 0;
     case ce_kind::random_: {   // inclusive [lo, hi]; exactly one draw per call
         auto lo = eval(e.a, x, y), hi = eval(e.b, x, y);
-        // an empty range still draws once (uniform(1)) and yields lo (section 5.10)
+        // an empty range still draws once (uniform(1)) and yields lo
         uint64_t range = hi < lo ? 1 : (uint64_t)(hi - lo) + 1;
         return w32(lo + (long long)uniform(range));
     }
     default: {   // the pure operators; operands left to right (an eager `if`
-                 // evaluates both branches, section 5.10)
+                 // evaluates both branches)
         long long a = e.a >= 0 ? eval(e.a, x, y) : 0;
         long long b = e.b >= 0 ? eval(e.b, x, y) : 0;
         long long c = e.c >= 0 ? eval(e.c, x, y) : 0;
@@ -120,15 +120,14 @@ long long machine::eval(int idx, int x, int y) {
     }
 }
 
-// The one execution core (spec section 6.7). Statements run top to bottom; the
-// mode algebra lives here and only here — batch generate(), progressive
-// stepping, and observation all pull this coroutine.
+// The one execution core. Statements run top to bottom; the mode algebra lives
+// here and only here — batch generate(), progressive stepping, and observation
+// all pull this coroutine.
 //
 //   scatter, everywhere — one frozen pass: collect, seeded-shuffle (+ `ordered`
 //                 priority sort), apply non-conflicting matches to the back
-//                 buffer under the write mask (section 6.8), swap. `P%` first
-//                 sizes the applied set a full pass would make (section 6.7) and
-//                 keeps its prefix.
+//                 buffer under the write mask, swap. `P%` first sizes the
+//                 applied set a full pass would make and keeps its prefix.
 //   once, grow  — re-collect each application; each sees all prior writes.
 //                 No mask. `grow` without a count runs to the fixpoint.
 //   settle      — iterated batch sweeps until one changes nothing; the
@@ -137,7 +136,7 @@ long long machine::eval(int idx, int x, int y) {
 // Yields after every application and every completed statement — pullers
 // filter to their granularity.
 // A run binds the params, then applies the entry exactly as `once S` to the
-// empty stack (section 6): one iteration of its body - no guard, no draw, no
+// empty stack: one iteration of its body - no guard, no draw, no
 // stability check. Its body statements are frame 0 of the statement stack.
 sequence<step_event> machine::run() {
     if (entry_ < 0 || entry_ >= (int)prog_->sequences.size()) co_return;
@@ -149,9 +148,9 @@ sequence<step_event> machine::run() {
         frames_.assign(1, frame{si, 0, 1});
         bool seq = st.what == compiled_stmt::kind::apply && st.seq_id >= 0;
 
-        // A false `when` guard skips the statement in full (section 6). A skipped
+        // A false `when` guard skips the statement in full. A skipped
         // leaf still yields its boundary so progress advances; applying a
-        // sequence is never a step of its own (Appendix A).
+        // sequence is never a step of its own.
         if (st.guard >= 0 && eval(st.guard, 0, 0) == 0) {
             if (!seq) co_yield step_event{step_event::kind::statement, si};
             continue;
@@ -243,7 +242,7 @@ sequence<step_event> machine::run_leaf(compiled_stmt const& st, int top, int cou
 
 }
 
-// section 6.10: `once` = 1 iteration; `settle(N)` = up to N, stopping after a
+// A sequence application: `once` = 1 iteration; `settle(N)` = up to N, stopping after a
 // stable one; `settle` = until one is stable. Body statements run exactly as in
 // the program; the frames record where each step happened.
 sequence<step_event> machine::run_sequence(compiled_stmt const& st, int top, int count) {
@@ -251,7 +250,7 @@ sequence<step_event> machine::run_sequence(compiled_stmt const& st, int top, int
     int cap = st.mode == apply_mode::once ? 1 : count;   // -1 = fixpoint
     size_t depth = frames_.size();
     for (int it = 0; cap < 0 || it < cap; ++it) {
-        bool check = cap != 1;   // `once S` never needs the comparison (section 10.7)
+        bool check = cap != 1;   // `once S` never needs the comparison
         stack_state start;
         if (check) start = capture();
         for (int j = 0; j < (int)body.size(); ++j) {
@@ -287,7 +286,7 @@ machine::stack_state machine::capture() const {
 }
 
 // Stability compares states, not writes: dimensions plus every cell of every
-// layer. A cell written back to its old value is no change (section 6.10).
+// layer. A cell written back to its old value is no change.
 bool machine::unchanged_since(stack_state const& s) const {
     if (s.rows != rows_ || s.cols != cols_) return false;
     for (size_t i = 0; i < grids_.size(); ++i)
@@ -376,8 +375,8 @@ void machine::record_highlights(compiled_pair const& pair, match const& m) {
 }
 
 // Rebuild one grid to nr x nc, each new cell from src(r, c) — the shared
-// skeleton of every geometric operation. Ops read like their spec sections:
-// a rebuild is just a coordinate mapping.
+// skeleton of every geometric operation, so each op is just a coordinate
+// mapping.
 template <class F>
 static void rebuild(grid_state& g, int nr, int nc, F&& src) {
     std::vector<int64_t> nf((size_t)nr * nc, g.empty_raw());
@@ -391,14 +390,14 @@ static void rebuild(grid_state& g, int nr, int nc, F&& src) {
 }
 
 void machine::exec_op(compiled_op const& op) {
-    // `int` arguments evaluate now, after the guard, in written order
-    // (section 10.6); out-of-range values are handled below (section 7.4).
+    // `int` arguments evaluate now, after the guard, in written order;
+    // out-of-range values are handled below.
     long long arg[8] = {};   // by the parameter's position in the operation table
     for (auto const& ia : op.int_args) arg[ia.param] = eval(ia.expr, 0, 0);
 
     switch (op.kind) {
 
-    case op_kind::resize: { // content-preserving, top-left anchored (section 6.1)
+    case op_kind::resize: { // content-preserving, top-left anchored
         if (arg[0] < 1 || arg[1] < 1) {
             std::cerr << "warning: resize(" << arg[0] << ", " << arg[1]
                       << ") has a dimension below 1; leaving grids unchanged\n";
@@ -414,7 +413,7 @@ void machine::exec_op(compiled_op const& op) {
         return;
     }
 
-    case op_kind::upscale: { // duplicate every cell into an n x m block (section 6.2)
+    case op_kind::upscale: { // duplicate every cell into an n x m block
         if (arg[0] < 1 || arg[1] < 1)
             std::cerr << "warning: upscale(" << arg[0] << ", " << arg[1]
                       << ") has a factor below 1; treating it as 1\n";
@@ -428,7 +427,7 @@ void machine::exec_op(compiled_op const& op) {
         return;
     }
 
-    case op_kind::pad: {    // uniform empty border on all sides (section 6.5)
+    case op_kind::pad: {    // uniform empty border on all sides
         if (arg[0] < 0)
             std::cerr << "warning: pad(" << arg[0]
                       << ") has a margin below 0; treating it as 0\n";
@@ -444,7 +443,7 @@ void machine::exec_op(compiled_op const& op) {
         return;
     }
 
-    case op_kind::trim: {   // crop all layers to the union content box (section 6.3)
+    case op_kind::trim: {   // crop all layers to the union content box
         bool found = false;
         int min_r = 0, min_c = 0, max_r = 0, max_c = 0;
         for (auto const& g : grids_)
@@ -472,7 +471,7 @@ void machine::exec_op(compiled_op const& op) {
         return;
     }
 
-    case op_kind::mirror:   // fold the origin-side half onto the far side (section 6.4)
+    case op_kind::mirror:   // fold the origin-side half onto the far side
         for (auto& g : grids_) {
             if (op.w == 1) {   // horizontal: left half onto the right, reflected
                 for (int r = 0; r < g.rows; ++r)
@@ -506,7 +505,7 @@ static uint64_t mix64(uint64_t v) {
     return v ^ (v >> 31);
 }
 
-// path(...) (section 6.6): stamp a minimum-cost route from any `from` cell to the
+// path(...): stamp a minimum-cost route from any `from` cell to the
 // nearest `to` cell over the traversable cells, endpoints included.
 //
 // Draw contract (the algorithm-unobservable design): predicate passes and
@@ -525,7 +524,7 @@ void machine::run_path(compiled_op const& op, int ndirs) {
 
     auto pred_at = [&](int expr, int x, int y) { return expr >= 0 && eval(expr, x, y) != 0; };
     auto default_passable = [&](int x, int y) -> bool {
-        for (auto const& g : grids_)   // non-empty in at least one layer (section 6.3)
+        for (auto const& g : grids_)   // non-empty in at least one layer
             if (g.get(y, x) != g.empty_raw()) return true;
         return false;
     };
@@ -638,9 +637,9 @@ uint64_t machine::uniform(uint64_t n) {
     }
 }
 
-// Candidates in the pinned collection order (section 10.6 item 3): anchors
-// row-major, and at each anchor every variant whose pattern fits there, in
-// declaration order. Match-side `random` draws fire in exactly this order.
+// Candidates in the pinned collection order: anchors row-major, and at each
+// anchor every variant whose pattern fits there, in declaration order.
+// Match-side `random` draws fire in exactly this order.
 std::vector<machine::match> machine::collect(compiled_rule const& rule) {
     std::vector<match> out;
     if (rows_ <= 0 || cols_ <= 0) return out;
@@ -655,7 +654,7 @@ std::vector<machine::match> machine::collect(compiled_rule const& rule) {
     return out;
 }
 
-// Two phases (section 5.11): every bare cell of every pattern first - pure, so
+// Two phases: every bare cell of every pattern first - pure, so
 // their order is unobservable - then expression and `where` cells in pattern
 // order, row-major. Only phase 2 can draw, so a candidate its bare cells
 // reject consumes no draws.
@@ -674,12 +673,12 @@ bool machine::match_at(compiled_pair const& pair, int row, int col) {
             for (auto const& p : pat.bare_ne)   // `!.`: any stored number
                 if (g.get(row + p.r, col + p.c) == p.val) return false;
         } else {
-            for (auto const& p : pat.bare)   // mask overlap (section 4.1)
+            for (auto const& p : pat.bare)   // mask overlap
                 if ((g.get(row + p.r, col + p.c) & p.val) == 0) return false;
         }
     }
     // Binding cells: each site is non-empty, every other binding cell equals
-    // its site exactly (section 5.11). Their patterns' bounds were checked above.
+    // its site exactly. Their patterns' bounds were checked above.
     for (auto const& s : pair.var_sites) {
         grid_state const& g = grids_[(size_t)s.grid];
         int64_t v = g.get(row + s.r, col + s.c);
@@ -690,7 +689,7 @@ bool machine::match_at(compiled_pair const& pair, int row, int col) {
             var_value(pair, k.slot, row, col)) return false;
     for (auto const& pat : pair.lhs) {
         if (pat.computed.empty()) continue;
-        if (pat.is_where) {   // section 5.9: every cell's boolean must hold
+        if (pat.is_where) {   // every cell's boolean must hold
             for (auto const& p : pat.computed)
                 if (eval(p.expr, col + p.c, row + p.r) == 0) return false;
             continue;
@@ -706,8 +705,8 @@ bool machine::match_at(compiled_pair const& pair, int row, int col) {
 }
 
 // The write footprint is every non-wildcard cell of every write-tree leaf —
-// conservative across { any } branches (spec section 5.7); the mask is (grid,
-// cell)-keyed and write-only (section 6.8).
+// conservative across { any } branches; the mask is (grid, cell)-keyed and
+// write-only.
 bool machine::conflicts(compiled_pair const& pair, match const& m,
                         std::unordered_set<uint64_t> const& written) const {
     if (written.empty()) return false;
