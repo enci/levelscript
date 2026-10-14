@@ -127,6 +127,73 @@ void for_each_root_pattern(ast_file const& ast, int root, F&& f) {
                 if (s.inline_rule) rule(*s.inline_rule);
 }
 
+// `{"line":L,"col":C,"end_line":EL,"end_col":EC}`
+std::string range_json(source_loc const& l) {
+    return "{\"line\":" + std::to_string(l.line) + ",\"col\":" + std::to_string(l.col) +
+           ",\"end_line\":" + std::to_string(l.end_line) +
+           ",\"end_col\":" + std::to_string(l.end_col) + "}";
+}
+
+// The range of every node of the root module's rules and sequences but a lone
+// token (an editor selects words itself) - what folding and expand-selection
+// work from.
+struct span_list {
+    std::string& o;
+    comma_list   cl{o};
+
+    void add(source_loc const& l) { cl.next(); o += range_json(l); }
+    void expr(ls::expr const& e) {
+        if (e.args.empty()) return;
+        add(e.loc);
+        for (auto const& a : e.args) expr(*a);
+    }
+    void pattern(ls::pattern const& p) {
+        add(p.loc);
+        for (auto const& row : p.cells)
+            for (auto const& c : row) expr(*c);
+    }
+    void write(write_term const& t) {
+        if (t.what != write_term::kind::leaf || t.weight != 1) add(t.loc);
+        if (t.what == write_term::kind::leaf) pattern(t.pat);
+        for (auto const& it : t.items) write(it);
+    }
+    void rule(rule_decl const& r) {
+        add(r.loc);
+        for (auto const& pr : r.pairs) {
+            add(pr.loc);
+            for (auto const& p : pr.lhs) pattern(p);
+            write(pr.rhs);
+        }
+    }
+    void statement(program_stmt const& s) {
+        add(s.loc);
+        for (auto const& a : s.op_args) {
+            add(a.loc);
+            expr(*a.value);
+        }
+        if (s.count) expr(*s.count);
+        if (s.inline_rule) rule(*s.inline_rule);
+        if (s.guard) expr(*s.guard);
+    }
+};
+
+// One document-outline entry: its whole range, and the part to select (its
+// name) when it is picked.
+void emit_symbol(std::string& o, comma_list& cl, char const* kind, std::string const& name,
+                 source_loc const& range, source_loc const& select) {
+    cl.next();
+    o += "{\"kind\":\"" + std::string(kind) + "\",\"name\":";
+    js(o, name);
+    o += ",\"range\":" + range_json(range) + ",\"select\":" + range_json(select);
+}
+
+// A block's keyword: the first `len` characters of its range.
+source_loc keyword_of(source_loc l, int len) {
+    l.end_line = l.line;
+    l.end_col  = l.col + len;
+    return l;
+}
+
 }  // namespace
 
 std::string inspect_json(std::string const& source, std::string const& name,
@@ -190,6 +257,79 @@ std::string inspect_json(std::string const& source, std::string const& name,
         for_each_root_pattern(*ast, mods.root, [&](pattern const& p) {
             emit_pattern_refs(o, cl, p);
         });
+    }
+    o += "]";
+
+    // The root module's declarations, nested as an outline
+    o += ",\"outline\":[";
+    {
+        comma_list cl{o};
+        for (auto const& t : ast->tags) {
+            if (!in_root(t.loc)) continue;
+            emit_symbol(o, cl, "tag", t.name.text, t.loc, t.name.loc);
+            o += ",\"children\":[";
+            comma_list vl{o};
+            for (auto const& v : t.values) { emit_symbol(o, vl, "value", v.text, v.loc, v.loc); o += "}"; }
+            for (auto const& u : t.unions) {
+                emit_symbol(o, vl, "union", u.name.text, u.name.loc, u.name.loc);
+                o += "}";
+            }
+            o += "]}";
+        }
+        if (ast->has_layers && in_root(ast->layers.loc)) {
+            emit_symbol(o, cl, "layers", "layers", ast->layers.loc, keyword_of(ast->layers.loc, 6));
+            o += ",\"children\":[";
+            comma_list gl{o};
+            for (auto const& l : ast->layers.layers) {
+                if (!in_root(l.name.loc)) continue;
+                emit_symbol(o, gl, "grid", l.name.text, l.name.loc, l.name.loc);
+                o += "}";
+            }
+            o += "]}";
+        }
+        if (ast->has_params && in_root(ast->params_loc)) {
+            emit_symbol(o, cl, "params", "params", ast->params_loc, keyword_of(ast->params_loc, 6));
+            o += ",\"children\":[";
+            comma_list pl{o};
+            for (auto const& p : ast->params) {
+                if (!in_root(p.name.loc)) continue;
+                source_loc whole = p.name.loc;   // the name through its value
+                if (p.value) {
+                    whole.end_line = p.value->loc.end_line;
+                    whole.end_col  = p.value->loc.end_col;
+                }
+                emit_symbol(o, pl, "param", p.name.text, whole, p.name.loc);
+                o += "}";
+            }
+            o += "]}";
+        }
+        for (auto const& r : ast->rules) {
+            if (!in_root(r.loc)) continue;
+            emit_symbol(o, cl, "rule", r.name.text, r.loc, r.name.loc);
+            o += "}";
+        }
+        for (auto const& sq : ast->sequences) {
+            if (!in_root(sq.loc)) continue;
+            emit_symbol(o, cl, "sequence", sq.name.text, sq.loc, sq.name.loc);
+            o += "}";
+        }
+    }
+    o += "]";
+
+    o += ",\"spans\":[";
+    {
+        span_list sl{o};
+        if (ast->has_layers && in_root(ast->layers.loc)) sl.add(ast->layers.loc);
+        if (ast->has_params && in_root(ast->params_loc)) sl.add(ast->params_loc);
+        for (auto const& t : ast->tags)
+            if (in_root(t.loc)) sl.add(t.loc);
+        for (auto const& r : ast->rules)
+            if (in_root(r.loc)) sl.rule(r);
+        for (auto const& sq : ast->sequences) {
+            if (!in_root(sq.loc)) continue;
+            sl.add(sq.loc);
+            for (auto const& s : sq.stmts) sl.statement(s);
+        }
     }
     o += "]";
 

@@ -136,3 +136,25 @@ sequence main { everywhere { g[F] => g[W] } }
     CHECK(has(j, "{\"line\":3,\"col\":30,\"len\":1,\"kind\":\"layer\",\"target\":\"g\"}"));
     CHECK(!has(j, "\"kind\":\"rule\""));   // no name reference for an inline target
 }
+
+TEST_CASE("inspect: an outline of the declarations, and every node's range") {
+    std::string j = ls::inspect_json(good_src, "test.lvs");
+    auto range = [](int l, int c, int el, int ec) {
+        return "{\"line\":" + std::to_string(l) + ",\"col\":" + std::to_string(c) +
+               ",\"end_line\":" + std::to_string(el) + ",\"end_col\":" + std::to_string(ec) + "}";
+    };
+    // the whole declaration, then its name to select
+    CHECK(has(j, "{\"kind\":\"rule\",\"name\":\"fill\",\"range\":" + range(11, 1, 11, 39) +
+                 ",\"select\":" + range(11, 6, 11, 10) + "}"));
+    CHECK(has(j, "{\"kind\":\"sequence\",\"name\":\"main\",\"range\":" + range(12, 1, 15, 2)));
+    // blocks select their keyword; a param spans its name through its value
+    CHECK(has(j, "{\"kind\":\"layers\",\"name\":\"layers\",\"range\":" + range(3, 1, 6, 2) +
+                 ",\"select\":" + range(3, 1, 3, 7) + ",\"children\":[{\"kind\":\"grid\""));
+    CHECK(has(j, "{\"kind\":\"params\",\"name\":\"params\",\"range\":" + range(7, 1, 10, 2)));
+    CHECK(has(j, "{\"kind\":\"param\",\"name\":\"budget\",\"range\":" + range(9, 5, 9, 28)));
+    CHECK(has(j, "{\"kind\":\"union\",\"name\":\"blocker\""));
+    // node ranges: the sub-rule, a statement, and the multi-line blocks
+    CHECK(has(j, range(11, 13, 11, 37)));    // level[.] => level[floor]
+    CHECK(has(j, range(13, 5, 13, 17)));     // resize(4, 4)
+    CHECK(has(j, "\"spans\":[" + range(3, 1, 6, 2) + "," + range(7, 1, 10, 2)));
+}

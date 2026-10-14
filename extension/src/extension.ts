@@ -7,6 +7,7 @@ import { editorResolver } from './resolve';
 import * as path from 'path';
 import { registerDebugger } from './debugger';
 import { registerAstView } from './ast_view';
+import { documentSymbolProvider, foldingRangeProvider, selectionRangeProvider } from './structure';
 
 const LS_LANG = 'levelscript';
 let diagnosticCollection: vscode.DiagnosticCollection;
@@ -44,6 +45,9 @@ export async function activate(ctx: vscode.ExtensionContext) {
       // never ' ' or '\n': Enter would open a list and the next Enter accept it
       '[', '(', '=', ',', '|'
     ),
+    vscode.languages.registerDocumentSymbolProvider({ language: LS_LANG }, documentSymbolProvider),
+    vscode.languages.registerFoldingRangeProvider({ language: LS_LANG }, foldingRangeProvider),
+    vscode.languages.registerSelectionRangeProvider({ language: LS_LANG }, selectionRangeProvider),
   );
 
   registerDebugger(ctx);

@@ -84,6 +84,10 @@ struct loader {
             for (auto& x : a.sequences)     m.sequences.push_back(std::move(x));
             m.has_layers = m.has_layers || a.has_layers;
             m.has_params = m.has_params || a.has_params;
+            if (id == out.root) {
+                m.layers.loc = a.layers.loc;
+                m.params_loc = a.params_loc;
+            }
         }
         m.uses = std::move(asts[out.root].uses);
     }
