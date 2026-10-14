@@ -77,7 +77,7 @@ std::vector<token> lex(std::string_view src, std::string_view file,
         // VARIABLE: '?' and the name, no whitespace between.
         if (c == '?') {
             if (i + 1 >= n || !ident_start(src[i + 1])) {
-                diags.error(file, tl, tc, "expected a variable name right after '?'");
+                diags.error(file, tl, tc, tl, tc + 1, "expected a variable name right after '?'");
                 push(token_type::bad, "?", tl, tc);
                 ++i; ++col;
                 continue;
@@ -95,7 +95,7 @@ std::vector<token> lex(std::string_view src, std::string_view file,
             size_t s = i + 1, j = s;
             while (j < n && src[j] != '"' && src[j] != '\n') ++j;
             if (j >= n || src[j] != '"') {
-                diags.error(file, tl, tc, "unterminated string");
+                diags.error(file, tl, tc, tl, tc + (int)(j - i), "unterminated string");
                 push(token_type::bad, std::string(src.substr(i, j - i)), tl, tc);
                 col += (int)(j - i);
                 i = j;
@@ -160,7 +160,7 @@ std::vector<token> lex(std::string_view src, std::string_view file,
         default: break;
         }
         if (t == token_type::bad)
-            diags.error(file, tl, tc,
+            diags.error(file, tl, tc, tl, tc + 1,
                         "unexpected character '" + std::string(1, c) + "'");
         push(t, std::string(1, c), tl, tc);
         ++i; ++col;

@@ -283,7 +283,7 @@ struct analyzer {
 
     std::string const& label(source_loc loc) const { return mods.names[(size_t)loc.mod]; }
     void error(source_loc loc, std::string msg) {
-        diags.error(label(loc), loc.line, loc.col, std::move(msg));
+        diags.error(label(loc), loc.line, loc.col, loc.end_line, loc.end_col, std::move(msg));
     }
     // A word or number outside its table: "invalid <what> '<got>'; allowed: ...".
     template <class Table>
@@ -292,7 +292,7 @@ struct analyzer {
               allowed_keys(table));
     }
     void warning(source_loc loc, std::string msg) {
-        diags.warning(label(loc), loc.line, loc.col, std::move(msg));
+        diags.warning(label(loc), loc.line, loc.col, loc.end_line, loc.end_col, std::move(msg));
     }
 
     // Visibility: a module sees itself and the modules it uses directly.
@@ -539,11 +539,11 @@ struct analyzer {
         for (auto const& t : ast.tags) {
             std::string const& tname = t.name.text;
             if (out.tag_id(tname) >= 0)
-                error(t.loc, "duplicate tag '" + tname + "'");
+                error(t.name.loc, "duplicate tag '" + tname + "'");
             if (t.values.empty() && t.unions.empty())
-                error(t.loc, "tagset '" + tname + "' has no values");
+                error(t.name.loc, "tagset '" + tname + "' has no values");
             if ((int)t.values.size() > 30)   // bits 1..30; 0 = empty, 31 reserved
-                error(t.loc, "tagset '" + tname + "' has " +
+                error(t.name.loc, "tagset '" + tname + "' has " +
                       std::to_string(t.values.size()) + " values; the maximum is 30");
             std::vector<std::string> vals;
             for (auto const& [name, loc] : t.values) {
@@ -904,7 +904,7 @@ struct analyzer {
     void compile_rules() {
         for (auto const& r : ast.rules) {
             if (index_of(out.rules, r.name, &compiled_rule::name) >= 0)
-                error(r.loc, "duplicate rule '" + r.name.text + "'");
+                error(r.name.loc, "duplicate rule '" + r.name.text + "'");
             out.rules.push_back(compile_rule(r));
             out.rules.back().name = r.name.text;
         }
@@ -914,12 +914,12 @@ struct analyzer {
     compiled_rule compile_rule(rule_decl const& r) {
         // attributes; an invalid one is reported and adds no variants
         auto sym = lookup(symmetries, r.symmetry);
-        if (!sym) invalid(r.loc, "symmetry", r.symmetry, symmetries);
+        if (!sym) invalid(r.name.loc, "symmetry", r.symmetry, symmetries);
         std::vector<std::pair<transform, int16_t>> rots = {{transform::identity, 0}};
         for (long long a : r.rotation_angles) {
             auto rot = lookup(rotations, a);
             if (rot) rots.push_back({rot->k, (int16_t)a});
-            else     invalid(r.loc, "rotation angle", std::to_string(a), rotations);
+            else     invalid(r.name.loc, "rotation angle", std::to_string(a), rotations);
         }
         auto const& syms = sym ? sym->variants : symmetries[0].variants;
 
@@ -1284,11 +1284,11 @@ struct analyzer {
             int r = index_of(ast.rules, sq.name.text, &rule_decl::name);
             int k = index_of(out.sequences, sq.name.text, &compiled_sequence::name);
             if (r >= 0)
-                error(sq.loc, "duplicate name '" + sq.name.text + "': already declared as a "
+                error(sq.name.loc, "duplicate name '" + sq.name.text + "': already declared as a "
                       "rule on line " + std::to_string(ast.rules[(size_t)r].loc.line) +
                       " - rules and sequences share one namespace");
             else if (k >= 0)
-                error(sq.loc, "duplicate sequence '" + sq.name.text + "' (first declared on line " +
+                error(sq.name.loc, "duplicate sequence '" + sq.name.text + "' (first declared on line " +
                       std::to_string(ast.sequences[(size_t)k].loc.line) + ")");
             out.sequences.push_back({sq.name.text, {}});
         }
@@ -1324,7 +1324,7 @@ struct analyzer {
                 if (cs.rule_id < 0)
                     cs.seq_id = index_of(out.sequences, s.rule_name.text, &compiled_sequence::name);
                 if (cs.rule_id < 0 && cs.seq_id < 0) {
-                    error(s.loc, "undeclared rule or sequence '" + s.rule_name.text + "'" +
+                    error(s.rule_name.loc, "undeclared rule or sequence '" + s.rule_name.text + "'" +
                           did_you_mean(s.rule_name.text));
                     continue;
                 }

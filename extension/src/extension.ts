@@ -77,12 +77,11 @@ function analyse(doc: vscode.TextDocument) {
         return new vscode.Diagnostic(new vscode.Range(0, 0, 0, 1),
           `${path.basename(d.module)}:${d.line}:${d.col}: ${d.message}`, severity);
       }
-      // JSON lines are 1-based, columns are 1-based
-      const line = Math.max(0, d.line - 1);
-      const col = Math.max(0, d.col - 1);
-      // Give it a generic length of 1 for now if we don't have token len in diagnostic
-      const start = new vscode.Position(line, col);
-      const end = new vscode.Position(line, col + 1);
+      // 1-based lines and columns; without an end, one character is underlined
+      const start = new vscode.Position(Math.max(0, d.line - 1), Math.max(0, d.col - 1));
+      const end = d.end_line > 0
+        ? new vscode.Position(d.end_line - 1, d.end_col - 1)
+        : start.translate(0, 1);
       const severity = d.severity === 'error'
         ? vscode.DiagnosticSeverity.Error
         : vscode.DiagnosticSeverity.Warning;

@@ -1,6 +1,6 @@
 # LevelScript
 
-**Status**: Draft 0.9.2
+**Status**: Draft 0.9.4
 **File extension**: `.lvs`
 **CLI**: `levelscript [--seed N] [--entry name] [--param name=value ...] <file.lvs>` (`--entry` defaults to `main`, a tool convention; section 6)
 **Embedding**: namespace `ls::` (see Appendix A)
@@ -1023,9 +1023,9 @@ The compiler must reject:
 25. **Invalid union.** A `tag_union` whose member is not a `tag_value` or earlier `tag_union` of the same tagset; a member that forward-references a later union; or a union cycle. (A union name colliding with a `tag_value` name, a grid, a param, a reserved identifier, or a built-in is caught by the existing duplicate/collision checks - a union shares the tagset's value namespace.)
 26. **Default param scope.** A default expression (section 4.2) that reads a grid, `x`/`y`, or `width`/`height`; that forward-references a later param; or that participates in a cycle. (Same discipline as check 23; a default may reference earlier params and may call `random`.)
 27. **Input param without a default.** An `input_param` written as `name : number` with no `= expr` (every input param must carry a default, section 4.2).
-28. **Zero count.** Retired: a count is an expression, and an out-of-range one is clamped at run time with a warning (sections 6, 7.4).
+28. **Zero count.** Retired in 0.9.4: a count is an expression, and an out-of-range one is clamped at run time with a warning (sections 6, 7.4).
 29. **`ordered` misplacement.** `ordered` used as a write-side combinator (it is body-level only).
-30. **Percentage over 100.** Retired: clamped at run time with a warning, like check 28 (sections 6, 7.4).
+30. **Percentage over 100.** Retired in 0.9.4: clamped at run time with a warning, like check 28 (sections 6, 7.4).
 31. **Same-grid simultaneous write.** Within one `{ all }` write block, two items whose write footprints overlap on the **same grid** at the same cell (e.g. `{ all g[wall] g[floor] }`). Simultaneous writes to one cell are ambiguous; use a union `|` (section 5.5) to store multiple values. (Different grids at the same position are fine - the mask is (grid, cell)-keyed, section 6.8.)
 32. **Unknown operation.** An `op_call` (section 6.0) whose name is not in the operation table.
 33. **Operation argument arity/binding.** More positional arguments than the operation's positional parameters; a named-only parameter supplied positionally; a named argument preceding a positional one; or a parameter supplied both positionally and by name.
@@ -1051,7 +1051,7 @@ Warnings never stop compilation or execution; the runtime degrades with a warnin
 **Compile-time warnings** (surfaced via `generator::warnings()`, Appendix A):
 
 1. **Reductivity.** `grow` without a count over a rule where no unconditional write invalidates its own LHS - "may never terminate" (section 6.9). Not an error: the analysis is conservative, and a build pipeline may still choose to treat warnings as failures.
-2. **Unreachable sequence fixpoint.** Retired: it could only see literal operation arguments (section 6.10).
+2. **Unreachable sequence fixpoint.** Retired in 0.9.4: it could only see literal operation arguments (section 6.10).
 
 **Runtime warnings** (logged; the run continues, with the value clamped or the statement skipped as noted):
 

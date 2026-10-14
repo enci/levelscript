@@ -215,7 +215,9 @@ std::string inspect_json(std::string const& source, std::string const& name,
         for (auto const& d : diags.all) {
             cl.next();
             o += "{\"line\":" + std::to_string(d.line) +
-                 ",\"col\":" + std::to_string(d.col) + ",\"module\":";
+                 ",\"col\":" + std::to_string(d.col) +
+                 ",\"end_line\":" + std::to_string(d.end_line) +
+                 ",\"end_col\":" + std::to_string(d.end_col) + ",\"module\":";
             js(o, d.file);
             o += ",\"severity\":";
             o += d.is_error ? "\"error\"" : "\"warning\"";

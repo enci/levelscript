@@ -41,7 +41,7 @@ struct parser {
     bool accept_word(std::string_view w)   { if (at_word(w)) { eat(); return true; } return false; }
 
     void error_at(token const& t, std::string msg) {
-        diags.error(file, t.line, t.col, std::move(msg));
+        diags.error(file, t.line, t.col, t.line, t.end_col, std::move(msg));
     }
     bool expect(token_type t, char const* what) {
         if (accept(t)) return true;
@@ -531,7 +531,7 @@ struct parser {
             t.weight = (int)toks[pos - 1].int_val;
             if (!expect(token_type::rparen, "')'")) return false;
             if (!weight_allowed)
-                diags.error(file, wl.line, wl.col,
+                diags.error(file, wl.line, wl.col, wl.end_line, wl.end_col,
                             "(weight=N) is only allowed on '{ any }' items");
         }
 
@@ -567,7 +567,7 @@ struct parser {
         }
         expect(token_type::rbrace, "'}'");
         if (t.items.empty())
-            diags.error(file, bl.line, bl.col, "empty combinator block");
+            diags.error(file, bl.line, bl.col, bl.end_line, bl.end_col, "empty combinator block");
         return !t.items.empty();
     }
 
@@ -611,7 +611,7 @@ struct parser {
                 list_sep();   // optional comma between pairs
             }
             if (r.pairs.empty())
-                diags.error(file, bl.line, bl.col, "empty rule body");
+                diags.error(file, bl.line, bl.col, bl.end_line, bl.end_col, "empty rule body");
         } else {
             rule_pair pr;
             if (!parse_pair(pr)) { recover_to(token_type::rbrace); return false; }

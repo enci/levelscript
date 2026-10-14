@@ -223,7 +223,7 @@ TEST_CASE("modules: names are unique across the closure") {
         f.src["root.lvs"] = "use \"lib.lvs\"\n" + body;
         return f.compile("root.lvs").error();
     };
-    CHECK(has(dup("tag t { b }\n"), "root.lvs:2:1: error: duplicate tag 't'"));
+    CHECK(has(dup("tag t { b }\n"), "root.lvs:2:5: error: duplicate tag 't'"));
     CHECK(has(dup("layers { g: grid of t }\n"), "duplicate grid 'g'"));
     CHECK(has(dup("params { k: number = 2 }\n"), "duplicate param 'k'"));
     CHECK(has(dup("rule r { g[.] => g[a] }\n"), "duplicate rule 'r'"));
