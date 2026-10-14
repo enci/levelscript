@@ -81,20 +81,20 @@ rule r {
     auto const& lhs = ast.rules[0].pairs[0].lhs[0];
     CHECK(lhs.rows == 3);
     CHECK(lhs.cols == 3);
-    CHECK(lhs.cells[1][1].kind == cell_kind::tag_mask);
-    CHECK(lhs.cells[1][1].atoms[0].name == "wall");
-    CHECK(lhs.cells[0][0].kind == cell_kind::any);
+    CHECK(lhs.cells[1][1]->kind == expr_kind::ident);
+    CHECK(lhs.cells[1][1]->ident == "wall");
+    CHECK(lhs.cells[0][0]->kind == expr_kind::wildcard);
 }
 
 TEST_CASE("parser: cell kinds") {
     auto ast = parse_ok("rule r { t[* . 3 wall] => t[* . 3 wall] }");
     auto const& row = ast.rules[0].pairs[0].lhs[0].cells[0];
     REQUIRE(row.size() == 4);
-    CHECK(row[0].kind == cell_kind::any);
-    CHECK(row[1].kind == cell_kind::empty);
-    CHECK(row[2].kind == cell_kind::number);
-    CHECK(row[2].number == 3);
-    CHECK(row[3].kind == cell_kind::tag_mask);
+    CHECK(row[0]->kind == expr_kind::wildcard);
+    CHECK(row[1]->kind == expr_kind::empty_lit);
+    CHECK(row[2]->kind == expr_kind::int_lit);
+    CHECK(row[2]->int_val == 3);
+    CHECK(row[3]->kind == expr_kind::ident);
 }
 
 TEST_CASE("parser: missing arrow is an error") {
@@ -250,7 +250,7 @@ rule fill_geo { all
     REQUIRE(ast.rules.size() == 1);
     CHECK(ast.rules[0].body == body_combinator::all);
     REQUIRE(ast.rules[0].pairs.size() == 3);
-    CHECK(ast.rules[0].pairs[2].lhs[0].cells[0][0].atoms[0].name == "S");
+    CHECK(ast.rules[0].pairs[2].lhs[0].cells[0][0]->ident == "S");
 }
 
 TEST_CASE("parser: commas separate body pairs like newlines (list_sep)") {
@@ -435,10 +435,11 @@ TEST_CASE("parser: mask cells — unions and complements are whitespace-free") {
     auto ast = parse_ok("rule r { g[wall|door !wall] => g[floor floor] }");
     auto const& row = ast.rules[0].pairs[0].lhs[0].cells[0];
     REQUIRE(row.size() == 2);
-    REQUIRE(row[0].atoms.size() == 2);
-    CHECK(row[0].atoms[0].name == "wall");
-    CHECK(row[0].atoms[1].name == "door");
-    CHECK(row[1].atoms[0].negate);
+    REQUIRE(row[0]->kind == expr_kind::bit_or);
+    CHECK(row[0]->args[0]->ident == "wall");
+    CHECK(row[0]->args[1]->ident == "door");
+    REQUIRE(row[1]->kind == expr_kind::not_);      // complement
+    CHECK(row[1]->args[0]->ident == "wall");
     // spaced 'a | b' is NOT one cell — it fails to parse as cells
     CHECK(parse_fails("rule r { g[wall | door] => g[floor] }"));
 }
@@ -447,14 +448,14 @@ TEST_CASE("parser: pattern variables") {
     auto ast = parse_ok("rule r { g[?a (g != ?a) (?a)] => g[?a * *] }");
     auto const& row = ast.rules[0].pairs[0].lhs[0].cells[0];
     REQUIRE(row.size() == 3);
-    CHECK(row[0].kind == cell_kind::variable);
-    CHECK(row[0].variable == "?a");
-    REQUIRE(row[1].kind == cell_kind::expr_cell);
-    CHECK(row[1].value->args[1]->kind == expr_kind::variable);
-    CHECK(row[1].value->args[1]->ident == "?a");
-    REQUIRE(row[2].kind == cell_kind::expr_cell);   // parenthesized: an operand, not a binding
-    CHECK(row[2].value->kind == expr_kind::variable);
-    CHECK(ast.rules[0].pairs[0].rhs.pat.cells[0][0].kind == cell_kind::variable);
+    CHECK(row[0]->kind == expr_kind::variable);
+    CHECK(row[0]->ident == "?a");
+    REQUIRE(row[1]->kind == expr_kind::paren);
+    CHECK(row[1]->args[0]->args[1]->kind == expr_kind::variable);
+    CHECK(row[1]->args[0]->args[1]->ident == "?a");
+    REQUIRE(row[2]->kind == expr_kind::paren);   // parenthesized: an operand, not a binding
+    CHECK(row[2]->args[0]->kind == expr_kind::variable);
+    CHECK(ast.rules[0].pairs[0].rhs.pat.cells[0][0]->kind == expr_kind::variable);
     parse_ok("rule r { g[?a] where[ (?a > 3) ] => g[ (?a | wall) ] }");
 }
 
@@ -469,32 +470,31 @@ TEST_CASE("parser: '.' is a mask atom") {
     auto ast = parse_ok("rule r { g[!. .|door wall|. . !wall] => g[* * * * *] }");
     auto const& row = ast.rules[0].pairs[0].lhs[0].cells[0];
     REQUIRE(row.size() == 5);
-    REQUIRE(row[0].kind == cell_kind::tag_mask);
-    CHECK(row[0].atoms[0].name == ".");
-    CHECK(row[0].atoms[0].negate);
-    REQUIRE(row[1].atoms.size() == 2);
-    CHECK(row[1].atoms[0].name == ".");
-    CHECK(row[1].atoms[1].name == "door");
-    CHECK(row[2].atoms[1].name == ".");
-    CHECK(row[3].kind == cell_kind::empty);   // a lone '.' keeps its own node
-    CHECK(row[4].atoms[0].negate);
+    REQUIRE(row[0]->kind == expr_kind::not_);
+    CHECK(row[0]->args[0]->kind == expr_kind::empty_lit);
+    REQUIRE(row[1]->kind == expr_kind::bit_or);
+    CHECK(row[1]->args[0]->kind == expr_kind::empty_lit);
+    CHECK(row[1]->args[1]->ident == "door");
+    CHECK(row[2]->args[1]->kind == expr_kind::empty_lit);
+    CHECK(row[3]->kind == expr_kind::empty_lit);
+    CHECK(row[4]->kind == expr_kind::not_);
     CHECK(parse_fails("rule r { g[! .] => g[*] }"));   // '!' is adjacent
     CHECK(parse_fails("rule r { g[. | door] => g[*] }"));
 }
 
 TEST_CASE("parser: expression cells and precedence") {
     auto ast = parse_ok("rule r { g[ (tiles + 2 * 3 > 7) ] => g[ (if(d > 1, wall, floor)) ] }");
-    auto const& c = ast.rules[0].pairs[0].lhs[0].cells[0][0];
-    REQUIRE(c.kind == cell_kind::expr_cell);
-    REQUIRE(c.value->kind == expr_kind::gt);
-    auto const& add = *c.value->args[0];
+    auto const& c = *ast.rules[0].pairs[0].lhs[0].cells[0][0];
+    REQUIRE(c.kind == expr_kind::paren);
+    REQUIRE(c.args[0]->kind == expr_kind::gt);
+    auto const& add = *c.args[0]->args[0];
     REQUIRE(add.kind == expr_kind::add);            // + binds looser than *
     CHECK(add.args[1]->kind == expr_kind::mul);
-    auto const& w = ast.rules[0].pairs[0].rhs.pat.cells[0][0];
-    REQUIRE(w.kind == cell_kind::expr_cell);
-    CHECK(w.value->kind == expr_kind::call);
-    CHECK(w.value->ident == "if");
-    CHECK(w.value->args.size() == 3);
+    auto const& w = *ast.rules[0].pairs[0].rhs.pat.cells[0][0];
+    REQUIRE(w.kind == expr_kind::paren);
+    CHECK(w.args[0]->kind == expr_kind::call);
+    CHECK(w.args[0]->ident == "if");
+    CHECK(w.args[0]->args.size() == 3);
 }
 
 TEST_CASE("parser: where pseudo-layer") {
@@ -509,7 +509,7 @@ rule edge {
     auto const& pair = ast.rules[0].pairs[0];
     REQUIRE(pair.lhs.size() == 2);
     CHECK(pair.lhs[1].is_where);
-    CHECK(pair.lhs[1].cells[0][0].kind == cell_kind::expr_cell);
+    CHECK(pair.lhs[1].cells[0][0]->kind == expr_kind::paren);
 }
 
 TEST_CASE("parser: 'where' is a pattern head on either side of a single pair") {
@@ -525,7 +525,7 @@ TEST_CASE("parser: commas separate pattern rows") {
     auto const& lhs = ast.rules[0].pairs[0].lhs[0];
     CHECK(lhs.rows == 3);
     CHECK(lhs.cols == 3);
-    CHECK(lhs.cells[1][2].atoms[0].name == "W");
+    CHECK(lhs.cells[1][2]->ident == "W");
     auto const& rhs = ast.rules[0].pairs[0].rhs.pat;   // a 1x3 vertical pattern
     CHECK(rhs.rows == 3);
     CHECK(rhs.cols == 1);
@@ -543,8 +543,8 @@ TEST_CASE("parser: a comma inside an expression cell belongs to the expression")
     auto const& lhs = ast.rules[0].pairs[0].lhs[0];
     REQUIRE(lhs.rows == 2);
     CHECK(lhs.cols == 2);
-    CHECK(lhs.cells[0][0].value->kind == expr_kind::call);
-    CHECK(lhs.cells[0][0].value->args.size() == 2);
+    CHECK(lhs.cells[0][0]->args[0]->kind == expr_kind::call);
+    CHECK(lhs.cells[0][0]->args[0]->args.size() == 2);
 }
 
 TEST_CASE("parser: empty pattern rows around commas are errors") {
@@ -665,12 +665,13 @@ TEST_CASE("parser: nodes span what they were parsed from") {
     auto const& lhs = r.pairs[0].lhs[0];
     CHECK(span(lhs.loc) == "2:5-2:24");
     CHECK(span(lhs.grid.loc) == "2:5-2:10");
-    CHECK(span(lhs.cells[0][1].loc) == "2:13-2:23");          // the whole union
-    CHECK(span(lhs.cells[0][1].atoms[0].loc) == "2:13-2:18");  // '!' included
-    auto const& cell = r.pairs[0].rhs.pat.cells[0][0];
-    CHECK(span(cell.loc) == "4:11-4:22");                     // parentheses included
-    CHECK(span(cell.value->loc) == "4:12-4:21");              // the binary spans its operands
-    CHECK(span(cell.value->args[1]->loc) == "4:16-4:21");
+    CHECK(span(lhs.cells[0][1]->loc) == "2:13-2:23");            // the whole union
+    CHECK(span(lhs.cells[0][1]->args[0]->loc) == "2:13-2:18");   // '!' included
+    CHECK(span(lhs.cells[0][1]->args[0]->args[0]->loc) == "2:14-2:18");
+    auto const& cell = *r.pairs[0].rhs.pat.cells[0][0];
+    CHECK(span(cell.loc) == "4:11-4:22");                        // parentheses included
+    CHECK(span(cell.args[0]->loc) == "4:12-4:21");               // the binary spans its operands
+    CHECK(span(cell.args[0]->args[1]->loc) == "4:16-4:21");
 
     auto const& s = ast.sequences[0].stmts[0];
     CHECK(span(ast.sequences[0].loc) == "6:1-8:2");

@@ -35,6 +35,9 @@ enum class expr_kind {
     lt, le, gt, ge, eq, ne,
     and_, or_,
     bit_or,        // '|' tag union
+    // pattern cells only
+    wildcard,      // '*'
+    paren,         // '(' expr ')': a computed cell; args [the expr]
 };
 
 struct expr;
@@ -86,30 +89,19 @@ struct param_decl {
 
 // ── patterns ─────────────────────────────────────────────────────────────────
 
-// One whitespace-free mask atom: `wall` or `!wall` (complement, LHS only).
-struct mask_atom {
-    source_loc  loc;
-    std::string name;
-    bool        negate{false};
-};
-
-enum class cell_kind { any, empty, number, tag_mask, variable, expr_cell };
-
-struct cell {
-    cell_kind              kind{cell_kind::any};
-    source_loc             loc;
-    long long              number{0};   // number
-    std::vector<mask_atom> atoms;       // tag_mask: atoms OR'd together
-    std::string            variable;    // variable: '?name'
-    expr_ptr               value;       // expr_cell: '(' expr ')'
-};
+// A pattern cell is an expression:
+//   *            wildcard
+//   .  3  ?v     empty_lit, int_lit, variable
+//   wall|!door   ident, bit_or, not_ - a whitespace-free mask, where '!' is the
+//                complement within the grid's tagset, not boolean not
+//   (expr)       paren - a computed cell; `(?v)` reads a variable, `?v` binds it
 
 struct pattern {
-    source_loc                     loc;
-    ident                          grid;       // "" when is_where
-    bool                           is_where{false};
-    int                            rows{0}, cols{0};
-    std::vector<std::vector<cell>> cells;   // [row][col]; row widths checked in sema
+    source_loc                         loc;
+    ident                              grid;       // "" when is_where
+    bool                               is_where{false};
+    int                                rows{0}, cols{0};
+    std::vector<std::vector<expr_ptr>> cells;      // [row][col]; row widths checked in sema
 };
 
 // A recursive write-side term: a leaf pattern, an `{ all }` block

@@ -679,114 +679,136 @@ struct analyzer {
             int w = (int)p.cells[r].size() < p.cols ? (int)p.cells[r].size() : p.cols;
             for (int c = 0; c < w; ++c)
                 cp.cells[r * cp.cols + c] =
-                    compile_cell(p.cells[r][c], tag, cp.is_number, p.is_where, is_rhs);
+                    compile_cell(*p.cells[r][c], tag, cp.is_number, p.is_where, is_rhs);
         }
         return cp;
     }
 
-    compiled_cell compile_cell(cell const& in, int tag, bool is_number,
+    // The atoms of a bare mask cell `a|!b|.`: each a name ("." for empty)
+    // and whether it is complemented.
+    struct mask_atom { source_loc loc; std::string name; bool negate; };
+    static void mask_atoms(expr const& e, std::vector<mask_atom>& out) {
+        if (e.kind == expr_kind::bit_or) {
+            mask_atoms(*e.args[0], out);
+            mask_atoms(*e.args[1], out);
+            return;
+        }
+        bool negate = e.kind == expr_kind::not_;
+        expr const& a = negate ? *e.args[0] : e;
+        out.push_back({e.loc, a.kind == expr_kind::empty_lit ? "." : a.ident, negate});
+    }
+
+    // A cell's compiled form. Every constant cell - a bare one, or a
+    // parenthesized literal like `(wall)` - becomes a value the matcher tests
+    // with one mask or number comparison; only a computed cell is evaluated.
+    compiled_cell compile_cell(expr const& in, int tag, bool is_number,
                                bool is_where, bool is_rhs) {
         compiled_cell cc;
 
         if (is_where) {   // where cells are parenthesized booleans or '*'
-            if (in.kind == cell_kind::any) {   // no condition
+            if (in.kind == expr_kind::wildcard) {   // no condition
                 cc.what = compiled_cell::kind::wildcard;
                 return cc;
             }
-            if (in.kind == cell_kind::variable) {
-                error(in.loc, "a 'where' cell cannot be a bare pattern variable; "
-                      "'where' cells are boolean expressions, e.g. (" + in.variable + " > 0)");
-                cc.what = compiled_cell::kind::expr;
-                cc.expr = num_lit(1);
-                return cc;
-            }
-            if (in.kind != cell_kind::expr_cell) {
-                error(in.loc, "'where' cells must be '*' or a parenthesized boolean expression");
-                cc.what = compiled_cell::kind::expr;
-                cc.expr = num_lit();
-                return cc;
-            }
             cc.what = compiled_cell::kind::expr;
-            cc.expr = compile_as(*in.value, val_type::boolean, in.loc,
-                                 "'where' cell must evaluate to a boolean", scope_);
+            if (in.kind == expr_kind::variable) {
+                error(in.loc, "a 'where' cell cannot be a bare pattern variable; "
+                      "'where' cells are boolean expressions, e.g. (" + in.ident + " > 0)");
+                cc.expr = num_lit(1);
+            } else if (in.kind != expr_kind::paren) {
+                error(in.loc, "'where' cells must be '*' or a parenthesized boolean expression");
+                cc.expr = num_lit();
+            } else {
+                cc.expr = compile_as(*in.args[0], val_type::boolean, in.loc,
+                                     "'where' cell must evaluate to a boolean", scope_);
+            }
             return cc;
         }
 
         switch (in.kind) {
-        case cell_kind::any:
+        case expr_kind::wildcard:
             cc.what = compiled_cell::kind::wildcard;
-            break;
-        case cell_kind::empty:
+            return cc;
+        case expr_kind::empty_lit:
             cc.val = is_number ? num_empty : tag_empty;
-            break;
-        case cell_kind::number:
+            return cc;
+        case expr_kind::int_lit:
             if (!is_number)
                 error(in.loc, "integer cell in a tag grid");
-            cc.val = in.number;
-            break;
-        case cell_kind::tag_mask: {
-            bool has_empty = false;
-            for (auto const& a : in.atoms) has_empty |= a.name == ".";
-            if (is_number) {   // a number cell pattern is only '.' or '!.'
-                if (in.atoms.size() == 1 && in.atoms[0].name == "." && in.atoms[0].negate) {
-                    if (is_rhs)
-                        error(in.loc, "'!.' is not allowed on the write side");
-                    cc.val = num_empty;
-                    cc.ne = true;
-                } else if (has_empty) {
-                    error(in.loc, "a 'number' grid has no masks: '.' combines with "
-                          "nothing here (write '.' or '!.')");
-                } else {
-                    error(in.loc, "expected an integer or wildcard in a 'number' grid cell");
-                }
-                break;
-            }
-            if (is_rhs && has_empty && in.atoms.size() > 1)
-                error(in.loc, "'.' cannot be written in a union: a cell holds empty or "
-                      "values, never both");
-            int64_t full = 0;
-            for (int i = 0; i < (int)out.tag_values[tag].size(); ++i)
-                full |= tag_bit(i);
-            int64_t mask = 0;
-            for (auto const& a : in.atoms) {
-                int64_t m = a.name == "." ? tag_empty : out.mask_of(tag, a.name);
-                if (m == 0) {
-                    error(a.loc, "unknown tag value '" + a.name + "' for this grid");
-                    continue;
-                }
-                if (a.negate) {
-                    if (is_rhs)   // complement is match-side only
-                        error(a.loc, "tag complement '!" + a.name +
-                              "' is not allowed on the write side");
-                    mask |= full & ~m;
-                } else {
-                    mask |= m;
-                }
-            }
-            cc.val = mask;
-            break;
-        }
-        case cell_kind::variable: {   // bound and typed by bind_variables
-            int s = is_rhs ? use_variable(in.variable, in.loc) : vars_->slot(in.variable);
-            if (s < 0) { cc.what = compiled_cell::kind::wildcard; break; }
+            cc.val = in.int_val;
+            return cc;
+        case expr_kind::variable: {   // bound and typed by bind_variables
+            int s = is_rhs ? use_variable(in.ident, in.loc) : vars_->slot(in.ident);
+            if (s < 0) { cc.what = compiled_cell::kind::wildcard; return cc; }
             int type = vars_->vars[(size_t)s].type;
             if (is_rhs && type != tag)
-                error(in.loc, "pattern variable '" + in.variable + "' holds a " +
+                error(in.loc, "pattern variable '" + in.ident + "' holds a " +
                       type_name(type) + " value but is written into a " +
                       type_name(tag) + " grid");
             cc.what = compiled_cell::kind::variable;
             cc.var = s;
+            return cc;
+        }
+        case expr_kind::paren: {
+            int e = compile_as(*in.args[0], is_number ? val_type::num : val_type::mask, in.loc,
+                               is_number ? "expression in a 'number' grid cell must evaluate to a number"
+                                         : "expression in a tag grid cell must evaluate to a tag value",
+                               scope_, tag);
+            auto const& ce = out.exprs[(size_t)e];
+            if (ce.kind == ce_kind::int_lit || ce.kind == ce_kind::mask_lit)
+                cc.val = ce.val;   // a literal: tested like a bare cell
+            else {
+                cc.what = compiled_cell::kind::expr;
+                cc.expr = e;
+            }
+            return cc;
+        }
+        default:
             break;
         }
-        case cell_kind::expr_cell: {
-            cc.what = compiled_cell::kind::expr;
-            cc.expr = compile_as(*in.value, is_number ? val_type::num : val_type::mask, in.loc,
-                                 is_number ? "expression in a 'number' grid cell must evaluate to a number"
-                                           : "expression in a tag grid cell must evaluate to a tag value",
-                                 scope_, tag);
-            break;
+
+        // a bare mask: ident, '.', '!', and '|' (the parser builds nothing else)
+        std::vector<mask_atom> atoms;
+        mask_atoms(in, atoms);
+        bool has_empty = false;
+        for (auto const& a : atoms) has_empty |= a.name == ".";
+        if (is_number) {   // a number cell pattern is only '.' or '!.'
+            if (atoms.size() == 1 && atoms[0].name == "." && atoms[0].negate) {
+                if (is_rhs)
+                    error(in.loc, "'!.' is not allowed on the write side");
+                cc.val = num_empty;
+                cc.ne = true;
+            } else if (has_empty) {
+                error(in.loc, "a 'number' grid has no masks: '.' combines with "
+                      "nothing here (write '.' or '!.')");
+            } else {
+                error(in.loc, "expected an integer or wildcard in a 'number' grid cell");
+            }
+            return cc;
         }
+        if (is_rhs && has_empty && atoms.size() > 1)
+            error(in.loc, "'.' cannot be written in a union: a cell holds empty or "
+                  "values, never both");
+        int64_t full = 0;
+        for (int i = 0; i < (int)out.tag_values[tag].size(); ++i)
+            full |= tag_bit(i);
+        int64_t mask = 0;
+        for (auto const& a : atoms) {
+            int64_t m = a.name == "." ? tag_empty : out.mask_of(tag, a.name);
+            if (m == 0) {
+                error(a.loc, "unknown tag value '" + a.name + "' for this grid");
+                continue;
+            }
+            if (a.negate) {
+                if (is_rhs)   // complement is match-side only
+                    error(a.loc, "tag complement '!" + a.name +
+                          "' is not allowed on the write side");
+                mask |= full & ~m;
+            } else {
+                mask |= m;
+            }
         }
+        cc.val = mask;
         return cc;
     }
 
@@ -849,11 +871,11 @@ struct analyzer {
             int type = out.layers[gid].tag_id;
             for (auto const& row : p.cells)
                 for (auto const& c : row) {
-                    if (c.kind != cell_kind::variable) continue;
-                    auto& v = pv.vars[(size_t)pv.slot(c.variable)];
+                    if (c->kind != expr_kind::variable) continue;
+                    auto& v = pv.vars[(size_t)pv.slot(c->ident)];
                     if (!v.bound) { v.bound = true; v.type = type; continue; }
                     if (v.type != type && !v.reported) {
-                        error(c.loc, "pattern variable '" + c.variable + "' binds a " +
+                        error(c->loc, "pattern variable '" + c->ident + "' binds a " +
                               type_name(type) + " cell here but a " +
                               type_name(v.type) + " cell elsewhere");
                         v.reported = true;

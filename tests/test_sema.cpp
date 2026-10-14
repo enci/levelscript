@@ -826,3 +826,27 @@ TEST_CASE("sema: path arguments need no parentheses") {
     CHECK(ok(head + "sequence main { path(from=door, to=exit, into=tiles, write=c) }"));
     CHECK(ok(head + "sequence main { path(from=door, to=exit, into=tiles, write=c * 2) }"));
 }
+
+TEST_CASE("sema: constant cells compile to plain mask and number tests") {
+    // Constant cells, bare or parenthesized, are tested with one comparison
+    // each; only the computed ones are evaluated per candidate.
+    compile_result r(prelude + R"(
+rule r {
+    level[wall (floor) !wall|. * (if(x > 0, wall, floor))]
+    tiles[3 (4) . !. (x + 1)]
+    =>
+    { all level[* * * * *] tiles[* * * * *] }
+}
+sequence main { }
+)");
+    INFO(r.diags.format_all());
+    REQUIRE(r.ok);
+    auto const& lhs = r.prog.rules[0].pairs[0].lhs;
+    CHECK(lhs[0].bare.size() == 3);       // wall, (floor), !wall|.
+    CHECK(lhs[0].computed.size() == 1);   // the if(...)
+    CHECK(lhs[0].bare[1].val == ls::tag_bit(r.prog.value_id(0, "floor")));
+    CHECK(lhs[1].bare.size() == 3);       // 3, (4), .
+    CHECK(lhs[1].bare_ne.size() == 1);    // !.
+    CHECK(lhs[1].computed.size() == 1);   // x + 1
+    CHECK(lhs[1].bare[1].val == 4);
+}
