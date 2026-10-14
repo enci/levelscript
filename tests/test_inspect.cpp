@@ -158,3 +158,22 @@ TEST_CASE("inspect: an outline of the declarations, and every node's range") {
     CHECK(has(j, range(13, 5, 13, 17)));     // resize(4, 4)
     CHECK(has(j, "\"spans\":[" + range(3, 1, 6, 2) + "," + range(7, 1, 10, 2)));
 }
+
+TEST_CASE("inspect: diagnostics carry the range of what is wrong") {
+    std::string j = ls::inspect_json(R"(tag geo { wall }
+layers { level: grid of geo }
+rule r { level[(1 + wall)] => lvl[wall] }
+sequence main { everywhere nope }
+)", "test.lvs");
+    auto at = [](int l, int c, int el, int ec) {
+        return "{\"line\":" + std::to_string(l) + ",\"col\":" + std::to_string(c) +
+               ",\"end_line\":" + std::to_string(el) + ",\"end_col\":" + std::to_string(ec) + ",";
+    };
+    CHECK(has(j, at(3, 17, 3, 25)));   // the operation: 1 + wall
+    CHECK(has(j, at(3, 16, 3, 26)));   // the cell it makes the wrong type: (1 + wall)
+    CHECK(has(j, at(3, 31, 3, 34)));   // the undeclared grid's name: lvl
+    CHECK(has(j, at(4, 28, 4, 32)));   // the undeclared rule's name: nope
+    // a parse error underlines the offending token
+    std::string p = ls::inspect_json("rule r { g[.] => g[a] }\nsequence main { frob }\n", "test.lvs");
+    CHECK(has(p, at(2, 17, 2, 21)));   // frob
+}

@@ -16,6 +16,8 @@ export interface DecorationSpan extends Location {
 export interface InspectorDiagnostic {
     line: number;
     col: number;
+    end_line: number;   // one past what is wrong; 0: just the point
+    end_col: number;
     module?: string;   // the module the position is in
     severity: 'error' | 'warning';
     message: string;

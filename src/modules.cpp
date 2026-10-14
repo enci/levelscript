@@ -33,7 +33,7 @@ struct loader {
         std::vector<use_decl> uses = asts[id].uses;
         for (auto const& u : uses) {
             auto loc_err = [&](std::string msg) {
-                diags.error(name, u.loc.line, u.loc.col, std::move(msg));
+                diags.error(name, u.loc.line, u.loc.col, u.loc.end_line, u.loc.end_col, std::move(msg));
             };
             std::optional<module_source> src;
             if (resolve) src = resolve(u.path, name);

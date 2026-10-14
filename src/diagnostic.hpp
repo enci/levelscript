@@ -8,6 +8,7 @@ struct diagnostic {
     bool        is_error{true};
     std::string file;
     int         line{0}, col{0};
+    int         end_line{0}, end_col{0};   // one past what is wrong; 0: just the point
     std::string message;
 
     std::string format() const {
@@ -20,11 +21,14 @@ struct diagnostic {
 struct diagnostics {
     std::vector<diagnostic> all;
 
-    void error(std::string_view file, int line, int col, std::string msg) {
-        all.push_back({true, std::string(file), line, col, std::move(msg)});
+    // About the text from (line, col) up to (end_line, end_col).
+    void error(std::string_view file, int line, int col, int end_line, int end_col,
+               std::string msg) {
+        all.push_back({true, std::string(file), line, col, end_line, end_col, std::move(msg)});
     }
-    void warning(std::string_view file, int line, int col, std::string msg) {
-        all.push_back({false, std::string(file), line, col, std::move(msg)});
+    void warning(std::string_view file, int line, int col, int end_line, int end_col,
+                 std::string msg) {
+        all.push_back({false, std::string(file), line, col, end_line, end_col, std::move(msg)});
     }
     bool has_errors() const {
         for (auto const& d : all)
