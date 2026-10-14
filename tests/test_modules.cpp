@@ -109,7 +109,7 @@ TEST_CASE("modules: tag values need no visibility of their own") {
     CHECK(static_cast<bool>(f.compile("root.lvs")));
 }
 
-TEST_CASE("modules: canonical order is a post-order walk; a shared module loads once") {
+TEST_CASE("modules: canonical order is a post-order walk, a shared module loads once") {
     files f;   // a diamond: root -> left, right -> base
     f.src["base.lvs"]  = "tag t { a }\nlayers { g0: grid of t }\nsequence s0 { }\n";
     f.src["left.lvs"]  = "use \"base.lvs\"\nlayers { g1: grid of t }\nsequence s1 { }\n";

@@ -61,7 +61,7 @@ TEST_CASE("parser: match-side braces hold patterns and do not nest") {
     CHECK(parse_fails("rule r { { { g[a] } } => g[c] }"));
 }
 
-TEST_CASE("parser: list commas are optional; newlines are whitespace") {
+TEST_CASE("parser: list commas are optional, newlines are whitespace") {
     // comma-only, on one line
     auto a = parse_ok("tag t { a, b, c }\nlayers { g: grid of t, h: grid of number }\n"
                       "params { n: number = 2, m = n * 2 }\n"
@@ -155,7 +155,7 @@ TEST_CASE("parser: one params block per module") {
     CHECK(parse_fails("params { a: number = 1 }\nparams { b: number = 2 }"));
 }
 
-TEST_CASE("parser: an unclosed pattern reports the missing ']' once") {
+TEST_CASE("parser: an unclosed pattern reports the missing bracket once") {
     diagnostics diags;
     parse("rule r {\n    g[.\n    =>\n    g[a]\n}\n", "test", diags);
     REQUIRE(diags.all.size() == 1);

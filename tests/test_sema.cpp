@@ -81,7 +81,7 @@ TEST_CASE("sema: operation table") {
     CHECK(compile_result(prelude + "sequence main { resize(0, 5) }").ok);
 }
 
-TEST_CASE("sema: a zero count compiles; it applies nothing") {
+TEST_CASE("sema: a zero count compiles, it applies nothing") {
     for (char const* stmt : {"scatter(0) r", "scatter(0%) r", "grow(0) r", "settle(0) r"}) {
         INFO(stmt);
         CHECK(compile_result(prelude + "rule r { level[.] => level[wall] }\nsequence main { " +
@@ -221,7 +221,7 @@ sequence main { }
 static const std::string rfill =
     "rule fill { level[.] => level[floor] }\n";
 
-TEST_CASE("sema: modes and counts; out-of-range counts are run-time warnings") {
+TEST_CASE("sema: modes and counts, out-of-range counts are run-time warnings") {
     compile_result ok(prelude + rfill + R"(
 sequence main {
     resize(4, 4)
