@@ -7,6 +7,7 @@ Language support for [LevelScript](https://github.com/enci/levelscript) (`.lvs`)
 - Pattern cells colored by tag value
 - Hover, go-to-definition, and completion
 - A command to open the file in the native LevelScript debugger
+- **LevelScript: Show AST** - the file's syntax tree beside it, updated as you type
 
 The language is described in the [spec](https://github.com/enci/levelscript/blob/main/docs/spec.md).
 

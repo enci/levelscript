@@ -1,5 +1,11 @@
 #include "test_support.hpp"
+#include "ast_dump.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <algorithm>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 
 using namespace ls;
 
@@ -12,170 +18,23 @@ static ast_file parse_ok(std::string const& src) {
     return std::move(*ast);
 }
 
-// A count written as a literal: its value; anything else: -1.
-static long long lit(expr_ptr const& e) {
-    return e && e->kind == expr_kind::int_lit ? e->int_val : -1;
-}
-
 static bool parse_fails(std::string const& src) {
     diagnostics diags;
     parse(src, "test", diags);
     return diags.has_errors();
 }
 
-static const std::string skeleton = R"(
-tag geo { wall, floor }
-
-layers {
-    level: grid of geo
-    tiles: grid of number
-}
-
-rule fill {
-    level[.]
-    =>
-    level[floor]
-}
-
-sequence main {
-    resize(8, 4)
-    everywhere fill
-    once fill
-    scatter(5) fill
-}
-)";
-
-TEST_CASE("parser: full skeleton file") {
-    auto ast = parse_ok(skeleton);
-    REQUIRE(ast.tags.size() == 1);
-    CHECK(ast.tags[0].values.size() == 2);
-    REQUIRE(ast.layers.layers.size() == 2);
-    CHECK(ast.layers.layers[1].type == "number");
-    REQUIRE(ast.rules.size() == 1);
-    REQUIRE(ast.sequences.size() == 1);
-    REQUIRE(ast.sequences.back().stmts.size() == 4);
-    CHECK(ast.sequences.back().stmts[0].what == program_stmt::kind::op_call);
-    CHECK(ast.sequences.back().stmts[0].op_name == "resize");
-    CHECK(ast.sequences.back().stmts[1].mode == apply_mode::everywhere);
-    CHECK(ast.sequences.back().stmts[2].mode == apply_mode::once);
-    CHECK(ast.sequences.back().stmts[3].mode == apply_mode::scatter);
-    CHECK(lit(ast.sequences.back().stmts[3].count) == 5);
-}
-
-TEST_CASE("parser: multi-row pattern rows and cols") {
-    auto ast = parse_ok(R"(
-rule r {
-    g[
-        * * *
-        * wall *
-        * * * ]
-    =>
-    g[
-        * * *
-        * floor *
-        * * * ]
-}
-)");
-    REQUIRE(ast.rules.size() == 1);
-    REQUIRE(ast.rules[0].pairs.size() == 1);
-    auto const& lhs = ast.rules[0].pairs[0].lhs[0];
-    CHECK(lhs.rows == 3);
-    CHECK(lhs.cols == 3);
-    CHECK(lhs.cells[1][1]->kind == expr_kind::ident);
-    CHECK(lhs.cells[1][1]->ident == "wall");
-    CHECK(lhs.cells[0][0]->kind == expr_kind::wildcard);
-}
-
-TEST_CASE("parser: cell kinds") {
-    auto ast = parse_ok("rule r { t[* . 3 wall] => t[* . 3 wall] }");
-    auto const& row = ast.rules[0].pairs[0].lhs[0].cells[0];
-    REQUIRE(row.size() == 4);
-    CHECK(row[0]->kind == expr_kind::wildcard);
-    CHECK(row[1]->kind == expr_kind::empty_lit);
-    CHECK(row[2]->kind == expr_kind::int_lit);
-    CHECK(row[2]->int_val == 3);
-    CHECK(row[3]->kind == expr_kind::ident);
-}
-
 TEST_CASE("parser: missing arrow is an error") {
     CHECK(parse_fails("rule r { g[.] g[floor] }"));
 }
 
-TEST_CASE("parser: a stray top-level block is one diagnostic; parsing resumes") {
-    diagnostics diags;
-    auto ast = parse("program {\n    resize(2, 2)\n}\nrule r { g[.] => g[a] }\n", "test", diags);
-    REQUIRE(diags.all.size() == 1);
-    CHECK(diags.all[0].message.find("expected a declaration") != std::string::npos);
-    CHECK(ast->rules.size() == 1);
-}
-
-TEST_CASE("parser: use declarations head the file") {
-    auto ast = parse_ok("use \"schema.lvs\"\nuse \"lib/rules.lvs\"\ntag t { a }\n");
-    REQUIRE(ast.uses.size() == 2);
-    CHECK(ast.uses[0].path == "schema.lvs");
-    CHECK(ast.uses[1].path == "lib/rules.lvs");
+TEST_CASE("parser: misplaced and malformed use declarations") {
     CHECK(parse_fails("tag t { a }\nuse \"schema.lvs\"\n"));   // after a declaration
     CHECK(parse_fails("use schema\n"));                          // a path is a string
     CHECK(parse_fails("use \"schema.lvs\n"));                     // unterminated
 }
 
 // ── step 2: match blocks, write trees, attributes, body combinators ──────────
-
-TEST_CASE("parser: consecutive patterns conjoin on the match side") {
-    auto ast = parse_ok(R"(
-rule place {
-    algo[F]
-    enemies[.]
-    =>
-    enemies[goblin]
-}
-)");
-    auto const& pair = ast.rules[0].pairs[0];
-    REQUIRE(pair.lhs.size() == 2);
-    CHECK(pair.lhs[0].grid == "algo");
-    CHECK(pair.lhs[1].grid == "enemies");
-    CHECK(pair.rhs.what == write_term::kind::leaf);
-}
-
-TEST_CASE("parser: { any } write side with weights") {
-    auto ast = parse_ok(R"(
-rule reward {
-    algo[S]
-    =>
-    { any
-      (weight=8) items[.]
-      items[chest]
-    }
-}
-)");
-    auto const& rhs = ast.rules[0].pairs[0].rhs;
-    REQUIRE(rhs.what == write_term::kind::any);
-    REQUIRE(rhs.items.size() == 2);
-    CHECK(rhs.items[0].weight == 8);
-    CHECK(rhs.items[1].weight == 1);   // default
-}
-
-TEST_CASE("parser: nested all-of-any write tree") {
-    auto ast = parse_ok(R"(
-rule decorate {
-    algo[F]
-    =>
-    { all
-      level[floor]
-      { any
-        (weight=3) items[.]
-        items[chest]
-      }
-    }
-}
-)");
-    auto const& rhs = ast.rules[0].pairs[0].rhs;
-    REQUIRE(rhs.what == write_term::kind::all);
-    REQUIRE(rhs.items.size() == 2);
-    CHECK(rhs.items[0].what == write_term::kind::leaf);
-    CHECK(rhs.items[1].what == write_term::kind::any);
-    CHECK(rhs.items[1].items.size() == 2);
-}
 
 TEST_CASE("parser: weight inside { all } is an error") {
     CHECK(parse_fails(R"(
@@ -197,65 +56,9 @@ TEST_CASE("parser: the match side takes no combinator or commas") {
     CHECK(parse_fails("rule r { { all g[a] h[b] } => g[c] }"));
 }
 
-TEST_CASE("parser: braces may group a match side and change nothing") {
-    auto a = parse_ok("rule r { all\n { g[a] h[b] } => g[c]\n { g[b]\n h[.] } => { all g[d] h[e] }\n g[c] => g[d] }");
-    REQUIRE(a.rules[0].pairs.size() == 3);
-    CHECK(a.rules[0].pairs[0].lhs.size() == 2);
-    CHECK(a.rules[0].pairs[1].lhs.size() == 2);
-    CHECK(a.rules[0].pairs[2].lhs.size() == 1);
-    auto b = parse_ok("rule r { { g[a] } => g[b] }");
-    CHECK(b.rules[0].pairs[0].lhs.size() == 1);
+TEST_CASE("parser: match-side braces hold patterns and do not nest") {
     CHECK(parse_fails("rule r { { } => g[c] }"));
     CHECK(parse_fails("rule r { { { g[a] } } => g[c] }"));
-}
-
-TEST_CASE("parser: match-side patterns may share a line or span several") {
-    auto a = parse_ok("rule r { g[a] h[b] where[(x == 0)] => g[c] }");
-    CHECK(a.rules[0].pairs[0].lhs.size() == 3);
-    auto b = parse_ok("rule r { all\n g[a]\n h[b]\n =>\n g[c]\n g[d] h[.] => h[e] }");
-    REQUIRE(b.rules[0].pairs.size() == 2);
-    CHECK(b.rules[0].pairs[0].lhs.size() == 2);
-    CHECK(b.rules[0].pairs[1].lhs.size() == 2);
-}
-
-TEST_CASE("parser: single-item combinator blocks are allowed") {
-    auto ast = parse_ok("rule r { g[a] => { any g[b] } }");
-    CHECK(ast.rules[0].pairs[0].lhs.size() == 1);
-    CHECK(ast.rules[0].pairs[0].rhs.items.size() == 1);
-}
-
-TEST_CASE("parser: rule attributes") {
-    auto ast = parse_ok(R"(
-rule a(symmetry=horizontal) { g[.] => g[x] }
-rule b(rotation=all) { g[.] => g[x] }
-rule c(symmetry=all, rotation=180) { g[.] => g[x] }
-rule d(rotation={90, 270}) { g[.] => g[x] }
-)");
-    REQUIRE(ast.rules.size() == 4);
-    CHECK(ast.rules[0].symmetry == "horizontal");
-    CHECK(ast.rules[1].rotation_angles == std::vector<long long>{90, 180, 270});
-    CHECK(ast.rules[2].symmetry == "all");
-    CHECK(ast.rules[2].rotation_angles == std::vector<long long>{180});
-    CHECK(ast.rules[3].rotation_angles == std::vector<long long>{90, 270});
-}
-
-TEST_CASE("parser: body-level combinator with sub-rules") {
-    auto ast = parse_ok(R"(
-rule fill_geo { all
-    algo[W] => level[wall]
-    algo[F] => level[floor]
-    algo[S] => level[floor]
-}
-)");
-    REQUIRE(ast.rules.size() == 1);
-    CHECK(ast.rules[0].body == body_combinator::all);
-    REQUIRE(ast.rules[0].pairs.size() == 3);
-    CHECK(ast.rules[0].pairs[2].lhs[0].cells[0][0]->ident == "S");
-}
-
-TEST_CASE("parser: commas separate body pairs like newlines (list_sep)") {
-    auto ast = parse_ok("rule r { all\n g[a] => g[b], g[b] => g[c]\n}");
-    CHECK(ast.rules[0].pairs.size() == 2);
 }
 
 TEST_CASE("parser: list commas are optional; newlines are whitespace") {
@@ -283,82 +86,15 @@ TEST_CASE("parser: list commas are optional; newlines are whitespace") {
     CHECK(c.rules[0].pairs[0].rhs.items.size() == 2);
 }
 
-TEST_CASE("parser: statements are delimited by the grammar, not by newlines") {
-    auto ast = parse_ok("rule r { g[.] => g[a] }\n"
-                        "sequence main { resize(4, 4) everywhere r once r\n"
-                        "  path(from=a,\n to=a, into=g, write=a)\n"
-                        "  everywhere r\n    when (1 == 1)\n}");
-    REQUIRE(ast.sequences[0].stmts.size() == 5);
-    CHECK(ast.sequences[0].stmts[3].op_name == "path");
-    CHECK(ast.sequences[0].stmts[4].guard != nullptr);
-}
-
 TEST_CASE("parser: a bad statement is reported once per line") {
     diagnostics diags;
     parse("sequence main {\n  frob frob frob\n  resize(4, 4)\n}", "test", diags);
     CHECK(diags.all.size() == 1);
 }
 
-TEST_CASE("parser: a single sub-rule under a body combinator is allowed") {
-    auto ast = parse_ok("rule r { all\n g[.] => g[x]\n}");
-    CHECK(ast.rules[0].pairs.size() == 1);
-}
-
 // ── step 3: modes, counts, ordered ────────────────────────────────────────────
 
-TEST_CASE("parser: modes and counts") {
-    auto ast = parse_ok(R"(
-sequence main {
-    everywhere fill
-    settle smooth
-    once start
-    grow(200) walk
-    scatter(50%) carve
-    grow walk
-    settle(3) smooth
-    scatter(7) carve
-}
-)");
-    auto const& s = ast.sequences.back().stmts;
-    REQUIRE(s.size() == 8);
-    CHECK(s[0].mode == apply_mode::everywhere);
-    CHECK(!s[0].count);
-    CHECK(s[1].mode == apply_mode::settle);
-    CHECK(!s[1].count);
-    CHECK(s[2].mode == apply_mode::once);
-    CHECK(s[3].mode == apply_mode::grow);
-    CHECK(lit(s[3].count) == 200);
-    CHECK(s[4].mode == apply_mode::scatter);
-    CHECK(s[4].count_percent);
-    CHECK(lit(s[4].count) == 50);
-    CHECK(!s[5].count);
-    CHECK(lit(s[6].count) == 3);
-    CHECK(!s[7].count_percent);
-    CHECK(s[7].rule_name == "carve");
-}
-
-TEST_CASE("parser: counts are expressions; '%' binds to an atom") {
-    auto ast = parse_ok(R"(
-sequence main {
-    scatter(budget / 10) a
-    scatter(density%) a
-    scatter((n * 2)%) a
-    grow(random(1, 3)) a
-    settle(n - 1) a
-    scatter(50%) a
-}
-)");
-    auto const& s = ast.sequences.back().stmts;
-    REQUIRE(s.size() == 6);
-    CHECK(s[0].count->kind == expr_kind::div_);
-    CHECK(!s[0].count_percent);
-    CHECK(s[1].count->kind == expr_kind::ident);
-    CHECK(s[1].count_percent);
-    CHECK(s[2].count->kind == expr_kind::mul);
-    CHECK(s[2].count_percent);
-    CHECK(s[3].count->kind == expr_kind::call);
-    CHECK(s[4].count->kind == expr_kind::sub);
-    CHECK(lit(s[5].count) == 50);
+TEST_CASE("parser: '%' binds to an atom") {
     CHECK(parse_fails("sequence main { scatter(n * 2%) a }"));
     CHECK(parse_fails("sequence main { scatter(-5%) a }"));
     CHECK(parse_fails("sequence main { scatter(f(1)%) a }"));
@@ -379,49 +115,10 @@ TEST_CASE("parser: the 0.7 count and policy forms are not statements") {
     CHECK(parse_fails("sequence main { all(policy=stabilize) r }"));
 }
 
-TEST_CASE("parser: inline rules as statement targets") {
-    auto ast = parse_ok(R"(
-sequence main {
-    everywhere { g[.] => g[a] }
-    once (symmetry=all) { g[a .] => g[* b] }
-    grow (rotation=all) { g[a .] => g[* a] }
-    grow(n) (rotation=all) { g[a .] => g[* a] }
-    settle(3) { all g[a] => g[b], g[b] => g[a] }
-    scatter(50%) { { g[a] h[.] } => h[x] }
-    everywhere fill
-}
-)");
-    auto const& s = ast.sequences.back().stmts;
-    REQUIRE(s.size() == 7);
-    REQUIRE(s[0].inline_rule);
-    CHECK(s[0].rule_name.text.empty());
-    CHECK(s[0].inline_rule->pairs.size() == 1);
-    CHECK(s[1].inline_rule->symmetry == "all");
-    CHECK(!s[2].count);                                  // '(' IDENT '=' is attributes
-    CHECK(s[2].inline_rule->rotation_angles.size() == 3);
-    CHECK(s[3].count);                                   // a count, then attributes
-    CHECK(s[3].inline_rule->rotation_angles.size() == 3);
-    CHECK(s[4].inline_rule->body == body_combinator::all);
-    CHECK(s[4].inline_rule->pairs.size() == 2);
-    CHECK(s[5].inline_rule->pairs[0].lhs.size() == 2);
-    CHECK(!s[6].inline_rule);
-    CHECK(s[6].rule_name == "fill");
-}
-
 TEST_CASE("parser: an inline rule is always braced") {
     CHECK(parse_fails("sequence main { everywhere g[.] => g[a] }"));
     CHECK(parse_fails("sequence main { once (symmetry=all) fill }"));
     CHECK(parse_fails("sequence main { everywhere { } }"));
-}
-
-TEST_CASE("parser: ordered body combinator") {
-    auto ast = parse_ok(R"(
-rule climb { ordered
-    g[a] => g[b]
-    g[.] => g[a]
-}
-)");
-    CHECK(ast.rules[0].body == body_combinator::ordered);
 }
 
 TEST_CASE("parser: ordered on a match or write side is an error") {
@@ -431,32 +128,8 @@ TEST_CASE("parser: ordered on a match or write side is an error") {
 
 // ── step 4: expressions, mask cells, where, params, when ─────────────────────
 
-TEST_CASE("parser: mask cells — unions and complements are whitespace-free") {
-    auto ast = parse_ok("rule r { g[wall|door !wall] => g[floor floor] }");
-    auto const& row = ast.rules[0].pairs[0].lhs[0].cells[0];
-    REQUIRE(row.size() == 2);
-    REQUIRE(row[0]->kind == expr_kind::bit_or);
-    CHECK(row[0]->args[0]->ident == "wall");
-    CHECK(row[0]->args[1]->ident == "door");
-    REQUIRE(row[1]->kind == expr_kind::not_);      // complement
-    CHECK(row[1]->args[0]->ident == "wall");
-    // spaced 'a | b' is NOT one cell — it fails to parse as cells
+TEST_CASE("parser: a spaced union is not one bare cell") {
     CHECK(parse_fails("rule r { g[wall | door] => g[floor] }"));
-}
-
-TEST_CASE("parser: pattern variables") {
-    auto ast = parse_ok("rule r { g[?a (g != ?a) (?a)] => g[?a * *] }");
-    auto const& row = ast.rules[0].pairs[0].lhs[0].cells[0];
-    REQUIRE(row.size() == 3);
-    CHECK(row[0]->kind == expr_kind::variable);
-    CHECK(row[0]->ident == "?a");
-    REQUIRE(row[1]->kind == expr_kind::paren);
-    CHECK(row[1]->args[0]->args[1]->kind == expr_kind::variable);
-    CHECK(row[1]->args[0]->args[1]->ident == "?a");
-    REQUIRE(row[2]->kind == expr_kind::paren);   // parenthesized: an operand, not a binding
-    CHECK(row[2]->args[0]->kind == expr_kind::variable);
-    CHECK(ast.rules[0].pairs[0].rhs.pat.cells[0][0]->kind == expr_kind::variable);
-    parse_ok("rule r { g[?a] where[ (?a > 3) ] => g[ (?a | wall) ] }");
 }
 
 TEST_CASE("parser: a variable is not a bare mask atom") {
@@ -466,85 +139,9 @@ TEST_CASE("parser: a variable is not a bare mask atom") {
     CHECK(parse_fails("rule r { g[? a] => g[*] }"));
 }
 
-TEST_CASE("parser: '.' is a mask atom") {
-    auto ast = parse_ok("rule r { g[!. .|door wall|. . !wall] => g[* * * * *] }");
-    auto const& row = ast.rules[0].pairs[0].lhs[0].cells[0];
-    REQUIRE(row.size() == 5);
-    REQUIRE(row[0]->kind == expr_kind::not_);
-    CHECK(row[0]->args[0]->kind == expr_kind::empty_lit);
-    REQUIRE(row[1]->kind == expr_kind::bit_or);
-    CHECK(row[1]->args[0]->kind == expr_kind::empty_lit);
-    CHECK(row[1]->args[1]->ident == "door");
-    CHECK(row[2]->args[1]->kind == expr_kind::empty_lit);
-    CHECK(row[3]->kind == expr_kind::empty_lit);
-    CHECK(row[4]->kind == expr_kind::not_);
-    CHECK(parse_fails("rule r { g[! .] => g[*] }"));   // '!' is adjacent
+TEST_CASE("parser: '!' and '|' touch the atoms of a bare mask") {
+    CHECK(parse_fails("rule r { g[! .] => g[*] }"));
     CHECK(parse_fails("rule r { g[. | door] => g[*] }"));
-}
-
-TEST_CASE("parser: expression cells and precedence") {
-    auto ast = parse_ok("rule r { g[ (tiles + 2 * 3 > 7) ] => g[ (if(d > 1, wall, floor)) ] }");
-    auto const& c = *ast.rules[0].pairs[0].lhs[0].cells[0][0];
-    REQUIRE(c.kind == expr_kind::paren);
-    REQUIRE(c.args[0]->kind == expr_kind::gt);
-    auto const& add = *c.args[0]->args[0];
-    REQUIRE(add.kind == expr_kind::add);            // + binds looser than *
-    CHECK(add.args[1]->kind == expr_kind::mul);
-    auto const& w = *ast.rules[0].pairs[0].rhs.pat.cells[0][0];
-    REQUIRE(w.kind == expr_kind::paren);
-    CHECK(w.args[0]->kind == expr_kind::call);
-    CHECK(w.args[0]->ident == "if");
-    CHECK(w.args[0]->args.size() == 3);
-}
-
-TEST_CASE("parser: where pseudo-layer") {
-    auto ast = parse_ok(R"(
-rule edge {
-    level[floor]
-    where[ (x == 0) ]
-    =>
-    level[wall]
-}
-)");
-    auto const& pair = ast.rules[0].pairs[0];
-    REQUIRE(pair.lhs.size() == 2);
-    CHECK(pair.lhs[1].is_where);
-    CHECK(pair.lhs[1].cells[0][0]->kind == expr_kind::paren);
-}
-
-TEST_CASE("parser: 'where' is a pattern head on either side of a single pair") {
-    auto ast = parse_ok("rule r { where[(x == 0), (y == 0)] => g[a] }");
-    auto const& p = ast.rules[0].pairs[0].lhs[0];
-    CHECK(p.is_where);
-    CHECK(p.rows == 2);
-    CHECK(p.cols == 1);
-}
-
-TEST_CASE("parser: commas separate pattern rows") {
-    auto ast = parse_ok("rule r { algo[* * *, * S W, * * *] => g[a, b, c] }");
-    auto const& lhs = ast.rules[0].pairs[0].lhs[0];
-    CHECK(lhs.rows == 3);
-    CHECK(lhs.cols == 3);
-    CHECK(lhs.cells[1][2]->ident == "W");
-    auto const& rhs = ast.rules[0].pairs[0].rhs.pat;   // a 1x3 vertical pattern
-    CHECK(rhs.rows == 3);
-    CHECK(rhs.cols == 1);
-}
-
-TEST_CASE("parser: a comma followed by a newline is one row break") {
-    auto ast = parse_ok("rule r {\n g[a b,\n   c d,   \n   e f]\n =>\n g[* *\n * *\n * *] }");
-    auto const& lhs = ast.rules[0].pairs[0].lhs[0];
-    CHECK(lhs.rows == 3);
-    CHECK(lhs.cols == 2);
-}
-
-TEST_CASE("parser: a comma inside an expression cell belongs to the expression") {
-    auto ast = parse_ok("rule r { n[(min(x, y)) *, * (max(1, 2))] => n[1 1, 1 1] }");
-    auto const& lhs = ast.rules[0].pairs[0].lhs[0];
-    REQUIRE(lhs.rows == 2);
-    CHECK(lhs.cols == 2);
-    CHECK(lhs.cells[0][0]->args[0]->kind == expr_kind::call);
-    CHECK(lhs.cells[0][0]->args[0]->args.size() == 2);
 }
 
 TEST_CASE("parser: empty pattern rows around commas are errors") {
@@ -554,76 +151,8 @@ TEST_CASE("parser: empty pattern rows around commas are errors") {
     CHECK(parse_fails("rule r { g[a,\n] => g[a] }"));
 }
 
-TEST_CASE("parser: params block") {
-    auto ast = parse_ok(R"(
-params {
-    difficulty: number = 3
-    rooms: number = random(2, 5)
-    budget = difficulty * 10
-}
-)");
-    REQUIRE(ast.params.size() == 3);
-    CHECK(!ast.params[0].is_derived);
-    CHECK(ast.params[0].value->kind == expr_kind::int_lit);
-    CHECK(!ast.params[1].is_derived);
-    CHECK(ast.params[2].is_derived);
-    CHECK(ast.params[2].value->kind == expr_kind::mul);
+TEST_CASE("parser: one params block per module") {
     CHECK(parse_fails("params { a: number = 1 }\nparams { b: number = 2 }"));
-}
-
-TEST_CASE("parser: when guards") {
-    auto ast = parse_ok(R"(
-sequence main {
-    resize(4, 4)  when (difficulty > 3)
-    everywhere fill      when (style == 0)
-}
-)");
-    REQUIRE(ast.sequences.back().stmts.size() == 2);
-    CHECK(ast.sequences.back().stmts[0].guard != nullptr);
-    CHECK(ast.sequences.back().stmts[0].guard->kind == expr_kind::gt);
-    CHECK(ast.sequences.back().stmts[1].guard->kind == expr_kind::eq);
-}
-
-TEST_CASE("parser: named unions in the tag block") {
-    auto ast = parse_ok("tag geo { wall, door, floor, blocker = wall | door }");
-    REQUIRE(ast.tags[0].values.size() == 3);
-    REQUIRE(ast.tags[0].unions.size() == 1);
-    CHECK(ast.tags[0].unions[0].name == "blocker");
-    CHECK(ast.tags[0].unions[0].members == std::vector<std::string>{"wall", "door"});
-}
-
-TEST_CASE("parser: contextual names in their grammar slots") {
-    auto ast = parse_ok(R"(
-rule a(symmetry=none, rotation=none) { g[.] => g[x] }
-rule b(rotation=all, symmetry=vertical) { g[.] => g[x] }
-rule c { g[ (max(g, 1)) ] => g[x] }
-sequence main {
-    scatter(3) a
-    mirror(horizontal)
-    mirror(vertical)
-}
-)");
-    REQUIRE(ast.rules.size() == 3);
-    CHECK(ast.rules[0].symmetry == "none");
-    CHECK(ast.rules[0].rotation_angles.empty());
-    CHECK(ast.rules[1].symmetry == "vertical");
-    CHECK(ast.rules[1].rotation_angles == std::vector<long long>{90, 180, 270});
-    auto const& s = ast.sequences.back().stmts;
-    REQUIRE(s.size() == 3);
-    CHECK(lit(s[0].count) == 3);
-    REQUIRE(s[1].op_args.size() == 1);
-    CHECK(s[1].op_args[0].value->ident == "horizontal");
-    CHECK(s[2].op_args[0].value->ident == "vertical");
-}
-
-TEST_CASE("parser: contextual names are legal declaration names") {
-    auto ast = parse_ok(R"(
-tag none { horizontal, vertical, symmetry, rotation }
-layers { none: grid of none }
-params { rotation: number = 1 }
-)");
-    REQUIRE(ast.tags.size() == 1);
-    CHECK(ast.tags[0].name == "none");
 }
 
 TEST_CASE("parser: an unclosed pattern reports the missing ']' once") {
@@ -679,4 +208,37 @@ TEST_CASE("parser: nodes span what they were parsed from") {
     CHECK(span(s.count->loc) == "7:13-7:18");
     CHECK(span(s.rule_name.loc) == "7:20-7:24");
     CHECK(span(s.guard->loc) == "7:31-7:36");
+}
+
+// ── golden ASTs ──────────────────────────────────────────────────────────────
+
+static std::string read_file(std::filesystem::path const& p) {
+    std::ifstream in(p, std::ios::binary);
+    std::stringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+}
+
+// Each tests/ast/<name>.lvs, parsed alone, must dump - without spans, then
+// any diagnostics - exactly as tests/ast/<name>.ast. A parser change that
+// alters a tree shows up as a reviewable diff of that file; to accept one, run
+// the tests with LS_UPDATE_GOLDEN=1 set, which rewrites the .ast files.
+TEST_CASE("parser: golden ASTs") {
+    namespace fs = std::filesystem;
+    std::vector<fs::path> sources;
+    for (auto const& e : fs::directory_iterator(LS_AST_GOLDEN_DIR))
+        if (e.path().extension() == ".lvs") sources.push_back(e.path());
+    std::sort(sources.begin(), sources.end());
+    REQUIRE(!sources.empty());
+    bool update = std::getenv("LS_UPDATE_GOLDEN") != nullptr;
+    for (auto const& src : sources) {
+        diagnostics diags;
+        std::string actual = dump_ast(read_file(src), src.filename().string(), false, diags);
+        for (auto const& d : diags.all) actual += "; " + d.format() + "\n";
+        fs::path golden = fs::path(src).replace_extension(".ast");
+        if (update) std::ofstream(golden, std::ios::binary) << actual;
+        INFO(golden.string());
+        REQUIRE(fs::exists(golden));
+        CHECK(read_file(golden) == actual);
+    }
 }

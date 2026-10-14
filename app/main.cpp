@@ -1,3 +1,4 @@
+#include "ast_dump.hpp"
 #include "fs_resolver.hpp"
 #include "inspect.hpp"
 #include "ls.hpp"
@@ -15,8 +16,10 @@
 static void usage(char const* argv0) {
     std::cerr << "Usage: " << argv0
               << " [--seed N] [--entry name] [--param name=value ...] [--inspect] <file.lvs>\n"
+              << "       " << argv0 << " --ast [--no-spans] <file.lvs>\n"
               << "       " << argv0 << " --version\n"
-              << "  --entry  the sequence to run (default: main)\n";
+              << "  --entry  the sequence to run (default: main)\n"
+              << "  --ast    print the file's syntax tree; --no-spans leaves out source ranges\n";
 }
 
 static void print_level(ls::level const& lv, std::ostream& out) {
@@ -43,6 +46,7 @@ int main(int argc, char* argv[]) {
     std::string entry_name = "main";   // a tool convention, not the language's
     std::vector<std::pair<std::string, int>> params;
     bool inspect = false;
+    bool ast = false, spans = true;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -51,6 +55,10 @@ int main(int argc, char* argv[]) {
             return 0;
         } else if (arg == "--inspect") {
             inspect = true;
+        } else if (arg == "--ast") {
+            ast = true;
+        } else if (arg == "--no-spans") {
+            spans = false;
         } else if (arg == "--seed" && i + 1 < argc) {
             seed = (uint64_t)std::stoull(argv[++i]);
         } else if (arg == "--entry" && i + 1 < argc) {
@@ -81,6 +89,13 @@ int main(int argc, char* argv[]) {
     if (!read_text_file(name, source)) {
         std::cerr << "Error: cannot open '" << path << "'\n";
         return 1;
+    }
+
+    if (ast) {   // this file only, as parsed; parse errors on stderr
+        ls::diagnostics diags;
+        std::cout << ls::dump_ast(source, name, spans, diags);
+        std::cerr << diags.format_all();
+        return diags.has_errors() ? 1 : 0;
     }
 
     if (inspect) {   // editor tooling: JSON report, exit 0 (diagnostics inside)

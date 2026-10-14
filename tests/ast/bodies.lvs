@@ -1,0 +1,28 @@
+// Rule bodies: a single pair, or sub-rules under all / any / ordered,
+// separated by newlines or commas; and rule attributes.
+rule fill_geo { all
+    algo[W] => level[wall]
+    algo[F] => level[floor]
+    algo[S] => level[floor]
+}
+rule commas { all
+ g[a] => g[b], g[b] => g[c]
+}
+rule one_sub { all
+ g[.] => g[x]
+}
+rule spanning { all
+ g[a]
+ h[b]
+ =>
+ g[c]
+ g[d] h[.] => h[e] }
+rule climb { ordered
+    g[a] => g[b]
+    g[.] => g[a]
+}
+
+rule a(symmetry=horizontal) { g[.] => g[x] }
+rule b(rotation=all) { g[.] => g[x] }
+rule c(symmetry=all, rotation=180) { g[.] => g[x] }
+rule d(rotation={90, 270}) { g[.] => g[x] }

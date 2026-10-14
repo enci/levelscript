@@ -6,6 +6,7 @@ add_library(ls_lib STATIC
     machine.cpp
     ls.cpp
     inspect.cpp
+    ast_dump.cpp
 )
 
 target_include_directories(ls_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

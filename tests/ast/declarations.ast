@@ -1,0 +1,13 @@
+(use "schema.lvs")
+(use "lib/rules.lvs")
+(tag geo
+  (value wall)
+  (value door)
+  (value floor)
+  (union blocker wall door))
+(layers
+  (grid level geo)
+  (grid tiles number))
+(input difficulty 3)
+(input rooms (call random 2 5))
+(derived budget (* difficulty 10))

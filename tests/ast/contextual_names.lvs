@@ -1,0 +1,15 @@
+// Contextual names are plain names: legal as declarations, and words only in
+// their own grammar slots.
+tag none { horizontal, vertical, symmetry, rotation }
+layers { none: grid of none }
+params { rotation: number = 1 }
+
+rule a(symmetry=none, rotation=none) { g[.] => g[x] }
+rule b(rotation=all, symmetry=vertical) { g[.] => g[x] }
+rule c { g[ (max(g, 1)) ] => g[x] }
+
+sequence main {
+    scatter(3) a
+    mirror(horizontal)
+    mirror(vertical)
+}

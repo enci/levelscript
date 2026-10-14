@@ -1,0 +1,38 @@
+(tag none
+  (value horizontal)
+  (value vertical)
+  (value symmetry)
+  (value rotation))
+(layers
+  (grid none none))
+(input rotation 1)
+(rule a
+  (pair
+    (match
+      (pattern g
+        (row .)))
+    (write
+      (pattern g
+        (row x)))))
+(rule b
+  (symmetry vertical)
+  (rotation 90 180 270)
+  (pair
+    (match
+      (pattern g
+        (row .)))
+    (write
+      (pattern g
+        (row x)))))
+(rule c
+  (pair
+    (match
+      (pattern g
+        (row (paren (call max g 1)))))
+    (write
+      (pattern g
+        (row x)))))
+(sequence main
+  (scatter (count 3) a)
+  (op mirror (arg horizontal))
+  (op mirror (arg vertical)))

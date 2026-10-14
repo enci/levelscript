@@ -63,6 +63,7 @@ Compiles a `.lvs` file, runs one sequence and prints every layer as text.
 
 ```
 levelscript [--seed N] [--entry name] [--param name=value ...] [--inspect] <file.lvs>
+levelscript --ast [--no-spans] <file.lvs>
 ```
 
 | Option | Meaning |
@@ -71,6 +72,7 @@ levelscript [--seed N] [--entry name] [--param name=value ...] [--inspect] <file
 | `--entry name` | Sequence to run (default `main`). If it doesn't exist, the available sequences are listed. |
 | `--param name=value` | Set an integer parameter; repeatable. |
 | `--inspect` | Don't run; print a JSON report (diagnostics, symbols) for editor tooling. |
+| `--ast` | Don't run; print the file's syntax tree, each node with its source range. `--no-spans` leaves the ranges out. The file is parsed alone; its `use`s are not followed. |
 
 ```
 levelscript --seed 42 examples/dungeon.lvs
