@@ -1,13 +1,25 @@
 #pragma once
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace ls {
 
+// Where a construct is written: from (line, col) to (end_line, end_col), the
+// end one past its last character. Diagnostics point at the start.
 struct source_loc {
     int line{0}, col{0};
+    int end_line{0}, end_col{0};
     int mod{0};   // module id within a compile; labels diagnostics
+};
+
+// A name as written, and where.
+struct ident {
+    std::string text;
+    source_loc  loc;
+
+    friend bool operator==(ident const& a, std::string_view b) { return a.text == b; }
 };
 
 // ── expressions ──────────────────────────────────────────────────────────────
@@ -41,26 +53,19 @@ struct expr {
 // A named union: `blocker = wall | door` — a mask alias over the
 // tagset's own members (values or earlier unions). Consumes no bit.
 struct tag_union {
-    source_loc               loc;
-    std::string              name;
+    ident                    name;
     std::vector<std::string> members;
 };
 
-struct tag_value {
-    source_loc  loc;
-    std::string name;
-};
-
 struct tag_decl {
-    source_loc               loc;
-    std::string              name;
-    std::vector<tag_value>   values;
-    std::vector<tag_union>   unions;
+    source_loc             loc;
+    ident                  name;
+    std::vector<ident>     values;
+    std::vector<tag_union> unions;
 };
 
 struct layer_decl {
-    source_loc  loc;
-    std::string name;
+    ident       name;
     std::string type;   // tagset name, or "number"
 };
 
@@ -74,8 +79,7 @@ struct layers_decl {
 // input:   `name: number = expr` — supplied at runtime, default is mandatory
 // derived: `name = expr`         — computed once at startup
 struct param_decl {
-    source_loc  loc;
-    std::string name;
+    ident       name;
     bool        is_derived{false};
     expr_ptr    value;   // the default (input) or the definition (derived)
 };
@@ -102,8 +106,7 @@ struct cell {
 
 struct pattern {
     source_loc                     loc;
-    source_loc                     grid_loc;
-    std::string                    grid;       // "" when is_where
+    ident                          grid;       // "" when is_where
     bool                           is_where{false};
     int                            rows{0}, cols{0};
     std::vector<std::vector<cell>> cells;   // [row][col]; row widths checked in sema
@@ -132,8 +135,7 @@ enum class body_combinator { none, all, any, ordered };
 
 struct rule_decl {
     source_loc             loc;
-    source_loc             name_loc;
-    std::string            name;
+    ident                  name;               // "" for an inline rule
     std::string            symmetry{"none"};   // validated in sema
     std::vector<long long> rotation_angles;    // besides identity; validated in sema
     body_combinator        body{body_combinator::none};
@@ -179,9 +181,7 @@ struct program_stmt {
     apply_mode  mode{apply_mode::everywhere};
     expr_ptr    count;                // the parenthesized count; null = none
     bool        count_percent{false}; // scatter(P%)
-    source_loc  count_loc;
-    std::string rule_name;            // a rule or a sequence; resolved in sema
-    source_loc  rule_name_loc;
+    ident       rule_name;            // a rule or a sequence; resolved in sema
     std::unique_ptr<rule_decl> inline_rule;   // target written in place; else null
     // optional `when (expr)` guard: boolean, params only
     expr_ptr    guard;
@@ -190,8 +190,7 @@ struct program_stmt {
 // A named statement list, applied by name like a rule.
 struct sequence_decl {
     source_loc                loc;
-    source_loc                name_loc;
-    std::string               name;
+    ident                     name;
     std::vector<program_stmt> stmts;
 };
 

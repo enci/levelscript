@@ -41,8 +41,10 @@ std::vector<token> lex(std::string_view src, std::string_view file,
     size_t i = 0;
     size_t n = src.size();
 
+    // A string token's text drops its two quotes; every other text is as written.
     auto push = [&](token_type t, std::string text, int l, int c, long long v = 0) {
-        out.push_back({t, std::move(text), v, l, c});
+        int end = c + (int)text.size() + (t == token_type::string ? 2 : 0);
+        out.push_back({t, std::move(text), v, l, c, end});
     };
 
     while (i < n) {

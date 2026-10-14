@@ -271,7 +271,7 @@ std::string stmt_desc(program_stmt const& s) {
     if (s.count) {
         p += "(" + expr_brief(*s.count) + (s.count_percent ? "%)" : ")");
     }
-    p += s.inline_rule ? std::string(" { ... }") : " " + s.rule_name;
+    p += s.inline_rule ? std::string(" { ... }") : " " + s.rule_name.text;
     if (s.guard) p += "  when (...)";
     return p;
 }
@@ -506,7 +506,7 @@ void draw_rule_window(script const& sc, debug_run const& run, float mini_px,
     ImGui::TextUnformatted(cr.name.c_str());   // an inline rule's is its position
     rule_decl const* decl = stmt.inline_rule.get();
     for (auto const& rd : sc.ast.rules)
-        if (!decl && rd.name == stmt.rule_name) decl = &rd;
+        if (!decl && rd.name == stmt.rule_name.text) decl = &rd;
     if (decl) {
         auto const& rd = *decl;
         std::string attrs;

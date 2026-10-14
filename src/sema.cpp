@@ -537,21 +537,22 @@ struct analyzer {
 
     void build_tables() {
         for (auto const& t : ast.tags) {
-            if (out.tag_id(t.name) >= 0)
-                error(t.loc, "duplicate tag '" + t.name + "'");
+            std::string const& tname = t.name.text;
+            if (out.tag_id(tname) >= 0)
+                error(t.loc, "duplicate tag '" + tname + "'");
             if (t.values.empty() && t.unions.empty())
-                error(t.loc, "tagset '" + t.name + "' has no values");
+                error(t.loc, "tagset '" + tname + "' has no values");
             if ((int)t.values.size() > 30)   // bits 1..30; 0 = empty, 31 reserved
-                error(t.loc, "tagset '" + t.name + "' has " +
+                error(t.loc, "tagset '" + tname + "' has " +
                       std::to_string(t.values.size()) + " values; the maximum is 30");
             std::vector<std::string> vals;
-            for (auto const& v : t.values) {
-                check_name(v.loc, "tag value", v.name);
-                if (index_of(vals, v.name) >= 0)
-                    error(v.loc, "duplicate tag value '" + v.name + "' in '" + t.name + "'");
-                vals.push_back(v.name);
+            for (auto const& [name, loc] : t.values) {
+                check_name(loc, "tag value", name);
+                if (index_of(vals, name) >= 0)
+                    error(loc, "duplicate tag value '" + name + "' in '" + tname + "'");
+                vals.push_back(name);
             }
-            out.tag_names.push_back(t.name);
+            out.tag_names.push_back(tname);
             out.tag_values.push_back(std::move(vals));
             tag_mod.push_back(t.loc.mod);
 
@@ -561,56 +562,59 @@ struct analyzer {
             int tid = (int)out.tag_names.size() - 1;
             out.tag_unions.push_back({});
             for (auto const& u : t.unions) {
-                check_name(u.loc, "union", u.name);
-                if (out.value_id(tid, u.name) >= 0 || out.mask_of(tid, u.name) != 0)
-                    error(u.loc, "union '" + u.name +
-                          "' redeclares a tag value or union in '" + t.name + "'");
+                auto const& [name, loc] = u.name;
+                check_name(loc, "union", name);
+                if (out.value_id(tid, name) >= 0 || out.mask_of(tid, name) != 0)
+                    error(loc, "union '" + name +
+                          "' redeclares a tag value or union in '" + tname + "'");
                 int64_t mask = 0;
                 for (auto const& m : u.members) {
                     int64_t mm = out.mask_of(tid, m);
                     if (mm == 0)
-                        error(u.loc, "union '" + u.name + "' references '" + m +
+                        error(loc, "union '" + name + "' references '" + m +
                               "', which is not a value or earlier union of '" +
-                              t.name + "'");
+                              tname + "'");
                     mask |= mm;
                 }
-                out.tag_unions[tid].push_back({u.name, mask});
+                out.tag_unions[tid].push_back({name, mask});
             }
         }
 
         for (auto const& l : ast.layers.layers) {
-            check_name(l.loc, "grid", l.name);
-            if (out.layer_id(l.name) >= 0) {   // across every module in the closure
-                error(l.loc, "duplicate grid '" + l.name + "'");
+            auto const& [name, loc] = l.name;
+            check_name(loc, "grid", name);
+            if (out.layer_id(name) >= 0) {   // across every module in the closure
+                error(loc, "duplicate grid '" + name + "'");
                 continue;
             }
             int tag = -1;
             if (l.type != "number") {
                 tag = out.tag_id(l.type);
                 if (tag < 0)
-                    error(l.loc, "grid '" + l.name +
+                    error(loc, "grid '" + name +
                           "' references undeclared tag '" + l.type + "'");
                 else
-                    require_visible(l.loc, "tagset", l.type, tag_mod[(size_t)tag]);
+                    require_visible(loc, "tagset", l.type, tag_mod[(size_t)tag]);
             }
-            out.layers.push_back({l.name, tag});
-            layer_mod.push_back(l.loc.mod);
+            out.layers.push_back({name, tag});
+            layer_mod.push_back(loc.mod);
         }
 
         for (auto const& p : ast.params) {
-            check_name(p.loc, "param", p.name);
-            if (out.layer_id(p.name) >= 0)
-                error(p.loc, "param '" + p.name + "' collides with a grid of the same name");
-            if (out.param_id(p.name) >= 0) {
-                error(p.loc, "duplicate param '" + p.name + "'");
+            auto const& [name, loc] = p.name;
+            check_name(loc, "param", name);
+            if (out.layer_id(name) >= 0)
+                error(loc, "param '" + name + "' collides with a grid of the same name");
+            if (out.param_id(name) >= 0) {
+                error(loc, "duplicate param '" + name + "'");
                 continue;
             }
             // Every input param must carry a default.
             if (!p.is_derived && !p.value)
-                error(p.loc, "input param '" + p.name +
-                      "' must have a default, e.g. '" + p.name + ": number = 0'");
-            out.param_names.push_back(p.name);
-            param_mod.push_back(p.loc.mod);
+                error(loc, "input param '" + name +
+                      "' must have a default, e.g. '" + name + ": number = 0'");
+            out.param_names.push_back(name);
+            param_mod.push_back(loc.mod);
         }
     }
 
@@ -620,9 +624,9 @@ struct analyzer {
         for (int i = 0; i < (int)ast.params.size(); ++i) {
             auto const& p = ast.params[i];
             if (!p.value) continue;   // missing default already reported
-            int e = compile_as(*p.value, val_type::num, p.loc,
+            int e = compile_as(*p.value, val_type::num, p.name.loc,
                                std::string(p.is_derived ? "derived param '" : "default for param '")
-                               + p.name + "' must evaluate to a number", scope{false, false, i});
+                               + p.name.text + "' must evaluate to a number", scope{false, false, i});
             out.startup_exprs.push_back({i, e, !p.is_derived});
         }
     }
@@ -643,12 +647,12 @@ struct analyzer {
                 error(p.loc, "'where' is a match-side pseudo-layer; it cannot "
                       "appear on the write side");
         } else {
-            cp.grid_id = out.layer_id(p.grid);
+            cp.grid_id = out.layer_id(p.grid.text);
             if (cp.grid_id < 0) {
-                error(p.loc, "undeclared grid '" + p.grid + "'");
+                error(p.grid.loc, "undeclared grid '" + p.grid.text + "'");
                 return cp;
             }
-            require_visible(p.loc, "grid", p.grid, layer_mod[(size_t)cp.grid_id]);
+            require_visible(p.grid.loc, "grid", p.grid.text, layer_mod[(size_t)cp.grid_id]);
             tag = out.layers[cp.grid_id].tag_id;
             cp.is_number = tag < 0;
         }
@@ -840,7 +844,7 @@ struct analyzer {
     void bind_variables(rule_pair const& pr, pair_vars& pv) {
         for (auto const& p : pr.lhs) {
             if (p.is_where) continue;   // a bare variable there is an error, reported by its cell
-            int gid = out.layer_id(p.grid);
+            int gid = out.layer_id(p.grid.text);
             if (gid < 0) continue;      // reported by compile_pattern
             int type = out.layers[gid].tag_id;
             for (auto const& row : p.cells)
@@ -878,9 +882,9 @@ struct analyzer {
     void compile_rules() {
         for (auto const& r : ast.rules) {
             if (index_of(out.rules, r.name, &compiled_rule::name) >= 0)
-                error(r.loc, "duplicate rule '" + r.name + "'");
+                error(r.loc, "duplicate rule '" + r.name.text + "'");
             out.rules.push_back(compile_rule(r));
-            out.rules.back().name = r.name;
+            out.rules.back().name = r.name.text;
         }
     }
 
@@ -1213,7 +1217,7 @@ struct analyzer {
     // A count: a statement-scope expression like a guard - params only, and a
     // number. Out-of-range values are clamped, with a warning, at run time.
     void compile_count(program_stmt const& s, compiled_stmt& cs, std::string const& ctx) {
-        cs.count = compile_as(*s.count, val_type::num, s.count_loc,
+        cs.count = compile_as(*s.count, val_type::num, s.count->loc,
                               "a count must be a number" + ctx, stmt_scope, -1,
                               /*type_empty=*/false);
     }
@@ -1255,16 +1259,16 @@ struct analyzer {
     // name lookups find the first declaration.
     void register_sequences() {
         for (auto const& sq : ast.sequences) {
-            int r = index_of(ast.rules, sq.name, &rule_decl::name);
-            int k = index_of(out.sequences, sq.name, &compiled_sequence::name);
+            int r = index_of(ast.rules, sq.name.text, &rule_decl::name);
+            int k = index_of(out.sequences, sq.name.text, &compiled_sequence::name);
             if (r >= 0)
-                error(sq.loc, "duplicate name '" + sq.name + "': already declared as a "
+                error(sq.loc, "duplicate name '" + sq.name.text + "': already declared as a "
                       "rule on line " + std::to_string(ast.rules[(size_t)r].loc.line) +
                       " - rules and sequences share one namespace");
             else if (k >= 0)
-                error(sq.loc, "duplicate sequence '" + sq.name + "' (first declared on line " +
+                error(sq.loc, "duplicate sequence '" + sq.name.text + "' (first declared on line " +
                       std::to_string(ast.sequences[(size_t)k].loc.line) + ")");
-            out.sequences.push_back({sq.name, {}});
+            out.sequences.push_back({sq.name.text, {}});
         }
     }
 
@@ -1294,28 +1298,28 @@ struct analyzer {
                     cs.rule_id = (int)out.rules.size() - 1;
                 }
                 if (cs.rule_id < 0)
-                    cs.rule_id = index_of(out.rules, s.rule_name, &compiled_rule::name);
+                    cs.rule_id = index_of(out.rules, s.rule_name.text, &compiled_rule::name);
                 if (cs.rule_id < 0)
-                    cs.seq_id = index_of(out.sequences, s.rule_name, &compiled_sequence::name);
+                    cs.seq_id = index_of(out.sequences, s.rule_name.text, &compiled_sequence::name);
                 if (cs.rule_id < 0 && cs.seq_id < 0) {
-                    error(s.loc, "undeclared rule or sequence '" + s.rule_name + "'" +
-                          did_you_mean(s.rule_name));
+                    error(s.loc, "undeclared rule or sequence '" + s.rule_name.text + "'" +
+                          did_you_mean(s.rule_name.text));
                     continue;
                 }
                 if (s.inline_rule)
                     ;   // declared right here
                 else if (cs.rule_id >= 0)
-                    require_visible(s.rule_name_loc, "rule", s.rule_name,
+                    require_visible(s.rule_name.loc, "rule", s.rule_name.text,
                                     ast.rules[(size_t)cs.rule_id].loc.mod);
                 else
-                    require_visible(s.rule_name_loc, "sequence", s.rule_name,
+                    require_visible(s.rule_name.loc, "sequence", s.rule_name.text,
                                     ast.sequences[(size_t)cs.seq_id].loc.mod);
                 if (s.count) compile_count(s, cs, ctx);
                 if (cs.seq_id >= 0) {
                     // Rule-only modes on a sequence.
                     if (s.mode != apply_mode::once && s.mode != apply_mode::settle)
                         error(s.loc, std::string("'") + mode_name(s.mode) + "' is not valid on sequence '" +
-                              s.rule_name + "'; a sequence takes 'once' or 'settle'" +
+                              s.rule_name.text + "'; a sequence takes 'once' or 'settle'" +
                               (s.mode == apply_mode::scatter
                                    ? ", and 'scatter' belongs on the statements inside it" : ""));
                 } else if (s.mode == apply_mode::grow && !s.count) {
@@ -1379,7 +1383,7 @@ struct analyzer {
         if (!best_effort && diags.has_errors()) return;
         register_sequences();
         for (size_t i = 0; i < ast.sequences.size(); ++i)
-            compile_stmts(ast.sequences[i].stmts, out.sequences[i].stmts, ast.sequences[i].name);
+            compile_stmts(ast.sequences[i].stmts, out.sequences[i].stmts, ast.sequences[i].name.text);
         check_sequence_cycles();
     }
 };

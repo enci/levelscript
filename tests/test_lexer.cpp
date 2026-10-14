@@ -51,6 +51,14 @@ TEST_CASE("lexer: positions are 1-based line:col") {
     CHECK(t[2].col == 3);
 }
 
+TEST_CASE("lexer: a token ends one past its last character") {
+    auto t = lex_ok("wall => \"a.lvs\" 120");
+    CHECK(t[0].end_col == 5);    // wall
+    CHECK(t[1].end_col == 8);    // =>
+    CHECK(t[2].end_col == 16);   // the quotes count, though the text drops them
+    CHECK(t[3].end_col == 20);
+}
+
 TEST_CASE("lexer: '?name' is one VARIABLE token") {
     auto t = lex_ok("?a ?all ?x_1(");
     REQUIRE(t.size() == 5);
