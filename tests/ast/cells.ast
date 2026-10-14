@@ -1,0 +1,115 @@
+(rule kinds
+  (pair
+    (match
+      (pattern t
+        (row * . 3 wall)))
+    (write
+      (pattern t
+        (row * . 3 wall)))))
+(rule rows
+  (pair
+    (match
+      (pattern g
+        (row * * *)
+        (row * wall *)
+        (row * * *)))
+    (write
+      (pattern g
+        (row * * *)
+        (row * a *)
+        (row * * *)))))
+(rule masks
+  (pair
+    (match
+      (pattern g
+        (row (| wall door) (! wall))))
+    (write
+      (pattern g
+        (row floor floor)))))
+(rule empties
+  (pair
+    (match
+      (pattern g
+        (row (! .) (| . door) (| wall .) . (! wall))))
+    (write
+      (pattern g
+        (row * * * * *)))))
+(rule variables
+  (pair
+    (match
+      (pattern g
+        (row ?a (paren (!= g ?a)) (paren ?a))))
+    (write
+      (pattern g
+        (row ?a * *)))))
+(rule variable_where
+  (pair
+    (match
+      (pattern g
+        (row ?a))
+      (where
+        (row (paren (> ?a 3)))))
+    (write
+      (pattern g
+        (row (paren (| ?a wall)))))))
+(rule precedence
+  (pair
+    (match
+      (pattern g
+        (row (paren (> (+ tiles (* 2 3)) 7)))))
+    (write
+      (pattern g
+        (row (paren (call if (> d 1) wall floor)))))))
+(rule calls
+  (pair
+    (match
+      (pattern n
+        (row (paren (call min x y)) *)
+        (row * (paren (call max 1 2)))))
+    (write
+      (pattern n
+        (row 1 1)
+        (row 1 1)))))
+(rule edge
+  (pair
+    (match
+      (pattern level
+        (row floor))
+      (where
+        (row (paren (== x 0)))))
+    (write
+      (pattern level
+        (row wall)))))
+(rule where_alone
+  (pair
+    (match
+      (where
+        (row (paren (== x 0)))
+        (row (paren (== y 0)))))
+    (write
+      (pattern g
+        (row a)))))
+(rule comma_rows
+  (pair
+    (match
+      (pattern algo
+        (row * * *)
+        (row * S W)
+        (row * * *)))
+    (write
+      (pattern g
+        (row a)
+        (row b)
+        (row c)))))
+(rule comma_newline
+  (pair
+    (match
+      (pattern g
+        (row a b)
+        (row c d)
+        (row e f)))
+    (write
+      (pattern g
+        (row * *)
+        (row * *)
+        (row * *)))))

@@ -59,6 +59,10 @@
       {
         "command": "levelscript.locateDebugger",
         "title": "LevelScript: Locate Debugger"
+      },
+      {
+        "command": "levelscript.showAst",
+        "title": "LevelScript: Show AST"
       }
     ],
     "configuration": {
@@ -83,6 +87,10 @@
       "commandPalette": [
         {
           "command": "levelscript.run",
+          "when": "resourceLangId == levelscript"
+        },
+        {
+          "command": "levelscript.showAst",
           "when": "resourceLangId == levelscript"
         }
       ]

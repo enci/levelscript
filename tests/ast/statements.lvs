@@ -1,0 +1,44 @@
+// Statements: operation calls and rule applications with a mode, a count
+// (an expression; '%' binds to an atom), a target, and a `when` guard.
+sequence modes {
+    everywhere fill
+    settle smooth
+    once start
+    grow(200) walk
+    scatter(50%) carve
+    grow walk
+    settle(3) smooth
+    scatter(7) carve
+}
+
+sequence counts {
+    scatter(budget / 10) a
+    scatter(density%) a
+    scatter((n * 2)%) a
+    grow(random(1, 3)) a
+    settle(n - 1) a
+    scatter(50%) a
+}
+
+sequence inline {
+    everywhere { g[.] => g[a] }
+    once (symmetry=all) { g[a .] => g[* b] }
+    grow (rotation=all) { g[a .] => g[* a] }
+    grow(n) (rotation=all) { g[a .] => g[* a] }
+    settle(3) { all g[a] => g[b], g[b] => g[a] }
+    scatter(50%) { { g[a] h[.] } => h[x] }
+    everywhere fill
+}
+
+sequence guards {
+    resize(4, 4)  when (difficulty > 3)
+    everywhere fill      when (style == 0)
+}
+
+// statements end where the grammar says, not at newlines
+sequence delimited { resize(4, 4) everywhere r once r
+  path(from=a,
+ to=a, into=g, write=a)
+  everywhere r
+    when (1 == 1)
+}

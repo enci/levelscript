@@ -1,0 +1,6 @@
+// A stray top-level block is one diagnostic, and parsing resumes at the
+// next declaration.
+program {
+    resize(2, 2)
+}
+rule r { g[.] => g[a] }

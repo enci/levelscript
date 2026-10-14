@@ -1,4 +1,5 @@
 #include <emscripten/bind.h>
+#include "ast_dump.hpp"
 #include "inspect.hpp"
 #include "ls.hpp"
 #include <cstdio>
@@ -72,6 +73,12 @@ ls::resolver js_resolver(val resolve) {
 
 std::string inspect_with(std::string const& source, std::string const& name, val resolve) {
     return ls::inspect_json(source, name, js_resolver(resolve));
+}
+
+// The AST of one file, as `levelscript --ast` prints it.
+std::string ast_dump_of(std::string const& source, std::string const& name) {
+    ls::diagnostics diags;
+    return ls::dump_ast(source, name, /*spans=*/true, diags);
 }
 
 std::unordered_map<int, session> g_sessions;
@@ -231,6 +238,7 @@ void run_end(int id) {
 EMSCRIPTEN_BINDINGS(ls_module) {
     function("version", +[]() { return std::string(LS_VERSION_STRING); });
     function("inspect_json", &inspect_with);
+    function("ast_dump", &ast_dump_of);
     function("run_begin", &run_begin);
     function("run_last_error", &run_last_error);
     function("run_state", &run_state);

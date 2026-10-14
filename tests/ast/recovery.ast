@@ -1,0 +1,9 @@
+(rule r
+  (pair
+    (match
+      (pattern g
+        (row .)))
+    (write
+      (pattern g
+        (row a)))))
+; recovery.lvs:3:1: error: expected a declaration (use, tag, layers, params, rule, sequence)

@@ -1,0 +1,96 @@
+(rule place
+  (pair
+    (match
+      (pattern algo
+        (row F))
+      (pattern enemies
+        (row .)))
+    (write
+      (pattern enemies
+        (row goblin)))))
+(rule reward
+  (pair
+    (match
+      (pattern algo
+        (row S)))
+    (write
+      (any
+        (weight 8
+          (pattern items
+            (row .)))
+        (pattern items
+          (row chest))))))
+(rule decorate
+  (pair
+    (match
+      (pattern algo
+        (row F)))
+    (write
+      (all
+        (pattern level
+          (row floor))
+        (any
+          (weight 3
+            (pattern items
+              (row .)))
+          (pattern items
+            (row chest)))))))
+(rule single_item
+  (pair
+    (match
+      (pattern g
+        (row a)))
+    (write
+      (any
+        (pattern g
+          (row b))))))
+(rule shared_line
+  (pair
+    (match
+      (pattern g
+        (row a))
+      (pattern h
+        (row b))
+      (where
+        (row (paren (== x 0)))))
+    (write
+      (pattern g
+        (row c)))))
+(rule braced_one
+  (pair
+    (match
+      (pattern g
+        (row a)))
+    (write
+      (pattern g
+        (row b)))))
+(rule braced
+  (body all)
+  (pair
+    (match
+      (pattern g
+        (row a))
+      (pattern h
+        (row b)))
+    (write
+      (pattern g
+        (row c))))
+  (pair
+    (match
+      (pattern g
+        (row b))
+      (pattern h
+        (row .)))
+    (write
+      (all
+        (pattern g
+          (row d))
+        (pattern h
+          (row e)))))
+  (pair
+    (match
+      (pattern g
+        (row c)))
+    (write
+      (pattern g
+        (row d)))))

@@ -9,6 +9,7 @@ add_executable(ls_tests
 )
 
 target_link_libraries(ls_tests PRIVATE ls_lib Catch2::Catch2WithMain)
+target_compile_definitions(ls_tests PRIVATE LS_AST_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/ast")
 if(MSVC)
     target_compile_options(ls_tests PRIVATE /W4)
 else()

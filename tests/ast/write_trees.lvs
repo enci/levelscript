@@ -1,0 +1,39 @@
+// Match sides conjoin patterns, optionally braced; write sides nest
+// { all } and { any } blocks, with weights on { any } items.
+rule place {
+    algo[F]
+    enemies[.]
+    =>
+    enemies[goblin]
+}
+
+rule reward {
+    algo[S]
+    =>
+    { any
+      (weight=8) items[.]
+      items[chest]
+    }
+}
+
+rule decorate {
+    algo[F]
+    =>
+    { all
+      level[floor]
+      { any
+        (weight=3) items[.]
+        items[chest]
+      }
+    }
+}
+
+rule single_item { g[a] => { any g[b] } }
+rule shared_line { g[a] h[b] where[(x == 0)] => g[c] }
+rule braced_one { { g[a] } => g[b] }
+
+rule braced { all
+ { g[a] h[b] } => g[c]
+ { g[b]
+ h[.] } => { all g[d] h[e] }
+ g[c] => g[d] }

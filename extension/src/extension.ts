@@ -6,6 +6,7 @@ import { initWasm, inspectJson } from './wasm';
 import { editorResolver } from './resolve';
 import * as path from 'path';
 import { registerDebugger } from './debugger';
+import { registerAstView } from './ast_view';
 
 const LS_LANG = 'levelscript';
 let diagnosticCollection: vscode.DiagnosticCollection;
@@ -46,6 +47,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
   );
 
   registerDebugger(ctx);
+  registerAstView(ctx);
 
   if (vscode.window.activeTextEditor?.document.languageId === LS_LANG) {
     analyse(vscode.window.activeTextEditor.document);

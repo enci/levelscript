@@ -13,6 +13,11 @@ export async function initWasm() {
     }
 }
 
+export function astDump(source: string, name: string): string {
+    if (!wasmModule) throw new Error("WASM not initialized");
+    return wasmModule.ast_dump(source, name);
+}
+
 export function inspectJson(source: string, name: string, resolve?: Resolver): InspectionResult {
     if (!wasmModule) throw new Error("WASM not initialized");
     const resultStr = wasmModule.inspect_json(source, name, resolve);

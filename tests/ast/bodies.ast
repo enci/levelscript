@@ -1,0 +1,121 @@
+(rule fill_geo
+  (body all)
+  (pair
+    (match
+      (pattern algo
+        (row W)))
+    (write
+      (pattern level
+        (row wall))))
+  (pair
+    (match
+      (pattern algo
+        (row F)))
+    (write
+      (pattern level
+        (row floor))))
+  (pair
+    (match
+      (pattern algo
+        (row S)))
+    (write
+      (pattern level
+        (row floor)))))
+(rule commas
+  (body all)
+  (pair
+    (match
+      (pattern g
+        (row a)))
+    (write
+      (pattern g
+        (row b))))
+  (pair
+    (match
+      (pattern g
+        (row b)))
+    (write
+      (pattern g
+        (row c)))))
+(rule one_sub
+  (body all)
+  (pair
+    (match
+      (pattern g
+        (row .)))
+    (write
+      (pattern g
+        (row x)))))
+(rule spanning
+  (body all)
+  (pair
+    (match
+      (pattern g
+        (row a))
+      (pattern h
+        (row b)))
+    (write
+      (pattern g
+        (row c))))
+  (pair
+    (match
+      (pattern g
+        (row d))
+      (pattern h
+        (row .)))
+    (write
+      (pattern h
+        (row e)))))
+(rule climb
+  (body ordered)
+  (pair
+    (match
+      (pattern g
+        (row a)))
+    (write
+      (pattern g
+        (row b))))
+  (pair
+    (match
+      (pattern g
+        (row .)))
+    (write
+      (pattern g
+        (row a)))))
+(rule a
+  (symmetry horizontal)
+  (pair
+    (match
+      (pattern g
+        (row .)))
+    (write
+      (pattern g
+        (row x)))))
+(rule b
+  (rotation 90 180 270)
+  (pair
+    (match
+      (pattern g
+        (row .)))
+    (write
+      (pattern g
+        (row x)))))
+(rule c
+  (symmetry all)
+  (rotation 180)
+  (pair
+    (match
+      (pattern g
+        (row .)))
+    (write
+      (pattern g
+        (row x)))))
+(rule d
+  (rotation 90 270)
+  (pair
+    (match
+      (pattern g
+        (row .)))
+    (write
+      (pattern g
+        (row x)))))

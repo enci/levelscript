@@ -1,0 +1,40 @@
+// Pattern cells are expressions: '*', '.', integers, variables, bare masks
+// (unions and complements, whitespace-free), and parenthesized expressions.
+rule kinds { t[* . 3 wall] => t[* . 3 wall] }
+
+rule rows {
+    g[
+        * * *
+        * wall *
+        * * * ]
+    =>
+    g[* * *, * a *, * * *]
+}
+
+rule masks { g[wall|door !wall] => g[floor floor] }
+rule empties { g[!. .|door wall|. . !wall] => g[* * * * *] }
+
+rule variables { g[?a (g != ?a) (?a)] => g[?a * *] }
+rule variable_where { g[?a] where[ (?a > 3) ] => g[ (?a | wall) ] }
+
+rule precedence { g[ (tiles + 2 * 3 > 7) ] => g[ (if(d > 1, wall, floor)) ] }
+rule calls { n[(min(x, y)) *, * (max(1, 2))] => n[1 1, 1 1] }
+
+rule edge {
+    level[floor]
+    where[ (x == 0) ]
+    =>
+    level[wall]
+}
+rule where_alone { where[(x == 0), (y == 0)] => g[a] }
+
+// a comma ends a row, and a comma followed by a newline is one break
+rule comma_rows { algo[* * *, * S W, * * *] => g[a, b, c] }
+rule comma_newline {
+ g[a b,
+   c d,
+   e f]
+ =>
+ g[* *
+ * *
+ * *] }

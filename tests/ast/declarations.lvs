@@ -1,0 +1,17 @@
+// Declarations: uses head the file; tagsets with values and named unions;
+// one layers block; input and derived params.
+use "schema.lvs"
+use "lib/rules.lvs"
+
+tag geo { wall, door, floor, blocker = wall | door }
+
+layers {
+    level: grid of geo
+    tiles: grid of number
+}
+
+params {
+    difficulty: number = 3
+    rooms: number = random(2, 5)
+    budget = difficulty * 10
+}
