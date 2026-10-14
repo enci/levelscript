@@ -131,6 +131,19 @@ struct rule_pair {
     write_term           rhs;
 };
 
+// Every pattern of a write tree, in source order.
+template <class F>
+void for_each_pattern(write_term const& t, F&& f) {
+    if (t.what == write_term::kind::leaf) f(t.pat);
+    for (auto const& it : t.items) for_each_pattern(it, f);
+}
+// Every pattern of a sub-rule, in source order: the match side, then the writes.
+template <class F>
+void for_each_pattern(rule_pair const& pr, F&& f) {
+    for (auto const& p : pr.lhs) f(p);
+    for_each_pattern(pr.rhs, f);
+}
+
 enum class body_combinator { none, all, any, ordered };
 
 struct rule_decl {

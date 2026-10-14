@@ -102,15 +102,6 @@ void emit_pattern_tokens(std::string& o, comma_list& cl,
     }
 }
 
-void emit_write_term_tokens(std::string& o, comma_list& cl,
-                            compiled const& prog, write_term const& t) {
-    if (t.what == write_term::kind::leaf) {
-        emit_pattern_tokens(o, cl, prog, t.pat);
-        return;
-    }
-    for (auto const& it : t.items) emit_write_term_tokens(o, cl, prog, it);
-}
-
 // Collect grid names and rule names as hover/definition references
 void emit_pattern_refs(std::string& o, comma_list& cl, pattern const& p) {
     if (p.is_where) return;
@@ -121,14 +112,6 @@ void emit_pattern_refs(std::string& o, comma_list& cl, pattern const& p) {
     o += "}";
 }
 
-void emit_write_term_refs(std::string& o, comma_list& cl, write_term const& t) {
-    if (t.what == write_term::kind::leaf) {
-        emit_pattern_refs(o, cl, t.pat);
-        return;
-    }
-    for (auto const& it : t.items) emit_write_term_refs(o, cl, it);
-}
-
 // `,"loc":{...}` of a declared name, with its module's canonical name, so an
 // editor can jump into the file that declares it.
 void emit_loc(std::string& o, module_closure const& mods, ident const& name) {
@@ -137,16 +120,19 @@ void emit_loc(std::string& o, module_closure const& mods, ident const& name) {
     o += "}";
 }
 
-// Every rule of the root module: declared ones, then those written inline in
-// its sequences' statements.
+// Every pattern of the root module's rules: declared rules, then those written
+// inline in its sequences' statements.
 template <class F>
-void for_each_root_rule(ast_file const& ast, int root, F&& f) {
+void for_each_root_pattern(ast_file const& ast, int root, F&& f) {
+    auto rule = [&](rule_decl const& r) {
+        for (auto const& pr : r.pairs) for_each_pattern(pr, f);
+    };
     for (auto const& r : ast.rules)
-        if (r.loc.mod == root) f(r);
+        if (r.loc.mod == root) rule(r);
     for (auto const& sq : ast.sequences)
         if (sq.loc.mod == root)
             for (auto const& s : sq.stmts)
-                if (s.inline_rule) f(*s.inline_rule);
+                if (s.inline_rule) rule(*s.inline_rule);
 }
 
 }  // namespace
@@ -184,12 +170,8 @@ std::string inspect_json(std::string const& source, std::string const& name,
     o += ",\"tokens\":[";
     {
         comma_list cl{o};
-        for_each_root_rule(*ast, mods.root, [&](rule_decl const& r) {
-            for (auto const& pr : r.pairs) {
-                for (auto const& lp : pr.lhs)
-                    emit_pattern_tokens(o, cl, prog, lp);
-                emit_write_term_tokens(o, cl, prog, pr.rhs);
-            }
+        for_each_root_pattern(*ast, mods.root, [&](pattern const& p) {
+            emit_pattern_tokens(o, cl, prog, p);
         });
     }
     o += "]";
@@ -213,11 +195,8 @@ std::string inspect_json(std::string const& source, std::string const& name,
         for (auto const& sq : ast->sequences)
             if (in_root(sq.loc)) stmt_refs(sq.stmts);
         // Grid references in rule patterns, named and inline
-        for_each_root_rule(*ast, mods.root, [&](rule_decl const& r) {
-            for (auto const& pr : r.pairs) {
-                for (auto const& lp : pr.lhs) emit_pattern_refs(o, cl, lp);
-                emit_write_term_refs(o, cl, pr.rhs);
-            }
+        for_each_root_pattern(*ast, mods.root, [&](pattern const& p) {
+            emit_pattern_refs(o, cl, p);
         });
     }
     o += "]";
