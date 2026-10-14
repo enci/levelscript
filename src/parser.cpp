@@ -58,14 +58,32 @@ struct parser {
     // list_sep ::= ','  - optional between list items
     void list_sep()      { accept(token_type::comma); }
 
-    source_loc loc() const { return {peek().line, peek().col, mod}; }
-    // location of the token just consumed
-    source_loc prev_loc() const { return {toks[pos - 1].line, toks[pos - 1].col, mod}; }
+    source_loc span(token const& t) const { return {t.line, t.col, t.line, t.end_col, mod}; }
+    // the next token's location, where a construct starts
+    source_loc loc() const { return span(peek()); }
+    // the token just consumed, and it as a name
+    source_loc prev_loc() const { return span(toks[pos - 1]); }
+    ident prev_ident() const { return {toks[pos - 1].text, prev_loc()}; }
+
+    // End `l` at the token just consumed (no token consumed: `l` stays as is).
+    void close(source_loc& l) const {
+        if (pos == 0) return;
+        token const& t = toks[pos - 1];
+        if (t.line < l.line || (t.line == l.line && t.col < l.col)) return;
+        l.end_line = t.line;
+        l.end_col  = t.end_col;
+    }
+    // Closes a node's span on every return path of the function parsing it.
+    struct closing {
+        parser const& p;
+        source_loc&   l;
+        ~closing() { p.close(l); }
+    };
 
     // Two tokens touch (no whitespace between) — bare mask cells `a|b`, `!a`
     // are whitespace-free; a spaced `a | b` is not one cell.
     bool adjacent(token const& a, token const& b) const {
-        return a.line == b.line && a.col + (int)a.text.size() == b.col;
+        return a.line == b.line && a.end_col == b.col;
     }
 
     // ── expressions (C precedence, lowest to highest) ────────────────────────
@@ -76,10 +94,13 @@ struct parser {
         e->loc = loc();
         return e;
     }
-    expr_ptr make_binary(expr_kind k, expr_ptr a, expr_ptr b, source_loc l) {
+    // A binary node spans its operands.
+    expr_ptr make_binary(expr_kind k, expr_ptr a, expr_ptr b) {
         auto e = std::make_unique<expr>();
         e->kind = k;
-        e->loc = l;
+        e->loc = a->loc;
+        e->loc.end_line = b->loc.end_line;
+        e->loc.end_col  = b->loc.end_col;
         e->args.push_back(std::move(a));
         e->args.push_back(std::move(b));
         return e;
@@ -119,6 +140,7 @@ struct parser {
                         e->args.push_back(parse_expr());
                 }
                 expect(token_type::rparen, "')'");
+                close(e->loc);
             }
             return e;
         }
@@ -136,6 +158,7 @@ struct parser {
             e->kind = k;
             e->loc = l;
             e->args.push_back(parse_unary());
+            close(e->loc);
             return e;
         }
         return parse_primary();
@@ -168,8 +191,8 @@ struct parser {
             for (auto const& o : binary_ops)
                 if (at(o.tok)) { op = &o; break; }
             if (!op || op->prec < min_prec) return e;
-            source_loc l = loc(); eat();
-            e = make_binary(op->kind, std::move(e), parse_expr(op->prec + 1), l);
+            eat();
+            e = make_binary(op->kind, std::move(e), parse_expr(op->prec + 1));
         }
     }
 
@@ -180,15 +203,13 @@ struct parser {
         d.loc = loc();
         eat();   // 'tag'
         if (!expect(token_type::ident, "a tagset name")) return;
-        d.name = toks[pos - 1].text;
+        d.name = prev_ident();
         if (!expect(token_type::lbrace, "'{'")) return;
         while (!at(token_type::rbrace) && !at_end()) {
             if (!expect(token_type::ident, "a tag value name")) { eat_bad(); list_sep(); continue; }
-            source_loc name_loc = prev_loc();
-            std::string name = toks[pos - 1].text;
+            ident name = prev_ident();
             if (at(token_type::equals)) {   // named union: blocker = wall | door
                 tag_union u;
-                u.loc = name_loc;
                 u.name = std::move(name);
                 eat();   // '='
                 do {
@@ -197,11 +218,12 @@ struct parser {
                 } while (accept(token_type::pipe));
                 d.unions.push_back(std::move(u));
             } else {
-                d.values.push_back({name_loc, std::move(name)});
+                d.values.push_back(std::move(name));
             }
             list_sep();
         }
         expect(token_type::rbrace, "'}'");
+        close(d.loc);
         out.tags.push_back(std::move(d));
     }
 
@@ -209,14 +231,14 @@ struct parser {
         if (out.has_layers)
             error_at(peek(), "only one 'layers' block per module");
         out.layers.loc = loc();
+        closing closer{*this, out.layers.loc};
         out.has_layers = true;
         eat();   // 'layers'
         if (!expect(token_type::lbrace, "'{'")) return;
         while (!at(token_type::rbrace) && !at_end()) {
             layer_decl l;
             if (!expect(token_type::ident, "a grid name")) { eat_bad(); list_sep(); continue; }
-            l.loc = prev_loc();
-            l.name = toks[pos - 1].text;
+            l.name = prev_ident();
             if (!expect(token_type::colon, "':'"))         { list_sep(); continue; }
             if (!expect(token_type::kw_grid, "'grid'"))    { list_sep(); continue; }
             if (!expect(token_type::kw_of, "'of'"))        { list_sep(); continue; }
@@ -240,14 +262,13 @@ struct parser {
         if (!expect(token_type::lbrace, "'{'")) return;
         while (!at(token_type::rbrace) && !at_end()) {
             param_decl p;
-            p.loc = loc();
             if (!expect(token_type::ident, "a param name")) { eat_bad(); list_sep(); continue; }
-            p.name = toks[pos - 1].text;
+            p.name = prev_ident();
             if (accept(token_type::colon)) {   // input: name ':' 'number' '=' expr
                 if (!expect(token_type::kw_number, "'number'")) { list_sep(); continue; }
                 if (accept(token_type::equals))
                     p.value = parse_expr();
-                // a missing default is reported in sema, with p.loc
+                // a missing default is reported in sema, at the name
             } else {                           // derived: name '=' expr
                 p.is_derived = true;
                 if (!expect(token_type::equals, "':' or '='")) { list_sep(); continue; }
@@ -266,6 +287,7 @@ struct parser {
     bool parse_mask_atom(cell& c) {
         mask_atom a;
         a.loc = loc();
+        auto finish = [&] { close(a.loc); c.atoms.push_back(std::move(a)); };
         if (at(token_type::bang)) {
             token const& b = eat();
             a.negate = true;
@@ -277,7 +299,7 @@ struct parser {
         if (at(token_type::dot)) {
             eat();
             a.name = ".";
-            c.atoms.push_back(std::move(a));
+            finish();
             return true;
         }
         if (at(token_type::variable)) {
@@ -290,12 +312,13 @@ struct parser {
             return false;
         }
         a.name = eat().text;
-        c.atoms.push_back(std::move(a));
+        finish();
         return true;
     }
 
     bool parse_cell(cell& c) {
         c.loc = loc();
+        closing closer{*this, c.loc};
         if (accept(token_type::star)) { c.kind = cell_kind::any;   return true; }
         if (at(token_type::dot) && !(peek(1).is(token_type::pipe) && adjacent(peek(), peek(1)))) {
             eat();
@@ -342,13 +365,13 @@ struct parser {
 
     bool parse_pattern(pattern& p) {
         p.loc = loc();
+        closing closer{*this, p.loc};
         if (at(token_type::kw_where)) {   // where pseudo-layer
             p.is_where = true;
             eat();
         } else {
             if (!expect(token_type::ident, "a grid name")) return false;
-            p.grid_loc = prev_loc();
-            p.grid = toks[pos - 1].text;
+            p.grid = prev_ident();
         }
         if (!expect(token_type::lbracket, "'['")) return false;
         in_grid = true;    // newlines separate rows until ']'
@@ -491,6 +514,7 @@ struct parser {
 
     bool parse_write_term(write_term& t, bool weight_allowed) {
         t.loc = loc();
+        closing closer{*this, t.loc};
 
         // optional (weight=N) prefix — legal only as an { any } item
         if (at(token_type::lparen) && peek(1).is(token_type::kw_weight)) {
@@ -543,6 +567,7 @@ struct parser {
 
     bool parse_pair(rule_pair& pr) {
         pr.loc = loc();
+        closing closer{*this, pr.loc};
         if (!parse_match_side(pr.lhs)) return false;
         if (!expect(token_type::arrow, "'=>'")) return false;
         return parse_write_term(pr.rhs, /*weight_allowed=*/false);
@@ -553,13 +578,13 @@ struct parser {
         r.loc = loc();
         eat();   // 'rule'
         if (!expect(token_type::ident, "a rule name")) return;
-        r.name_loc = prev_loc();
-        r.name = toks[pos - 1].text;
+        r.name = prev_ident();
         if (parse_rule_rest(r)) out.rules.push_back(std::move(r));
     }
 
     // rule_attrs? '{' rule_body '}' - shared by named and inline rules
     bool parse_rule_rest(rule_decl& r) {
+        closing closer{*this, r.loc};
         if (accept(token_type::lparen)) parse_rule_attrs(r);
         if (!expect(token_type::lbrace, "'{'")) return false;
 
@@ -617,7 +642,6 @@ struct parser {
     // `n * 2%` is an error, `(n * 2)%` a percentage.
     void parse_count(program_stmt& s, bool percent_ok) {
         eat();   // '('
-        s.count_loc = loc();
         bool atom_percent =
             ((at(token_type::integer) || at(token_type::ident)) &&
              peek(1).is(token_type::percent)) ||
@@ -676,13 +700,12 @@ struct parser {
         if (at(token_type::lbrace) || at_rule_attrs()) {   // an inline rule
             auto r = std::make_unique<rule_decl>();
             r->loc = loc();
-            r->name_loc = r->loc;
+            r->name.loc = r->loc;
             if (parse_rule_rest(*r)) s.inline_rule = std::move(r);
             return;
         }
         if (expect(token_type::ident, "a rule or sequence name, or an inline rule '{ ... }'")) {
-            s.rule_name_loc = prev_loc();
-            s.rule_name = toks[pos - 1].text;
+            s.rule_name = prev_ident();
         }
     }
 
@@ -699,6 +722,7 @@ struct parser {
                 eat();   // '='
             }
             a.value = parse_expr();
+            close(a.loc);
             s.op_args.push_back(std::move(a));
             if (!accept(token_type::comma)) break;
         }
@@ -733,6 +757,7 @@ struct parser {
                     expect(token_type::rparen, "')'");
                 }
             }
+            close(s.loc);
             out.push_back(std::move(s));
         }
     }
@@ -746,6 +771,7 @@ struct parser {
                      "declarations of a file");
         if (!expect(token_type::string, "a module path in quotes, e.g. use \"schema.lvs\""))
             return;
+        close(l);
         out.uses.push_back({l, toks[pos - 1].text});
     }
 
@@ -755,16 +781,16 @@ struct parser {
         sq.loc = loc();
         eat();   // 'sequence'
         if (!expect(token_type::ident, "a sequence name")) return;
-        sq.name_loc = prev_loc();
-        sq.name = toks[pos - 1].text;
+        sq.name = prev_ident();
         if (at(token_type::lparen)) {
-            error_at(peek(), "expected '{' after sequence name '" + sq.name +
+            error_at(peek(), "expected '{' after sequence name '" + sq.name.text +
                      "'; sequences take no attributes");
             recover_to(token_type::rparen);
         }
         if (!expect(token_type::lbrace, "'{'")) return;
-        parse_statement_list(sq.stmts, sq.name);
+        parse_statement_list(sq.stmts, sq.name.text);
         expect(token_type::rbrace, "'}'");
+        close(sq.loc);
         out.sequences.push_back(std::move(sq));
     }
 

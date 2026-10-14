@@ -394,7 +394,7 @@ sequence main {
     auto const& s = ast.sequences.back().stmts;
     REQUIRE(s.size() == 7);
     REQUIRE(s[0].inline_rule);
-    CHECK(s[0].rule_name.empty());
+    CHECK(s[0].rule_name.text.empty());
     CHECK(s[0].inline_rule->pairs.size() == 1);
     CHECK(s[1].inline_rule->symmetry == "all");
     CHECK(!s[2].count);                                  // '(' IDENT '=' is attributes
@@ -641,4 +641,41 @@ TEST_CASE("parser: an unknown attribute is parsed whole — one diagnostic") {
         REQUIRE(diags.all.size() == 1);
         CHECK(diags.all[0].message.find("unknown rule attribute 'colour'") != std::string::npos);
     }
+}
+
+// A span as "line:col-end_line:end_col".
+static std::string span(source_loc const& l) {
+    return std::to_string(l.line) + ":" + std::to_string(l.col) + "-" +
+           std::to_string(l.end_line) + ":" + std::to_string(l.end_col);
+}
+
+TEST_CASE("parser: nodes span what they were parsed from") {
+    auto ast = parse_ok(
+        "rule fill {\n"                                // line 1
+        "    level[. !wall|door]\n"                     // line 2
+        "    =>\n"
+        "    level[(1 + x * 2) *]\n"                    // line 4
+        "}\n"
+        "sequence main {\n"                             // line 6
+        "    scatter(n + 1) fill when (n > 2)\n"        // line 7
+        "}\n");
+    auto const& r = ast.rules[0];
+    CHECK(span(r.loc) == "1:1-5:2");
+    CHECK(span(r.name.loc) == "1:6-1:10");
+    auto const& lhs = r.pairs[0].lhs[0];
+    CHECK(span(lhs.loc) == "2:5-2:24");
+    CHECK(span(lhs.grid.loc) == "2:5-2:10");
+    CHECK(span(lhs.cells[0][1].loc) == "2:13-2:23");          // the whole union
+    CHECK(span(lhs.cells[0][1].atoms[0].loc) == "2:13-2:18");  // '!' included
+    auto const& cell = r.pairs[0].rhs.pat.cells[0][0];
+    CHECK(span(cell.loc) == "4:11-4:22");                     // parentheses included
+    CHECK(span(cell.value->loc) == "4:12-4:21");              // the binary spans its operands
+    CHECK(span(cell.value->args[1]->loc) == "4:16-4:21");
+
+    auto const& s = ast.sequences[0].stmts[0];
+    CHECK(span(ast.sequences[0].loc) == "6:1-8:2");
+    CHECK(span(s.loc) == "7:5-7:37");                         // guard included
+    CHECK(span(s.count->loc) == "7:13-7:18");
+    CHECK(span(s.rule_name.loc) == "7:20-7:24");
+    CHECK(span(s.guard->loc) == "7:31-7:36");
 }

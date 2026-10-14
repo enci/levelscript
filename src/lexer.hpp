@@ -34,6 +34,7 @@ struct token {
     std::string text;
     long long   int_val{0};
     int         line{1}, col{1};
+    int         end_col{1};   // one past the token's last character (tokens are one line)
 
     bool is(token_type t) const { return type == t; }
 };

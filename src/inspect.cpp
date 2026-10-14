@@ -31,6 +31,13 @@ void js(std::string& o, std::string_view s) {
     o += '"';
 }
 
+// `"line":L,"col":C,"len":N` for a span on one line (len 0 otherwise).
+std::string span_json(source_loc const& l) {
+    int len = l.end_line == l.line ? l.end_col - l.col : 0;
+    return "\"line\":" + std::to_string(l.line) + ",\"col\":" + std::to_string(l.col) +
+           ",\"len\":" + std::to_string(len);
+}
+
 struct comma_list {
     std::string& o;
     bool first{true};
@@ -53,40 +60,34 @@ int union_slot(compiled const& prog, int tid, std::string const& name) {
 void emit_pattern_tokens(std::string& o, comma_list& cl,
                          compiled const& prog, pattern const& p) {
     if (p.is_where) return;
-    int gid = prog.layer_id(p.grid);
+    int gid = prog.layer_id(p.grid.text);
     if (gid < 0) return;
     int tid = prog.layers[gid].tag_id;   // -1: number grid
     for (auto const& row : p.cells) {
         for (auto const& c : row) {
             if (c.kind == cell_kind::any) {
                 cl.next();
-                o += "{\"line\":" + std::to_string(c.loc.line) +
-                     ",\"col\":" + std::to_string(c.loc.col) +
-                     ",\"len\":1,\"tag\":-1,\"value\":-1}";
+                o += "{" + span_json(c.loc) + ",\"tag\":-1,\"value\":-1}";
                 continue;
             }
             if (c.kind == cell_kind::empty) {
                 cl.next();
-                o += "{\"line\":" + std::to_string(c.loc.line) +
-                     ",\"col\":" + std::to_string(c.loc.col) +
-                     ",\"len\":1,\"tag\":-2,\"value\":-2}";
+                o += "{" + span_json(c.loc) + ",\"tag\":-2,\"value\":-2}";
                 continue;
             }
             if (c.kind == cell_kind::number) {
                 cl.next();
-                o += "{\"line\":" + std::to_string(c.loc.line) +
-                     ",\"col\":" + std::to_string(c.loc.col) +
-                     ",\"len\":" + std::to_string(std::to_string(c.number).size()) +
-                     ",\"tag\":-3,\"value\":" + std::to_string(c.number) + "}";
+                o += "{" + span_json(c.loc) + ",\"tag\":-3,\"value\":" +
+                     std::to_string(c.number) + "}";
                 continue;
             }
             if (c.kind != cell_kind::tag_mask) continue;
             for (auto const& a : c.atoms) {
+                source_loc at = a.loc;   // the name, after any '!'
+                if (a.negate) ++at.col;
                 if (a.name == ".") {   // '.' atom: painted like a lone '.'
                     cl.next();
-                    o += "{\"line\":" + std::to_string(a.loc.line) +
-                         ",\"col\":" + std::to_string(a.loc.col + (a.negate ? 1 : 0)) +
-                         ",\"len\":1,\"tag\":-2,\"value\":-2}";
+                    o += "{" + span_json(at) + ",\"tag\":-2,\"value\":-2}";
                     continue;
                 }
                 if (tid < 0) continue;
@@ -94,10 +95,7 @@ void emit_pattern_tokens(std::string& o, comma_list& cl,
                 if (vid < 0) vid = union_slot(prog, tid, a.name);
                 if (vid < 0) continue;   // unknown names stay unpainted
                 cl.next();
-                o += "{\"line\":" + std::to_string(a.loc.line) +
-                     ",\"col\":" + std::to_string(a.loc.col + (a.negate ? 1 : 0)) +
-                     ",\"len\":" + std::to_string(a.name.size()) +
-                     ",\"tag\":" + std::to_string(tid) +
+                o += "{" + span_json(at) + ",\"tag\":" + std::to_string(tid) +
                      ",\"value\":" + std::to_string(vid) + "}";
             }
         }
@@ -116,13 +114,10 @@ void emit_write_term_tokens(std::string& o, comma_list& cl,
 // Collect grid names and rule names as hover/definition references
 void emit_pattern_refs(std::string& o, comma_list& cl, pattern const& p) {
     if (p.is_where) return;
-    if (p.grid.empty()) return;
+    if (p.grid.text.empty()) return;
     cl.next();
-    o += "{\"line\":" + std::to_string(p.grid_loc.line) +
-         ",\"col\":" + std::to_string(p.grid_loc.col) +
-         ",\"len\":" + std::to_string(p.grid.size()) +
-         ",\"kind\":\"layer\",\"target\":";
-    js(o, p.grid);
+    o += "{" + span_json(p.grid.loc) + ",\"kind\":\"layer\",\"target\":";
+    js(o, p.grid.text);
     o += "}";
 }
 
@@ -134,13 +129,11 @@ void emit_write_term_refs(std::string& o, comma_list& cl, write_term const& t) {
     for (auto const& it : t.items) emit_write_term_refs(o, cl, it);
 }
 
-// `,"loc":{...}` with the declaring module's canonical name, so an
-// editor can jump into the file that declares a name.
-void emit_loc(std::string& o, module_closure const& mods, source_loc l, size_t len) {
-    o += ",\"loc\":{\"line\":" + std::to_string(l.line) +
-         ",\"col\":" + std::to_string(l.col) +
-         ",\"len\":" + std::to_string(len) + ",\"module\":";
-    js(o, mods.names[(size_t)l.mod]);
+// `,"loc":{...}` of a declared name, with its module's canonical name, so an
+// editor can jump into the file that declares it.
+void emit_loc(std::string& o, module_closure const& mods, ident const& name) {
+    o += ",\"loc\":{" + span_json(name.loc) + ",\"module\":";
+    js(o, mods.names[(size_t)name.loc.mod]);
     o += "}";
 }
 
@@ -208,14 +201,12 @@ std::string inspect_json(std::string const& source, std::string const& name,
         auto stmt_refs = [&](std::vector<program_stmt> const& stmts) {
             for (auto const& s : stmts) {
                 if (s.what != program_stmt::kind::apply || s.inline_rule) continue;
-                bool is_seq = !lookup(ast->rules, s.rule_name) &&   // rules win lookups
-                              lookup(ast->sequences, s.rule_name);
+                bool is_seq = !lookup(ast->rules, s.rule_name.text) &&   // rules win lookups
+                              lookup(ast->sequences, s.rule_name.text);
                 cl.next();
-                o += "{\"line\":" + std::to_string(s.rule_name_loc.line) +
-                     ",\"col\":" + std::to_string(s.rule_name_loc.col) +
-                     ",\"len\":" + std::to_string(s.rule_name.size()) +
+                o += "{" + span_json(s.rule_name.loc) +
                      ",\"kind\":\"" + (is_seq ? "sequence" : "rule") + "\",\"target\":";
-                js(o, s.rule_name);
+                js(o, s.rule_name.text);
                 o += "}";
             }
         };
@@ -244,7 +235,7 @@ std::string inspect_json(std::string const& source, std::string const& name,
             cl.next();
             o += "{\"name\":";
             js(o, prog.tag_names[ti]);
-            if (td) emit_loc(o, mods, td->loc, 0);
+            if (td) emit_loc(o, mods, td->name);
             o += ",\"values\":[";
             comma_list vl{o};
             for (int i = 0; i < (int)prog.tag_values[ti].size(); ++i) {
@@ -252,7 +243,7 @@ std::string inspect_json(std::string const& source, std::string const& name,
                 o += "{\"name\":";
                 js(o, prog.tag_values[ti][i]);
                 if (td && i < (int)td->values.size())
-                    emit_loc(o, mods, td->values[(size_t)i].loc, td->values[(size_t)i].name.size());
+                    emit_loc(o, mods, td->values[(size_t)i]);
                 o += "}";
             }
             o += "],\"unions\":[";
@@ -264,7 +255,7 @@ std::string inspect_json(std::string const& source, std::string const& name,
                     o += "{\"name\":";
                     js(o, uname);
                     if (auto au = td ? lookup(td->unions, uname) : nullptr)
-                        emit_loc(o, mods, au->loc, au->name.size());
+                        emit_loc(o, mods, au->name);
                     o += "}";
                 }
             o += "]}";
@@ -280,7 +271,7 @@ std::string inspect_json(std::string const& source, std::string const& name,
             o += ",\"type\":";
             js(o, l.tag_id >= 0 ? prog.tag_names[(size_t)l.tag_id] : "number");
             if (auto al = lookup(ast->layers.layers, l.name))   // first declaration wins
-                emit_loc(o, mods, al->loc, al->name.size());
+                emit_loc(o, mods, al->name);
             o += "}";
         }
     }
@@ -297,7 +288,7 @@ std::string inspect_json(std::string const& source, std::string const& name,
             o += ",\"derived\":";
             o += derived ? "true" : "false";
             if (auto ap = lookup(ast->params, prog.param_names[(size_t)pi]))
-                emit_loc(o, mods, ap->loc, ap->name.size());
+                emit_loc(o, mods, ap->name);
             o += "}";
         }
     }
@@ -307,8 +298,8 @@ std::string inspect_json(std::string const& source, std::string const& name,
         for (auto const& r : ast->rules) {
             cl.next();
             o += "{\"name\":";
-            js(o, r.name);
-            emit_loc(o, mods, r.name_loc, r.name.size());
+            js(o, r.name.text);
+            emit_loc(o, mods, r.name);
             o += "}";
         }
     }
@@ -318,8 +309,8 @@ std::string inspect_json(std::string const& source, std::string const& name,
         for (auto const& sq : ast->sequences) {
             cl.next();
             o += "{\"name\":";
-            js(o, sq.name);
-            emit_loc(o, mods, sq.name_loc, sq.name.size());
+            js(o, sq.name.text);
+            emit_loc(o, mods, sq.name);
             o += "}";
         }
     }
