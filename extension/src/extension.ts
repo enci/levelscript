@@ -62,8 +62,8 @@ function analyse(doc: vscode.TextDocument) {
     setCached(doc.uri.toString(), result);
 
     const vsDiags = result.diagnostics.map(d => {
-      // A diagnostic in another module of the closure (section 2.6) has no
-      // position in this file: pin it to the top, naming where it is.
+      // A diagnostic in another module of the closure has no position in this
+      // file: pin it to the top, naming where it is.
       if (d.module && d.module !== doc.uri.fsPath) {
         const severity = d.severity === 'error'
           ? vscode.DiagnosticSeverity.Error

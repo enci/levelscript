@@ -5,9 +5,9 @@
 #include <sstream>
 #include <string>
 
-// The tools' module resolver (spec section 2.6, Appendix A): a `use` path is relative
-// to the using module's directory, '/'-separated. The canonical name is the
-// lexically normalized path, so every spelling of one file is one module.
+// The tools' module resolver: a `use` path is relative to the using module's
+// directory, '/'-separated. The canonical name is the lexically normalized
+// path, so every spelling of one file is one module.
 
 inline std::string canonical_module_name(std::string const& path) {
     return std::filesystem::path(path).lexically_normal().generic_string();

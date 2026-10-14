@@ -1,4 +1,4 @@
-// Named sequences (spec section 6.10) — the conformance suite ls-tests-sequence.md,
+// Named sequences — the conformance suite ls-tests-sequence.md,
 // Q01–Q50, one TEST_CASE per Q. Harness conventions follow the suite:
 // iterations are read off stmt_stack(), "equivalent to program B" means
 // byte-identical levels for seeds 1–20 with default params.
@@ -87,8 +87,7 @@ int cell_sum(ls::level const& lv, char const* layer) {
     return s;
 }
 
-// The saturating counter of the suite's section 3: `inc` raises the 1x1 cell by 1
-// while it is below `cap`.
+// A saturating counter: `inc` raises the 1x1 cell by 1 while it is below `cap`.
 std::string counter(int cap) {
     return R"(
 layers { tiles: grid of number }
@@ -545,7 +544,7 @@ layers { g: grid of t }
 rule fill { g[.] => g[a] }
 )";
 
-TEST_CASE("sequence Q23-Q26: a sequence takes once or settle only (check 37)") {
+TEST_CASE("sequence Q23-Q26: a sequence takes once or settle only") {
     for (char const* stmt : {"everywhere s", "grow s", "grow(3) s", "scatter(3) s", "scatter(50%) s"}) {
         INFO(stmt);
         CHECK(compile_result(fill_decls + "sequence s { everywhere fill }\nsequence main { resize(2, 2)  " +
@@ -559,18 +558,18 @@ TEST_CASE("sequence Q23-Q26: a sequence takes once or settle only (check 37)") {
     }
 }
 
-TEST_CASE("sequence Q27: a direct cycle is rejected even when never applied (check 38)") {
+TEST_CASE("sequence Q27: a direct cycle is rejected even when never applied") {
     CHECK(compile_result("sequence s { once s }\nlayers { }\nsequence main { resize(1, 1) }\n")
           .has_error("sequence 's' applies itself"));
 }
 
-TEST_CASE("sequence Q28: an indirect cycle (check 38)") {
+TEST_CASE("sequence Q28: an indirect cycle") {
     CHECK(compile_result("sequence a { once b }\nsequence b { settle(2) a }\n"
                          "layers { }\nsequence main { resize(1, 1)  once a }\n")
           .has_error("sequence cycle: 'a' -> 'b' -> 'a'"));
 }
 
-TEST_CASE("sequence Q29-Q30: rules and sequences share one namespace (check 39)") {
+TEST_CASE("sequence Q29-Q30: rules and sequences share one namespace") {
     CHECK(compile_result(fill_decls + "sequence fill { resize(1, 1) }\nsequence main { resize(1, 1) }\n")
           .has_error("already declared as a rule on line 4"));
     CHECK(compile_result(fill_decls + "sequence s { everywhere fill }\nsequence s { once fill }\n"
@@ -578,7 +577,7 @@ TEST_CASE("sequence Q29-Q30: rules and sequences share one namespace (check 39)"
           .has_error("duplicate sequence 's'"));
 }
 
-TEST_CASE("sequence Q31: unknown name, with a suggestion across both kinds (check 8)") {
+TEST_CASE("sequence Q31: unknown name, with a suggestion across both kinds") {
     CHECK(compile_result(fill_decls + "sequence smooth { everywhere fill }\n"
                          "sequence main { resize(2, 2)  everywhere smoth }\n")
           .has_error("undeclared rule or sequence 'smoth'; did you mean sequence 'smooth'?"));
@@ -596,7 +595,7 @@ TEST_CASE("sequence Q33: a bare pattern pair is not a statement") {
     CHECK(r.diags.all.size() == 1);   // one diagnostic for the bad line
 }
 
-TEST_CASE("sequence: an inline rule behaves exactly as the named rule (0.8, section 6)") {
+TEST_CASE("sequence: an inline rule behaves exactly as the named rule") {
     std::string decls = "tag t { a, b, c }\nlayers { g: grid of t }\n";
     check_equivalent(
         decls + "rule fill { g[.] => g[a] }\n"
@@ -617,7 +616,7 @@ TEST_CASE("sequence Q34: sequences take no attributes") {
           .has_error("expected '{' after sequence name 's'; sequences take no attributes"));
 }
 
-TEST_CASE("sequence Q35: rule-level checks still apply inside a body (check 21)") {
+TEST_CASE("sequence Q35: rule-level checks still apply inside a body") {
     CHECK(compile_result(fill_decls + "sequence s { scatter(1 > 0) fill }\n"
                          "sequence main { resize(1, 1)  once s }\n")
           .has_error("a count must be a number (sequence 's')"));
@@ -626,7 +625,7 @@ TEST_CASE("sequence Q35: rule-level checks still apply inside a body (check 21)"
 // ── 6. Dimension changes are not checked at compile time ────────────────────
 
 TEST_CASE("sequence Q36-Q38: settle over a dimension-changing sequence compiles silently") {
-    // the arguments are expressions evaluated at run time (section 6.10)
+    // the arguments are expressions evaluated at run time
     compile_result r("layers { }\nsequence widen { upscale(2, 2) }\nsequence frame { pad(1) }\n"
                      "sequence main { resize(1, 1)  settle(2) widen  settle(2) frame }\n");
     CHECK(r.ok);

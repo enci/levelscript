@@ -1,4 +1,4 @@
-// Modules and entries (spec 0.7: section 2.6 modules, section 6 entries, Appendix A).
+// Modules and entries: loading a closure of modules, and running any sequence as the entry.
 // Every test resolves through an in-memory file map; a module's canonical
 // name is its path as written.
 #include "test_support.hpp"
@@ -31,7 +31,7 @@ bool has(std::string const& text, std::string const& needle) {
     return text.find(needle) != std::string::npos;
 }
 
-// The section 2.6 example: dungeon.lvs -> carve.lvs -> schema.lvs.
+// The spec's modules example: dungeon.lvs -> carve.lvs -> schema.lvs.
 files spec_example() {
     files f;
     f.src["schema.lvs"] = "tag algo { R, W }\nlayers { level: grid of algo }\n";
@@ -45,7 +45,7 @@ files spec_example() {
 
 }  // namespace
 
-// ── section 2.6: the closure, canonical order, visibility ────────────────────────────
+// ── the closure, canonical order, visibility ─────────────────────────────────
 
 TEST_CASE("modules: the spec example compiles and runs") {
     auto f = spec_example();
@@ -63,7 +63,7 @@ TEST_CASE("modules: the spec example compiles and runs") {
     CHECK(r == 1);
 }
 
-TEST_CASE("modules: a use is not re-exported (D3)") {
+TEST_CASE("modules: a use is not re-exported") {
     auto f = spec_example();
     // dungeon.lvs writes `level`, declared in schema.lvs, which it does not use
     f.src["dungeon.lvs"] =
@@ -79,7 +79,7 @@ TEST_CASE("modules: a use is not re-exported (D3)") {
     CHECK(static_cast<bool>(f.compile("dungeon.lvs")));
 }
 
-TEST_CASE("modules: every kind of name goes through visibility (check 8)") {
+TEST_CASE("modules: every kind of name goes through visibility") {
     files f;
     f.src["lib.lvs"] =
         "tag t { a }\nlayers { g: grid of t }\nparams { k: number = 2 }\n"
@@ -157,7 +157,7 @@ TEST_CASE("modules: params evaluate in canonical order across modules") {
               b.generate(b.sequence("main"), seed)["n"].at(0, 0));
 }
 
-TEST_CASE("modules: a path predicate considers only the grids its module sees (6.6)") {
+TEST_CASE("modules: a path predicate considers only the grids its module sees") {
     files f;
     f.src["a.lvs"] = "tag ta { v }\nlayers { ga: grid of ta }\n";
     f.src["b.lvs"] = "tag tb { v }\nlayers { gb: grid of tb }\n";
@@ -172,9 +172,9 @@ TEST_CASE("modules: a path predicate considers only the grids its module sees (6
     CHECK(has(f.compile("root.lvs").error(), "is ambiguous"));
 }
 
-// ── section 7.3, checks 9, 39-43 ──────────────────────────────────────────────────────
+// ── module errors ────────────────────────────────────────────────────────────
 
-TEST_CASE("modules: an unresolved use is check 9") {
+TEST_CASE("modules: an unresolved use is an error") {
     files f;
     f.src["root.lvs"] = "use \"missing.lvs\"\nsequence main { }\n";
     auto gen = f.compile("root.lvs");
@@ -185,7 +185,7 @@ TEST_CASE("modules: an unresolved use is check 9") {
     CHECK(bare.modules() == std::vector<std::string>{"root.lvs"});   // resolved so far
 }
 
-TEST_CASE("modules: use cycles are check 40") {
+TEST_CASE("modules: use cycles are an error") {
     files f;
     f.src["self.lvs"] = "use \"self.lvs\"\n";
     CHECK(has(f.compile("self.lvs").error(), "module cycle: 'self.lvs' -> 'self.lvs'"));
@@ -198,7 +198,7 @@ TEST_CASE("modules: use cycles are check 40") {
     CHECK(gen.modules() == std::vector<std::string>{"c.lvs", "b.lvs", "a.lvs"});
 }
 
-TEST_CASE("modules: using one module twice is check 41") {
+TEST_CASE("modules: using one module twice is an error") {
     files f;
     f.src["lib.lvs"] = "tag t { a }\n";
     f.src["root.lvs"] = "use \"lib.lvs\"\nuse \"lib.lvs\"\n";
@@ -215,7 +215,7 @@ TEST_CASE("modules: using one module twice is check 41") {
     CHECK(has(gen.error(), "module 'lib.lvs' is already used"));
 }
 
-TEST_CASE("modules: names are unique across the closure (checks 39, 42)") {
+TEST_CASE("modules: names are unique across the closure") {
     files f;
     f.src["lib.lvs"] = "tag t { a }\nlayers { g: grid of t }\nparams { k: number = 1 }\n"
                       "rule r { g[.] => g[a] }\n";
@@ -230,7 +230,7 @@ TEST_CASE("modules: names are unique across the closure (checks 39, 42)") {
     CHECK(has(dup("sequence r { }\n"), "already declared as a rule"));
 }
 
-TEST_CASE("modules: one layers block per module (check 43)") {
+TEST_CASE("modules: one layers block per module") {
     CHECK(ts::compile_result("layers { }\nlayers { }\n").has_error("only one 'layers' block per module"));
 }
 
@@ -243,7 +243,7 @@ TEST_CASE("modules: diagnostics are labelled with the declaring module") {
     CHECK(!has(gen.error(), "root.lvs:1:"));
 }
 
-TEST_CASE("modules: a module compiles identically on its own (2.6)") {
+TEST_CASE("modules: a module compiles identically on its own") {
     auto f = spec_example();
     auto alone = f.compile("carve.lvs");   // a dependency, compiled as the root
     INFO(alone.error());
@@ -252,7 +252,7 @@ TEST_CASE("modules: a module compiles identically on its own (2.6)") {
     CHECK(alone.generate(alone.sequence("carve"), 1).width() == 16);
 }
 
-// ── section 6 entries ────────────────────────────────────────────────────────────────
+// ── entries ──────────────────────────────────────────────────────────────────
 
 static char const* two_entries = R"(
 layers { tiles: grid of number }
@@ -341,7 +341,7 @@ TEST_CASE("run: begin events are off by default") {
     CHECK(steps == 2);
 }
 
-TEST_CASE("modules: an inline rule resolves names in its sequence's module (0.8, section 6)") {
+TEST_CASE("modules: an inline rule resolves names in its sequence's module") {
     files f;
     f.src["schema.lvs"] = "tag t { a }\nlayers { g: grid of t }\n";
     f.src["walls.lvs"] = "use \"schema.lvs\"\nsequence fill { everywhere { g[.] => g[a] } }\n";

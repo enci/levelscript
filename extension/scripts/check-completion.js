@@ -71,12 +71,12 @@ const cases = [
     ['rule r { g[.] where[ (x == ▮', { kind: 'expr', grids: true, pos: true }],
     ['rule r { g[.] where[ ▮', { kind: 'none' }],
 
-    // modules (section 2.6)
+    // modules
     ['use "schema.lvs"\n▮', { kind: 'top' }],
     ['use "sche▮', { kind: 'none' }],                     // typing a path
     ['use ▮', { kind: 'none' }],
 
-    // sequences (section 6.10)
+    // sequences
     ['sequence ▮', { kind: 'none' }],
     ['sequence s(▮', { kind: 'none' }],
     ['sequence s {\n    ▮', { kind: 'statement', guard: false }],
@@ -100,7 +100,7 @@ const cases = [
     ['sequence main {\n    grow(k * 2) ▮', { kind: 'ruleName' }],
     ['sequence main {\n    scatter(50%) ▮', { kind: 'ruleName' }],
     ['sequence main {\n    scatter(▮', { kind: 'expr', grids: false, pos: false }],   // params only
-    // inline rules (section 6)
+    // inline rules
     ['sequence main {\n    everywhere {▮', { kind: 'ruleBody', start: true }],
     ['sequence main {\n    everywhere { g[F] => ▮', { kind: 'ruleBody', start: false }],
     ['sequence main {\n    once (▮', { kind: 'ruleAttr' }],

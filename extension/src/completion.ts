@@ -16,7 +16,7 @@ export type CompletionContext =
     | { kind: 'of' }                                    // layers { g: grid _ }
     | { kind: 'gridType' }                              // layers { g: grid of _ }
     | { kind: 'paramType' }                             // params { p: _ }
-    | { kind: 'expr'; grids: boolean; pos: boolean }    // expressions (section 5.8)
+    | { kind: 'expr'; grids: boolean; pos: boolean }    // expressions
     | { kind: 'ruleAttr' }                              // rule r(_)
     | { kind: 'attrValue'; attr: string }               // rule r(symmetry=_)
     | { kind: 'ruleBody'; start: boolean }              // a pattern may start here
@@ -28,8 +28,8 @@ export type CompletionContext =
     | { kind: 'opArg'; op: string; index: number; used: string[] }  // path(_)
     | { kind: 'opValue'; op: string; param: string };   // path(into=_)
 
-// Operation parameter schemas (spec section 6.0). The op names are checked
-// against the compiler's inspect `ops` list by scripts/check-completion.js.
+// Operation parameter schemas. The op names are checked against the compiler's
+// inspect `ops` list by scripts/check-completion.js.
 export type OpParamKind = 'int' | 'grid' | 'pred' | 'value' | 'expr' | 'enum';
 // `values`: the suggested words (an enum's whole set; an int's meaningful values)
 export interface OpParam { name: string; kind: OpParamKind; positional: boolean; required: boolean; values?: string[] }
@@ -66,7 +66,7 @@ interface Frame {
 
 const STRING = '<string>';   // token text for any string literal
 const OPERATORS = new Set(['+', '-', '*', '/', '==', '!=', '<', '<=', '>', '>=', '&&', '||', '|', '!']);
-// Modes (section 6). scatter always takes a count; grow and settle may.
+// Modes. scatter always takes a count; grow and settle may.
 const MODES = new Set(['once', 'scatter', 'everywhere', 'grow', 'settle']);
 const COUNTED = new Set(['scatter', 'grow', 'settle']);
 
@@ -91,7 +91,7 @@ export function completionContext(text: string, offset: number): CompletionConte
             continue;
         }
         if (/\s/.test(c)) { i++; continue; }
-        if (c === '"') {   // a `use` path (section 2.6): one token, no escapes
+        if (c === '"') {   // a `use` path: one token, no escapes
             let j = i + 1;
             while (j < text.length && text[j] !== '"' && text[j] !== '\n') j++;
             if (j >= offset || text[j] !== '"') return { kind: 'none' };   // typing a path
@@ -149,16 +149,16 @@ function openFrame(c: '{' | '[' | '(', stack: Frame[]): Frame {
             const kw = decl[0]?.t;
             if (kw === 'tag') return frame('tag:' + (decl[1]?.t ?? ''));
             if (kw === 'layers' || kw === 'params') return frame(kw);
-            if (kw === 'sequence') return frame('statements');   // a statement_list (section 6)
+            if (kw === 'sequence') return frame('statements');   // a statement_list
             if (kw === 'rule') return frame('rule');
             return frame('other');
         }
-        // an inline rule's body: after a mode, a count, or its attributes (section 6)
+        // an inline rule's body: after a mode, a count, or its attributes
         if (parent.owner === 'statements' && last && (endsMode(last) || (last.t === ')' && last.owner === 'attrs')))
             return frame('rule');
         if (parent.owner === 'attrs' && prev === '=' && prev2 === 'rotation') return frame('set');
         // after '=>' (and inside a write block) a combinator block; otherwise
-        // braces only group a match side (section 5.2)
+        // braces only group a match side
         if (parent.owner === 'combinator' || (parent.owner === 'rule' && prev === '=>'))
             return frame('combinator');
         if (parent.owner === 'rule') return frame('group');

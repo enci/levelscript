@@ -82,7 +82,7 @@ void emit_pattern_tokens(std::string& o, comma_list& cl,
             }
             if (c.kind != cell_kind::tag_mask) continue;
             for (auto const& a : c.atoms) {
-                if (a.name == ".") {   // '.' atom (0.9.1): painted like a lone '.'
+                if (a.name == ".") {   // '.' atom: painted like a lone '.'
                     cl.next();
                     o += "{\"line\":" + std::to_string(a.loc.line) +
                          ",\"col\":" + std::to_string(a.loc.col + (a.negate ? 1 : 0)) +
@@ -134,7 +134,7 @@ void emit_write_term_refs(std::string& o, comma_list& cl, write_term const& t) {
     for (auto const& it : t.items) emit_write_term_refs(o, cl, it);
 }
 
-// `,"loc":{...}` with the declaring module's canonical name (section 2.6), so an
+// `,"loc":{...}` with the declaring module's canonical name, so an
 // editor can jump into the file that declares a name.
 void emit_loc(std::string& o, module_closure const& mods, source_loc l, size_t len) {
     o += ",\"loc\":{\"line\":" + std::to_string(l.line) +
@@ -145,7 +145,7 @@ void emit_loc(std::string& o, module_closure const& mods, source_loc l, size_t l
 }
 
 // Every rule of the root module: declared ones, then those written inline in
-// its sequences' statements (section 6).
+// its sequences' statements.
 template <class F>
 void for_each_root_rule(ast_file const& ast, int root, F&& f) {
     for (auto const& r : ast.rules)

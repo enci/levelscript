@@ -8,11 +8,11 @@ namespace ls {
 
 namespace {
 
-// ── pattern transforms (spec section 5.6, section 10.3) ────────────────────────────────────
+// ── pattern transforms ───────────────────────────────────────────────────────
 //
 // Applied at compile time to expand symmetry/rotation variants. The both-axis
 // flip IS the 180° rotation, so flip_both doubles as rot180; the per-sub-rule
-// dedup below collapses the coincidence (v0.6.2 semantics).
+// dedup below collapses the coincidence.
 
 enum class transform { identity, flip_h, flip_v, flip_both, rot90, rot270 };
 
@@ -38,8 +38,8 @@ compiled_pattern transform_pattern(transform k, compiled_pattern const& p) {
     return out;
 }
 
-// Split a match-side pattern's cells into the matcher's two phases (section
-// 5.11), in the variant's row-major order.
+// Split a match-side pattern's cells into the matcher's two phases, in the
+// variant's row-major order.
 void index_probes(compiled_pattern& p) {
     p.bare.clear();
     p.bare_ne.clear();
@@ -118,7 +118,7 @@ bool write_terms_equal(compiled_write_term const& a, compiled_write_term const& 
     return true;
 }
 
-// Variant dedup key (spec section 5.6.2): two variants are duplicates iff both the
+// Variant dedup key: two variants are duplicates iff both the
 // match side and the write tree are structurally equal. A same-LHS variant
 // with different writes survives as its own candidate.
 bool pairs_equal(compiled_pair const& a, compiled_pair const& b) {
@@ -128,7 +128,7 @@ bool pairs_equal(compiled_pair const& a, compiled_pair const& b) {
     return write_terms_equal(a.rhs, b.rhs);
 }
 
-// Expression value kinds (section 5.8).
+// The kinds of value an expression can have.
 enum class val_type { num, mask, boolean };
 
 // ── name tables ───────────────────────────────────────────────────────────────
@@ -149,9 +149,10 @@ std::string allowed_keys(Table const& table) {
     return out;
 }
 
-// Rule attributes (section 5.6). symmetry=all is four variants: identity + H +
+// Rule attributes: the variants each `symmetry` value adds, and each
+// `rotation` angle's transform. symmetry=all is four variants: identity + H +
 // V + both-axis; the both-axis flip IS the 180° rotation, and the
-// per-sub-rule dedup collapses the coincidence (section 5.6.1, v0.6.2).
+// per-sub-rule dedup collapses the coincidence.
 using mirror = compiled_pair::mirror;
 struct symmetry_row {
     char const* name;
@@ -169,7 +170,7 @@ static const rotation_row rotations[] = {
     {90, transform::rot90}, {180, transform::flip_both}, {270, transform::rot270},
 };
 
-// The unary and binary operators (section 5.8): operand and result types. A
+// The unary and binary operators, with their operand and result types. A
 // `same_kind` operator takes two numbers or two tag values.
 struct operator_row {
     expr_kind   name;
@@ -202,18 +203,19 @@ static const operator_row operators[] = {
      "'|' (tag union) requires tag-valued operands"},
 };
 
-// The `mirror` operation's axis (section 6.4): 1 = horizontal.
+// The `mirror` operation's axis: 1 = horizontal.
 struct axis_row { char const* name; int w; };
 static const axis_row mirror_axes[] = {{"horizontal", 1}, {"vertical", 0}};
 
 // Identifier scope for the position being compiled. Cell/where exprs are
-// permissive; `when` guards and param exprs are restricted (section 4.2/section 6).
+// permissive; statement exprs and param exprs are restricted.
 struct scope {
     bool allow_grids{true};
     bool allow_pos{true};      // x / y / width / height
     int  param_limit{-1};      // -1 = any param; else only ids < limit
 };
-// Statement scope (section 6): guards, counts, `int` arguments - params only.
+// Statement scope (guards, counts, `int` arguments): params only - a statement
+// has no cell to read grids or positions from.
 constexpr scope stmt_scope{false, false, -1};
 
 struct analyzer {
@@ -228,14 +230,14 @@ struct analyzer {
 
     scope scope_{};
 
-    // Pattern variables of the pair being compiled (section 5.11); null outside
-    // a pattern pair, where any variable is check 46. A slot's type is the
+    // Pattern variables (`?name`) of the pair being compiled; null outside
+    // a pattern pair, where using one is an error. A slot's type is the
     // binding cells' grid type: a tag id, or -1 for number.
     struct pair_vars {
         struct var {
             std::string name;          // '?name'
             int         type{-1};
-            bool        bound{false};  // has a binding cell (check 44)
+            bool        bound{false};  // has a binding cell (a bare match-side cell)
             bool        reported{false};
         };
         std::vector<var> vars;
@@ -262,7 +264,7 @@ struct analyzer {
     }
 
     // A use of `name` in an expression or a write: its slot, or -1 after
-    // reporting it (check 44, check 46).
+    // reporting it (outside a pattern pair, or never bound).
     int use_variable(std::string const& name, source_loc loc) {
         if (!vars_) {
             error(loc, "pattern variable '" + name + "' outside a pattern; variables "
@@ -293,8 +295,8 @@ struct analyzer {
         diags.warning(label(loc), loc.line, loc.col, std::move(msg));
     }
 
-    // section 2.6 visibility: a module sees itself and the modules it uses directly.
-    // A name declared in the closure but not seen is check 8, reported with
+    // Visibility: a module sees itself and the modules it uses directly.
+    // A name declared in the closure but not seen is an error, reported with
     // its declaring module so the fix is in the message.
     bool sees(int from, int decl) const { return mods.sees[(size_t)from][(size_t)decl] != 0; }
     void require_visible(source_loc at, char const* kind, std::string const& name, int decl) {
@@ -303,7 +305,7 @@ struct analyzer {
               "module '" + mods.names[(size_t)decl] + "', which this module does not use");
     }
 
-    // ── expressions (section 5.8) ───────────────────────────────────────────────────
+    // ── expressions ──────────────────────────────────────────────────────────
 
     int add_expr(compiled_expr e) {
         out.exprs.push_back(e);
@@ -351,7 +353,7 @@ struct analyzer {
         {"random", ce_kind::random_, 2},
     };
 
-    // Resolve a bare identifier (section 5.8): x/y/width/height → param → tag
+    // Resolve a bare identifier, first match wins: x/y/width/height → param → tag
     // value or union of the enclosing cell's tagset → grid → a tag value or
     // union of the one tagset that declares it.
     int compile_ident(expr const& e, int ctx_tag, val_type& t) {
@@ -464,7 +466,7 @@ struct analyzer {
             return typed_empty(val_type::num);
         case expr_kind::ident:
             return compile_ident(e, ctx_tag, t);
-        case expr_kind::variable: {   // section 5.11
+        case expr_kind::variable: {   // `?name`: what its binding cell matched
             int s = use_variable(e.ident, e.loc);
             if (s < 0) {   // reported; type it as wanted so nothing cascades
                 t = hint == (int)val_type::mask ? val_type::mask : val_type::num;
@@ -521,10 +523,10 @@ struct analyzer {
         return add_expr({op->code, 0, -1, c[0], c[1], -1});
     }
 
-    // One collision discipline for every named declaration (the MGSL retro's
-    // check_name): reserved position idents are caught here with one message
-    // shape. Built-in names are not reserved (section 5.10): a call is `IDENT '('`,
-    // and tag values, grids, and params are never called.
+    // One collision discipline for every named declaration: reserved position
+    // idents are caught here with one message shape. Built-in names are not
+    // reserved: a call is `IDENT '('`, and tag values, grids, and params are
+    // never called.
     void check_name(source_loc loc, std::string const& kind, std::string const& name) {
         if (is_reserved_ident(name))
             error(loc, kind + " '" + name + "' collides with a reserved "
@@ -539,7 +541,7 @@ struct analyzer {
                 error(t.loc, "duplicate tag '" + t.name + "'");
             if (t.values.empty() && t.unions.empty())
                 error(t.loc, "tagset '" + t.name + "' has no values");
-            if ((int)t.values.size() > 30)   // section 3: bits 1..30; 0 = empty, 31 reserved
+            if ((int)t.values.size() > 30)   // bits 1..30; 0 = empty, 31 reserved
                 error(t.loc, "tagset '" + t.name + "' has " +
                       std::to_string(t.values.size()) + " values; the maximum is 30");
             std::vector<std::string> vals;
@@ -553,7 +555,7 @@ struct analyzer {
             out.tag_values.push_back(std::move(vals));
             tag_mod.push_back(t.loc.mod);
 
-            // Named unions (section 3): resolve in declaration order; a member is a
+            // Named unions: resolve in declaration order; a member is a
             // value or an earlier union of this tagset; a union shares the
             // value namespace and consumes no bit.
             int tid = (int)out.tag_names.size() - 1;
@@ -578,7 +580,7 @@ struct analyzer {
 
         for (auto const& l : ast.layers.layers) {
             check_name(l.loc, "grid", l.name);
-            if (out.layer_id(l.name) >= 0) {   // section 7.3, check 42, closure-wide
+            if (out.layer_id(l.name) >= 0) {   // across every module in the closure
                 error(l.loc, "duplicate grid '" + l.name + "'");
                 continue;
             }
@@ -603,7 +605,7 @@ struct analyzer {
                 error(p.loc, "duplicate param '" + p.name + "'");
                 continue;
             }
-            // section 7.3, check 27: every input param must carry a default.
+            // Every input param must carry a default.
             if (!p.is_derived && !p.value)
                 error(p.loc, "input param '" + p.name +
                       "' must have a default, e.g. '" + p.name + ": number = 0'");
@@ -612,7 +614,7 @@ struct analyzer {
         }
     }
 
-    // Param startup expressions (section 4.2): derived params and input defaults share
+    // Param startup expressions: derived params and input defaults share
     // one discipline — earlier params only, no grids, no position/dimensions.
     void compile_params() {
         for (int i = 0; i < (int)ast.params.size(); ++i) {
@@ -628,7 +630,8 @@ struct analyzer {
     // ── rules ────────────────────────────────────────────────────────────────
 
     // Compile one pattern; `exp_rows/exp_cols` enforce the shape constraint
-    // (spec section 5.4, recursive over the write tree) — 0 means "sets the reference".
+    // (every pattern of a pair has one shape, recursively over the write tree) —
+    // 0 means "sets the reference".
     compiled_pattern compile_pattern(pattern const& p, int exp_rows, int exp_cols,
                                      bool is_rhs) {
         compiled_pattern cp;
@@ -636,7 +639,7 @@ struct analyzer {
         if (p.is_where) {
             cp.grid_id  = where_grid;
             cp.is_where = true;
-            if (is_rhs)   // section 7.3, check 11
+            if (is_rhs)
                 error(p.loc, "'where' is a match-side pseudo-layer; it cannot "
                       "appear on the write side");
         } else {
@@ -681,12 +684,12 @@ struct analyzer {
                                bool is_where, bool is_rhs) {
         compiled_cell cc;
 
-        if (is_where) {   // where cells are parenthesized booleans or '*' (section 5.9)
+        if (is_where) {   // where cells are parenthesized booleans or '*'
             if (in.kind == cell_kind::any) {   // no condition
                 cc.what = compiled_cell::kind::wildcard;
                 return cc;
             }
-            if (in.kind == cell_kind::variable) {   // check 46
+            if (in.kind == cell_kind::variable) {
                 error(in.loc, "a 'where' cell cannot be a bare pattern variable; "
                       "'where' cells are boolean expressions, e.g. (" + in.variable + " > 0)");
                 cc.what = compiled_cell::kind::expr;
@@ -720,9 +723,9 @@ struct analyzer {
         case cell_kind::tag_mask: {
             bool has_empty = false;
             for (auto const& a : in.atoms) has_empty |= a.name == ".";
-            if (is_number) {   // only '.' and '!.' (section 4.1, check 47)
+            if (is_number) {   // a number cell pattern is only '.' or '!.'
                 if (in.atoms.size() == 1 && in.atoms[0].name == "." && in.atoms[0].negate) {
-                    if (is_rhs)   // check 15
+                    if (is_rhs)
                         error(in.loc, "'!.' is not allowed on the write side");
                     cc.val = num_empty;
                     cc.ne = true;
@@ -734,7 +737,7 @@ struct analyzer {
                 }
                 break;
             }
-            if (is_rhs && has_empty && in.atoms.size() > 1)   // check 47
+            if (is_rhs && has_empty && in.atoms.size() > 1)
                 error(in.loc, "'.' cannot be written in a union: a cell holds empty or "
                       "values, never both");
             int64_t full = 0;
@@ -748,7 +751,7 @@ struct analyzer {
                     continue;
                 }
                 if (a.negate) {
-                    if (is_rhs)   // section 7.3, check 15: complement is match-side only
+                    if (is_rhs)   // complement is match-side only
                         error(a.loc, "tag complement '!" + a.name +
                               "' is not allowed on the write side");
                     mask |= full & ~m;
@@ -759,11 +762,11 @@ struct analyzer {
             cc.val = mask;
             break;
         }
-        case cell_kind::variable: {   // section 5.11; bound and typed by bind_variables
+        case cell_kind::variable: {   // bound and typed by bind_variables
             int s = is_rhs ? use_variable(in.variable, in.loc) : vars_->slot(in.variable);
             if (s < 0) { cc.what = compiled_cell::kind::wildcard; break; }
             int type = vars_->vars[(size_t)s].type;
-            if (is_rhs && type != tag)   // check 45
+            if (is_rhs && type != tag)
                 error(in.loc, "pattern variable '" + in.variable + "' holds a " +
                       type_name(type) + " value but is written into a " +
                       type_name(tag) + " grid");
@@ -802,7 +805,7 @@ struct analyzer {
     }
 
     // Within one { all } write block, two items may not write the same grid at
-    // the same cell — a write-write ambiguity (spec section 7.3, check 31).
+    // the same cell — a write-write ambiguity.
     void check_all_no_overlap(compiled_write_term const& all_node, source_loc loc) {
         auto key = [](int g, int r, int c) {
             return ((int64_t)g << 40) | ((int64_t)r << 20) | (int64_t)c;
@@ -832,11 +835,11 @@ struct analyzer {
     }
 
     // Every bare variable cell of a real-grid match-side pattern binds; all of
-    // one variable's binding cells must share a grid type (check 45). Runs
-    // before any cell compiles, so uses are order-free (section 5.11).
+    // one variable's binding cells must share a grid type. Runs before any
+    // cell compiles, so a variable may be used before its binding cell.
     void bind_variables(rule_pair const& pr, pair_vars& pv) {
         for (auto const& p : pr.lhs) {
-            if (p.is_where) continue;   // a bare variable there is check 46
+            if (p.is_where) continue;   // a bare variable there is an error, reported by its cell
             int gid = out.layer_id(p.grid);
             if (gid < 0) continue;      // reported by compile_pattern
             int type = out.layers[gid].tag_id;
@@ -883,7 +886,7 @@ struct analyzer {
 
     // One rule's attributes and body, expanded into its variants.
     compiled_rule compile_rule(rule_decl const& r) {
-        // attributes (spec section 7.3, checks 7/18); an invalid one adds nothing
+        // attributes; an invalid one is reported and adds no variants
         auto sym = lookup(symmetries, r.symmetry);
         if (!sym) invalid(r.loc, "symmetry", r.symmetry, symmetries);
         std::vector<std::pair<transform, int16_t>> rots = {{transform::identity, 0}};
@@ -897,8 +900,7 @@ struct analyzer {
         compiled_rule cr;
         cr.body = r.body;
         // Expand each sub-rule into its variants; dedup by (match, write)
-        // equality, scoped per sub-rule so same-LHS sub-rules both survive
-        // (section 5.6.2, section 10.2).
+        // equality, scoped per sub-rule so same-LHS sub-rules both survive.
         for (int bi = 0; bi < (int)r.pairs.size(); ++bi) {
             compiled_pair base = compile_base_pair(r.pairs[bi]);
             base.sub_rule_idx = bi;
@@ -920,9 +922,8 @@ struct analyzer {
         return cr;
     }
 
-    // ── reductivity check (LevelScript addition; MGSL section 6.9 left this to the
-    //    author). A sub-rule *definitely* sustains the fixpoint when no write
-    //    that happens on every resolution ({ any } branches don't count)
+    // ── reductivity check. A sub-rule *definitely* sustains the fixpoint when
+    //    no write that happens on every resolution ({ any } branches don't count)
     //    overwrites one of its own LHS-constrained cells with a value that no
     //    longer matches — the applied anchor then re-matches forever, and
     //    `grow` without a count never terminates. Conservative: warns only
@@ -945,7 +946,7 @@ struct analyzer {
                         // computed matches are uncertain — never a guaranteed loop
                         if (req.what == compiled_cell::kind::expr) { invalidates = true; break; }
                         // A binding cell no write touches keeps its value, and so
-                        // its equality with the others (section 6.9).
+                        // its equality with the others.
                         for (auto const* wp : writes) {
                             if (wp->grid_id != lp.grid_id) continue;
                             auto const& w = wp->at(r, c);
@@ -973,9 +974,9 @@ struct analyzer {
         }
     }
 
-    // ── program (operation table, section 6.0) ──────────────────────────────────────
+    // ── program operations ───────────────────────────────────────────────────
 
-    // ── the operation table (section 6.0): a closed set resolved by name, exactly
+    // ── the operation table: a closed set resolved by name, exactly
     //    like expression built-ins. Adding an operation = a row here + an
     //    executor in the machine; no grammar or keyword change. ──────────────
 
@@ -1032,9 +1033,8 @@ struct analyzer {
     // ── per-kind argument compilers ──────────────────────────────────────────
 
     // A number argument. `int` arguments (resize w/h, upscale n/m, pad n,
-    // path connectivity) are
-    // statement-scope expressions, like a count (check 21); out-of-range
-    // values are handled at run time (section 6.0). `cost` is per cell.
+    // path connectivity) are statement-scope expressions, like a count;
+    // out-of-range values are handled at run time. `cost` is per cell.
     int op_num(op_arg const& a, char const* op, char const* pn, bool statement) {
         return compile_as(*a.value, val_type::num, a.loc,
                           "'" + std::string(pn) + "' of '" + op + "' must be a number",
@@ -1084,7 +1084,7 @@ struct analyzer {
     }
 
     // A `value` argument: an expression typed by the target grid, so a bare
-    // name resolves against its tagset first (section 6.0).
+    // name resolves against its tagset first.
     int op_value(op_arg const& a, char const* op, char const* pn, int into_grid) {
         int tid = out.layers[into_grid].tag_id;
         return compile_as(*a.value, tid < 0 ? val_type::num : val_type::mask, a.loc,
@@ -1094,7 +1094,7 @@ struct analyzer {
                           scope{}, tid);
     }
 
-    // ── argument binding + per-op compilation (section 7.3, check 32–35) ─────────────────
+    // ── argument binding + per-op compilation ────────────────────────────────
 
     bool compile_op_call(program_stmt const& s, compiled_op& op) {
         op_spec const* spec = lookup(op_table(), s.op_name);
@@ -1165,7 +1165,8 @@ struct analyzer {
         if (!ok) return false;
 
         op.kind = spec->kind;
-        // `int` arguments in written order (section 10.6), positional or named
+        // `int` arguments, positional or named, in written order: they evaluate
+        // (and draw any `random`) in that order
         for (auto const& a : s.op_args)
             for (int i = 0; i < (int)spec->params.size(); ++i)
                 if (bound[i] == &a && spec->params[i].kind == arg_kind::int_)
@@ -1207,11 +1208,10 @@ struct analyzer {
         return true;
     }
 
-    // ── statements (section 6): the program body and every sequence body ──────────
+    // ── statements: the program body and every sequence body ─────────────────
 
-    // A count (section 6): a statement-scope expression like a guard - params
-    // only, a number (check 21). Out-of-range values are clamped, with a
-    // warning, at run time.
+    // A count: a statement-scope expression like a guard - params only, and a
+    // number. Out-of-range values are clamped, with a warning, at run time.
     void compile_count(program_stmt const& s, compiled_stmt& cs, std::string const& ctx) {
         cs.count = compile_as(*s.count, val_type::num, s.count_loc,
                               "a count must be a number" + ctx, stmt_scope, -1,
@@ -1250,7 +1250,7 @@ struct analyzer {
         return best.empty() ? "" : "; did you mean " + kind + " '" + best + "'?";
     }
 
-    // Rules and sequences share one namespace (section 7.3, check 39). Every sequence gets
+    // Rules and sequences share one namespace. Every sequence gets
     // a slot, duplicates included, so out.sequences[i] is ast.sequences[i];
     // name lookups find the first declaration.
     void register_sequences() {
@@ -1284,7 +1284,7 @@ struct analyzer {
                 cs.mode = s.mode;
                 cs.percent = s.count_percent;
                 if (s.inline_rule) {
-                    // an anonymous rule declared in the sequence's module (section 6)
+                    // an anonymous rule declared in the sequence's module
                     auto const& r = *s.inline_rule;
                     compiled_rule cr = compile_rule(r);
                     cr.name = "inline@" + std::to_string(r.loc.line) + ":" +
@@ -1312,20 +1312,19 @@ struct analyzer {
                                     ast.sequences[(size_t)cs.seq_id].loc.mod);
                 if (s.count) compile_count(s, cs, ctx);
                 if (cs.seq_id >= 0) {
-                    // section 7.3, check 37: rule-only modes on a sequence.
+                    // Rule-only modes on a sequence.
                     if (s.mode != apply_mode::once && s.mode != apply_mode::settle)
                         error(s.loc, std::string("'") + mode_name(s.mode) + "' is not valid on sequence '" +
                               s.rule_name + "'; a sequence takes 'once' or 'settle'" +
                               (s.mode == apply_mode::scatter
                                    ? ", and 'scatter' belongs on the statements inside it" : ""));
                 } else if (s.mode == apply_mode::grow && !s.count) {
-                    // Reductivity warning (section 6.9 — LevelScript addition): a
-                    // `grow` fixpoint over a rule whose write never invalidates
-                    // its own match cannot terminate.
+                    // Reductivity warning: a `grow` fixpoint over a rule whose
+                    // write never invalidates its own match cannot terminate.
                     check_reductive(out.rules[cs.rule_id], s.loc);
                 }
             }
-            // `when (expr)` guard (section 6): boolean, params only — no grids, no
+            // `when (expr)` guard: boolean, params only — no grids, no
             // position/dimensions (there is no candidate position or committed
             // size at statement scope).
             if (s.guard)
@@ -1336,7 +1335,7 @@ struct analyzer {
         }
     }
 
-    // section 7.3, check 38: a sequence that applies itself, directly or through others.
+    // A sequence may not apply itself, directly or through others.
     void check_sequence_cycles() {
         int n = (int)out.sequences.size();
         std::vector<int> state(n, 0);   // 0 new, 1 on the DFS path, 2 done
