@@ -328,7 +328,7 @@ sequence main {
 }
 )";
 
-TEST_CASE("api: grow sees prior writes; scatter does not") {
+TEST_CASE("api: grow sees prior writes, scatter does not") {
     // From one seed, 20 grow steps add exactly 20 cells —
     // each step re-collects, so growth feeds on its own writes.
     auto inc = make(grow_src);
@@ -457,7 +457,7 @@ TEST_CASE("api: counts are computed from params on each run") {
     CHECK(painted("scatter((n * 2)%) paint", 30) == 60);
 }
 
-TEST_CASE("api: computed counts below 0 act as 0; percentages above 100 as 100") {
+TEST_CASE("api: computed counts below 0 act as 0, percentages above 100 as 100") {
     CHECK(painted("scatter(n) paint", -4) == 0);
     CHECK(painted("grow(n) paint", -1) == 0);
     CHECK(painted("settle(n) paint", 0) == 0);
@@ -1208,7 +1208,7 @@ sequence main {
     CHECK(dump(lv, "copy") == std::vector<int>{both, both, wall, both});
 }
 
-TEST_CASE("api: a binding cell never matches empty; a stored 0 is not empty") {
+TEST_CASE("api: a binding cell never matches empty, a stored 0 is not empty") {
     auto gen = make(R"(
 layers {
     tiles: grid of number
