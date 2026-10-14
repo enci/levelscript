@@ -282,85 +282,89 @@ struct parser {
 
     // ── patterns ─────────────────────────────────────────────────────────────
 
-    // One whitespace-free mask atom: IDENT, '.', or either after '!' (adjacent).
-    // '.' is bit 0, empty; its name is ".".
-    bool parse_mask_atom(cell& c) {
-        mask_atom a;
-        a.loc = loc();
-        auto finish = [&] { close(a.loc); c.atoms.push_back(std::move(a)); };
+    // One whitespace-free mask atom: IDENT or '.', after an adjacent '!' for
+    // the complement. Null after reporting an error.
+    expr_ptr parse_mask_atom() {
         if (at(token_type::bang)) {
+            auto e = make_expr(expr_kind::not_);
             token const& b = eat();
-            a.negate = true;
             if (!(at(token_type::ident) || at(token_type::dot)) || !adjacent(b, peek())) {
                 error_at(peek(), "expected a tag value or '.' right after '!'");
-                return false;
+                return nullptr;
             }
+            e->args.push_back(parse_mask_atom());
+            close(e->loc);
+            return e;
         }
         if (at(token_type::dot)) {
+            auto e = make_expr(expr_kind::empty_lit);
             eat();
-            a.name = ".";
-            finish();
-            return true;
+            return e;
         }
         if (at(token_type::variable)) {
             error_at(peek(), "a pattern variable does not combine into a bare mask; "
                      "write (... | " + peek().text + ")");
-            return false;
+            return nullptr;
         }
         if (!at(token_type::ident)) {
             error_at(peek(), "expected a tag value");
-            return false;
+            return nullptr;
         }
-        a.name = eat().text;
-        finish();
-        return true;
+        auto e = make_expr(expr_kind::ident);
+        e->ident = eat().text;
+        return e;
     }
 
-    bool parse_cell(cell& c) {
-        c.loc = loc();
-        closing closer{*this, c.loc};
-        if (accept(token_type::star)) { c.kind = cell_kind::any;   return true; }
-        if (at(token_type::dot) && !(peek(1).is(token_type::pipe) && adjacent(peek(), peek(1)))) {
+    // One pattern cell, as described at `pattern`. Null after reporting an error.
+    expr_ptr parse_cell() {
+        if (at(token_type::star)) {
+            auto e = make_expr(expr_kind::wildcard);
             eat();
-            c.kind = cell_kind::empty;
-            return true;
+            return e;
         }
-        if (at(token_type::integer))  { c.kind = cell_kind::number; c.number = eat().int_val; return true; }
+        if (at(token_type::integer)) {
+            auto e = make_expr(expr_kind::int_lit);
+            e->int_val = eat().int_val;
+            return e;
+        }
         if (at(token_type::lparen)) {   // '( expr )' — computed cell
+            auto e = make_expr(expr_kind::paren);
             eat();
-            c.kind = cell_kind::expr_cell;
-            c.value = parse_expr();
-            return expect(token_type::rparen, "')'");
+            e->args.push_back(parse_expr());
+            if (!expect(token_type::rparen, "')'")) return nullptr;
+            close(e->loc);
+            return e;
         }
         if (at(token_type::variable)) {   // pattern variable
-            c.kind = cell_kind::variable;
-            c.variable = eat().text;
+            auto e = make_expr(expr_kind::variable);
+            e->ident = eat().text;
             if (at(token_type::pipe) && adjacent(toks[pos - 1], peek())) {
                 error_at(peek(), "a pattern variable does not combine into a bare mask; "
-                         "write (" + c.variable + " | ...)");
+                         "write (" + e->ident + " | ...)");
                 eat();   // the '|'; recovery skips the atom after it
-                return false;
+                return nullptr;
             }
-            return true;
+            return e;
         }
         if (at(token_type::ident) || at(token_type::bang) || at(token_type::dot)) {
-            c.kind = cell_kind::tag_mask;
-            if (!parse_mask_atom(c)) return false;
+            auto e = parse_mask_atom();
             // whitespace-free unions: a|b|c (each '|' adjacent on both sides)
-            while (at(token_type::pipe) && adjacent(toks[pos - 1], peek())) {
+            while (e && at(token_type::pipe) && adjacent(toks[pos - 1], peek())) {
                 token const& bar = eat();
                 if (!adjacent(bar, peek())) {
                     error_at(peek(), "a bare mask cell is whitespace-free; "
                              "wrap a spaced union in parentheses");
-                    return false;
+                    return nullptr;
                 }
-                if (!parse_mask_atom(c)) return false;
+                auto atom = parse_mask_atom();
+                if (!atom) return nullptr;
+                e = make_binary(expr_kind::bit_or, std::move(e), std::move(atom));
             }
-            return true;
+            return e;
         }
         error_at(peek(), "expected a pattern cell (*, ., a tag value, an integer, "
                  "a pattern variable, or a parenthesized expression)");
-        return false;
+        return nullptr;
     }
 
     bool parse_pattern(pattern& p) {
@@ -385,10 +389,10 @@ struct parser {
         // row_sep ::= ',' WS* NEWLINE? | NEWLINE. A comma inside '( ... )' is
         // consumed by the cell's expression, so only a depth-0 comma gets here.
         while (!body_ends()) {
-            std::vector<cell> row;
+            std::vector<expr_ptr> row;
             while (!at(token_type::newline) && !at(token_type::comma) && !body_ends()) {
-                cell c;
-                if (!parse_cell(c)) { eat_bad(); continue; }
+                auto c = parse_cell();
+                if (!c) { eat_bad(); continue; }
                 row.push_back(std::move(c));
             }
             if (at(token_type::comma)) {

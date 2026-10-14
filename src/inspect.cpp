@@ -63,43 +63,35 @@ void emit_pattern_tokens(std::string& o, comma_list& cl,
     int gid = prog.layer_id(p.grid.text);
     if (gid < 0) return;
     int tid = prog.layers[gid].tag_id;   // -1: number grid
-    for (auto const& row : p.cells) {
-        for (auto const& c : row) {
-            if (c.kind == cell_kind::any) {
-                cl.next();
-                o += "{" + span_json(c.loc) + ",\"tag\":-1,\"value\":-1}";
-                continue;
-            }
-            if (c.kind == cell_kind::empty) {
-                cl.next();
-                o += "{" + span_json(c.loc) + ",\"tag\":-2,\"value\":-2}";
-                continue;
-            }
-            if (c.kind == cell_kind::number) {
-                cl.next();
-                o += "{" + span_json(c.loc) + ",\"tag\":-3,\"value\":" +
-                     std::to_string(c.number) + "}";
-                continue;
-            }
-            if (c.kind != cell_kind::tag_mask) continue;
-            for (auto const& a : c.atoms) {
-                source_loc at = a.loc;   // the name, after any '!'
-                if (a.negate) ++at.col;
-                if (a.name == ".") {   // '.' atom: painted like a lone '.'
-                    cl.next();
-                    o += "{" + span_json(at) + ",\"tag\":-2,\"value\":-2}";
-                    continue;
-                }
-                if (tid < 0) continue;
-                int vid = prog.value_id(tid, a.name);
-                if (vid < 0) vid = union_slot(prog, tid, a.name);
-                if (vid < 0) continue;   // unknown names stay unpainted
-                cl.next();
-                o += "{" + span_json(at) + ",\"tag\":" + std::to_string(tid) +
-                     ",\"value\":" + std::to_string(vid) + "}";
-            }
+    // Paints a bare cell; '!' and '|' are painted through to their atoms, and
+    // a parenthesized cell is not painted.
+    auto paint = [&](auto& self, expr const& e) -> void {
+        auto token = [&](int tag, long long value) {
+            cl.next();
+            o += "{" + span_json(e.loc) + ",\"tag\":" + std::to_string(tag) +
+                 ",\"value\":" + std::to_string(value) + "}";
+        };
+        switch (e.kind) {
+        case expr_kind::wildcard:  token(-1, -1); return;
+        case expr_kind::empty_lit: token(-2, -2); return;
+        case expr_kind::int_lit:   token(-3, e.int_val); return;
+        case expr_kind::not_:
+        case expr_kind::bit_or:
+            for (auto const& a : e.args) self(self, *a);
+            return;
+        case expr_kind::ident: {
+            if (tid < 0) return;
+            int vid = prog.value_id(tid, e.ident);
+            if (vid < 0) vid = union_slot(prog, tid, e.ident);
+            if (vid >= 0) token(tid, vid);   // unknown names stay unpainted
+            return;
         }
-    }
+        default:
+            return;
+        }
+    };
+    for (auto const& row : p.cells)
+        for (auto const& c : row) paint(paint, *c);
 }
 
 // Collect grid names and rule names as hover/definition references
