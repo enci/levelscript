@@ -26,11 +26,30 @@ export interface RefSpan extends Location {
     target: string;
 }
 
+// A node's source range: 1-based, the end one past its last character.
+export interface SourceRange {
+    line: number;
+    col: number;
+    end_line: number;
+    end_col: number;
+}
+
+// One outline entry: a declaration's whole range, and its name's.
+export interface OutlineSymbol {
+    kind: 'tag' | 'value' | 'union' | 'layers' | 'grid' | 'params' | 'param' | 'rule' | 'sequence';
+    name: string;
+    range: SourceRange;
+    select: SourceRange;
+    children?: OutlineSymbol[];
+}
+
 export interface InspectionResult {
     ok: boolean;
     diagnostics: InspectorDiagnostic[];
     tokens: DecorationSpan[];
     refs?: RefSpan[];
+    outline?: OutlineSymbol[];
+    spans?: SourceRange[];   // every node of the file's rules and sequences, but lone tokens
     symbols: {
         modules?: string[];
         tags: { name: string, values: { name: string, loc?: Location }[], unions: { name: string, loc?: Location }[] }[];

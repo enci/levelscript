@@ -257,6 +257,8 @@ struct parser {
     void parse_params(ast_file& out) {
         if (out.has_params)
             error_at(peek(), "only one 'params' block per module");
+        out.params_loc = loc();
+        closing closer{*this, out.params_loc};
         out.has_params = true;
         eat();   // 'params'
         if (!expect(token_type::lbrace, "'{'")) return;

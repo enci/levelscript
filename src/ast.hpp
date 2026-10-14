@@ -208,16 +208,18 @@ struct use_decl {
 };
 
 // One module's declarations - or, after loading, the whole closure's,
-// merged in canonical order (each declaration's loc.mod says whose it was).
+// merged in canonical order (each declaration's loc.mod says whose it was;
+// the block locations and `uses` are the root module's).
 struct ast_file {
-    std::vector<use_decl>   uses;
-    std::vector<tag_decl>   tags;
-    layers_decl             layers;
-    std::vector<param_decl> params;
-    std::vector<rule_decl>  rules;
+    std::vector<use_decl>      uses;
+    std::vector<tag_decl>      tags;
+    layers_decl                layers;
+    source_loc                 params_loc;   // the `params { ... }` block
+    std::vector<param_decl>    params;
+    std::vector<rule_decl>     rules;
     std::vector<sequence_decl> sequences;
-    bool                    has_layers{false};
-    bool                    has_params{false};
+    bool                       has_layers{false};
+    bool                       has_params{false};
 };
 
 }  // namespace ls
