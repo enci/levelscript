@@ -49,6 +49,13 @@ struct module_source {
 using resolver = std::function<std::optional<module_source>(const std::string& path,
                                                             const std::string& from)>;
 
+/// Receives each warning of a generator, formatted like a diagnostic
+/// ("dungeon.lvs:14:5: warning: path() found no route ..."): the compile's
+/// warnings, then those of every run it starts (a count below 0, a path
+/// with no route, ...), positioned at their statement. Runs may call it
+/// from any thread that drives them.
+using warning_handler = std::function<void(const std::string& warning)>;
+
 // ── grid — one layer of a generated level ────────────────────────────────────
 
 class grid {
@@ -222,15 +229,18 @@ public:
     /// `name`. The game owns file/asset IO: each `use` is mapped to a module
     /// by `resolve`; with no resolver every `use` is unresolved. Diagnostics
     /// are labelled with canonical module names ("dungeon.lvs:12:3: error: ...").
+    /// Warnings go to `warn`; with none, each is written to stderr.
     static generator compile(const std::string& source,
                              const std::string& name = "generator",
-                             resolver resolve = {});
+                             resolver resolve = {},
+                             warning_handler warn = {});
 
     explicit operator bool() const { return prog_ != nullptr; }
     /// Formatted diagnostics when compile failed; "" when it succeeded.
     std::string error() const { return error_; }
     /// Formatted warnings of a successful compile (e.g. a fixpoint statement
-    /// over a rule that can never terminate); "" when there are none.
+    /// over a rule that can never terminate); "" when there are none. They
+    /// also went to the warning handler.
     std::string warnings() const { return warnings_; }
 
     /// Value mask, qualified by tagset: tag("geo.wall") -> that value's bit;
@@ -275,6 +285,7 @@ private:
     std::string                     error_;
     std::string                     warnings_;
     std::vector<std::string>        modules_;
+    warning_handler                 warn_;
 };
 
 }  // namespace ls

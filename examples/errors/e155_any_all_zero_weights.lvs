@@ -1,0 +1,7 @@
+// E155 (0.10, check 54): an { any } needs at least one positive weight.
+// @expect error
+// @expect stderr-contains has weight 0
+tag t { a, b }
+layers { g: grid of t }
+rule r { g[.] => { any (weight=0) g[a] (weight=0) g[b] } }
+sequence main { resize(2, 2) everywhere r }

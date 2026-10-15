@@ -1,14 +1,14 @@
 #include "machine.hpp"
 #include <algorithm>
-#include <iostream>
 #include <limits>
 #include <queue>
 #include <tuple>
 
 namespace ls::internal {
 
-machine::machine(std::shared_ptr<compiled const> prog, uint64_t seed, int entry)
-    : prog_(std::move(prog)), entry_(entry), rng_(seed) {
+machine::machine(std::shared_ptr<compiled const> prog, uint64_t seed, int entry,
+                 std::function<void(std::string const&)> warn)
+    : prog_(std::move(prog)), entry_(entry), warn_(std::move(warn)), rng_(seed) {
     grids_.resize(prog_->layers.size());
     for (int i = 0; i < (int)grids_.size(); ++i)
         grids_[i].is_number = prog_->layers[i].tag_id < 0;
@@ -16,6 +16,15 @@ machine::machine(std::shared_ptr<compiled const> prog, uint64_t seed, int entry)
     param_supplied_.assign(prog_->param_names.size(), 0);
     graphs_.resize(prog_->graphs.size());
     selections_.resize(prog_->selectors.size());
+}
+
+void machine::warn(std::string msg) const {
+    if (!warn_) return;
+    auto const& labels = prog_->module_labels;
+    std::string file = stmt_loc_.mod >= 0 && stmt_loc_.mod < (int)labels.size()
+                     ? labels[(size_t)stmt_loc_.mod] : "";
+    warn_(diagnostic{false, file, stmt_loc_.line, stmt_loc_.col,
+                     stmt_loc_.end_line, stmt_loc_.end_col, std::move(msg)}.format());
 }
 
 void machine::set_param(std::string const& name, long long value) {
@@ -246,21 +255,23 @@ sequence<step_event> machine::run() {
 }
 
 int machine::eval_count(compiled_stmt const& st) {
+    stmt_loc_ = st.loc;
     if (st.count < 0) return -1;
     long long v = eval(st.count, 0, 0);
     char const* pct = st.percent ? "%" : "";
     if (v < 0) {
-        std::cerr << "warning: a count of " << v << pct << " is below 0; treating it as 0\n";
+        warn("a count of " + std::to_string(v) + std::string(pct) + " is below 0; treating it as 0");
         v = 0;
     }
     if (st.percent && v > 100) {
-        std::cerr << "warning: a percentage of " << v << "% is above 100; treating it as 100%\n";
+        warn("a percentage of " + std::to_string(v) + "% is above 100; treating it as 100%");
         v = 100;
     }
     return (int)v;
 }
 
 sequence<step_event> machine::run_leaf(compiled_stmt const& st, int top, int count) {
+    stmt_loc_ = st.loc;
     if (st.what == compiled_stmt::kind::op_call) {
         exec_op(st.op);
     } else if (count == 0) {
@@ -477,8 +488,7 @@ void machine::exec_op(compiled_op const& op) {
 
     case op_kind::resize: { // content-preserving, top-left anchored
         if (arg[0] < 1 || arg[1] < 1) {
-            std::cerr << "warning: resize(" << arg[0] << ", " << arg[1]
-                      << ") has a dimension below 1; leaving grids unchanged\n";
+            warn("resize(" + std::to_string(arg[0]) + ", " + std::to_string(arg[1]) + ") has a dimension below 1; leaving grids unchanged");
             return;
         }
         int w = (int)arg[0], h = (int)arg[1];
@@ -493,8 +503,7 @@ void machine::exec_op(compiled_op const& op) {
 
     case op_kind::upscale: { // duplicate every cell into an n x m block
         if (arg[0] < 1 || arg[1] < 1)
-            std::cerr << "warning: upscale(" << arg[0] << ", " << arg[1]
-                      << ") has a factor below 1; treating it as 1\n";
+            warn("upscale(" + std::to_string(arg[0]) + ", " + std::to_string(arg[1]) + ") has a factor below 1; treating it as 1");
         int n = arg[0] < 1 ? 1 : (int)arg[0], m = arg[1] < 1 ? 1 : (int)arg[1];
         rows_ *= m;
         cols_ *= n;
@@ -507,8 +516,7 @@ void machine::exec_op(compiled_op const& op) {
 
     case op_kind::pad: {    // uniform empty border on all sides
         if (arg[0] < 0)
-            std::cerr << "warning: pad(" << arg[0]
-                      << ") has a margin below 0; treating it as 0\n";
+            warn("pad(" + std::to_string(arg[0]) + ") has a margin below 0; treating it as 0");
         int n = arg[0] < 0 ? 0 : (int)arg[0];
         if (n == 0) return;
         rows_ += 2 * n;
@@ -535,8 +543,7 @@ void machine::exec_op(compiled_op const& op) {
                     }
                 }
         if (!found) {
-            std::cerr << "warning: trim() on an entirely empty stack; "
-                         "leaving grids unchanged\n";
+            warn("trim() on an entirely empty stack; leaving grids unchanged");
             return;
         }
         rows_ = max_r - min_r + 1;
@@ -568,8 +575,7 @@ void machine::exec_op(compiled_op const& op) {
     case op_kind::path: {
         long long conn = arg[compiled_op::path_connectivity];
         if (conn != 4 && conn != 8)
-            std::cerr << "warning: path() connectivity " << conn
-                      << " is not 4 or 8; treating it as 4\n";
+            warn("path() connectivity " + std::to_string(conn) + " is not 4 or 8; treating it as 4");
         run_path(op, conn == 8 ? 8 : 4);
         return;
     }
@@ -595,7 +601,7 @@ static uint64_t mix64(uint64_t v) {
 // output, and a future A* is a pure optimization.
 void machine::run_path(compiled_op const& op, int ndirs) {
     if (grids_.empty() || grids_[0].rows <= 0 || op.into_grid < 0) {
-        std::cerr << "warning: path() before any resize; leaving grids unchanged\n";
+        warn("path() before any resize; leaving grids unchanged");
         return;
     }
     int W = grids_[0].cols, H = grids_[0].rows;
@@ -675,8 +681,7 @@ void machine::run_path(compiled_op const& op, int ndirs) {
             goal = (int)i;
     }
     if (goal < 0) {
-        std::cerr << "warning: path() found no route from 'from' to 'to'; "
-                     "leaving grids unchanged\n";
+        warn("path() found no route from 'from' to 'to'; leaving grids unchanged");
         return;
     }
 

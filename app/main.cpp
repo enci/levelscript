@@ -108,7 +108,6 @@ int main(int argc, char* argv[]) {
         std::cerr << gen.error();
         return 1;
     }
-    if (!gen.warnings().empty()) std::cerr << gen.warnings();
 
     int entry = gen.sequence(entry_name);
     if (entry < 0) {

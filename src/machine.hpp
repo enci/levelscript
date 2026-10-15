@@ -2,6 +2,7 @@
 #include "graph.hpp"
 #include "sema.hpp"
 #include "sequence.hpp"
+#include <functional>
 #include <memory>
 #include <random>
 #include <unordered_set>
@@ -77,7 +78,9 @@ struct highlight {
 class machine {
 public:
     // `entry`: the sequence a run applies; an invalid id runs nothing.
-    machine(std::shared_ptr<compiled const> prog, uint64_t seed, int entry);
+    // `warn` receives each runtime warning, formatted; it may be empty.
+    machine(std::shared_ptr<compiled const> prog, uint64_t seed, int entry,
+            std::function<void(std::string const&)> warn = {});
 
     // Supply an input param before run(); unknown names are ignored.
     void set_param(std::string const& name, long long value);
@@ -121,6 +124,9 @@ private:
         return step_event{step_event::kind::begin, top};
     }
     bool unchanged_since(stack_state const& s) const;
+
+    // Report a runtime warning at the statement being run.
+    void warn(std::string msg) const;
 
     void exec_op(compiled_op const& op);
     void run_path(compiled_op const& op, int ndirs);   // ndirs = 4 or 8
@@ -193,6 +199,8 @@ private:
 
     std::shared_ptr<compiled const> prog_;
     int                             entry_{-1};
+    std::function<void(std::string const&)> warn_;
+    source_loc                      stmt_loc_;   // the statement being run, for warnings
     std::mt19937_64                 rng_;
     std::vector<grid_state>         grids_;    // indexed by grid id
     struct graph_cache {
