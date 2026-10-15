@@ -22,7 +22,7 @@
     },
     "keyword": {
       "name": "keyword.control.levelscript",
-      "match": "\\b(use|tag|layers|grid|of|number|rule|sequence|params|where|when|any|all|ordered|once|scatter|everywhere|grow|settle|symmetry|rotation|weight|none|horizontal|vertical)\\b"
+      "match": "\\b(use|tag|layers|grid|graph|of|number|rule|sequence|params|where|when|any|all|ordered|once|scatter|everywhere|grow|settle|symmetry|rotation|weight|none|horizontal|vertical|nodes|edges)\\b"
     },
     "operator": {
       "name": "keyword.operator.levelscript",

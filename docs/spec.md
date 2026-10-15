@@ -1,6 +1,6 @@
 # LevelScript
 
-**Status**: Draft 0.9.4
+**Status**: Draft 0.10.0
 **File extension**: `.lvs`
 **CLI**: `levelscript [--seed N] [--entry name] [--param name=value ...] <file.lvs>` (`--entry` defaults to `main`, a tool convention; section 6)
 **Embedding**: namespace `ls::` (see Appendix A)

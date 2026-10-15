@@ -53,6 +53,9 @@ export const definitionProvider: vscode.DefinitionProvider = {
         } else if (ref.kind === 'layer') {
             const layer = cached.symbols.layers.find(l => l.name === ref.target);
             if (layer && layer.loc) return spanToLocation(doc.uri, layer.loc);
+        } else if (ref.kind === 'graph') {
+            const graph = cached.symbols.graphs?.find(g => g.name === ref.target);
+            if (graph && graph.loc) return spanToLocation(doc.uri, graph.loc);
         }
 
         return null;
@@ -95,6 +98,12 @@ export const hoverProvider: vscode.HoverProvider = {
                     if (layer) {
                         const type = layer.type === 'number' ? 'number' : layer.type;
                         md.appendMarkdown(`**${layer.name}**: grid of \`${type}\``);
+                        return new vscode.Hover(md);
+                    }
+                } else if (ref.kind === 'graph') {
+                    const graph = cached.symbols.graphs?.find(g => g.name === ref.target);
+                    if (graph) {
+                        md.appendMarkdown(`**${graph.name}**: graph of \`${graph.source}\``);
                         return new vscode.Hover(md);
                     }
                 } else if (ref.kind === 'rule') {
@@ -144,6 +153,8 @@ export const completionProvider: vscode.CompletionItemProvider = {
         };
         const allTagValues = () => sym?.tags.forEach(t => tagValues(t));
         const grids = () => sym?.layers.forEach(l => word(l.name, K.Class, `grid of ${l.type}`));
+        const graphs = () => sym?.graphs?.forEach(g => word(g.name, K.Interface, `graph of ${g.source}`));
+        const isGraph = (name: string | undefined) => !!sym?.graphs?.some(g => g.name === name);
 
         switch (ctx.kind) {
         case 'top':
@@ -159,6 +170,14 @@ export const completionProvider: vscode.CompletionItemProvider = {
             break;
         case 'gridOf':
             snippet('grid of', 'grid of ${1}', K.Keyword);
+            snippet('graph of', 'graph of ${1}', K.Keyword, 'a read-only view of a grid');
+            break;
+        case 'graphSource':
+            grids();
+            break;
+        case 'graphArg':
+            snippet('nodes', 'nodes=${1}', K.Property, 'tag mask of the node cells');
+            snippet('edges', 'edges=${1}', K.Property, 'tag mask of the connector cells');
             break;
         case 'of':
             word('of', K.Keyword);
@@ -170,13 +189,18 @@ export const completionProvider: vscode.CompletionItemProvider = {
         case 'paramType':
             snippet('number', 'number = ${1:0}', K.Keyword);
             break;
-        case 'expr':
+        case 'expr': {
+            // a graph-pattern cell reads no grid; it calls the graph functions,
+            // whose selectors name grids
+            const graphCell = isGraph(ctx.head);
             sym?.builtins.forEach(b => snippet(b, `${b}(\${1})`, K.Function, 'built-in'));
+            if (graphCell) sym?.graph_functions?.forEach(b => snippet(b, `${b}(\${1})`, K.Function, 'graph function'));
             sym?.params.forEach(p => word(p.name, K.Variable, p.derived ? 'derived param' : 'param'));
             if (ctx.grids) grids();
             if (ctx.pos) ['x', 'y', 'width', 'height'].forEach(n => word(n, K.Constant, 'position'));
-            allTagValues();
+            if (!graphCell) allTagValues();
             break;
+        }
         case 'ruleAttr':
             snippet('symmetry', 'symmetry=${1|horizontal,vertical,all,none|}', K.Property);
             snippet('rotation', 'rotation=${1|all,90,180,270,none|}', K.Property);
@@ -192,6 +216,7 @@ export const completionProvider: vscode.CompletionItemProvider = {
                 word('ordered', K.Keyword, 'sub-rules in priority order');
             }
             grids();
+            graphs();
             word('where', K.Keyword, 'position pseudo-layer');
             break;
         case 'combinator':

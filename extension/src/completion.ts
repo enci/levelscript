@@ -13,10 +13,13 @@ export type CompletionContext =
     | { kind: 'top' }                                   // use / tag / layers / params / rule / sequence
     | { kind: 'unionMember'; tag: string }              // tag t { ..., D = F | _ }
     | { kind: 'gridOf' }                                // layers { g: _ }
-    | { kind: 'of' }                                    // layers { g: grid _ }
+    | { kind: 'of' }                                    // layers { g: grid _ } / { m: graph _ }
     | { kind: 'gridType' }                              // layers { g: grid of _ }
+    | { kind: 'graphSource' }                           // layers { m: graph of _ }
+    | { kind: 'graphArg' }                              // layers { m: graph of g(_ }
     | { kind: 'paramType' }                             // params { p: _ }
-    | { kind: 'expr'; grids: boolean; pos: boolean }    // expressions
+    | { kind: 'expr'; grids: boolean; pos: boolean; head?: string }   // expressions; head: the
+                                                        // pattern whose cell this is, if any
     | { kind: 'ruleAttr' }                              // rule r(_)
     | { kind: 'attrValue'; attr: string }               // rule r(symmetry=_)
     | { kind: 'ruleBody'; start: boolean }              // a pattern may start here
@@ -61,6 +64,7 @@ interface Frame {
     open: '{' | '[' | '(' | '';
     owner: string;       // what opened it: 'top' 'tag:t' 'layers' 'params' 'rule' 'statements' 'combinator' 'group' 'set' 'grid:g' 'where' 'attrs' 'count:grow' 'op:path' 'when' 'weight' 'expr'
     scope: 'full' | 'restricted' | '';   // expression scope inherited by '(' frames
+    head?: string;       // the pattern head of a cell's '(' frames
     toks: Tok[];
 }
 
@@ -140,8 +144,8 @@ function openFrame(c: '{' | '[' | '(', stack: Frame[]): Frame {
     const last = toks[toks.length - 1];
     const prev = last?.t;
     const prev2 = toks[toks.length - 2]?.t;
-    const frame = (owner: string, scope: Frame['scope'] = ''): Frame =>
-        ({ open: c, owner, scope, toks: [] });
+    const frame = (owner: string, scope: Frame['scope'] = '', head?: string): Frame =>
+        head === undefined ? { open: c, owner, scope, toks: [] } : { open: c, owner, scope, head, toks: [] };
 
     if (c === '{') {
         if (parent.owner === 'top') {
@@ -180,8 +184,10 @@ function openFrame(c: '{' | '[' | '(', stack: Frame[]): Frame {
     }
     if (parent.owner === 'rule' || parent.owner === 'combinator') return frame('weight');
     if (parent.owner === 'params') return frame('expr', 'restricted');
-    if (parent.owner.startsWith('grid:') || parent.owner === 'where') return frame('expr', 'full');
-    if (parent.scope) return frame('expr', parent.scope);
+    if (parent.owner === 'layers') return frame('graphArgs');
+    if (parent.owner.startsWith('grid:')) return frame('expr', 'full', parent.owner.slice(5));
+    if (parent.owner === 'where') return frame('expr', 'full');
+    if (parent.scope) return frame('expr', parent.scope, parent.head);
     return frame('other');
 }
 
@@ -213,9 +219,11 @@ function classify(stack: Frame[]): CompletionContext {
             ? { kind: 'top' } : none;
     case 'layers':
         if (prev === ':') return { kind: 'gridOf' };
-        if (prev === 'grid') return { kind: 'of' };
-        if (prev === 'of') return { kind: 'gridType' };
+        if (prev === 'grid' || prev === 'graph') return { kind: 'of' };
+        if (prev === 'of') return prev2 === 'graph' ? { kind: 'graphSource' } : { kind: 'gridType' };
         return none;
+    case 'graphArgs':
+        return prev === undefined || prev === ',' ? { kind: 'graphArg' } : none;
     case 'params':
         if (prev === ':') return { kind: 'paramType' };
         // `p: number = _` or `p = _`, and operands after operators - not a new entry's name
@@ -275,9 +283,11 @@ function classify(stack: Frame[]): CompletionContext {
         if (prev === '=' && prev2) return { kind: 'opValue', op, param: prev2 };
         return none;
     }
-    if (f.owner === 'when' || f.owner === 'expr' || f.owner.startsWith('count:'))
-        return exprMayStart(prev)
-            ? { kind: 'expr', grids: f.scope === 'full', pos: f.scope === 'full' }
-            : none;
+    if (f.owner === 'when' || f.owner === 'expr' || f.owner.startsWith('count:')) {
+        if (!exprMayStart(prev)) return none;
+        const full = f.scope === 'full';
+        return f.head === undefined ? { kind: 'expr', grids: full, pos: full }
+                                    : { kind: 'expr', grids: full, pos: full, head: f.head };
+    }
     return none;
 }
