@@ -176,7 +176,7 @@ TEST_CASE("graph: the masks of a graph entry") {
 }
 
 TEST_CASE("graph: graphs share the layer namespace") {
-    // checks 42 and 12
+    // checks 12, 42
     std::string grids = "tag t { a }\nlayers {\n    g: grid of t\n";
     CHECK(compile_result(grids + "    g: graph of g\n}").has_error("duplicate layer 'g'"));
     CHECK(compile_result(grids + "    m: graph of g\n    m: graph of g\n}").has_error("duplicate layer 'm'"));
@@ -632,7 +632,7 @@ compile_result rule_with(std::string const& body) {
 }  // namespace
 
 TEST_CASE("graph: misusing a graph name") {
-    // check 51
+    // checks 35, 51
     CHECK(rule_with("level[R] where[ (map == 1) ] => level[H]").has_error("cannot be read in an expression"));
     CHECK(rule_with("map[ (neighbors(map[R]) > 0) ] => level[H]").has_error("cannot be a selector's grid"));
     CHECK(rule_with("level[R] => map[ (degree() == 0) ]").has_error("graph 'map' cannot be written"));
@@ -643,7 +643,7 @@ TEST_CASE("graph: misusing a graph name") {
 }
 
 TEST_CASE("graph: graph-pattern cells") {
-    // checks 52 and 46
+    // checks 14, 46, 52
     CHECK(rule_with("map[R] => level[H]").has_error("graph-pattern cells must be '*'"));
     CHECK(rule_with("map[3] => level[H]").has_error("graph-pattern cells must be '*'"));
     CHECK(rule_with("ids[?v] map[?v] => level[H]").has_error("cannot be a bare pattern variable"));
@@ -654,7 +654,7 @@ TEST_CASE("graph: graph-pattern cells") {
 }
 
 TEST_CASE("graph: graph functions only in graph-pattern cells") {
-    // check 53
+    // checks 8, 53
     CHECK(rule_with("level[R] where[ (degree() == 1) ] => level[H]").has_error("is a graph function"));
     CHECK(rule_with("level[R] => ids[ (size()) ]").has_error("is a graph function"));
     CHECK(rule_with("level[ (if(degree() > 0, R, H)) ] => level[H]").has_error("is a graph function"));
