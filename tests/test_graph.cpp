@@ -319,6 +319,14 @@ TEST_CASE("graph: direct contact joins nodes in the connector form") {
     CHECK(g.neighbors(2).empty());
 }
 
+TEST_CASE("graph: a cell overlapping both masks is a node cell") {
+    // R|H is its own value: a node between two rooms, adjacent to both
+    auto g = generate(stamped(algo, "level", {"R R|H R"})).graph("map");
+    REQUIRE(g.node_count() == 3);
+    CHECK(g.node_at(1, 0) == 1);
+    CHECK(g.neighbors(1) == ids({0, 2}));
+}
+
 TEST_CASE("graph: regions are 4-connected") {
     auto g = generate(stamped(algo, "level", {"R .", ". R"})).graph("whole");
     REQUIRE(g.node_count() == 2);   // diagonal cells are two nodes
