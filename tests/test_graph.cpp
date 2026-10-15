@@ -9,42 +9,11 @@
 
 using ts::compile_result;
 using ts::make;
+using ts::show;
+using ts::stamp;
+using ts::stamped;
 
 namespace {
-
-// One inline rule the size of the whole grid, which fits only at (0, 0), so
-// `once` writes exactly `rows` into `grid`. Each row is space-separated cells.
-std::string stamp(std::string const& grid, std::vector<std::string> const& rows) {
-    std::string any, cells;
-    for (size_t r = 0; r < rows.size(); ++r) {
-        std::string stars;
-        for (size_t i = 0, n = 0; i <= rows[r].size(); ++i)
-            if (i == rows[r].size() || rows[r][i] == ' ') {
-                if (n > 0) stars += stars.empty() ? "*" : " *";
-                n = 0;
-            } else {
-                ++n;
-            }
-        any   += (r ? ", " : "") + stars;
-        cells += (r ? ", " : "") + rows[r];
-    }
-    return "once { " + grid + "[" + any + "] => " + grid + "[" + cells + "] }";
-}
-
-int width_of(std::vector<std::string> const& rows) {
-    int w = 1;
-    for (char c : rows[0]) w += c == ' ';
-    return w;
-}
-
-// A program with `decls`, whose main resizes to fit `rows` and stamps them
-// into `grid`, then runs `after`.
-std::string stamped(std::string const& decls, std::string const& grid,
-                    std::vector<std::string> const& rows, std::string const& after = "") {
-    return decls + "\nsequence main {\n    resize(" + std::to_string(width_of(rows)) + ", " +
-           std::to_string(rows.size()) + ")\n    " + stamp(grid, rows) + "\n    " + after +
-           "\n}\n";
-}
 
 ls::level generate(std::string const& src) {
     auto gen = make(src);
@@ -444,22 +413,6 @@ layers {
 
 // Rooms A (2x2), B (2x2), C (1 cell): A-B and B-C through halls.
 const std::vector<std::string> abc = {"R R H R R H R", "R R . R R . ."};
-
-// One character per cell of `grid`, rows joined by '/': '.' for an empty
-// cell, else the first letter of its value name (number grids: the number).
-std::string show(ls::level const& lv, std::string const& name) {
-    auto g = lv[name];
-    std::string out;
-    for (int y = 0; y < lv.height(); ++y) {
-        if (y) out += '/';
-        for (int x = 0; x < lv.width(); ++x) {
-            if (g.is_empty(x, y)) out += '.';
-            else if (g.is_number()) out += std::to_string(g.at(x, y));
-            else out += g.valueName(g.at(x, y))[0];
-        }
-    }
-    return out;
-}
 
 }  // namespace
 

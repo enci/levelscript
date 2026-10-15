@@ -9,6 +9,18 @@
 
 namespace ls::internal {
 
+// uniform(n): an unbiased integer in [0, n), n >= 1, from a stream of raw
+// 64-bit draws `next`. Rejection sampling: discard raw outputs below
+// 2^64 mod n, return x mod n. Plain 64-bit arithmetic, so a seed gives the
+// same draws on every platform and compiler.
+template <class Next> uint64_t uniform_draw(Next&& next, uint64_t n) {
+    uint64_t threshold = (0 - n) % n;   // 2^64 mod n, in 64-bit arithmetic
+    for (;;) {
+        uint64_t x = next();
+        if (x >= threshold) return x % n;
+    }
+}
+
 // ── generated output (owned values; what level/grid hand to the game) ────────
 
 struct level_data {
@@ -124,10 +136,7 @@ private:
     // platform and compiler - unlike std::shuffle and
     // std::uniform_int_distribution, whose algorithms the standard leaves
     // to each library.
-    //
-    // uniform(n): unbiased integer in [0, n), n >= 1. Rejection sampling:
-    // discard raw outputs below 2^64 mod n, return x mod n.
-    uint64_t uniform(uint64_t n);
+    uint64_t uniform(uint64_t n) { return uniform_draw(rng_, n); }
     // Fisher-Yates: for i = size-1 down to 1, swap item i with item uniform(i+1).
     template <class T> void shuffle(std::vector<T>& v) {
         for (size_t i = v.size(); i > 1; --i)
