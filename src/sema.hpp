@@ -217,12 +217,23 @@ struct compiled_layer {
     int         tag_id{-1};   // index into tag_names/tag_values; -1 = number grid
 };
 
+// A graph layer: a read-only view of its source grid, extracted on every
+// read. Node cells are the source's non-empty cells overlapping `nodes`
+// (every non-empty cell of a number grid); connector cells overlap `edges`.
+struct compiled_graph {
+    std::string name;
+    int         source{-1};   // grid id
+    int64_t     nodes{0};     // value bits; tag sources only
+    int64_t     edges{0};     // value bits; 0 = no connectors
+};
+
 struct compiled {
     std::vector<std::string>              tag_names;
     std::vector<std::vector<std::string>> tag_values;   // [tag_id][value_id]
     // named unions per tagset: (name, resolved mask)
     std::vector<std::vector<std::pair<std::string, int64_t>>> tag_unions;
     std::vector<compiled_layer>           layers;
+    std::vector<compiled_graph>           graphs;   // not in the layer order
     std::vector<compiled_rule>            rules;
     std::vector<compiled_sequence>        sequences;   // canonical order = API ids
     std::vector<std::string>              modules;     // canonical names, canonical order
@@ -244,6 +255,7 @@ struct compiled {
     }
 
     int layer_id(std::string_view name) const { return index_of(layers, name, &compiled_layer::name); }
+    int graph_id(std::string_view name) const { return index_of(graphs, name, &compiled_graph::name); }
     int tag_id(std::string_view name) const   { return index_of(tag_names, name); }
     int value_id(int tag, std::string_view name) const {
         if (tag < 0 || tag >= (int)tag_values.size()) return -1;

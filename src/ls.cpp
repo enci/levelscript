@@ -1,10 +1,12 @@
 #include "ls.hpp"
+#include "graph.hpp"
 #include "machine.hpp"
 #include "modules.hpp"
 #include "sema.hpp"
 
 namespace ls {
 
+using internal::graph_data;
 using internal::level_data;
 using internal::machine;
 using internal::sequence;
@@ -82,6 +84,24 @@ std::string grid::valueName(int mask) const {
     return vals[value_id];
 }
 
+// ── graph ────────────────────────────────────────────────────────────────────
+
+graph::graph(std::shared_ptr<graph_data const> data) : data_(std::move(data)) {}
+
+int graph::node_count() const { return data_ ? data_->node_count() : 0; }
+
+int graph::node_at(int x, int y) const { return data_ ? data_->node_at(x, y) : -1; }
+
+int graph::node_size(int node) const {
+    if (!data_ || node < 0 || node >= data_->node_count()) return 0;
+    return data_->sizes[(size_t)node];
+}
+
+std::vector<int> graph::neighbors(int node) const {
+    if (!data_ || node < 0 || node >= data_->node_count()) return {};
+    return data_->adj[(size_t)node];
+}
+
 // ── level ────────────────────────────────────────────────────────────────────
 
 level::level(std::shared_ptr<level_data const> data) : data_(std::move(data)) {}
@@ -111,6 +131,16 @@ std::string level::layer_name(int index) const {
     if (data_ && index >= 0 && index < (int)data_->info->layers.size())
         return data_->info->layers[index].name;
     return "";
+}
+
+class graph level::graph(const std::string& name) const {
+    if (!data_) return {};
+    int id = data_->info->graph_id(name);
+    if (id < 0) return {};
+    auto const& g = data_->info->graphs[(size_t)id];
+    auto const& src = data_->layers[(size_t)g.source];
+    return ls::graph{std::make_shared<graph_data const>(
+        internal::extract_graph(g, src.tag_id < 0, src.cells, data_->width, data_->height))};
 }
 
 // ── run ──────────────────────────────────────────────────────────────────────

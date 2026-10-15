@@ -61,7 +61,9 @@ struct printer {
         default: break;
         }
         std::string s = "(";
-        s += e.kind == expr_kind::call ? "call " + e.ident : op_symbol(e.kind);
+        s += e.kind == expr_kind::call     ? "call " + e.ident
+           : e.kind == expr_kind::selector ? "selector " + e.ident
+                                           : std::string(op_symbol(e.kind));
         for (auto const& a : e.args) s += " " + expr_str(*a);
         return s + at(e.loc) + ")";
     }
@@ -147,7 +149,11 @@ struct printer {
         }
         if (ast.has_layers) {
             open("layers", &ast.layers.loc);
-            for (auto const& l : ast.layers.layers) line("(grid " + l.name.text + " " + l.type + ")");
+            for (auto const& l : ast.layers.layers) {
+                std::string s = std::string(l.is_graph ? "(graph " : "(grid ") + l.name.text + " " + l.type;
+                for (auto const& a : l.args) s += " (" + a.name.text + " " + expr_str(*a.mask) + ")";
+                line(s + ")");
+            }
             close();
         }
         for (auto const& p : ast.params) {

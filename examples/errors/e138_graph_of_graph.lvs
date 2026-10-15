@@ -1,0 +1,10 @@
+// E138 (0.10, check 48): a graph is not the source of another graph.
+// @expect error
+// @expect stderr-contains built from graph
+tag algo { R, H }
+layers {
+    level: grid of algo
+    map:   graph of level
+    meta:  graph of map
+}
+sequence main { resize(2, 2) }

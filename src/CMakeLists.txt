@@ -3,6 +3,7 @@ add_library(ls_lib STATIC
     modules.cpp
     parser.cpp
     sema.cpp
+    graph.cpp
     machine.cpp
     ls.cpp
     inspect.cpp
