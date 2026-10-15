@@ -14,6 +14,8 @@ machine::machine(std::shared_ptr<compiled const> prog, uint64_t seed, int entry)
         grids_[i].is_number = prog_->layers[i].tag_id < 0;
     params_.assign(prog_->param_names.size(), 0);
     param_supplied_.assign(prog_->param_names.size(), 0);
+    graphs_.resize(prog_->graphs.size());
+    selections_.resize(prog_->selectors.size());
 }
 
 void machine::set_param(std::string const& name, long long value) {
@@ -102,6 +104,12 @@ long long machine::eval(int idx, int x, int y) {
         if (y < 0 || y >= g.rows || x < 0 || x >= g.cols) return 0;
         return (g.get(y, x) & e.val) != 0;
     }
+    case ce_kind::degree_:
+    case ce_kind::size_:
+    case ce_kind::distance_:
+    case ce_kind::distance_raw:
+    case ce_kind::neighbors_:
+        return eval_graph(e, x, y);
     case ce_kind::and_: return eval(e.a, x, y) != 0 && eval(e.b, x, y) != 0;   // lazy
     case ce_kind::or_:  return eval(e.a, x, y) != 0 || eval(e.b, x, y) != 0;
     case ce_kind::random_: {   // inclusive [lo, hi]; exactly one draw per call
@@ -116,6 +124,75 @@ long long machine::eval(int idx, int x, int y) {
         long long b = e.b >= 0 ? eval(e.b, x, y) : 0;
         long long c = e.c >= 0 ? eval(e.c, x, y) : 0;
         return ce_pure(e.kind, a, b, c);
+    }
+    }
+}
+
+// ── graphs: extracted from the snapshot, cached until their inputs change ────
+
+graph_data const& machine::graph(int id) {
+    auto& c = graphs_[(size_t)id];
+    auto const& g = prog_->graphs[(size_t)id];
+    grid_state const& src = grids_[(size_t)g.source];
+    if (c.version != src.version) {
+        c.data = extract_graph(g, src.is_number, src.front, src.cols, src.rows);
+        c.version = src.version;
+    }
+    return c.data;
+}
+
+std::vector<int> const& machine::selection(int id, int sel, bool distance) {
+    auto& c = selections_[(size_t)sel];
+    auto const& s = prog_->selectors[(size_t)sel];
+    grid_state const& src = grids_[(size_t)prog_->graphs[(size_t)id].source];
+    grid_state const& sg  = grids_[(size_t)s.grid];
+    if (c.source_version == src.version && c.grid_version == sg.version) return c.per_node;
+    c.source_version = src.version;
+    c.grid_version   = sg.version;
+
+    graph_data const& g = graph(id);
+    std::vector<char> picked((size_t)g.node_count(), 0);
+    for (size_t i = 0; i < g.node_of.size() && i < sg.front.size(); ++i) {
+        int node = g.node_of[i];
+        if (node < 0 || picked[(size_t)node]) continue;
+        int64_t v = sg.front[i];
+        if (sg.is_number ? (v == s.val) != s.ne : (v & s.val) != 0) picked[(size_t)node] = 1;
+    }
+    c.per_node.assign((size_t)g.node_count(), distance ? -1 : 0);
+    if (distance) {   // one breadth-first search from every selected node
+        std::queue<int> q;
+        for (int n = 0; n < g.node_count(); ++n)
+            if (picked[(size_t)n]) { c.per_node[(size_t)n] = 0; q.push(n); }
+        while (!q.empty()) {
+            int n = q.front();
+            q.pop();
+            for (int m : g.adj[(size_t)n])
+                if (c.per_node[(size_t)m] < 0) {
+                    c.per_node[(size_t)m] = c.per_node[(size_t)n] + 1;
+                    q.push(m);
+                }
+        }
+    } else {
+        for (int n = 0; n < g.node_count(); ++n)
+            for (int m : g.adj[(size_t)n]) c.per_node[(size_t)n] += picked[(size_t)m];
+    }
+    return c.per_node;
+}
+
+// A graph function at (x, y): about the node covering it (none reads as 0).
+long long machine::eval_graph(compiled_expr const& e, int x, int y) {
+    graph_data const& g = graph(e.ref);
+    int node = g.node_at(x, y);
+    if (node < 0) return 0;
+    switch (e.kind) {
+    case ce_kind::degree_: return (long long)g.adj[(size_t)node].size();
+    case ce_kind::size_:   return g.sizes[(size_t)node];
+    case ce_kind::neighbors_:
+        return e.val < 0 ? 0 : selection(e.ref, (int)e.val, false)[(size_t)node];
+    default: {   // distance: unreachable is empty, and reads as 0 unless raw
+        int d = e.val < 0 ? -1 : selection(e.ref, (int)e.val, true)[(size_t)node];
+        if (d >= 0) return d;
+        return e.kind == ce_kind::distance_raw ? num_empty : 0;
     }
     }
 }
@@ -387,6 +464,7 @@ static void rebuild(grid_state& g, int nr, int nc, F&& src) {
     g.cols = nc;
     g.front = std::move(nf);
     g.back.assign((size_t)nr * nc, g.empty_raw());
+    ++g.version;
 }
 
 void machine::exec_op(compiled_op const& op) {
@@ -483,6 +561,7 @@ void machine::exec_op(compiled_op const& op) {
                         g.front[(g.rows - 1 - r) * g.cols + c] = g.get(r, c);
             }
             g.back = g.front;
+            ++g.version;
         }
         return;
 
@@ -627,6 +706,7 @@ void machine::run_path(compiled_op const& op, int ndirs) {
         g.front[i] = v;
     }
     g.back = g.front;
+    ++g.version;
 }
 
 uint64_t machine::uniform(uint64_t n) {
@@ -689,6 +769,13 @@ bool machine::match_at(compiled_pair const& pair, int row, int col) {
             var_value(pair, k.slot, row, col)) return false;
     for (auto const& pat : pair.lhs) {
         if (pat.computed.empty()) continue;
+        if (pat.graph_id >= 0) {   // each cell tests the node covering it
+            for (auto const& p : pat.computed) {
+                if (graph(pat.graph_id).node_at(col + p.c, row + p.r) < 0) return false;
+                if (eval(p.expr, col + p.c, row + p.r) == 0) return false;
+            }
+            continue;
+        }
         if (pat.is_where) {   // every cell's boolean must hold
             for (auto const& p : pat.computed)
                 if (eval(p.expr, col + p.c, row + p.r) == 0) return false;
@@ -765,6 +852,7 @@ void machine::apply(compiled_pair const& pair, match const& m,
         auto const& pat = *pp;
         if (pat.grid_id < 0) continue;
         grid_state& g = grids_[pat.grid_id];
+        ++g.version;
         for (int r = 0; r < pat.rows; ++r)
             for (int c = 0; c < pat.cols; ++c) {
                 auto const& cell = pat.at(r, c);

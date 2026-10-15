@@ -1,0 +1,12 @@
+// E147 (0.10, check 52): graph-pattern cells are '*' or a parenthesized boolean.
+// @expect error
+// @expect stderr-contains graph-pattern cells must be
+tag algo { R, H }
+tag room { Start }
+layers {
+    level: grid of algo
+    rooms: grid of room
+    map:   graph of level(nodes=R, edges=H)
+}
+rule r { map[R] => level[H] }
+sequence main { resize(2, 2) everywhere r }
