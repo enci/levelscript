@@ -1,0 +1,11 @@
+// E146 (0.10, checks 51 and 35): an operation's grid parameter takes a grid.
+// @expect error
+// @expect stderr-contains is a graph layer
+tag algo { R, H }
+tag room { Start }
+layers {
+    level: grid of algo
+    rooms: grid of room
+    map:   graph of level(nodes=R, edges=H)
+}
+sequence main { resize(2, 2) path(from=R, to=R, into=level, write=H, over=map) }

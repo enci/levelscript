@@ -1,0 +1,12 @@
+// E148 (0.10, check 52): a graph-pattern cell reads no grid; conjoin a pattern instead.
+// @expect error
+// @expect stderr-contains reads no grid
+tag algo { R, H }
+tag room { Start }
+layers {
+    level: grid of algo
+    rooms: grid of room
+    map:   graph of level(nodes=R, edges=H)
+}
+rule r { map[ (degree() == 1 && level == R) ] => level[H] }
+sequence main { resize(2, 2) everywhere r }

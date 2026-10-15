@@ -456,7 +456,7 @@ cell         ::= '*' | INTEGER | tag_mask | VARIABLE | '(' expr ')'
 tag_mask     ::= mask_atom ('|' mask_atom)*
 mask_atom    ::= '!'? (IDENT | '.')
 ```
-A `tag_mask` is whitespace-free (the cell ends at the next whitespace or comma). A comma inside `( ... )` belongs to the expression; only a comma outside parentheses separates rows. `expr` inside `( ... )` follows section 5.8 and may contain whitespace. `tag_mask` (which includes bare `.` and `!.`) and the bare `*` are exactly the mask literals, and a bare `VARIABLE` is a pattern variable (section 5.11); every other expression must be parenthesized.
+A `tag_mask` is whitespace-free (the cell ends at the next whitespace or comma). A comma inside `( ... )` belongs to the expression; only a comma outside parentheses separates rows. `expr` inside `( ... )` follows section 5.8 and may contain whitespace. `tag_mask` (which includes bare `.` and `!.`) and the bare `*` are exactly the mask literals, and a bare `VARIABLE` is a pattern variable (section 5.11); every other expression must be parenthesized. A pattern head `IDENT` names a grid or, on the match side only, a graph layer (section 5.12).
 
 The opening `[` may be followed immediately by content on the same line or by a newline starting the first row. The closing `]` may follow the last row or sit on its own line.
 
@@ -549,7 +549,7 @@ Footprints are defined relative to the pattern's origin (top-left corner). When 
 
 The bounding rectangle of a pattern is its W x H region, but the footprints may be sparse subsets (a 3x3 pattern with `*` corners has plus-shaped footprints). The write footprint drives the write-protection mask (section 6.8). The read footprint does not participate in conflict handling; it defines which cells a match inspects, and which cells the observe channel reports as matched (Appendix A).
 
-**Expression cells.** An expression cell's read footprint is the set of grid cells its expression reads at the current position. Same-position cross-grid reads (a bare grid name, section 5.8) contribute the referenced grid's cell at this offset. Reads of `x`, `y`, `width`, `height`, params, and pattern variables read no grid cell and contribute nothing (a variable's binding cells are already in the read footprint). `where` cells contribute to the read footprint only (never the write footprint); a `*` `where` cell contributes nothing. On the RHS, an expression cell's write footprint is its own grid cell.
+**Expression cells.** An expression cell's read footprint is the set of grid cells its expression reads at the current position. Same-position cross-grid reads (a bare grid name, section 5.8) contribute the referenced grid's cell at this offset. Reads of `x`, `y`, `width`, `height`, params, and pattern variables read no grid cell and contribute nothing (a variable's binding cells are already in the read footprint). `where` cells contribute to the read footprint only (never the write footprint); a `*` `where` cell contributes nothing. A non-`*` graph-pattern cell contributes its own offset in the graph's source grid, and nothing for the graph's non-local reads (section 5.12). On the RHS, an expression cell's write footprint is its own grid cell.
 
 Because there is no coordinate indexing (section 5.8), every read offset is statically known, so footprints are compile-time static. Pattern variables carry values, not positions, and preserve this.
 
@@ -557,7 +557,7 @@ Because there is no coordinate indexing (section 5.8), every read offset is stat
 
 Expressions are **deterministic for a given seed**. Every built-in is pure except `random` (section 5.10), which advances the shared PRNG (section 10.6); `random` is the one expression form whose repeated evaluation may yield different values within a run. All other functions and operators are pure and side-effect-free. Expressions appear in three **scopes**, which differ in what they may read:
 
-- **Cell scope** - pattern cells (sections 2.5/5.3), `where` cells (section 5.9), and the per-cell arguments of an operation (the `pred`, `value`, and `expr` kinds, section 6.0). May read grids at the current position (below), `x`/`y`, `width`/`height`, and params; pattern and `where` cells may also read pattern variables (section 5.11). Evaluated per cell.
+- **Cell scope** - pattern cells (sections 2.5/5.3), `where` cells (section 5.9), graph-pattern cells (section 5.12), and the per-cell arguments of an operation (the `pred`, `value`, and `expr` kinds, section 6.0). May read grids at the current position (below), `x`/`y`, `width`/`height`, and params; pattern, `where`, and graph-pattern cells may also read pattern variables (section 5.11). Graph-pattern cells read no grid; they call the graph functions instead (section 5.12). Evaluated per cell.
 - **Statement scope** - `when` guards, counts (section 6), and `int` operation arguments (section 6.0). May read params only. Evaluated each time its statement is reached.
 - **Param scope** - param expressions (section 4.2). May read earlier params only. Evaluated once, at startup.
 
@@ -580,7 +580,8 @@ primary     ::= INTEGER
               | VARIABLE                    (* pattern variable - section 5.11 *)
               | IDENT '(' arg_list? ')'     (* built-in function call - section 5.10 *)
               | '(' expr ')'
-arg_list    ::= expr (',' expr)*
+arg_list    ::= arg (',' arg)*
+arg         ::= expr | selector              (* selector - section 5.12 *)
 ```
 Precedence follows C conventions (lowest to highest): `||`, `&&`, `|`, equality, relational, additive, multiplicative, unary, primary.
 
@@ -603,7 +604,7 @@ Operands evaluate left to right; `&&` and `||` short-circuit, and `if` is eager 
 
 `*` is **not** an expression value (inside `( )` it is multiplication); only `.` crosses from mask literal into the expression grammar.
 
-**Same-position reads only.** An expression reads other grids exclusively at the current cell's position. There is no coordinate indexing; neighbour structure is expressed by the surrounding pattern grid, not by expressions. This keeps read footprints static (section 5.7). To relate a cell to the value of another cell of the pattern, bind that value with a pattern variable (section 5.11).
+**Same-position reads only.** An expression reads other grids exclusively at the current cell's position. The one exception is the graph functions (section 5.12): confined to graph-pattern cells, they depend on a whole graph and on the grids their selectors name. There is no coordinate indexing; neighbour structure is expressed by the surrounding pattern grid, not by expressions. This keeps read footprints static (section 5.7). To relate a cell to the value of another cell of the pattern, bind that value with a pattern variable (section 5.11).
 
 **`random` and footprints.** A `random` call reads no grid cell, so it contributes nothing to the read footprint; footprints stay compile-time static. `random`'s only effect is advancing the PRNG.
 
@@ -640,10 +641,14 @@ LevelScript has a closed set of **built-in** functions; there are no user-define
 | `abs(a)` | `(number) -> number` | absolute value (wraps at INT_MIN) |
 | `clamp(v, lo, hi)` | `(number, number, number) -> number` | `max(lo, min(v, hi))` |
 | `random(lo, hi)` | `(number, number) -> number` | a value in `[lo, hi]` inclusive (`lo` when `hi < lo`); **advances the PRNG** (section 10.6). One draw per call. The one non-pure built-in. |
+| `degree()` | `() -> number`, graph-pattern cells only | number of nodes adjacent to the cell's node (section 5.12) |
+| `size()` | `() -> number`, graph-pattern cells only | number of cells in the node's region |
+| `distance(s)` | `(selector) -> number`, graph-pattern cells only | fewest edges from the node to a node `s` selects (`0` if `s` selects the node itself); empty (section 5.8) when no selected node is reachable |
+| `neighbors(s)` | `(selector) -> number`, graph-pattern cells only | number of adjacent nodes that `s` selects |
 
 Arities are fixed. `min`/`max` are binary; nest for more operands (`min(a, min(b, c))`). `if` is the only function whose type is parametric in `T`; it is a single generic signature, not overloading. Because evaluation is eager and all operators are total (section 5.8), `if(c, a, b)` never faults on its unused branch - e.g. `if(n == 0, 0, 100 / n)` is safe at `n == 0`.
 
-**Built-in names are not reserved.** A call is recognised syntactically (an identifier followed by `(`, section 5.8), and tag values, grids, and params are never called, so `if`, `min`, `max`, `abs`, `clamp`, and `random` may also be used as tag value, grid, or param names. Followed by `(`, such a name always denotes the built-in; otherwise it resolves per section 5.8. Like operation names (section 2.4), built-in names are not keywords.
+**Built-in names are not reserved.** A call is recognised syntactically (an identifier followed by `(`, section 5.8), and tag values, grids, and params are never called, so `if`, `min`, `max`, `abs`, `clamp`, `random`, and the graph functions `degree`, `size`, `distance`, and `neighbors` may also be used as tag value, grid, graph, or param names. Followed by `(`, such a name always denotes the built-in; otherwise it resolves per section 5.8. Like operation names (section 2.4), built-in names are not keywords.
 
 **`random` is impure; the others are pure.** Because `if` is eager, `if(c, random(0,9), random(0,9))` evaluates **both** branches and therefore draws **twice**, in left-to-right order, discarding the unused value. This is defined behaviour, not a fault; if exactly one draw is wanted, place the `random` outside the `if`. (Eager `if` is deliberate: totality makes the dead branch safe, and the fixed two-draw cost keeps the draw sequence trivially pinned.) `random` may appear in any expression position (match cells, `where`, write cells, `when` guards, param expressions): it reads no grid, position, or dimension, so the statement- and param-scope restrictions (section 5.8) do not exclude it. It draws once each time its expression is evaluated.
 
@@ -679,16 +684,76 @@ rule fall {
 
 A parenthesized `(?a)` is an expression cell, not a binding cell: it binds nothing and matches by the rules of section 5.3 (the overlap test on a tag grid).
 
-**Use.** Inside `( ... )`, `?a` is an expression operand (section 5.8) in any cell of the same pair: match-side expression cells, `where` cells, and write-side expression cells. A bare `?a` on the write side writes the captured value, multi-bit masks included, into its cell; the target grid must have the variable's type (check 45). Every variable used in an expression or on the write side must have at least one binding cell on the match side of its pair (check 44). Like binding, this range restriction does not depend on cell order. Variables exist only in patterns: a variable in a guard, a count, a param expression, or an operation argument is an error (check 46).
+**Use.** Inside `( ... )`, `?a` is an expression operand (section 5.8) in any cell of the same pair: match-side expression cells, `where` cells, graph-pattern cells (section 5.12), and write-side expression cells. A bare `?a` on the write side writes the captured value, multi-bit masks included, into its cell; the target grid must have the variable's type (check 45). Every variable used in an expression or on the write side must have at least one binding cell on the match side of its pair (check 44). Like binding, this range restriction does not depend on cell order. Variables exist only in patterns: a variable in a guard, a count, a param expression, or an operation argument is an error (check 46).
 
 **Evaluation order.** Because an expression may read a variable, testing a candidate runs in two phases:
 
 1. **Bare cells.** Every match-side cell that is not an expression - `*`, `.`, integers, tag masks, and binding cells - in every match-side pattern. These cells are pure, so their order is unobservable. Any mismatch, including binding cells that disagree, rejects the candidate.
-2. **Expression cells.** The parenthesized cells of real-grid patterns and the non-`*` cells of `where` patterns, with every variable bound. They evaluate pattern by pattern in match-side order and, within a pattern, in row-major order of the variant being tested, stopping at the first that fails.
+2. **Expression cells.** The parenthesized cells of real-grid patterns and the non-`*` cells of `where` and graph patterns (section 5.12), with every variable bound. They evaluate pattern by pattern in match-side order and, within a pattern, in row-major order of the variant being tested, stopping at the first that fails.
 
 The two phases apply to every rule, with or without variables. Only phase 2 can draw (`random`), so a candidate rejected by its bare cells consumes no draws (section 10.6).
 
 **Variants.** A symmetry or rotation variant moves cells together with the variables in them; names are unchanged. De-duplication (section 10.2) compares variables by name.
+
+### 5.12 Graph patterns
+
+A graph layer (section 4.3) may head a pattern on the match side. Each cell of a **graph pattern** tests the node whose region covers that cell's position:
+
+```ls
+// Every cell of every dead-end room.
+rule dead_end {
+    map[ (degree() == 1) ] => rooms[DeadEnd]
+}
+
+// Rooms next to the boss room.
+rule guarded {
+    map[ (neighbors(rooms[Boss]) > 0) ] => rooms[Guarded]
+}
+```
+
+**Cells.** A graph-pattern cell is `*`, which places no condition, or a parenthesized boolean expression (check 52). A non-`*` cell matches at a position iff a node covers it and the expression is true for that node. At a position no node covers (a connector cell, any other non-node cell, or an empty one) it fails. Every cell of a region sees the same node, so `everywhere dead_end` writes every cell of every dead-end room. A graph pattern may have any rectangular shape; each cell tests the node at its own position, so two cells may see one node or two different ones.
+
+**Graph functions.** Four built-ins (section 5.10) describe the cell's node. They are valid only in graph-pattern cells (check 53):
+
+- `degree()` - the number of adjacent nodes.
+- `size()` - the number of cells in the node's region.
+- `distance(s)` - the fewest edges from the node to a node that `s` selects: `0` if `s` selects the node itself, and **empty** (section 5.8) if no selected node is reachable, including when `s` selects none.
+- `neighbors(s)` - the number of adjacent nodes that `s` selects.
+
+**Selectors.** The argument `s` of `distance` and `neighbors` is a **selector**: a one-cell pattern `g[m]` over a grid `g` the module sees, either the graph's source or any other grid. `m` is a tag mask for a tag grid, or an integer, `.`, or `!.` for a number grid. A node is selected iff at least one cell of its region matches `m` in `g` under the usual cell semantics (mask overlap or number equality, section 4.1). A selector is not an expression and appears nowhere else (check 53).
+
+```
+selector      ::= IDENT '[' selector_cell ']'
+selector_cell ::= INTEGER | tag_mask
+```
+
+**Scope.** Graph-pattern cells are cell-scope expressions (section 5.8) that read no grid: a grid name inside one is an error (check 52). They may read params, `x`/`y`, `width`/`height`, and pattern variables bound on the same match side, and may call any built-in. To combine a graph property with a grid value, conjoin patterns on the match side:
+
+```ls
+rule dead_end_chest {
+    map[ (degree() == 1) ]
+    items[.]
+    =>
+    items[chest]
+}
+```
+
+**Unreachable is empty.** An empty number reads as `0` in comparisons (section 5.8), so a test that must exclude unreachable nodes checks for empty first:
+
+```ls
+// Spread a single Start cell over its whole room.
+rule spread_start {
+    map[ (distance(rooms[Start]) != . && distance(rooms[Start]) == 0) ]
+    =>
+    rooms[Start]
+}
+```
+
+Without the guard, every unreachable node would match, and so would every node when no `Start` exists.
+
+**State and order.** A graph pattern reads the graph of the snapshot its pass matches against (sections 4.3 and 7.1). In a batch pass it sees statement-entry state, a `settle` sweep sees the previous sweep, and a step mode sees every prior application. Graph-pattern cells are expression cells: they evaluate in phase 2 (section 5.11), after every bare cell, in match-side order. A graph pattern on the write side is an error (check 51).
+
+**Footprint.** A non-`*` graph-pattern cell adds its own offset in the graph's source grid to the read footprint (section 5.7), so its `cell_highlight` (Appendix A) names the source layer. Extraction and selectors read beyond that offset, but those reads are not part of the footprint, which stays compile-time static. As for every read footprint, this affects only the observe channel, never conflicts (section 6.8).
 
 ---
 
@@ -883,7 +948,7 @@ Parameters (section 6.0):
 - `to : pred` (required) - goal cell(s); the route ends at the nearest reachable one.
 - `into : grid` (required) - the grid the route is stamped into.
 - `write : value` (required) - the value stamped on each route cell (typed by `into`).
-- `over : grid?` (optional) - the **connectivity substrate**. Omitted, the route runs over the implicit grid adjacency of the coordinate space. This is the **seam** for the planned graph layers (section 9): a graph reference here will route over its edges - the same operation, one swapped input. Until graphs land, only grid adjacency is defined.
+- `over : grid?` (optional) - the **connectivity substrate**. Omitted, the route runs over the implicit grid adjacency of the coordinate space. This is the **seam** for routing over graph layers (section 4.3): a graph reference here will route over its edges - the same operation, one swapped input. That is not yet defined (section 9): `over` takes a grid only, and a graph name here is a kind error (check 35).
 - `passable : pred?` (optional, default: any non-empty cell) - traversable cells. `from`/`to` cells are always traversable.
 - `connectivity : int?` (optional, default `4`) - 4- or 8-neighbour grid adjacency; any other value is treated as `4`, with a runtime warning (section 7.4). Ignored when `over` is a graph.
 - `cost : expr?` (optional, default `1`) - per-step weight at the entered cell. Default 1 is breadth-first (uniform shortest path); a non-constant cost is weighted (Dijkstra). Non-positive cost is treated as 1.
@@ -1014,7 +1079,7 @@ Like the reductivity warning, this check is conservative. A guard suppresses the
 
 ### 7.1 Snapshot semantics
 
-Matching is always evaluated against a **snapshot** of the grid, never against a partially-written live grid. The unit that shares a snapshot is the **pass**, and passes differ by mode: a batch mode (`scatter`, `everywhere`) is one pass (every candidate sees statement-entry state); `settle` is a sequence of passes (each sweep re-snapshots, seeing the prior sweep); a step mode (`once`, `grow`) re-snapshots every application (each sees all prior writes). Within any single pass, all candidates see the same input and earlier applications' writes are invisible; the write-protection mask (section 6.8) prevents conflicting writes within a batch pass. At end of statement the live grid becomes the next statement's input.
+Matching is always evaluated against a **snapshot** of the grid, never against a partially-written live grid. The unit that shares a snapshot is the **pass**, and passes differ by mode: a batch mode (`scatter`, `everywhere`) is one pass (every candidate sees statement-entry state); `settle` is a sequence of passes (each sweep re-snapshots, seeing the prior sweep); a step mode (`once`, `grow`) re-snapshots every application (each sees all prior writes). Within any single pass, all candidates see the same input and earlier applications' writes are invisible; the write-protection mask (section 6.8) prevents conflicting writes within a batch pass. At end of statement the live grid becomes the next statement's input. A graph layer read during a pass is extracted from that pass's snapshot (section 4.3).
 
 Implementations may realize a pass's snapshot as a full copy, copy-on-write per touched cell, or any equivalent mechanism (section 10.3); only the visibility rules above are observable.
 
@@ -1081,7 +1146,7 @@ The compiler must reject:
 43. **Duplicate layers block.** More than one `layers` block in a module.
 44. **Unbound variable.** A pattern variable used in an expression or on the write side with no binding cell (a bare occurrence) on the match side of its pattern pair (section 5.11).
 45. **Variable type.** Binding cells of one variable in grids of different types (distinct tagsets, or a tag grid and a `number` grid); or a bare variable written into a grid whose type differs from the variable's.
-46. **Variable outside a pattern.** A pattern variable in a `when` guard, a count, a param expression, or an operation argument; or a bare variable cell in a `where` pattern (`where` cells are boolean expressions, section 5.9).
+46. **Variable outside a pattern.** A pattern variable in a `when` guard, a count, a param expression, or an operation argument; or a bare variable cell in a `where` or graph pattern (their cells are boolean expressions, sections 5.9 and 5.12).
 47. **Misplaced empty mask.** A write-side `tag_mask` that unions `.` with any other atom (e.g. `.|wall`); or, in a number grid, a `tag_mask` other than `.` or `!.` (section 4.1).
 48. **Graph source.** A graph layer whose `of` name does not resolve to a grid: a tagset, another graph, or an undeclared name (section 4.3).
 49. **Graph form.** A graph argument other than `nodes` or `edges`, or one given twice; `edges` without `nodes`; or `nodes`/`edges` on a graph whose source is a number grid (section 4.3).
@@ -1218,7 +1283,7 @@ carves the cheapest corridor; equal-cost routes vary by seed, reproducibly (sect
 
 Deferred, in rough priority order:
 
-**Graphs.** The reason for the language's forward-looking design (and its name making room for more than grids): graph layers alongside grid layers, with rewrite semantics over nodes/edges and integration with grid-derived graphs. `path`'s `over=` parameter (section 6.6) is the prepared seam - a graph reference there routes over its edges, the same operation with one swapped input.
+**Graphs beyond views.** The reason for the language's forward-looking design (and its name making room for more than grids). Graph layers are read-only views extracted from grids (section 4.3), read by graph patterns (section 5.12). Deferred beyond that: rewrite semantics over nodes and edges (mission graphs generated first and laid out after); directed and labelled edges; routing over a graph through `path`'s `over=` (the prepared seam, section 6.6); node identity in patterns (a graph-pattern cell binding a pattern variable to its node, so that two cells can be tested for lying in the same node); and selection by extremes - "the dead end farthest from Start" needs either a rank written by a query or aggregate expressions, and neither exists yet.
 
 **The structural-operation family.** `path` is the first of a family conforming to the section 6.0 envelope (predicate/grid arguments in, result written into a grid, seeded, table-resolved): BSP subdivision, flood-fill regions, MST/room-linking, Voronoi, a full distance field. The graph-generalizable members - `path`, MST, distance - share the `over` seam; BSP and Voronoi are grid-native. Each is a table row plus an executor; none needs a grammar change.
 
@@ -1281,7 +1346,7 @@ A single PRNG stream (`mt19937_64` in the reference implementation), seeded from
 
 1. **Param expressions** (section 4.2) evaluate once at startup, in canonical declaration order (section 2.6), an input's default only when the param was not supplied - their draws come first.
 2. A **`when` guard** (section 6) evaluates once when its statement is reached, in statement order; if it passes, the statement's **count** (section 6), if any, evaluates next, or, for an operation call, its `int` arguments (section 6.0), in written order.
-3. **Match-cell and `where`-cell** expressions evaluate during the collection scan, in row-major anchor order and, within an anchor, in sub-rule/variant declaration order. For each candidate, bare cells are tested first and draw nothing; only if all of them match do expression cells evaluate, pattern by pattern in match-side order and row-major within each pattern as the variant lays it out, short-circuiting on the first that fails (section 5.11) - a `random` in a cell not reached does not draw.
+3. **Match-cell, `where`-cell, and graph-pattern-cell** expressions evaluate during the collection scan, in row-major anchor order and, within an anchor, in sub-rule/variant declaration order. For each candidate, bare cells are tested first and draw nothing; only if all of them match do expression cells evaluate, pattern by pattern in match-side order and row-major within each pattern as the variant lays it out, short-circuiting on the first that fails (section 5.11) - a `random` in a cell not reached does not draw.
 4. **Candidate ordering** draws next: the pass's seeded shuffle (batch modes and `settle` sweeps) or the single uniform pick (step modes), per section 10.4.
 5. **At application**: one draw per `{ any }` node on the resolved write path, outer before inner, earlier sibling first (a single-item `{ any }` still draws, section 5.2); then write-cell expressions, row-major per resolved leaf.
 6. **`path` statements** follow the section 6.6 draw contract: predicate passes (`from`, `to`, `passable`), per-cell `cost`, exactly one tie-key draw, then the start-to-goal `write` stamps.

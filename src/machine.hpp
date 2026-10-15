@@ -1,4 +1,5 @@
 #pragma once
+#include "graph.hpp"
 #include "sema.hpp"
 #include "sequence.hpp"
 #include <memory>
@@ -44,6 +45,9 @@ struct grid_state {
     int rows{0}, cols{0};
     bool is_number{false};
     std::vector<int64_t> front, back;   // double-buffered
+    // Bumped by every write, so caches derived from the front buffer
+    // (graph extractions) know when they are stale.
+    uint64_t version{0};
 
     int64_t empty_raw() const { return is_number ? num_empty : tag_empty; }
     int64_t get(int r, int c) const { return front[r * cols + c]; }
@@ -165,6 +169,15 @@ private:
     bool grids_differ() const;   // back vs front (settle change detection)
     void record_highlights(compiled_pair const& pair, match const& m);
 
+    // Graph `id` as extracted from its source's front buffer, re-extracted
+    // only after the source has been written.
+    graph_data const& graph(int id);
+    // What selector `sel` of graph `id` gives each node: the distance to the
+    // nearest selected node (-1 = unreachable), or the number of selected
+    // neighbours.
+    std::vector<int> const& selection(int id, int sel, bool distance);
+    long long eval_graph(compiled_expr const& e, int x, int y);
+
     static uint64_t mask_key(int grid_id, int flat) {
         return ((uint64_t)grid_id << 40) | (uint64_t)flat;
     }
@@ -173,6 +186,16 @@ private:
     int                             entry_{-1};
     std::mt19937_64                 rng_;
     std::vector<grid_state>         grids_;    // indexed by grid id
+    struct graph_cache {
+        uint64_t   version{~0ull};   // the source's, when extracted
+        graph_data data;
+    };
+    std::vector<graph_cache>        graphs_;   // indexed by graph id
+    struct selection_cache {
+        uint64_t         source_version{~0ull}, grid_version{~0ull};
+        std::vector<int> per_node;
+    };
+    std::vector<selection_cache>    selections_;   // indexed by selector id
     // The stack's dimensions - kept apart from the layers so a layer-less
     // program still has a size (width/height, stability, the level).
     int                             rows_{0}, cols_{0};

@@ -1,0 +1,12 @@
+// E145 (0.10, check 51): a graph name only heads a match-side pattern.
+// @expect error
+// @expect stderr-contains cannot be read in an expression
+tag algo { R, H }
+tag room { Start }
+layers {
+    level: grid of algo
+    rooms: grid of room
+    map:   graph of level(nodes=R, edges=H)
+}
+rule r { level[R] where[ (map == 1) ] => level[H] }
+sequence main { resize(2, 2) everywhere r }
