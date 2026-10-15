@@ -709,14 +709,6 @@ void machine::run_path(compiled_op const& op, int ndirs) {
     ++g.version;
 }
 
-uint64_t machine::uniform(uint64_t n) {
-    uint64_t threshold = (0 - n) % n;   // 2^64 mod n, in 64-bit arithmetic
-    for (;;) {
-        uint64_t x = rng_();
-        if (x >= threshold) return x % n;
-    }
-}
-
 // Candidates in the pinned collection order: anchors row-major, and at each
 // anchor every variant whose pattern fits there, in declaration order.
 // Match-side `random` draws fire in exactly this order.

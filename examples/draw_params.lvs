@@ -1,0 +1,24 @@
+// Draw site (v0.10.0, section 10.6 item 1): param draws come first.
+//
+// The default of `k` and the derived `j` draw at startup, in declaration
+// order, before any statement. Supplying `k` skips its draw (tested in C++).
+//
+// @seed 3
+// @expect run-ok
+
+tag t { a }
+layers {
+    g: grid of t
+    n: grid of number
+}
+params {
+    k: number = random(1, 100)
+    j = random(1, 100) + k
+}
+
+sequence main {
+    resize(6, 2)
+    once { where[ (x == 0 && y == 0) ] => n[ (k) ] }
+    once { where[ (x == 1 && y == 0) ] => n[ (j) ] }
+    scatter(3) { g[.] => g[a] }
+}

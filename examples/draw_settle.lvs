@@ -1,0 +1,15 @@
+// Draw site (v0.10.0, section 10.6 item 4): one shuffle per settle sweep.
+//
+// Overlapping pairs conflict, so each sweep fills what its shuffle allows
+// and the next sweep shuffles what is left.
+//
+// @seed 9
+// @expect run-ok
+
+tag t { a, b }
+layers { g: grid of t }
+
+sequence main {
+    resize(9, 2)
+    settle { g[. .] => g[a b] }
+}

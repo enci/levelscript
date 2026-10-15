@@ -1,0 +1,17 @@
+// Draw site (v0.10.0, section 10.6 item 6): path's one tie-key draw.
+//
+// Every monotone route across an open 6x6 grid has the same length, so the
+// tie key alone picks the route. A change here is a change to path ties.
+//
+// @seed 11
+// @expect run-ok
+
+tag t { a, p }
+layers { g: grid of t }
+
+sequence main {
+    resize(6, 6)
+    once { where[ (x == 0 && y == 0) ] => g[a] }
+    once { where[ (x == 5 && y == 5) ] => g[p] }
+    path(from=a, to=p, into=g, write=a, passable=(x >= 0))
+}
