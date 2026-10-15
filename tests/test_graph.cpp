@@ -760,3 +760,54 @@ rule r { distance[size] g[ (size() > size2 && neighbors(neighbors[!.]) >= 0) ] =
     INFO(r.diags.format_all());
     CHECK(r.ok);
 }
+
+// ── integration ──────────────────────────────────────────────────────────────
+
+#include <set>
+
+TEST_CASE("graph: a zone graph matches the walls carved between zones") {
+    std::string decls = R"(
+tag geo { wall }
+layers {
+    zones: grid of number
+    level: grid of geo
+    areas: graph of zones
+}
+rule wall_between(rotation=all) {
+    zones[?a *]
+    where[* (zones != ?a)]
+    =>
+    level[* wall]
+}
+)";
+    auto lv = generate(stamped(decls, "zones",
+        {"1 1 1 2 2 2", "1 1 3 3 2 2", "4 4 3 3 5 5", "4 4 4 5 5 5"},
+        "everywhere wall_between"));
+    auto areas = lv.graph("areas");
+    REQUIRE(areas.node_count() == 5);
+    auto zones = lv["zones"];
+    auto level = lv["level"];
+    // pairs of zones a wall cell borders, as graph nodes
+    std::set<std::pair<int, int>> walled;
+    for (int y = 0; y < lv.height(); ++y)
+        for (int x = 0; x < lv.width(); ++x) {
+            if (level.is_empty(x, y)) continue;
+            int a = areas.node_at(x, y);
+            int dx[] = {1, -1, 0, 0}, dy[] = {0, 0, 1, -1};
+            bool borders = false;
+            for (int k = 0; k < 4; ++k) {
+                int b = areas.node_at(x + dx[k], y + dy[k]);
+                if (b < 0 || b == a) continue;
+                borders = true;
+                walled.insert({std::min(a, b), std::max(a, b)});
+            }
+            CHECK(borders);   // walls only where zones meet
+            CHECK(zones.at(x, y) > 0);
+        }
+    std::set<std::pair<int, int>> edges;
+    for (int a = 0; a < areas.node_count(); ++a)
+        for (int b : areas.neighbors(a))
+            if (a < b) edges.insert({a, b});
+    CHECK(walled == edges);   // every edge carved, and no wall between non-neighbours
+    CHECK(edges.size() == 8);   // 1-2 1-3 1-4 2-3 2-5 3-4 3-5 4-5
+}
