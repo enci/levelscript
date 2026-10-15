@@ -24,7 +24,7 @@ export interface InspectorDiagnostic {
 }
 
 export interface RefSpan extends Location {
-    kind: 'layer' | 'rule' | 'sequence';
+    kind: 'layer' | 'graph' | 'rule' | 'sequence';
     target: string;
 }
 
@@ -38,7 +38,7 @@ export interface SourceRange {
 
 // One outline entry: a declaration's whole range, and its name's.
 export interface OutlineSymbol {
-    kind: 'tag' | 'value' | 'union' | 'layers' | 'grid' | 'params' | 'param' | 'rule' | 'sequence';
+    kind: 'tag' | 'value' | 'union' | 'layers' | 'grid' | 'graph' | 'params' | 'param' | 'rule' | 'sequence';
     name: string;
     range: SourceRange;
     select: SourceRange;
@@ -56,10 +56,12 @@ export interface InspectionResult {
         modules?: string[];
         tags: { name: string, values: { name: string, loc?: Location }[], unions: { name: string, loc?: Location }[] }[];
         layers: { name: string, type: string, loc?: Location }[];
+        graphs?: { name: string, source: string, loc?: Location }[];
         params: { name: string, derived: boolean }[];
         rules: { name: string, loc?: Location }[];
         sequences: { name: string, loc?: Location }[];
         ops: string[];
         builtins: string[];
+        graph_functions?: string[];   // built-ins of graph-pattern cells only
     };
 }
