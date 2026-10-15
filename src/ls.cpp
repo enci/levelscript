@@ -3,6 +3,7 @@
 #include "machine.hpp"
 #include "modules.hpp"
 #include "sema.hpp"
+#include <iostream>
 
 namespace ls {
 
@@ -160,8 +161,9 @@ struct run_state {
 
     run_state(std::shared_ptr<compiled const> prog, int entry, uint64_t seed,
               step_mode md, observe obs,
-              std::vector<std::pair<std::string, int>> const& params)
-        : m(std::move(prog), seed, entry), seq(m.run()), mode(md) {
+              std::vector<std::pair<std::string, int>> const& params,
+              warning_handler const& warn)
+        : m(std::move(prog), seed, entry, warn), seq(m.run()), mode(md) {
         m.set_observe(obs == observe::on);
         for (auto const& [name, value] : params) m.set_param(name, value);
     }
@@ -236,8 +238,10 @@ level run::finish() {
 // ── generator ────────────────────────────────────────────────────────────────
 
 generator generator::compile(const std::string& source, const std::string& name,
-                             resolver resolve) {
+                             resolver resolve, warning_handler warn) {
     generator g;
+    g.warn_ = warn ? std::move(warn)
+                   : [](std::string const& w) { std::cerr << w << '\n'; };
     diagnostics diags;
     std::string label = name.empty() ? "generator" : name;
 
@@ -249,7 +253,10 @@ generator generator::compile(const std::string& source, const std::string& name,
             g.prog_ = std::move(prog);
     }
     if (!g.prog_) g.error_ = diags.format_all();
-    else if (!diags.all.empty()) g.warnings_ = diags.format_all();
+    else if (!diags.all.empty()) {
+        g.warnings_ = diags.format_all();
+        for (auto const& d : diags.all) g.warn_(d.format());
+    }
     return g;
 }
 
@@ -279,7 +286,7 @@ std::string generator::sequence_name(int id) const {
 level generator::generate(int entry, uint64_t seed,
                           std::vector<std::pair<std::string, int>> const& params) const {
     if (!prog_ || entry < 0 || entry >= sequence_count()) return {};
-    machine m(prog_, seed, entry);
+    machine m(prog_, seed, entry, warn_);
     for (auto const& [name, value] : params) m.set_param(name, value);
     auto seq = m.run();
     while (seq.next()) {}
@@ -290,7 +297,7 @@ class run generator::run(int entry, uint64_t seed, step_mode mode, observe obs,
                          std::vector<std::pair<std::string, int>> const& params) const {
     if (!prog_) return ls::run{};
     return ls::run{std::make_unique<internal::run_state>(prog_, entry, seed, mode, obs,
-                                                         params)};
+                                                         params, warn_)};
 }
 
 int generator::statement_count(int entry) const {

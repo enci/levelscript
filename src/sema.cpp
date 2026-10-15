@@ -1038,6 +1038,11 @@ struct analyzer {
             ct.items.push_back(compile_write_term(it, exp_rows, exp_cols));
         if (ct.what == compiled_write_term::kind::all)
             check_all_no_overlap(ct, t.loc);
+        if (ct.what == compiled_write_term::kind::any && !ct.items.empty() &&
+            std::none_of(ct.items.begin(), ct.items.end(),
+                         [](compiled_write_term const& it) { return it.weight > 0; }))
+            error(t.loc, "every item of this '{ any }' has weight 0; at least one needs a "
+                  "positive weight to be picked");
         return ct;
     }
 
@@ -1610,6 +1615,7 @@ struct analyzer {
 
     void run(bool best_effort) {
         for (int id : mods.order) out.modules.push_back(mods.names[(size_t)id]);
+        out.module_labels = mods.names;
         build_tables();
         if (!best_effort && diags.has_errors()) return;
         compile_params();

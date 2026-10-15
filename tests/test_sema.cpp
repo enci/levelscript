@@ -850,3 +850,22 @@ sequence main { }
     CHECK(lhs[1].computed.size() == 1);   // x + 1
     CHECK(lhs[1].bare[1].val == 4);
 }
+
+TEST_CASE("sema: an { any } needs a positive weight") {
+    // check 54
+    std::string decls = "tag t { a, b }\nlayers { g: grid of t }\n";
+    CHECK(compile_result(decls + "rule r { g[.] => { any (weight=0) g[a] (weight=0) g[b] } }")
+              .has_error("has weight 0"));
+    CHECK(compile_result(decls + "rule r { g[.] => { any (weight=0) g[a] } }")
+              .has_error("has weight 0"));
+    CHECK(compile_result(decls + "rule r { g[.] => { any (weight=0) g[a] g[b] } }").ok);
+
+    // a zero-weight item is never picked
+    auto gen = ts::make(decls + "sequence main {\n    resize(8, 8)\n"
+                        "    everywhere { g[.] => { any (weight=0) g[a] g[b] } }\n}\n");
+    REQUIRE(static_cast<bool>(gen));
+    auto g = gen.generate(gen.sequence("main"), 3)["g"];
+    int b = gen.tag("t.b");
+    for (int y = 0; y < 8; ++y)
+        for (int x = 0; x < 8; ++x) CHECK(g.at(x, y) == b);
+}

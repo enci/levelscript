@@ -253,6 +253,7 @@ struct compiled {
     std::vector<compiled_rule>            rules;
     std::vector<compiled_sequence>        sequences;   // canonical order = API ids
     std::vector<std::string>              modules;     // canonical names, canonical order
+    std::vector<std::string>              module_labels;   // by module id: names in diagnostics
     std::vector<compiled_expr>            exprs;   // the expression arena
 
     // params: startup_exprs run once, in declaration order, when the

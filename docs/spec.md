@@ -486,7 +486,7 @@ Within an `{ any }` block, options may carry a weight:
 }
 ```
 
-Weight is per-option, prefixed before the option. Omitted weight defaults to `1`. Weights bias random selection proportionally.
+Weight is per-option, prefixed before the option. Omitted weight defaults to `1`. Weights bias random selection proportionally. A weight is an integer literal, so it is known at compile time; an item of weight `0` is never picked, and a block whose weights are all `0` is a compile error (check 54).
 
 **Union writes.** A RHS tag cell may be a union mask, e.g. `level[wall|floor]`, written via `|` (section 5.8). The cell then stores a multi-bit mask. Single-bit writes are **not** required. The meaning of a multi-valued cell under later matching is the any-overlap rule `(stored & mask) != 0` (section 4.1).
 
@@ -1154,17 +1154,20 @@ The compiler must reject:
 51. **Graph misuse.** A graph name read in an expression, used as a selector's grid, passed to an operation's `grid` parameter (also check 35), or heading a write-side pattern (sections 4.3 and 5.12).
 52. **Graph-pattern cell.** A graph-pattern cell other than `*` or a parenthesized boolean expression; or a grid read inside a graph-pattern cell (section 5.12).
 53. **Graph function placement.** A call to `degree`, `size`, `distance`, or `neighbors` outside a graph-pattern cell; a selector anywhere but as the argument of `distance` or `neighbors`, or a non-selector argument there; or a selector cell that does not fit its grid (a tag mask on a number grid other than `.` or `!.`, or an integer on a tag grid) (section 5.12).
+54. **Zero-weight `{ any }`.** An `{ any }` block whose items all have weight `0` (section 5.5).
 
 ### 7.4 Warnings
 
 Warnings never stop compilation or execution; the runtime degrades with a warning and continues, never faults.
 
-**Compile-time warnings** (surfaced via `generator::warnings()`, Appendix A):
+Every warning goes to the generator's warning handler (Appendix A), formatted like a diagnostic and positioned at its declaration or statement. Without a handler, warnings are written to the standard error stream.
+
+**Compile-time warnings** (also surfaced via `generator::warnings()`, Appendix A):
 
 1. **Reductivity.** `grow` without a count over a rule where no unconditional write invalidates its own LHS - "may never terminate" (section 6.9). Not an error: the analysis is conservative, and a build pipeline may still choose to treat warnings as failures.
 2. **Unreachable sequence fixpoint.** Retired in 0.9.4: it could only see literal operation arguments (section 6.10).
 
-**Runtime warnings** (logged; the run continues, with the value clamped or the statement skipped as noted):
+**Runtime warnings** (reported at the statement that raised them; the run continues, with the value clamped or the statement skipped as noted):
 
 - `trim()` on an entirely empty stack (section 6.3).
 - `resize(...)` with a dimension below 1; the statement is a no-op (section 6.1).
@@ -1305,7 +1308,7 @@ This section is non-normative; it records how the reference implementation is bu
 
 ### 10.1 Architecture
 
-- **One execution core.** The interpreter is a single C++20 coroutine that yields step events at application and statement boundaries. Batch generation (`generator::generate`), progressive generation (`generation::step`, with granularity a filter on the event puller), and any debug/visualization UI all pull the same coroutine. There is never a second interpreter to drift from the first.
+- **One execution core.** The interpreter is a single C++20 coroutine that yields step events at application and statement boundaries. Batch generation (`generator::generate`), progressive generation (`run::step`, with granularity a filter on the event puller), and any debug/visualization UI all pull the same coroutine. There is never a second interpreter to drift from the first.
 - **The compiled artifact is self-contained.** Semantic analysis copies everything the runtime and the embedding API need for the whole module closure (section 2.6) - names, tables, compiled rules, the operation schedule - into one immutable object shared by reference counting; the AST is discarded after analysis. Generated levels are likewise self-contained values that outlive their generator (Appendix A).
 - **Ids over strings.** Grids, tag values, and rules are integer indices into vectors; names resolve once at the API boundary. Conflict masks are hashed sets keyed by a packed (grid id, flat cell index).
 - **Tables over keyword grammar.** Operations (section 6.0) and expression built-ins (section 5.10) resolve by name against schema tables; each layer has one generic call production (`IDENT '(' arg_list? ')'` in expressions, `op_call` in statements), and adding an entry is a table row plus an executor.
@@ -1390,7 +1393,7 @@ When extraction happens follows from snapshot semantics (section 7.1): once per 
 
 ## Appendix A: The embedding API
 
-The reference implementation is a C++ library first and a CLI second. A game embeds `ls.hpp` and sees exactly five types - `generator`, `level`, `grid`, `graph`, `generation` - in namespace `ls`. Nothing throws: a failed compile yields a falsy `generator` carrying `error()`, and every query on an invalid object reads as empty.
+The reference implementation is a C++ library first and a CLI second. A game embeds `ls.hpp` and sees exactly five types - `generator`, `level`, `grid`, `graph`, `run` - in namespace `ls`. Nothing throws: a failed compile yields a falsy `generator` carrying `error()`, and every query on an invalid object reads as empty.
 
 ```cpp
 auto gen   = ls::generator::compile(source, "dungeon.lvs", resolve);  // once, at load
@@ -1398,26 +1401,27 @@ int  wall  = gen.tag("geometry.wall");              // resolve names once
 int  entry = gen.sequence("main");                  // any sequence can be the entry
 auto level = gen.generate(entry, seed);             // pure in (entry, seed, params)
 auto geo   = level["level"];
-if (geo.at(x, y) == wall) ...
+if (geo.has(x, y, wall)) ...
+auto map   = level.graph("map");                    // a graph layer, by name
 ```
 
-**The factory-vs-value split.** A `generator` is a **stateless, reusable factory**: one per root module and its closure (section 2.6), shareable across threads; each `generate`/`begin` call names its entry, is independent, and carries its own run state. A `level` is a **self-contained owned value**: it owns its cells and outlives the generator that made it. A `grid` **shares ownership** of the level data it views, so a grid handed to a garbage-collected scripting host can outlive the `level` object it came from. Internally, one coroutine-backed execution core (section 10.1) serves both `generate` (drain to completion) and `begin`/`step` (pull incrementally); they cannot diverge.
+**The factory-vs-value split.** A `generator` is a **stateless, reusable factory**: one per root module and its closure (section 2.6), shareable across threads; each `generate`/`run` call names its entry, is independent, and carries its own run state. A `level` is a **self-contained owned value**: it owns its cells and outlives the generator that made it. A `grid` **shares ownership** of the level data it views, so a grid handed to a garbage-collected scripting host can outlive the `level` object it came from. A `graph` is extracted when `level::graph` returns it and is self-contained too. Internally, one coroutine-backed execution core (section 10.1) serves both `generate` (drain to completion) and `run`/`step` (pull incrementally); they cannot diverge.
 
 ### `generator` - one compiled module closure
 
 | member | meaning |
 |--------|---------|
-| `static generator compile(const std::string& source, const std::string& name = "generator", resolver resolve = {})` | Compile `source` as the root module (section 2.6), with canonical name `name`. The game owns file/asset IO: each `use` is mapped to a module by `resolve` (see Module resolution below); with no resolver, every `use` is an unresolved module (section 7.3, check 9). Diagnostics are labelled with canonical module names (`"dungeon.lvs:12:3: error: ..."`). |
+| `static generator compile(const std::string& source, const std::string& name = "generator", resolver resolve = {}, warning_handler warn = {})` | Compile `source` as the root module (section 2.6), with canonical name `name`. The game owns file/asset IO: each `use` is mapped to a module by `resolve` (see Module resolution below); with no resolver, every `use` is an unresolved module (section 7.3, check 9). Diagnostics are labelled with canonical module names (`"dungeon.lvs:12:3: error: ..."`). Every warning of the compile and of every run the generator starts goes to `warn` (see Warnings below); with none, to the standard error stream. |
 | `explicit operator bool()` | True iff compilation succeeded. |
 | `std::string error()` | Formatted diagnostics when compile failed; `""` on success. |
-| `std::string warnings()` | Formatted warnings of a successful compile (e.g. the reductivity warning, section 7.4); `""` when none. |
-| `int tag(const std::string& qualified)` | Tag value id, qualified by tagset: `tag("geometry.wall")`. Ids are per tagset, valid for every layer of that tagset. `-1` if unknown. |
+| `std::string warnings()` | Formatted warnings of a successful compile (e.g. the reductivity warning, section 7.4); `""` when none. They also went to the warning handler. |
+| `int tag(const std::string& qualified)` | Value mask, qualified by tagset: `tag("geometry.wall")` is that value's bit, and a named union's name gives its combined mask. Masks are per tagset, valid for every layer of that tagset. `0` if unknown, so an unknown name ORed into a combined mask adds nothing. |
 | `int sequence(const std::string& name)` | Sequence id, for use as an entry (section 6). `-1` if unknown. Ids are `0 .. sequence_count() - 1` in canonical declaration order (section 2.6). |
 | `int sequence_count()` | Number of sequences in the closure. |
 | `std::string sequence_name(int id)` | Name of a sequence id (`""` if out of range). |
 | `std::vector<std::string> modules()` | Canonical names of the closure's modules in canonical order, root last (section 2.6). After a failed compile, the modules resolved before the failure. For hot reload. |
 | `level generate(int entry, uint64_t seed, const std::vector<std::pair<std::string, int>>& params = {})` | Run sequence `entry` as the entry (section 6): (entry, seed, params) -> `level`, deterministically (section 7.2). Params override declared defaults; unknown names are ignored. An invalid entry id yields an empty level. |
-| `generation begin(int entry, uint64_t seed, step_mode mode = step_mode::statement, observe obs = observe::off, const std::vector<std::pair<std::string, int>>& params = {})` | Start a progressive run of `entry`; pull it with `generation::step()`. With an invalid entry id, the first `step()` returns `false`. |
+| `run run(int entry, uint64_t seed, step_mode mode = step_mode::statement, observe obs = observe::off, const std::vector<std::pair<std::string, int>>& params = {})` | Start a progressive run of `entry`; pull it with `run::step()`. With an invalid entry id, the first `step()` returns `false`. |
 | `int statement_count(int entry)` | Number of statements in the entry's body (progress denominators). Statements inside nested sequences are not counted; a sequence application counts as one. `0` for an invalid id. |
 
 **Module resolution.** `compile` maps each `use` (section 2.6) through a host callback:
@@ -1429,14 +1433,22 @@ using resolver = std::function<std::optional<module_source>(const std::string& p
 
 `path` is the string written in the `use`; `from` is the canonical name of the using module (the root's is `compile`'s `name`). The resolver returns the module's canonical name and source text, or `std::nullopt` when it cannot resolve the path (check 9). The canonical name identifies the module within the compile and labels its diagnostics, so the resolver must return the same name for every path that denotes the same file. The CLI's resolver reads the filesystem, relative to the directory of `from`.
 
+**Warnings.** Warnings (section 7.4) go to a host callback, one call per warning:
+
+```cpp
+using warning_handler = std::function<void(const std::string& warning)>;
+```
+
+Each warning is formatted like a diagnostic, labelled with its module and positioned at its declaration or, at run time, at the statement that raised it: `"dungeon.lvs:14:5: warning: path() found no route from 'from' to 'to'; leaving grids unchanged"`. A run calls the handler from whichever thread drives it.
+
 ### `level` - one generated outcome: the stack of co-registered grids
 
 | member | meaning |
 |--------|---------|
 | `int width()`, `int height()` | Final dimensions. |
 | `int layer_count()` | Number of grid layers; graph layers are not counted (section 4.3). |
-| `grid operator[](const std::string& layer_name)` | Layer by name. |
-| `grid layer(int index)` | Layer by layer order (section 4). |
+| `grid operator[](const std::string& layer_name)` | Grid layer by name. |
+| `grid layer(int index)` | Grid layer by layer order (section 4). |
 | `std::string layer_name(int index)` | Name of the layer at `index`. |
 | `graph graph(const std::string& name)` | Graph layer by name, extracted from the level's final grids (section 4.3). Invalid if no graph layer has that name. |
 
@@ -1444,10 +1456,12 @@ using resolver = std::function<std::optional<module_source>(const std::string& p
 
 | member | meaning |
 |--------|---------|
-| `int at(int x, int y)` | The tag value id at (x, y), or the stored number for number layers; `-1` when empty (or out of range / invalid). |
-| `bool empty(int x, int y)` | True iff the cell is empty. |
+| `std::string name()` | Name of the layer (`""` if invalid). |
 | `bool is_number()` | True for `grid of number` layers. |
-| `std::string name(int value_id)` | Name of a tag value id (`""` for number layers or out of range). |
+| `int at(int x, int y)` | For a tag layer, the stored value mask: a single value bit for a normal cell, several for a union write (section 5.5). For a number layer, the stored number. `-1` when empty, out of range, or invalid - which a number cell may also store, so `is_empty` is the emptiness test. |
+| `bool is_empty(int x, int y)` | True iff the cell is empty; also true out of range or on an invalid grid. |
+| `bool has(int x, int y, int mask)` | True iff the stored mask overlaps `mask` (section 4.1) - the test that stays correct for a union cell. `false` for number layers. |
+| `std::string valueName(int mask)` | Name of a single-bit value mask (`""` if `mask` is not exactly one value bit, or for number layers). |
 
 ### `graph` - one graph layer of a generated level
 
@@ -1460,24 +1474,25 @@ using resolver = std::function<std::optional<module_source>(const std::string& p
 
 A `graph` is extracted once, when `level::graph` returns it, and is a self-contained value: it does not depend on the `level` object afterwards.
 
-### `generation` - one in-flight progressive run
+### `run` - one in-flight progressive run
 
 | member | meaning |
 |--------|---------|
-| `bool step()` | Advance by the granularity fixed at `begin()`; `false` when done. |
+| `bool step()` | Advance by the granularity fixed at `generator::run()`; `false` when done. |
 | `void stop_at_begin(bool on)` | Also stop *before* each statement: `step()` then returns at the begin of every statement whose guard passed (a rule application, an operation, or a sequence application), with `stmt_stack()` naming it. Off by default. For debuggers: breaking or stepping to a statement before it changes anything. |
-| `bool at_statement_begin()` | Whether the last step is a statement's begin (see `stop_at_begin`). Observe channel. |
+| `bool at_statement_begin()` | Whether the last step is a statement's begin (see `stop_at_begin`). |
+| `bool at_statement_boundary()` | Whether the last step completed a statement, rather than one application within it. |
 | `level snapshot()` | Copy of the current state - committed statements plus the current batch's applications so far. |
 | `level finish()` | Drain whatever remains and return the finished level (the "skip" path). |
-| `int stmt_index()` | Index, in the entry's body, of the statement the last step worked on (`-1` before the first step). Inside a nested sequence, this is the index of the entry-body statement that applied it. Observe channel. |
-| `std::vector<stmt_frame> stmt_stack()` | Position of the last step through nested sequences, outermost first. Frame 0 is a statement of the entry's body (its `index` equals `stmt_index()`); each further frame is a statement inside the sequence applied by the frame before it. Empty before the first step. Observe channel. |
-| `std::vector<cell_highlight> highlights()` | Matched/written cells of the last application. Observe channel; populated only when begun with `observe::on`. |
+| `int statement_index()` | Index, in the entry's body, of the statement the last step worked on (`-1` before the first step). Inside a nested sequence, this is the index of the entry-body statement that applied it. |
+| `std::vector<stmt_frame> stmt_stack()` | Position of the last step through nested sequences, outermost first. Frame 0 is a statement of the entry's body (its `index` equals `statement_index()`); each further frame is a statement inside the sequence applied by the frame before it. Empty before the first step. |
+| `std::vector<cell_highlight> highlights()` | Matched/written cells of the last application. Observe channel; populated only when started with `observe::on`. |
 
 Supporting types:
 
 - `enum class step_mode { statement, application }` - the pull granularity: one **leaf** statement per `step()`, or one rule application per `step()` (operations and atomic batches still advance whole). A leaf statement is a rule application or an operation, in the entry's body or inside a nested sequence. Applying a sequence is not itself a step, and neither is its stability check.
-- `enum class observe { off, on }` - whether the run records the observe channel (`stmt_index`, `stmt_stack`, `highlights`); off costs nothing.
-- `struct stmt_frame { int index; int iteration; }` - one level of the statement stack. `index` is the statement's position in its enclosing list (the entry's body, or a nested sequence body). `iteration` is the 0-based iteration of the enclosing sequence application (always 0 for frame 0, since the entry runs once).
-- `struct cell_highlight { enum class kind { match, write }; int layer; int x, y; kind what; }` - one highlighted cell: which layer/cell the last application matched or wrote.
+- `enum class observe { off, on }` - whether the run records highlights; off costs nothing.
+- `struct stmt_frame { int index; int iteration; int iterations; }` - one level of the statement stack. `index` is the statement's position in its enclosing list (the entry's body, or a nested sequence body). `iteration` is the 0-based iteration of the enclosing sequence application (always 0 for frame 0, since the entry runs once); `iterations` is that application's evaluated count, `-1` when it runs until stable.
+- `struct cell_highlight { enum class kind { match, write }; int layer; int x, y; kind what; }` - one highlighted cell: which layer/cell the last application matched or wrote. A graph-pattern cell highlights its graph's source layer (section 5.12).
 
-`generation` is move-only (it owns the in-flight coroutine state). Dropping it mid-run is safe; `finish()` is the explicit skip-to-end.
+`run` is move-only (it owns the in-flight coroutine state). Dropping it mid-run is safe; `finish()` is the explicit skip-to-end.
