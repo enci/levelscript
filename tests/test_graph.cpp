@@ -600,6 +600,15 @@ TEST_CASE("graph: selections follow writes to the selector's grid") {
     CHECK(show(grown, "rooms") == "S.S.S");
 }
 
+TEST_CASE("graph: off-node graph cells draw nothing") {
+    std::string after = "\n    scatter(3) { level[R] items[.] => items[chest] }";
+    auto items = [&](std::string const& first) {
+        return show(generate(stamped(dungeon, "level", abc, first + after)), "items");
+    };
+    // the cell sees no node on H and empty cells: no draws, so the scatter is unchanged
+    CHECK(items("everywhere { level[!R] map[ (random(0, 9) > 100) ] => items[.] }") == items(""));
+}
+
 TEST_CASE("graph: graph cells evaluate after bare cells") {
     std::string after = "\n    scatter(3) { level[R] items[.] => items[chest] }";
     auto items = [&](std::string const& first) {

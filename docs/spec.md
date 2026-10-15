@@ -456,7 +456,7 @@ cell         ::= '*' | INTEGER | tag_mask | VARIABLE | '(' expr ')'
 tag_mask     ::= mask_atom ('|' mask_atom)*
 mask_atom    ::= '!'? (IDENT | '.')
 ```
-A `tag_mask` is whitespace-free (the cell ends at the next whitespace or comma). A comma inside `( ... )` belongs to the expression; only a comma outside parentheses separates rows. `expr` inside `( ... )` follows section 5.8 and may contain whitespace. `tag_mask` (which includes bare `.` and `!.`) and the bare `*` are exactly the mask literals, and a bare `VARIABLE` is a pattern variable (section 5.11); every other expression must be parenthesized. A pattern head `IDENT` names a grid or, on the match side only, a graph layer (section 5.12).
+A `tag_mask` is whitespace-free (the cell ends at the next whitespace or comma). A comma inside `( ... )` belongs to the expression; only a comma outside parentheses separates rows. A newline separates rows everywhere in the grid, inside `( ... )` too, so a parenthesized cell is written on one line; one broken across lines is a parse error. `expr` inside `( ... )` follows section 5.8 and may contain whitespace. `tag_mask` (which includes bare `.` and `!.`) and the bare `*` are exactly the mask literals, and a bare `VARIABLE` is a pattern variable (section 5.11); every other expression must be parenthesized. A pattern head `IDENT` names a grid or, on the match side only, a graph layer (section 5.12).
 
 The opening `[` may be followed immediately by content on the same line or by a newline starting the first row. The closing `]` may follow the last row or sit on its own line.
 
@@ -711,7 +711,7 @@ rule guarded {
 }
 ```
 
-**Cells.** A graph-pattern cell is `*`, which places no condition, or a parenthesized boolean expression (check 52). A non-`*` cell matches at a position iff a node covers it and the expression is true for that node. At a position no node covers (a connector cell, any other non-node cell, or an empty one) it fails. Every cell of a region sees the same node, so `everywhere dead_end` writes every cell of every dead-end room. A graph pattern may have any rectangular shape; each cell tests the node at its own position, so two cells may see one node or two different ones.
+**Cells.** A graph-pattern cell is `*`, which places no condition, or a parenthesized boolean expression (check 52). A non-`*` cell matches at a position iff a node covers it and the expression is true for that node. At a position no node covers (a connector cell, any other non-node cell, or an empty one) it fails without evaluating its expression, so a `random` in it draws nothing there. Every cell of a region sees the same node, so `everywhere dead_end` writes every cell of every dead-end room. A graph pattern may have any rectangular shape; each cell tests the node at its own position, so two cells may see one node or two different ones.
 
 **Graph functions.** Four built-ins (section 5.10) describe the cell's node. They are valid only in graph-pattern cells (check 53):
 

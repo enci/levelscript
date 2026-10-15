@@ -1,0 +1,11 @@
+// E154 (0.10, section 5.3): a newline inside a pattern breaks the row, even inside ( ).
+// @expect error
+// @expect stderr-contains expected ')'
+tag t { a }
+layers {
+    g: grid of t
+    n: grid of number
+}
+rule r { g[ (n > 1 &&
+              n < 5) ] => g[a] }
+sequence main { resize(2, 2) everywhere r }
