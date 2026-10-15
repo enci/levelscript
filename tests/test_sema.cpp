@@ -28,6 +28,7 @@ sequence main { resize(4, 3)  everywhere fill }
 }
 
 TEST_CASE("sema: duplicate declarations") {
+    // checks 39, 42
     CHECK(compile_result("tag a { x }\ntag a { y }\nsequence main { }").has_error("duplicate tag"));
     CHECK(compile_result("tag a { x, x }\nsequence main { }").has_error("duplicate tag value"));
     CHECK(compile_result(prelude +
@@ -36,6 +37,7 @@ TEST_CASE("sema: duplicate declarations") {
 }
 
 TEST_CASE("sema: unknown references") {
+    // checks 6, 8
     CHECK(compile_result("layers { g: grid of nope }\nsequence main { }")
           .has_error("undeclared tag"));
     CHECK(compile_result(prelude + "rule r { nope[.] => nope[.] }\nsequence main { }")
@@ -47,6 +49,7 @@ TEST_CASE("sema: unknown references") {
 }
 
 TEST_CASE("sema: cell/grid type mismatches") {
+    // check 14
     CHECK(compile_result(prelude + "rule r { level[3] => level[wall] }\nsequence main { }")
           .has_error("integer cell in a tag grid"));
     CHECK(compile_result(prelude + "rule r { tiles[wall] => tiles[1] }\nsequence main { }")
@@ -54,11 +57,13 @@ TEST_CASE("sema: cell/grid type mismatches") {
 }
 
 TEST_CASE("sema: shape mismatch") {
+    // check 3
     CHECK(compile_result(prelude + "rule r { level[. .] => level[wall] }\nsequence main { }")
           .has_error("dimension mismatch"));
 }
 
 TEST_CASE("sema: inconsistent row widths") {
+    // check 1
     compile_result r(prelude + R"(
 rule r {
     level[
@@ -75,6 +80,7 @@ sequence main { }
 }
 
 TEST_CASE("sema: operation table") {
+    // checks 32, 34
     CHECK(compile_result(prelude + "sequence main { warp(3, 3) }").has_error("unknown operation"));
     CHECK(compile_result(prelude + "sequence main { resize(3) }").has_error("requires argument 'h'"));
     // out-of-range values are handled at run time
@@ -92,6 +98,7 @@ TEST_CASE("sema: a zero count compiles, it applies nothing") {
 // -- step 2: write trees, attributes, variant expansion --
 
 TEST_CASE("sema: same-grid simultaneous write in { all } is rejected") {
+    // check 31
     CHECK(compile_result(prelude + R"(
 rule r {
     level[.]
@@ -122,6 +129,7 @@ sequence main { }
 }
 
 TEST_CASE("sema: nested write leaf shape mismatch is rejected") {
+    // check 3
     CHECK(compile_result(prelude + R"(
 rule r {
     level[. .]
@@ -136,6 +144,7 @@ sequence main { }
 }
 
 TEST_CASE("sema: invalid attribute values") {
+    // check 18
     CHECK(compile_result(prelude +
         "rule r(symmetry=diagonal) { level[.] => level[wall] }\nsequence main { }")
         .has_error("invalid symmetry 'diagonal'"));
@@ -243,6 +252,7 @@ sequence main {
 }
 
 TEST_CASE("sema: counts read params only and are numbers") {
+    // check 21
     std::string params = "params { n: number = 4 }\n";
     for (char const* stmt : {"scatter(tiles) fill", "grow(x) fill", "settle(width - 1) fill",
                              "scatter((height)%) fill"}) {
@@ -306,6 +316,7 @@ sequence main { grow(5) mark }
 static const std::string rprog = "sequence main { }\n";
 
 TEST_CASE("sema: expression type errors") {
+    // checks 6, 14
     CHECK(compile_result(prelude + "rule r { level[ (wall + 1) ] => level[floor] }\n" + rprog)
           .has_error("arithmetic operator requires numeric"));
     CHECK(compile_result(prelude + "rule r { level[ (wall == 1) ] => level[floor] }\n" + rprog)
@@ -321,6 +332,7 @@ TEST_CASE("sema: expression type errors") {
 }
 
 TEST_CASE("sema: built-in calls") {
+    // checks 16, 19, 20
     CHECK(compile_result(prelude + "rule r { tiles[ (warp(1)) ] => tiles[1] }\n" + rprog)
           .has_error("unknown function 'warp'"));
     CHECK(compile_result(prelude + "rule r { tiles[ (min(1)) ] => tiles[1] }\n" + rprog)
@@ -337,6 +349,7 @@ TEST_CASE("sema: built-in calls") {
 }
 
 TEST_CASE("sema: where discipline") {
+    // checks 11, 14
     CHECK(compile_result(prelude + "rule r { level[.] => where[ (x == 0) ] }\n" + rprog)
           .has_error("cannot appear on the write side"));
     CHECK(compile_result(prelude + R"(
@@ -350,11 +363,13 @@ rule r {
 }
 
 TEST_CASE("sema: complement is match-side only") {
+    // check 15
     CHECK(compile_result(prelude + "rule r { level[wall] => level[!wall] }\n" + rprog)
           .has_error("not allowed on the write side"));
 }
 
 TEST_CASE("sema: param scopes") {
+    // checks 12, 23, 26, 27
     // input param without a default
     CHECK(compile_result("params { d: number }\n" + rprog)
           .has_error("must have a default"));
@@ -378,6 +393,7 @@ TEST_CASE("sema: param scopes") {
 }
 
 TEST_CASE("sema: when guard discipline") {
+    // check 22
     std::string pre = prelude + rfill + "params { d: number = 0 }\n";
     CHECK(compile_result(prelude + rfill +
           "params { d: number = 0 }\nsequence main { everywhere fill when (d + 1) }")
@@ -391,6 +407,7 @@ TEST_CASE("sema: when guard discipline") {
 }
 
 TEST_CASE("sema: named unions") {
+    // check 25
     compile_result ok(R"(
 tag geo { wall, door, floor, blocker = wall | door, solid = blocker | floor }
 layers { level: grid of geo }
@@ -424,6 +441,7 @@ layers {
 )";
 
 TEST_CASE("sema: operation argument binding") {
+    // checks 33, 34
     // positional may also be supplied by name; named-only rejects positional
     compile_result named_ok(prelude + "sequence main { resize(w=4, h=3) }");
     INFO(named_ok.diags.format_all());
@@ -445,6 +463,7 @@ TEST_CASE("sema: operation argument binding") {
 }
 
 TEST_CASE("sema: operation argument kinds and constraints") {
+    // checks 21, 35
     CHECK(compile_result(prelude + "sequence main { mirror(diagonal) }")
           .has_error("invalid mirror axis"));
     CHECK(compile_result(prelude + "sequence main { mirror(3) }")
@@ -477,6 +496,7 @@ sequence main {
 }
 
 TEST_CASE("sema: ambiguous bare predicate needs the expression form") {
+    // check 35
     CHECK(compile_result(R"(
 tag a { door }
 tag b { door, road }
@@ -489,6 +509,7 @@ sequence main { path(from=door, to=road, into=g2, write=road) }
 }
 
 TEST_CASE("sema: tagset over the 30-value cap") {
+    // check 10
     std::string big = "tag t { ";
     for (int i = 0; i < 31; ++i) big += "v" + std::to_string(i) + ", ";
     big += "}\nsequence main { }";
@@ -543,6 +564,7 @@ rule r(rotation=all) {
 }
 
 TEST_CASE("sema: contextual names") {
+    // checks 6, 18
     SECTION("none/horizontal/vertical/symmetry/rotation are legal names") {
         compile_result r(R"(
 tag none { horizontal, vertical }
@@ -619,6 +641,7 @@ sequence main {
 }
 
 TEST_CASE("sema: inline rules get every rule check, located at the rule") {
+    // checks 6, 8, 18
     CHECK(compile_result(prelude + "sequence main { everywhere { level[lava] => level[floor] } }")
           .has_error("unknown tag value 'lava'"));
     CHECK(compile_result(prelude + "sequence main { everywhere (symmetry=diagonal) { level[.] => level[floor] } }")
@@ -653,6 +676,7 @@ TEST_CASE("sema: pattern variables bind, type, and are used") {
 }
 
 TEST_CASE("sema: unbound pattern variables") {
+    // check 44
     compile_result write(prelude + "rule r { level[.] => level[?v] }\n" + rprog);
     CHECK(write.has_error("'?v' is never bound"));
     compile_result paren(prelude + "rule r { level[(?v)] => level[*] }\n" + rprog);
@@ -666,6 +690,7 @@ TEST_CASE("sema: unbound pattern variables") {
 }
 
 TEST_CASE("sema: pattern variable types") {
+    // check 45
     CHECK(compile_result(prelude + "rule r { level[?v] tiles[?v] => level[*] }\n" + rprog)
           .has_error("binds a number cell here but a tagset 'geo' cell elsewhere"));
     CHECK(compile_result(prelude + "rule r { tiles[?v] => level[?v] }\n" + rprog)
@@ -677,6 +702,7 @@ TEST_CASE("sema: pattern variable types") {
 }
 
 TEST_CASE("sema: pattern variables outside a pattern") {
+    // check 46
     auto outside = [](std::string const& src) {
         return compile_result(prelude + src).has_error("outside a pattern");
     };
@@ -690,6 +716,7 @@ TEST_CASE("sema: pattern variables outside a pattern") {
 }
 
 TEST_CASE("sema: 'where' cells are '*' or parenthesized booleans") {
+    // check 13
     compile_result star(prelude + "rule r { level[floor floor] where[* (x > 1)] => level[* wall] }\n" + rprog);
     INFO(star.diags.format_all());
     CHECK(star.ok);
@@ -736,6 +763,7 @@ TEST_CASE("sema: '.' composes in match-side masks") {
 }
 
 TEST_CASE("sema: misplaced empty masks") {
+    // checks 15, 47
     CHECK(compile_result(prelude + "rule r { level[wall] => level[!.] }\n" + rprog)
           .has_error("tag complement '!.' is not allowed on the write side"));
     CHECK(compile_result(prelude + "rule r { tiles[1] => tiles[!.] }\n" + rprog)
@@ -771,6 +799,7 @@ TEST_CASE("sema: reductivity sees through '!.'") {
 // ── expressions in operation arguments ───────────────────────────────────────
 
 TEST_CASE("sema: operation arguments are expressions resolved by kind") {
+    // checks 21, 35
     auto ok = [](std::string const& src) {
         compile_result r(src);
         INFO(r.diags.format_all());
@@ -798,6 +827,7 @@ TEST_CASE("sema: operation arguments are expressions resolved by kind") {
 }
 
 TEST_CASE("sema: a tag name outside a tag cell names the one tagset declaring it") {
+    // check 6
     // a union resolves like a value (a 'where' cell has no tagset of its own)
     CHECK(compile_result("tag t { a, b, ab = a | b }\nlayers { g: grid of t }\n"
                          "rule r { g[*] where[(g == ab)] => g[b] }\nsequence main { }\n").ok);
@@ -868,4 +898,21 @@ TEST_CASE("sema: an { any } needs a positive weight") {
     int b = gen.tag("t.b");
     for (int y = 0; y < 8; ++y)
         for (int x = 0; x < 8; ++x) CHECK(g.at(x, y) == b);
+}
+
+TEST_CASE("sema: a combinator block needs an item") {
+    // check 4
+    std::string decls = "tag t { a }\nlayers { g: grid of t }\n";
+    CHECK(compile_result(decls + "rule r { g[.] => { any } }").has_error("empty combinator block"));
+    CHECK(compile_result(decls + "rule r { g[.] => { all } }").has_error("empty combinator block"));
+    CHECK(compile_result(decls + "rule r { any }").has_error("empty rule body"));
+    CHECK(compile_result(decls + "rule r { g[.] => { any g[a] } }").ok);
+}
+
+TEST_CASE("sema: a derived param is a number") {
+    // check 24
+    std::string decls = "tag t { a }\nlayers { g: grid of t }\n";
+    CHECK(compile_result(decls + "params { p = a }").has_error("derived param 'p' must evaluate to a number"));
+    CHECK(compile_result(decls + "params { p = 1 > 0 }").has_error("derived param 'p' must evaluate to a number"));
+    CHECK(compile_result(decls + "params { p = 2 * 3 }").ok);
 }
