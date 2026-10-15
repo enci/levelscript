@@ -11,7 +11,7 @@ enum class token_type {
     variable,   // '?name', a pattern variable; text keeps the '?'
     // keywords; contextual names such as `symmetry` or `horizontal` lex as
     // ident and are matched by text in the parser
-    kw_tag, kw_layers, kw_grid, kw_of, kw_number, kw_rule, kw_sequence,
+    kw_tag, kw_layers, kw_grid, kw_graph, kw_of, kw_number, kw_rule, kw_sequence,
     kw_all, kw_any, kw_ordered, kw_weight,
     kw_once, kw_scatter, kw_everywhere, kw_grow, kw_settle,   // modes
     kw_params, kw_where, kw_when, kw_use,

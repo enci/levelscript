@@ -14,7 +14,8 @@ static bool digit(char c) { return c >= '0' && c <= '9'; }
 static token_type keyword_or_ident(std::string_view text) {
     static const std::unordered_map<std::string_view, token_type> keywords = {
         {"tag", token_type::kw_tag},       {"layers", token_type::kw_layers},
-        {"grid", token_type::kw_grid},     {"of", token_type::kw_of},
+        {"grid", token_type::kw_grid},     {"graph", token_type::kw_graph},
+        {"of", token_type::kw_of},
         {"number", token_type::kw_number}, {"rule", token_type::kw_rule},
         {"sequence", token_type::kw_sequence},
         {"all", token_type::kw_all},       {"any", token_type::kw_any},

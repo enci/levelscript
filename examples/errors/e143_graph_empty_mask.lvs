@@ -1,0 +1,9 @@
+// E143 (0.10, check 50): a mask must select at least one value.
+// @expect error
+// @expect stderr-contains selects no value
+tag algo { R, H }
+layers {
+    level: grid of algo
+    map:   graph of level(nodes=.)
+}
+sequence main { resize(2, 2) }

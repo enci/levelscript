@@ -1,0 +1,9 @@
+// E137 (0.10, check 48): a graph is built from a grid, not a tagset.
+// @expect error
+// @expect stderr-contains built from tagset
+tag algo { R, H }
+layers {
+    level: grid of algo
+    map:   graph of algo
+}
+sequence main { resize(2, 2) }

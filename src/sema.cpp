@@ -226,7 +226,7 @@ struct analyzer {
 
     // Declaring module of each table entry, aligned with out.tag_names,
     // out.layers and out.param_names (rules and sequences align with the AST).
-    std::vector<int> tag_mod, layer_mod, param_mod;
+    std::vector<int> tag_mod, layer_mod, graph_mod, param_mod;
 
     scope scope_{};
 
@@ -581,6 +581,7 @@ struct analyzer {
         }
 
         for (auto const& l : ast.layers.layers) {
+            if (l.is_graph) continue;   // after every grid: a source may come later
             auto const& [name, loc] = l.name;
             check_name(loc, "grid", name);
             if (out.layer_id(name) >= 0) {   // across every module in the closure
@@ -600,11 +601,16 @@ struct analyzer {
             layer_mod.push_back(loc.mod);
         }
 
+        for (auto const& l : ast.layers.layers)
+            if (l.is_graph) add_graph(l);
+
         for (auto const& p : ast.params) {
             auto const& [name, loc] = p.name;
             check_name(loc, "param", name);
             if (out.layer_id(name) >= 0)
                 error(loc, "param '" + name + "' collides with a grid of the same name");
+            if (out.graph_id(name) >= 0)
+                error(loc, "param '" + name + "' collides with a graph of the same name");
             if (out.param_id(name) >= 0) {
                 error(loc, "duplicate param '" + name + "'");
                 continue;
@@ -616,6 +622,107 @@ struct analyzer {
             out.param_names.push_back(name);
             param_mod.push_back(loc.mod);
         }
+    }
+
+    // The value bits of tagset `tag`: every value, no empty bit.
+    int64_t value_bits(int tag) const {
+        int64_t full = 0;
+        for (int i = 0; i < (int)out.tag_values[(size_t)tag].size(); ++i) full |= tag_bit(i);
+        return full;
+    }
+
+    // A whitespace-free mask over tagset `tag`: its atoms' union, each `!a`
+    // the complement of `a` within the tagset. Unknown atoms are reported
+    // with `whose` ("for this grid") and add nothing.
+    int64_t tag_mask(expr const& e, int tag, std::string const& whose) {
+        std::vector<mask_atom> atoms;
+        mask_atoms(e, atoms);
+        int64_t mask = 0;
+        for (auto const& a : atoms) {
+            int64_t m = a.name == "." ? tag_empty : out.mask_of(tag, a.name);
+            if (m == 0) {
+                error(a.loc, "unknown tag value '" + a.name + "' " + whose);
+                continue;
+            }
+            mask |= a.negate ? value_bits(tag) & ~m : m;
+        }
+        return mask;
+    }
+
+    // A graph entry: its source grid, form, and masks.
+    void add_graph(layer_decl const& l) {
+        auto const& [name, loc] = l.name;
+        check_name(loc, "graph", name);
+        if (out.layer_id(name) >= 0 || out.graph_id(name) >= 0) {
+            error(loc, "duplicate layer '" + name + "': a grid or graph of that name is "
+                  "already declared");
+            return;
+        }
+        compiled_graph g;
+        g.name = name;
+        g.source = out.layer_id(l.type);
+        auto is_graph = [&](layer_decl const& o) { return o.is_graph && o.name.text == l.type; };
+        if (g.source < 0) {
+            if (std::any_of(ast.layers.layers.begin(), ast.layers.layers.end(), is_graph))
+                error(loc, "graph '" + name + "' is built from graph '" + l.type +
+                      "'; a graph's source must be a grid");
+            else if (out.tag_id(l.type) >= 0)
+                error(loc, "graph '" + name + "' is built from tagset '" + l.type +
+                      "'; a graph's source must be a grid");
+            else
+                error(loc, "graph '" + name + "' references undeclared grid '" + l.type + "'");
+        } else {
+            require_visible(loc, "grid", l.type, layer_mod[(size_t)g.source]);
+        }
+        out.graphs.push_back(g);
+        graph_mod.push_back(loc.mod);
+        if (g.source < 0) return;
+
+        int tag = out.layers[(size_t)g.source].tag_id;
+        graph_arg const* nodes = nullptr;
+        graph_arg const* edges = nullptr;
+        for (auto const& a : l.args) {
+            bool is_nodes = a.name == "nodes";
+            if (!is_nodes && !(a.name == "edges")) {
+                error(a.name.loc, "unknown graph argument '" + a.name.text +
+                      "'; allowed: nodes, edges");
+                continue;
+            }
+            graph_arg const*& slot = is_nodes ? nodes : edges;
+            if (slot) error(a.name.loc, "graph argument '" + a.name.text + "' given twice");
+            else slot = &a;
+        }
+        if (tag < 0) {
+            if (!l.args.empty())
+                error(l.args[0].name.loc, "graph '" + name + "' is built from number grid '" +
+                      l.type + "', which takes no 'nodes' or 'edges'; write 'graph of " +
+                      l.type + "'");
+            return;
+        }
+        if (edges && !nodes)
+            error(edges->name.loc, "graph '" + name + "' has 'edges' without 'nodes'");
+
+        int64_t full = value_bits(tag);
+        std::string whose = "in a mask of graph '" + name + "': its source '" + l.type +
+                            "' holds tagset '" + out.tag_names[(size_t)tag] + "'";
+        auto mask = [&](graph_arg const* a) -> int64_t {
+            int64_t m = tag_mask(*a->mask, tag, whose) & full;
+            if (m == 0)
+                error(a->mask->loc, "the '" + a->name.text + "' mask of graph '" + name +
+                      "' selects no value");
+            return m;
+        };
+        g.nodes = nodes ? mask(nodes) : full;
+        g.edges = edges ? mask(edges) : 0;
+        if (int64_t shared = g.nodes & g.edges) {
+            std::string list;
+            for (int i = 0; i < (int)out.tag_values[(size_t)tag].size(); ++i)
+                if (shared & tag_bit(i))
+                    list += (list.empty() ? "'" : ", '") + out.tag_values[(size_t)tag][(size_t)i] + "'";
+            error(edges->mask->loc, "the 'nodes' and 'edges' masks of graph '" + name +
+                  "' share " + list + "; a cell is a node or a connector, not both");
+        }
+        out.graphs.back() = g;
     }
 
     // Param startup expressions: derived params and input defaults share
@@ -789,26 +896,12 @@ struct analyzer {
         if (is_rhs && has_empty && atoms.size() > 1)
             error(in.loc, "'.' cannot be written in a union: a cell holds empty or "
                   "values, never both");
-        int64_t full = 0;
-        for (int i = 0; i < (int)out.tag_values[tag].size(); ++i)
-            full |= tag_bit(i);
-        int64_t mask = 0;
-        for (auto const& a : atoms) {
-            int64_t m = a.name == "." ? tag_empty : out.mask_of(tag, a.name);
-            if (m == 0) {
-                error(a.loc, "unknown tag value '" + a.name + "' for this grid");
-                continue;
-            }
-            if (a.negate) {
-                if (is_rhs)   // complement is match-side only
+        if (is_rhs)   // complement is match-side only
+            for (auto const& a : atoms)
+                if (a.negate)
                     error(a.loc, "tag complement '!" + a.name +
                           "' is not allowed on the write side");
-                mask |= full & ~m;
-            } else {
-                mask |= m;
-            }
-        }
-        cc.val = mask;
+        cc.val = tag_mask(in, tag, "for this grid");
         return cc;
     }
 
@@ -1414,7 +1507,7 @@ struct analyzer {
 
 bool analyze(module_closure const& mods, compiled& out, diagnostics& diags,
              bool best_effort) {
-    analyzer a{mods.merged, out, diags, mods, {}, {}, {}};
+    analyzer a{mods.merged, out, diags, mods, {}, {}, {}, {}};
     a.run(best_effort);
     return !diags.has_errors();
 }

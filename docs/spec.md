@@ -8,7 +8,7 @@
 
 LevelScript is a domain-specific language for procedural generation of grid-based content (roguelike dungeons, puzzle layouts, tile maps). A generator describes how to transform a stack of correlated grids through a sequence of pattern-rewrite rules, orchestrated by a small set of built-in operations.
 
-The reference implementation is a C++ library first and a CLI second, built around a single coroutine-backed execution core, a self-contained compiled artifact, and an embedding-first API (section 10, Appendix A). Graph layers are the planned next step (section 9). This document has no changelog.
+The reference implementation is a C++ library first and a CLI second, built around a single coroutine-backed execution core, a self-contained compiled artifact, and an embedding-first API (section 10, Appendix A). Graph layers (section 4.3) read structure out of grids; rewriting graphs directly is planned (section 9). This document has no changelog.
 
 ---
 
@@ -16,7 +16,7 @@ The reference implementation is a C++ library first and a CLI second, built arou
 
 1. **Declarative**: a generator describes *what to match and write*, not *how to iterate*.
 2. **Visual**: pattern bodies look like the grids they match; an editor can render them with colored backgrounds.
-3. **Minimal surface area**: a small set of orthogonal concepts (tags, grids, rules, sequences, operations, modules) covers the design space.
+3. **Minimal surface area**: a small set of orthogonal concepts (tags, grids, graphs, rules, sequences, operations, modules) covers the design space.
 4. **Predictable execution**: snapshot-based rule application; one well-defined collect-then-pick model for all modes.
 5. **Cognitive load over terseness**: a rule should read clearly in isolation, even if that costs a few characters. Boilerplate is required only when ambiguity would otherwise exist.
 
@@ -49,7 +49,7 @@ Block comments are not supported.
 - **Start character**: an ASCII letter (`A`-`Z`, `a`-`z`) or `_`.
 - **Continue character**: an ASCII letter, an ASCII digit (`0`-`9`), or `_`.
 
-So `wall`, `Mauer`, `_internal` are valid; non-ASCII names lex as errors. This rule applies to tag names, tag value names, grid names, param names, rule names, and sequence names alike.
+So `wall`, `Mauer`, `_internal` are valid; non-ASCII names lex as errors. This rule applies to tag names, tag value names, grid names, graph names, param names, rule names, and sequence names alike.
 
 **Grammar:**
 ```
@@ -66,7 +66,7 @@ A `STRING` has no escape sequences and is ASCII (section 2.1). Its only use is t
 ### 2.4 Reserved keywords
 
 ```
-tag  layers  grid  of  number
+tag  layers  grid  graph  of  number
 rule  sequence  params  where  when  use
 any  all  ordered
 once  scatter  everywhere  grow  settle
@@ -82,7 +82,7 @@ RESERVED_CHARS ::= '[' | ']' | '{' | '}' | '(' | ')' | ',' | '='
 ```
 `?` begins a pattern variable (`VARIABLE`, section 2.3) and is valid nowhere else.
 
-**Contextual names.** A few grammar terminals are matched by identifier text rather than reserved: the attribute names and values of section 5.6 (`symmetry`, `rotation`, `none`, `horizontal`, `vertical`). They lex as `IDENT` and may also be used as names, since each slot resolves them against its own table.
+**Contextual names.** A few grammar terminals are matched by identifier text rather than reserved: the attribute names and values of section 5.6 (`symmetry`, `rotation`, `none`, `horizontal`, `vertical`), and the graph arguments `nodes` and `edges` (section 4.3). They lex as `IDENT` and may also be used as names, since each slot resolves them against its own table.
 
 **Operation names are not keywords.** The built-in operations `resize`, `upscale`, `trim`, `mirror`, `pad`, `path` (section 6.0) are resolved from the operation table, not reserved - like the built-in *functions* of section 5.10, a bare name that is not an operation call is just an identifier. They may be used as tag values, grid names, or params; they resolve as operations only in `op_call` position (section 6).
 
@@ -148,9 +148,9 @@ use_decl ::= 'use' STRING
 
 **The closure.** The module passed to the compiler is the **root**. The root and every module it uses, directly or through other modules, form its **closure**, which compiles to one generator (Appendix A). The `use` graph must be acyclic (check 40), and a module may use a given module only once (check 41). The closure's declarations are merged; at run time, nothing records which module declared what.
 
-**Names.** Names are unique across the closure. Two tagsets, two grids, or two params with the same name are a compile error wherever they are declared (check 42); so are two rules or sequences (check 39). There are no qualified names (`schema.level`) and there is no selective `use`. Because a name denotes the same declaration in every module, `use` determines only which names a module may reference.
+**Names.** Names are unique across the closure. Two tagsets, two layers (grids or graphs), or two params with the same name are a compile error wherever they are declared (check 42); so are two rules or sequences (check 39). There are no qualified names (`schema.level`) and there is no selective `use`. Because a name denotes the same declaration in every module, `use` determines only which names a module may reference.
 
-**Visibility.** A module **sees** its own declarations and the declarations of the modules it uses directly. A `use` is not re-exported: in the example above, `carve.lvs` sees `schema.lvs` and `dungeon.lvs` sees `carve.lvs`, but `dungeon.lvs` does not see `schema.lvs`. Every tagset, grid, param, rule, and sequence name a module writes must resolve to a declaration it sees (check 8). Tag values and tag unions need no visibility of their own; they resolve through the declared tagset of the grid they are written in (sections 3 and 5.8). A module's meaning therefore depends only on its own `use` declarations. It compiles identically as the root or as a dependency, and it can be compiled on its own.
+**Visibility.** A module **sees** its own declarations and the declarations of the modules it uses directly. A `use` is not re-exported: in the example above, `carve.lvs` sees `schema.lvs` and `dungeon.lvs` sees `carve.lvs`, but `dungeon.lvs` does not see `schema.lvs`. Every tagset, grid, graph, param, rule, and sequence name a module writes must resolve to a declaration it sees (check 8). Tag values and tag unions need no visibility of their own; they resolve through the declared tagset of the grid they are written in (sections 3 and 5.8). A module's meaning therefore depends only on its own `use` declarations. It compiles identically as the root or as a dependency, and it can be compiled on its own.
 
 **Canonical order.** The closure's modules are put in **canonical order** by a depth-first, post-order walk from the root. The walk follows each module's `use` declarations in written order and visits each module once, so every module comes after the modules it uses, and the root comes last (in the example: `schema.lvs`, `carve.lvs`, `dungeon.lvs`). Declarations are ordered by module in canonical order, then by position in their file. Canonical order fixes the layer order (section 4), the param evaluation order (section 4.2), and the sequence ids of the embedding API (Appendix A). Everything a module sees from another module precedes it in this order.
 
@@ -195,7 +195,7 @@ This encoding applies to **tag grids only**. `grid of number` cells store intege
 
 ---
 
-## 4. Grids and the `layers` block
+## 4. Grids, graphs, and the `layers` block
 
 Grids are declared in `layers` blocks, at most one per module (section 2.6):
 
@@ -208,22 +208,27 @@ layers {
 }
 ```
 
-Each entry is `name: grid of <type>`, where `<type>` is either:
+A grid entry is `name: grid of <type>`, where `<type>` is either:
 - A tagset name (`grid of geometry`)
 - The keyword `number` (for numeric/scalar grids)
 
+A graph entry, `name: graph of <grid>`, declares a read-only view of one grid instead (section 4.3).
+
 Grids have no declared size; size is set at run time via `resize`. All grids share the current size at all times.
 
-**Layer order.** The grids of every module in the closure (section 2.6) form one stack. Its order, the **layer order**, follows canonical order: modules in canonical order, and within a module the order of its `layers` entries. The embedding API exposes layers in this order (Appendix A). Every grid of the closure is in the stack, whether or not a given module sees it; visibility governs only which grid names a module may write.
+**Layer order.** The grids of every module in the closure (section 2.6) form one stack. Its order, the **layer order**, follows canonical order: modules in canonical order, and within a module the order of its `layers` entries. The embedding API exposes layers in this order (Appendix A). Every grid of the closure is in the stack, whether or not a given module sees it; visibility governs only which grid names a module may write. Graph layers are not in the stack and have no place in the layer order (section 4.3).
 
 **Grammar:**
 ```
 layers_decl      ::= 'layers' '{' layer_entry_list? '}'
 layer_entry_list ::= layer_entry (list_sep? layer_entry)* list_sep?
 layer_entry      ::= IDENT ':' 'grid' 'of' grid_type
+                   | IDENT ':' 'graph' 'of' IDENT graph_args?
 grid_type        ::= IDENT | 'number'
+graph_args       ::= '(' graph_arg (',' graph_arg)* ')'
+graph_arg        ::= IDENT '=' tag_mask
 ```
-`IDENT` after `of` must reference a declared tag (semantic check).
+`IDENT` after `grid of` must reference a declared tag; `IDENT` after `graph of` must reference a grid, and each `graph_arg` names `nodes` or `edges` (semantic checks, section 4.3). `tag_mask` is defined in section 5.3.
 
 ### 4.1 Empty cells
 
@@ -268,6 +273,41 @@ Two kinds of param, distinguished solely by the `: number` annotation:
 Both kinds carry an expression under the same scope discipline: literals, input params, and **earlier-declared** params only - no grid reads, no `x`/`y`, and no `width`/`height` (dimensions change during a run, so a startup-frozen dimension would be stale; read `width`/`height` directly in a cell expression instead). References resolve in declaration order; a forward reference or any cycle is a compile error. The expression may call `random` (section 5.10), drawing once at that single evaluation. Because both kinds are fixed once inputs bind, params are run-constant and determinism (section 7.2) holds.
 
 At most one `params` block per module. Declaration order spans modules: the closure's params are ordered canonically (section 2.6), so a param expression may reference only params that are declared earlier **and** that its module sees. (A param of a directly used module is always earlier.) A param name (input or derived) must not collide with a grid name or a reserved identifier (section 2.4). Param values and expressions are numbers; a derived param whose expression is not a number is a compile error.
+
+### 4.3 Graph layers
+
+A **graph layer** is a read-only view of one grid, its **source**. Its nodes and edges are regions of the source's cells, extracted from the source's current contents each time the graph is read. A graph holds no state of its own: nothing writes it, and it changes only when its source changes.
+
+```ls
+layers {
+    level:  grid of algo
+    rooms:  grid of room
+    zones:  grid of number
+    map:    graph of level(nodes=R, edges=H)   // rooms joined through halls
+    layout: graph of level(nodes=R|H)          // rooms and halls, each a node
+    areas:  graph of zones                     // one node per zone
+}
+```
+
+**Forms.** A graph entry takes one of three forms:
+
+| form | node cells | connector cells |
+|---|---|---|
+| `graph of g` | every non-empty cell | none |
+| `graph of g(nodes=M)` | non-empty cells with `(stored & M) != 0` | none |
+| `graph of g(nodes=M, edges=E)` | non-empty cells with `(stored & M) != 0` | non-empty cells with `(stored & E) != 0` |
+
+`M` and `E` are tag masks over the source's tagset (section 5.3). They must select at least one value and must not share one (check 50). The masked forms need a tag-grid source; a number-grid source takes the first form only (check 49). To leave values of a number grid out of its graph, a rule writes them empty first.
+
+**Nodes.** A node is a **value region**: a maximal set of node cells that hold one value and are connected through 4-neighbours (cells sharing a side) holding that value too. One value means an identical stored mask in a tag grid (exact equality, as in section 5.11), or the same integer in a number grid. Two separate patches of the same value are two nodes; adjacent cells of different values belong to different nodes.
+
+**Edges.** A **connector region** is a maximal 4-connected set of connector cells; unlike a node, it does not split by value. Two distinct nodes are **adjacent**, joined by one undirected edge, iff a cell of one is a 4-neighbour of a cell of the other, or one connector region has a 4-neighbour in each. A connector region touching k nodes therefore joins every pair of them. The graph is simple: at most one edge per pair, and no edge from a node to itself. A cell that is neither a node cell nor a connector cell, empty cells included, separates: contact across it joins nothing.
+
+**Node order.** Nodes are numbered from 0 in row-major order of each region's first cell. The order fixes node ids in the embedding API (Appendix A) and is otherwise unobservable.
+
+**Reading a graph.** Graph patterns (section 5.12) and the embedding API read graphs. Each read sees the graph of the source as the reader sees it: a rule reads the graph of its pass's snapshot (section 7.1), and the API reads the level's final grids. Extraction reads only the source and draws nothing.
+
+**A graph is not a grid.** It has no cells, is not part of the stack, and has no place in the layer order (section 4). Geometric operations do not act on it: after `upscale` or `mirror`, the next read extracts from the transformed source. A graph name is a layer name (check 42) that may only head a match-side pattern (section 5.12). Reading it in an expression, writing it, using it as a selector's grid, or passing it where an operation expects a grid is an error (check 51).
 
 ---
 
@@ -1003,11 +1043,11 @@ The compiler must reject:
 5. **Weight scope.** `(weight=N)` is rejected inside `{ all ... }` blocks and on bare patterns (parse error).
 6. **Tag/grid resolution.** Every identifier in a pattern cell must resolve per section 5.8 (for a bare mask literal: a tag value or union of the grid's declared tagset).
 7. **Attribute validation.** Attribute names and values must be in the table of section 5.6.
-8. **Reference resolution.** Every tagset, grid, param, rule, and sequence name must resolve to a declaration the referencing module sees (section 2.6). A name declared in the closure but not seen is reported as not visible, naming its declaring module. Rules and sequences may be referenced before they are declared; declaration order does not matter for them.
+8. **Reference resolution.** Every tagset, grid, graph, param, rule, and sequence name must resolve to a declaration the referencing module sees (section 2.6). A name declared in the closure but not seen is reported as not visible, naming its declaring module. Rules and sequences may be referenced before they are declared; declaration order does not matter for them.
 9. **Unresolved module.** A `use` path that the resolver cannot map to a module (section 2.6, Appendix A).
 10. **Tagset over cap.** A tagset with more than 30 values.
 11. **`where` on RHS.** A `where` pattern on the write side.
-12. **Reserved-name collision.** A tag value, grid, or param named `x`, `y`, `width`, or `height`; or a param colliding with a grid name.
+12. **Reserved-name collision.** A tag value, grid, graph, or param named `x`, `y`, `width`, or `height`; or a param colliding with a grid or graph name.
 13. **Bare computed expression.** A computed expression (comparison/arithmetic/logical/call) in a cell without enclosing `( ... )`.
 14. **Expression type errors.** An operator applied to the wrong value kind; an expression in a real cell not evaluating to the grid's type; comparing across distinct tagsets; a `.` with no inferable type.
 15. **Complement write.** `!`tag or `!.` used on the RHS (complement is match-side only).
@@ -1037,12 +1077,18 @@ The compiler must reject:
 39. **Duplicate rule or sequence name.** Rules and sequences share one namespace: two declarations with the same name anywhere in the closure (section 2.6), whether both are rules, both are sequences, or one of each.
 40. **Module cycle.** A module that uses itself, directly or through other modules (section 2.6).
 41. **Duplicate use.** A module with two `use` declarations that resolve to the same canonical name.
-42. **Duplicate tagset, grid, or param name.** Two tagsets, two grids, or two params with the same name anywhere in the closure, in one module or in different ones (section 2.6).
+42. **Duplicate tagset, layer, or param name.** Two tagsets, two layers (grids or graphs, in any combination), or two params with the same name anywhere in the closure, in one module or in different ones (section 2.6).
 43. **Duplicate layers block.** More than one `layers` block in a module.
 44. **Unbound variable.** A pattern variable used in an expression or on the write side with no binding cell (a bare occurrence) on the match side of its pattern pair (section 5.11).
 45. **Variable type.** Binding cells of one variable in grids of different types (distinct tagsets, or a tag grid and a `number` grid); or a bare variable written into a grid whose type differs from the variable's.
 46. **Variable outside a pattern.** A pattern variable in a `when` guard, a count, a param expression, or an operation argument; or a bare variable cell in a `where` pattern (`where` cells are boolean expressions, section 5.9).
 47. **Misplaced empty mask.** A write-side `tag_mask` that unions `.` with any other atom (e.g. `.|wall`); or, in a number grid, a `tag_mask` other than `.` or `!.` (section 4.1).
+48. **Graph source.** A graph layer whose `of` name does not resolve to a grid: a tagset, another graph, or an undeclared name (section 4.3).
+49. **Graph form.** A graph argument other than `nodes` or `edges`, or one given twice; `edges` without `nodes`; or `nodes`/`edges` on a graph whose source is a number grid (section 4.3).
+50. **Graph mask.** A `nodes` or `edges` mask naming a value outside the source grid's tagset; a mask that selects no value (e.g. `.`); or `nodes` and `edges` masks that share a value (section 4.3).
+51. **Graph misuse.** A graph name read in an expression, used as a selector's grid, passed to an operation's `grid` parameter (also check 35), or heading a write-side pattern (sections 4.3 and 5.12).
+52. **Graph-pattern cell.** A graph-pattern cell other than `*` or a parenthesized boolean expression; or a grid read inside a graph-pattern cell (section 5.12).
+53. **Graph function placement.** A call to `degree`, `size`, `distance`, or `neighbors` outside a graph-pattern cell; a selector anywhere but as the argument of `distance` or `neighbors`, or a non-selector argument there; or a selector cell that does not fit its grid (a tag mask on a number grid other than `.` or `!.`, or an integer on a tag grid) (section 5.12).
 
 ### 7.4 Warnings
 
@@ -1267,11 +1313,19 @@ Names go into closure-wide tables built in canonical order. That one pass assign
 
 The compiled artifact stays self-contained (section 10.1). It holds the merged closure, the canonical name of each module, and a (module, line) source location for each statement and rule, so diagnostics and a debugger can map steps back to the right file after the AST is discarded. `generator::modules()` lists the closure for hot reload: when any listed module changes, recompile from the root. A failed compile still lists the modules it resolved, so a host can watch a broken file and retry once it is fixed.
 
+### 10.9 Graph extraction
+
+A graph is a pure function of its source grid, so the reference runtime extracts it lazily and caches it. One flood fill over the source yields a node-id grid (each cell's node, or none), per-node cell counts, and the adjacency sets. Connector regions are filled in the same pass, and each adds an edge for every pair of nodes it touches. The cache is keyed by the source's write version, so every rule and graph pattern that reads the graph between two writes to its source shares one extraction.
+
+Selector results are cached per (graph, selector): `distance(s)` is one multi-source breadth-first search over the adjacency sets from the selected nodes, and `neighbors(s)` one scan of them, each producing a per-node array. Their key also includes the selector grid's write version: `distance(rooms[Start])` must be recomputed when `rooms` changes, even if the source did not. A graph-pattern cell then costs a node-id lookup and an array read.
+
+When extraction happens follows from snapshot semantics (section 7.1): once per batch pass or `settle` sweep, and under a step mode after any application that wrote the source or a selector grid. That is O(cells) per such application. Incremental maintenance is an optimisation the semantics leaves open, since extraction is unobservable.
+
 ---
 
 ## Appendix A: The embedding API
 
-The reference implementation is a C++ library first and a CLI second. A game embeds `ls.hpp` and sees exactly four types - `generator`, `level`, `grid`, `generation` - in namespace `ls`. Nothing throws: a failed compile yields a falsy `generator` carrying `error()`, and every query on an invalid object reads as empty.
+The reference implementation is a C++ library first and a CLI second. A game embeds `ls.hpp` and sees exactly five types - `generator`, `level`, `grid`, `graph`, `generation` - in namespace `ls`. Nothing throws: a failed compile yields a falsy `generator` carrying `error()`, and every query on an invalid object reads as empty.
 
 ```cpp
 auto gen   = ls::generator::compile(source, "dungeon.lvs", resolve);  // once, at load
@@ -1315,10 +1369,11 @@ using resolver = std::function<std::optional<module_source>(const std::string& p
 | member | meaning |
 |--------|---------|
 | `int width()`, `int height()` | Final dimensions. |
-| `int layer_count()` | Number of declared layers. |
+| `int layer_count()` | Number of grid layers; graph layers are not counted (section 4.3). |
 | `grid operator[](const std::string& layer_name)` | Layer by name. |
 | `grid layer(int index)` | Layer by layer order (section 4). |
 | `std::string layer_name(int index)` | Name of the layer at `index`. |
+| `graph graph(const std::string& name)` | Graph layer by name, extracted from the level's final grids (section 4.3). Invalid if no graph layer has that name. |
 
 ### `grid` - one layer of a generated level
 
@@ -1328,6 +1383,17 @@ using resolver = std::function<std::optional<module_source>(const std::string& p
 | `bool empty(int x, int y)` | True iff the cell is empty. |
 | `bool is_number()` | True for `grid of number` layers. |
 | `std::string name(int value_id)` | Name of a tag value id (`""` for number layers or out of range). |
+
+### `graph` - one graph layer of a generated level
+
+| member | meaning |
+|--------|---------|
+| `int node_count()` | Number of nodes (`0` when invalid). Node ids are `0 .. node_count() - 1`, numbered as in section 4.3. |
+| `int node_at(int x, int y)` | Id of the node whose region covers (x, y); `-1` when no node does (or out of range / invalid). |
+| `int node_size(int node)` | Number of cells in the node's region (`0` if out of range). |
+| `std::vector<int> neighbors(int node)` | Ids of the adjacent nodes, ascending (empty if out of range). |
+
+A `graph` is extracted once, when `level::graph` returns it, and is a self-contained value: it does not depend on the `level` object afterwards.
 
 ### `generation` - one in-flight progressive run
 
