@@ -763,7 +763,9 @@ rule r { distance[size] g[ (size() > size2 && neighbors(neighbors[!.]) >= 0) ] =
 
 // ── integration ──────────────────────────────────────────────────────────────
 
+#include <fstream>
 #include <set>
+#include <sstream>
 
 TEST_CASE("graph: a zone graph matches the walls carved between zones") {
     std::string decls = R"(
@@ -810,4 +812,22 @@ rule wall_between(rotation=all) {
             if (a < b) edges.insert({a, b});
     CHECK(walled == edges);   // every edge carved, and no wall between non-neighbours
     CHECK(edges.size() == 8);   // 1-2 1-3 1-4 2-3 2-5 3-4 3-5 4-5
+}
+
+TEST_CASE("graph: the showcase is pinned per seed") {
+    // examples/graph_rooms.lvs pins seed 2; two more seeds here, so a change
+    // in extraction or graph-pattern order shows on every CI platform
+    std::ifstream in(std::string(LS_EXAMPLES_DIR) + "/graph_rooms.lvs", std::ios::binary);
+    std::stringstream src;
+    src << in.rdbuf();
+    auto gen = make(src.str());
+    INFO(gen.error());
+    REQUIRE(static_cast<bool>(gen));
+    auto roles = [&](uint64_t seed) { return show(gen.generate(gen.sequence("main"), seed), "roles"); };
+    CHECK(roles(3) == "sss.ggg.....ddd/sss.ggg.....ddd/sss.ggg.....ddd/.............../"
+                      "ddd.hhh.hhh..../ddd.hhh.hhh..../ddd.hhh.hhh..../.............../"
+                      "ddd.........ddd/ddd.........ddd/ddd.........ddd");
+    CHECK(roles(11) == "ddd.hhh.ddd.sss/ddd.hhh.ddd.sss/ddd.hhh.ddd.sss/.............../"
+                       "....hhh.....ggg/....hhh.....ggg/....hhh.....ggg/.............../"
+                       "....ddd......../....ddd......../....ddd........");
 }
