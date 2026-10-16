@@ -148,6 +148,8 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
     project_config cfg = project_config::load(path, sc.layer_names());
 
     // ── prefs (theme + window geometry + seed) -- SDL's per-user location ────
+    // The app id is what Wayland/GNOME matches to levelscript.desktop for the dock icon.
+    SDL_SetAppMetadata("LevelScript", nullptr, "levelscript");
     SDL_Init(SDL_INIT_VIDEO);
     platform::set_app_icon(find_resource(k_app_icon).c_str());   // before the Dock tile shows
     char* pref_raw = SDL_GetPrefPath("levelscript", "debugger");
