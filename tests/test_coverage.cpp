@@ -74,7 +74,7 @@ TEST_CASE("coverage: uniform(n) rejects raw draws below 2^64 mod n") {
 }
 
 TEST_CASE("coverage: a supplied input skips its default's draw") {
-    // examples/draw_params.lvs: k = random(1, 100), j = random(1, 100) + k
+    // tests/golden/draws/params.lvs: k = random(1, 100), j = random(1, 100) + k
     std::string src = R"(
 layers { n: grid of number }
 params {

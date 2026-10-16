@@ -3,7 +3,7 @@
 
 Reads the checks from docs/spec.md section 7.3 (retired ones excluded), and
 the checks the tests name: a `// check N` or `// checks N, M` comment in a
-tests/*.cpp test, and the `check N` in an examples/errors/*.lvs header line.
+tests/*.cpp test, and the `check N` in an tests/errors/*.lvs header line.
 Lists each check with where it is tested; fails when a check has no test.
 
     python tools/check_coverage.py           # fail on any uncovered check
@@ -38,7 +38,7 @@ def tested() -> dict:
             for tag in re.findall(r"^\s*// checks? ([0-9][0-9, ]*)$", body, re.M):
                 for n in numbers(tag):
                     where.setdefault(n, []).append(f"{f.name}: {name}")
-    for f in sorted((ROOT / "examples" / "errors").glob("*.lvs")):
+    for f in sorted((ROOT / "tests" / "errors").glob("*.lvs")):
         header = f.read_text(encoding="utf-8").splitlines()[0]
         for tag in re.findall(r"checks? ([0-9][0-9, and]*)", header):
             for n in numbers(tag):
