@@ -45,6 +45,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          lfs: true
 
       # SDL3 only enables the video backends whose headers it finds; the debugger needs X11/Wayland.
       - name: Install Linux dependencies
