@@ -445,7 +445,7 @@ sequence main {
 )");
 }
 
-TEST_CASE("sequence Q19: a sequence equals its unrolled statements (mixed policies)") {
+TEST_CASE("sequence Q19: a sequence equals its unrolled statements (mixed modes)") {
     check_equivalent(noise_poke + R"(
 sequence s {
     grow(5) poke

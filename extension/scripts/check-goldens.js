@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Runs the extension's parser + sema (the diagnostics engine) over every .lvs
-// file under ../../examples and checks the results against each file's
+// file under samples/, tests/golden/ and tests/errors/ and checks the results against each file's
 // `// @expect ...` annotations.
 //
 //   @expect error                  → analysis must report >= 1 error
@@ -13,15 +13,16 @@
 //
 // Exit code is non-zero if any file fails, so this doubles as a CI gate.
 //
-//   node scripts/check-examples.js            # check all
-//   node scripts/check-examples.js --verbose  # also list every diagnostic
+//   node scripts/check-goldens.js            # check all
+//   node scripts/check-goldens.js --verbose  # also list every diagnostic
 
 const fs   = require('fs');
 const path = require('path');
 const createLsModule = require('../ls_wasm.js');
 
 const VERBOSE = process.argv.includes('--verbose');
-const EXAMPLES = path.resolve(__dirname, '..', '..', 'examples');
+const ROOT = path.resolve(__dirname, '..', '..');
+const DIRS = ['samples', 'tests/golden', 'tests/errors'].map(d => path.join(ROOT, d));
 
 let wasmModule = null;
 
@@ -70,12 +71,12 @@ function analyse(src, filename) {
 async function run() {
   wasmModule = await createLsModule();
   
-  const files = walk(EXAMPLES).sort();
+  const files = DIRS.flatMap(walk).sort();
 let pass = 0, fail = 0, skipped = 0, stubs = 0;
 const failures = [];
 
 for (const file of files) {
-  const rel = path.relative(EXAMPLES, file).replace(/\\/g, '/');
+  const rel = path.relative(ROOT, file).replace(/\\/g, '/');
   const src = fs.readFileSync(file, 'utf8');
   const exp = parseExpectations(src);
 

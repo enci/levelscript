@@ -1181,7 +1181,7 @@ Every warning goes to the generator's warning handler (Appendix A), formatted li
 
 ## 8. Worked example
 
-A complete fill-and-carve dungeon generator (see `examples/` for this and smaller single-feature examples):
+A complete fill-and-carve dungeon generator (see `samples/` for this and other complete generators, and `tests/golden/` for single-feature ones):
 
 ```ls
 tag items     { chest, heart, potion, sword, shield }
@@ -1271,7 +1271,7 @@ sequence main {
 
 Reading `main`: the first inline rule fills `algo` with `W`, and the second seeds up to five `S` markers into it in one batch; `grow(100)` runs `rwalk` as a drunkard's walk from them, carving `F` through the `W` fill, each step seeing the last (the `rotation=all` variants walk in all four directions); `upscale` doubles the resolution; `reduce` erodes 2x2 seed blocks; then batches convert the `algo` sketch into rewards, geometry, enemies, and tile indices. One-line rules and plain fill passes are written inline; rules with attributes (`rwalk`, `reduce`) or with alternatives (`reward`, `place_enemies`) are named.
 
-A structural-operation companion (`examples/corridor.lvs`): scatter a numeric cost field, place a door and an exit with `where`-pinned rules, then
+A structural-operation companion (`samples/corridor.lvs`): scatter a numeric cost field, place a door and an exit with `where`-pinned rules, then
 
 ```ls
 path(from=door, to=exit, into=site, write=road,

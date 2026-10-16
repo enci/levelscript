@@ -75,8 +75,8 @@ levelscript --ast [--no-spans] <file.lvs>
 | `--ast` | Don't run; print the file's syntax tree, each node with its source range. `--no-spans` leaves the ranges out. The file is parsed alone; its `use`s are not followed. |
 
 ```
-levelscript --seed 42 examples/dungeon.lvs
-levelscript --seed 7 --param difficulty=2 examples/arena.lvs
+levelscript --seed 42 samples/dungeon.lvs
+levelscript --seed 7 --param difficulty=2 samples/arena.lvs
 ```
 
 Compile errors and warnings go to stderr; a compile error exits with 1.
@@ -107,7 +107,7 @@ view (red dot). Keys follow VS Code:
 
 Per-layer display settings (text or tileset, opacity, visibility, zoom,
 background colour) are saved next to the script as `<file>.lvs.json`
-(see `examples/dungeon.lvs.json`). The theme, window geometry and seed are
+(see `samples/dungeon.lvs.json`). The theme, window geometry and seed are
 remembered per user.
 
 ## Build & test
@@ -116,5 +116,5 @@ remembered per user.
 cmake -S . -B build
 cmake --build build --config Debug --parallel
 build/tests/Debug/ls_tests.exe
-python tools/run_examples.py
+python tools/run_goldens.py
 ```

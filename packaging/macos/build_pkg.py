@@ -2,7 +2,7 @@
 
 Configures and builds an Apple Silicon (arm64) Release tree, stages a payload
 that installs to /usr/local/levelscript (bin/levelscript, bin/levelscript-debugger,
-bin/resources/, examples/, uninstall.sh) plus /etc/paths.d/levelscript, which puts
+bin/resources/, samples/, uninstall.sh) plus /etc/paths.d/levelscript, which puts
 bin/ on every user's PATH, and wraps it in a .pkg with pkgbuild + productbuild.
 
 The package is unsigned: the first time, users open it via System Settings >
@@ -70,8 +70,8 @@ def stage(build_dir: Path, payload: Path) -> None:
         shutil.copy2(find_exe(build_dir, name), app / "bin")
     # The debugger resolves fonts as <exe dir>/resources/...
     shutil.copytree(ROOT / "resources", app / "bin" / "resources")
-    shutil.copytree(ROOT / "examples", app / "examples",
-                    ignore=shutil.ignore_patterns("errors", "*.expected"))
+    shutil.copytree(ROOT / "samples", app / "samples",
+                    ignore=shutil.ignore_patterns("*.expected"))
     shutil.copy2(ROOT / "readme.md", app)
     uninstall = app / "uninstall.sh"
     uninstall.write_text((HERE / "uninstall.sh").read_text("utf-8")

@@ -101,7 +101,7 @@
     "build:wasm": "cd .. && emcmake cmake -B build/wasm -DCMAKE_BUILD_TYPE=Release && cmake --build build/wasm",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "test": "npm run compile && node scripts/check-examples.js && node scripts/check-completion.js",
+    "test": "npm run compile && node scripts/check-goldens.js && node scripts/check-completion.js",
     "package": "vsce package",
     "publish": "vsce publish"
   },
