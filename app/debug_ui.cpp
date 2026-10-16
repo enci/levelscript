@@ -125,10 +125,50 @@ static void set_window_icon(SDL_Window* window) {
     stbi_image_free(px);
 }
 
+// The logo at the left of the control bar. Windows already draws the window
+// icon in the caption right above it, so there the bar goes without; macOS
+// title bars never show one, and most Linux desktops (GNOME) don't either.
+#ifdef _WIN32
+static constexpr bool k_logo_in_bar = false;
+#else
+static constexpr bool k_logo_in_bar = true;
+#endif
+
+// The logo as a texture (the unpadded icon, so it fills its square).
+// nullptr when the resource is missing - the bar then just starts with its buttons.
+static SDL_Texture* load_logo(SDL_Renderer* renderer) {
+    std::string path = find_resource("resources/icon/levelscript.png");
+    if (path.empty()) return nullptr;
+    int w, h, ch;
+    unsigned char* px = stbi_load(path.c_str(), &w, &h, &ch, 4);
+    if (!px) return nullptr;
+    SDL_Texture* tex = nullptr;
+    if (SDL_Surface* surf = SDL_CreateSurfaceFrom(w, h, SDL_PIXELFORMAT_RGBA32, px, w * 4)) {
+        tex = SDL_CreateTextureFromSurface(renderer, surf);
+        SDL_DestroySurface(surf);
+    }
+    stbi_image_free(px);
+    return tex;
+}
+
 // ── themes (defined below run_debug_ui) ──────────────────────────────────────
 
 // Color of the gaps between docked panes (the dock host's background).
 static ImVec4 g_dock_gap;
+
+// The LevelScript accent: the brand green (#3FC46E, the site's --ls-green and
+// the icon's middle stop) on dark, a deeper shade on light so text and thin
+// marks keep their contrast.
+static ImVec4 brand_green(bool dark, float alpha = 1.f) {
+    return dark ? ImVec4(0.247f, 0.769f, 0.431f, alpha)     // #3FC46E
+                : ImVec4(0.137f, 0.620f, 0.329f, alpha);    // #239E54
+}
+// The brand's teal (the icon's last stop), for the one control that must
+// read apart from the green ones.
+static ImVec4 brand_teal(bool dark) {
+    return dark ? ImVec4(0.302f, 0.788f, 0.690f, 1.f)       // #4DC9B0
+                : ImVec4(0.059f, 0.549f, 0.447f, 1.f);      // #0F8C72
+}
 static void set_style_metrics();
 static void set_light_theme();
 static void set_dark_theme();
@@ -230,6 +270,7 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
 
     SDL_Renderer* renderer = SDL_CreateRenderer(window, nullptr);
     SDL_SetRenderVSync(renderer, 1);
+    SDL_Texture* logo = k_logo_in_bar ? load_logo(renderer) : nullptr;
 
     std::unordered_map<std::string, tile_texture> tile_textures;
     sync_tilesets(renderer, path, cfg, tile_textures);
@@ -522,6 +563,13 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
             ImGui::PopStyleColor();
             ImGui::PopStyleVar();
 
+            if (logo) {
+                const float side = ImGui::GetFrameHeight();
+                ImGui::Image((ImTextureID)(intptr_t)logo, { side, side });
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("LevelScript " LS_VERSION_STRING);
+                ImGui::SameLine(0.f, 12.f);
+            }
+
             // Icon button with a hover tooltip carrying the full label and
             // shortcut. When `active` is true it renders held-down (a "stays
             // pressed" toggle) by borrowing the button's active color.
@@ -537,12 +585,10 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
                 return clicked;
             };
 
-            // VS Code's debug toolbar: same order, names, keys and colors -
-            // blue stepping icons, a green restart.
-            ImVec4 dbg_blue  = dark_theme ? ImVec4(0.459f, 0.745f, 1.000f, 1.f)    // #75BEFF
-                                          : ImVec4(0.000f, 0.478f, 0.800f, 1.f);   // #007ACC
-            ImVec4 dbg_green = dark_theme ? ImVec4(0.537f, 0.820f, 0.522f, 1.f)    // #89D185
-                                          : ImVec4(0.220f, 0.541f, 0.204f, 1.f);   // #388A34
+            // VS Code's debug toolbar: same order, names and keys; in brand
+            // colors - green stepping icons, a teal restart.
+            ImVec4 dbg_step    = brand_green(dark_theme);
+            ImVec4 dbg_restart = brand_teal(dark_theme);
             auto dbgbtn = [&](char const* icon, char const* tip, ImVec4 col, bool enabled) {
                 ImGui::BeginDisabled(!enabled);
                 ImGui::PushStyleColor(ImGuiCol_Text, col);
@@ -554,27 +600,27 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
             };
             bool can_step = !run.done && !run.busy();
             if (run.busy()) {
-                if (dbgbtn(phosphor::PH_PAUSE, "Pause (F6)", dbg_blue, true)) action_pause();
+                if (dbgbtn(phosphor::PH_PAUSE, "Pause (F6)", dbg_step, true)) action_pause();
             } else {
                 if (dbgbtn(phosphor::PH_PLAY,
                            run.started ? "Continue (F5) - run to the next breakpoint"
                                        : "Run (F5) - run to the first breakpoint",
-                           dbg_blue, !run.done))
+                           dbg_step, !run.done))
                     action_continue();
             }
             if (dbgbtn(phosphor::PH_ARROW_ARC_RIGHT,
                        "Step Over (F10) - finish the statement, sequences included",
-                       dbg_blue, can_step))
+                       dbg_step, can_step))
                 action_step_over();
             if (dbgbtn(phosphor::PH_ARROW_LINE_DOWN,
-                       "Step Into (F11) - one rule application", dbg_blue, can_step))
+                       "Step Into (F11) - one rule application", dbg_step, can_step))
                 action_step_into();
             if (dbgbtn(phosphor::PH_ARROW_LINE_UP,
                        "Step Out (Shift+F11) - finish the current sequence",
-                       dbg_blue, can_step))
+                       dbg_step, can_step))
                 action_step_out();
             if (dbgbtn(phosphor::PH_ARROW_CLOCKWISE, "Restart (Ctrl+Shift+F5, R)",
-                       dbg_green, true))
+                       dbg_restart, true))
                 action_reset();
             ImGui::Text("|");
             ImGui::SameLine();
@@ -710,12 +756,12 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
             ImGui::SetNextWindowSize({ viewport->Size.x, statusbar_h });
 
             // VS Code (Dark+/Light+) style: a saturated bar with white text --
-            // blue while the script is healthy, red when the last (re)load
+            // brand green while the script is healthy, red when the last (re)load
             // failed. The right-hand chip is a darker block carrying the load
             // status so a failure is hard to miss.
-            const ImVec4 bar_col  = sc.ok ? ImVec4(0.000f, 0.478f, 0.800f, 1.f)   // #007ACC
+            const ImVec4 bar_col  = sc.ok ? brand_green(false)                     // #239E54
                                           : ImVec4(0.780f, 0.180f, 0.180f, 1.f);
-            const ImVec4 chip_col = sc.ok ? ImVec4(0.000f, 0.360f, 0.600f, 1.f)
+            const ImVec4 chip_col = sc.ok ? ImVec4(0.102f, 0.478f, 0.255f, 1.f)   // #1A7A41
                                           : ImVec4(0.520f, 0.070f, 0.070f, 1.f);
             const ImVec4 text_col = { 1.f, 1.f, 1.f, 1.f };
             const ImVec4 dim_col  = { 1.f, 1.f, 1.f, 0.78f };
@@ -808,6 +854,7 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
     ImGui_ImplSDLRenderer3_Shutdown();
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
+    if (logo) SDL_DestroyTexture(logo);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();
@@ -860,7 +907,7 @@ static void set_light_theme() {
     colors[ImGuiCol_ScrollbarGrab]          = ImVec4(0.70f, 0.70f, 0.72f, 1.00f);
     colors[ImGuiCol_ScrollbarGrabHovered]   = ImVec4(0.60f, 0.60f, 0.62f, 1.00f);
     colors[ImGuiCol_ScrollbarGrabActive]    = ImVec4(0.50f, 0.50f, 0.52f, 1.00f);
-    colors[ImGuiCol_CheckMark]              = ImVec4(0.50f, 0.50f, 0.52f, 1.00f);
+    colors[ImGuiCol_CheckMark]              = brand_green(false);   // also the views' accent
     colors[ImGuiCol_CheckboxSelectedBg]     = ImVec4(0.83f, 0.83f, 0.85f, 0.42f);
     colors[ImGuiCol_SliderGrab]             = ImVec4(0.55f, 0.55f, 0.57f, 1.00f);
     colors[ImGuiCol_SliderGrabActive]       = ImVec4(0.45f, 0.45f, 0.47f, 1.00f);
@@ -871,16 +918,16 @@ static void set_light_theme() {
     colors[ImGuiCol_HeaderHovered]          = ImVec4(0.53f, 0.53f, 0.53f, 0.25f);
     colors[ImGuiCol_HeaderActive]           = ImVec4(0.53f, 0.53f, 0.53f, 0.38f);
     colors[ImGuiCol_Separator]              = ImVec4(0.70f, 0.70f, 0.72f, 0.50f);
-    colors[ImGuiCol_SeparatorHovered]       = ImVec4(0.26f, 0.59f, 0.98f, 0.60f);
-    colors[ImGuiCol_SeparatorActive]        = ImVec4(0.26f, 0.59f, 0.98f, 0.80f);
-    colors[ImGuiCol_ResizeGrip]             = ImVec4(0.26f, 0.59f, 0.98f, 0.20f);
-    colors[ImGuiCol_ResizeGripHovered]      = ImVec4(0.26f, 0.59f, 0.98f, 0.50f);
-    colors[ImGuiCol_ResizeGripActive]       = ImVec4(0.26f, 0.59f, 0.98f, 0.80f);
+    colors[ImGuiCol_SeparatorHovered]       = brand_green(false, 0.60f);
+    colors[ImGuiCol_SeparatorActive]        = brand_green(false, 0.80f);
+    colors[ImGuiCol_ResizeGrip]             = brand_green(false, 0.20f);
+    colors[ImGuiCol_ResizeGripHovered]      = brand_green(false, 0.50f);
+    colors[ImGuiCol_ResizeGripActive]       = brand_green(false, 0.80f);
     colors[ImGuiCol_InputTextCursor]        = ImVec4(1.00f, 1.00f, 1.00f, 1.00f);
     colors[ImGuiCol_TabHovered]             = ImVec4(0.53f, 0.53f, 0.53f, 0.32f);
     colors[ImGuiCol_Tab]                    = ImVec4(0.78f, 0.78f, 0.80f, 0.00f);
     colors[ImGuiCol_TabSelected]            = ImVec4(0.70f, 0.70f, 0.72f, 0.00f);
-    colors[ImGuiCol_TabSelectedOverline]    = ImVec4(0.26f, 0.59f, 0.98f, 0.00f);
+    colors[ImGuiCol_TabSelectedOverline]    = brand_green(false, 0.00f);
     colors[ImGuiCol_TabDimmed]              = ImVec4(0.78f, 0.78f, 0.80f, 0.00f);
     colors[ImGuiCol_TabDimmedSelected]      = ImVec4(0.78f, 0.78f, 0.80f, 0.00f);
     colors[ImGuiCol_TabDimmedSelectedOverline]  = ImVec4(0.50f, 0.50f, 0.50f, 0.00f);
@@ -895,13 +942,13 @@ static void set_light_theme() {
     colors[ImGuiCol_TableBorderLight]       = ImVec4(0.78f, 0.78f, 0.80f, 1.00f);
     colors[ImGuiCol_TableRowBg]             = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
     colors[ImGuiCol_TableRowBgAlt]          = ImVec4(0.00f, 0.00f, 0.00f, 0.04f);
-    colors[ImGuiCol_TextLink]               = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
-    colors[ImGuiCol_TextSelectedBg]         = ImVec4(0.26f, 0.59f, 0.98f, 0.25f);
+    colors[ImGuiCol_TextLink]               = brand_green(false);
+    colors[ImGuiCol_TextSelectedBg]         = brand_green(false, 0.25f);
     colors[ImGuiCol_TreeLines]              = ImVec4(0.43f, 0.43f, 0.50f, 0.50f);
     colors[ImGuiCol_DragDropTarget]         = ImVec4(1.00f, 1.00f, 0.00f, 0.90f);
     colors[ImGuiCol_DragDropTargetBg]       = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
     colors[ImGuiCol_UnsavedMarker]          = ImVec4(1.00f, 1.00f, 1.00f, 1.00f);
-    colors[ImGuiCol_NavCursor]              = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
+    colors[ImGuiCol_NavCursor]              = brand_green(false);
     colors[ImGuiCol_NavWindowingHighlight]  = ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
     colors[ImGuiCol_NavWindowingDimBg]      = ImVec4(0.80f, 0.80f, 0.80f, 0.20f);
     colors[ImGuiCol_ModalWindowDimBg]       = ImVec4(0.20f, 0.20f, 0.20f, 0.35f);
@@ -915,40 +962,50 @@ static void set_dark_theme() {
     c[ImGuiCol_WindowBg]             = ImVec4(0.16f, 0.16f, 0.17f, 1.00f);
     c[ImGuiCol_ChildBg]              = ImVec4(0.00f, 0.00f, 0.00f, 0.15f);
     c[ImGuiCol_PopupBg]              = ImVec4(0.12f, 0.12f, 0.13f, 0.96f);
-    c[ImGuiCol_Border]               = ImVec4(0.35f, 0.35f, 0.38f, 0.40f);
+    // Docking draws its splitters in Border: the gap color (as in light), so
+    // splitters, the outer frame and the rounded corners show one backdrop.
+    c[ImGuiCol_Border]               = ImVec4(0.10f, 0.10f, 0.11f, 1.00f);
     c[ImGuiCol_BorderShadow]         = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
     c[ImGuiCol_FrameBg]              = ImVec4(0.22f, 0.22f, 0.23f, 1.00f);
     c[ImGuiCol_FrameBgHovered]       = ImVec4(0.28f, 0.28f, 0.30f, 1.00f);
     c[ImGuiCol_FrameBgActive]        = ImVec4(0.34f, 0.34f, 0.36f, 1.00f);
-    c[ImGuiCol_TitleBg]              = ImVec4(0.10f, 0.10f, 0.11f, 1.00f);
-    c[ImGuiCol_TitleBgActive]        = ImVec4(0.16f, 0.29f, 0.48f, 1.00f);
-    c[ImGuiCol_TitleBgCollapsed]     = ImVec4(0.00f, 0.00f, 0.00f, 0.51f);
+    // Title bar = pane background (as in light): a docked pane's tab bar is
+    // drawn with these, so the pane reads as one rounded card over the gap.
+    c[ImGuiCol_TitleBg]              = ImVec4(0.16f, 0.16f, 0.17f, 1.00f);
+    c[ImGuiCol_TitleBgActive]        = ImVec4(0.16f, 0.16f, 0.17f, 1.00f);
+    c[ImGuiCol_TitleBgCollapsed]     = ImVec4(0.16f, 0.16f, 0.17f, 0.75f);
     c[ImGuiCol_MenuBarBg]            = ImVec4(0.14f, 0.14f, 0.15f, 1.00f);
     c[ImGuiCol_ScrollbarBg]          = ImVec4(0.14f, 0.14f, 0.15f, 1.00f);
     c[ImGuiCol_ScrollbarGrab]        = ImVec4(0.28f, 0.28f, 0.30f, 1.00f);
     c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.34f, 0.34f, 0.36f, 1.00f);
     c[ImGuiCol_ScrollbarGrabActive]  = ImVec4(0.40f, 0.40f, 0.42f, 1.00f);
-    c[ImGuiCol_CheckMark]            = ImVec4(0.40f, 0.68f, 0.98f, 1.00f);
+    c[ImGuiCol_CheckMark]            = brand_green(true);   // also the views' accent
+    c[ImGuiCol_CheckboxSelectedBg]   = ImVec4(0.22f, 0.22f, 0.23f, 0.42f);
     c[ImGuiCol_SliderGrab]           = ImVec4(0.38f, 0.39f, 0.40f, 1.00f);
     c[ImGuiCol_SliderGrabActive]     = ImVec4(0.48f, 0.49f, 0.50f, 1.00f);
     c[ImGuiCol_Button]               = ImVec4(0.22f, 0.22f, 0.23f, 1.00f);
     c[ImGuiCol_ButtonHovered]        = ImVec4(0.28f, 0.28f, 0.30f, 1.00f);
     c[ImGuiCol_ButtonActive]         = ImVec4(0.34f, 0.34f, 0.36f, 1.00f);
-    c[ImGuiCol_Header]               = ImVec4(0.26f, 0.59f, 0.98f, 0.25f);
-    c[ImGuiCol_HeaderHovered]        = ImVec4(0.26f, 0.59f, 0.98f, 0.60f);
-    c[ImGuiCol_HeaderActive]         = ImVec4(0.26f, 0.59f, 0.98f, 0.80f);
+    c[ImGuiCol_Header]               = brand_green(true, 0.25f);
+    c[ImGuiCol_HeaderHovered]        = brand_green(true, 0.45f);
+    c[ImGuiCol_HeaderActive]         = brand_green(true, 0.60f);
     c[ImGuiCol_Separator]            = ImVec4(0.35f, 0.35f, 0.38f, 0.50f);
-    c[ImGuiCol_SeparatorHovered]     = ImVec4(0.10f, 0.40f, 0.75f, 0.78f);
-    c[ImGuiCol_SeparatorActive]      = ImVec4(0.10f, 0.40f, 0.75f, 1.00f);
-    c[ImGuiCol_ResizeGrip]           = ImVec4(0.26f, 0.59f, 0.98f, 0.20f);
-    c[ImGuiCol_ResizeGripHovered]    = ImVec4(0.26f, 0.59f, 0.98f, 0.50f);
-    c[ImGuiCol_ResizeGripActive]     = ImVec4(0.26f, 0.59f, 0.98f, 0.80f);
-    c[ImGuiCol_TabHovered]           = ImVec4(0.26f, 0.59f, 0.98f, 0.60f);
-    c[ImGuiCol_Tab]                  = ImVec4(0.18f, 0.35f, 0.58f, 0.86f);
-    c[ImGuiCol_TabSelected]          = ImVec4(0.20f, 0.41f, 0.68f, 1.00f);
-    c[ImGuiCol_TabSelectedOverline]  = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
-    c[ImGuiCol_TabDimmed]            = ImVec4(0.07f, 0.10f, 0.15f, 0.97f);
-    c[ImGuiCol_TabDimmedSelected]    = ImVec4(0.14f, 0.26f, 0.42f, 1.00f);
+    c[ImGuiCol_SeparatorHovered]     = brand_green(true, 0.60f);
+    c[ImGuiCol_SeparatorActive]      = brand_green(true, 0.80f);
+    c[ImGuiCol_ResizeGrip]           = brand_green(true, 0.20f);
+    c[ImGuiCol_ResizeGripHovered]    = brand_green(true, 0.50f);
+    c[ImGuiCol_ResizeGripActive]     = brand_green(true, 0.80f);
+    c[ImGuiCol_InputTextCursor]      = ImVec4(0.85f, 0.85f, 0.85f, 1.00f);
+    // Tabs are see-through (as in light), only hover shows.
+    c[ImGuiCol_TabHovered]           = ImVec4(0.53f, 0.53f, 0.53f, 0.32f);
+    c[ImGuiCol_Tab]                  = ImVec4(0.22f, 0.22f, 0.23f, 0.00f);
+    c[ImGuiCol_TabSelected]          = ImVec4(0.28f, 0.28f, 0.30f, 0.00f);
+    c[ImGuiCol_TabSelectedOverline]  = brand_green(true, 0.00f);
+    c[ImGuiCol_TabDimmed]            = ImVec4(0.22f, 0.22f, 0.23f, 0.00f);
+    c[ImGuiCol_TabDimmedSelected]    = ImVec4(0.22f, 0.22f, 0.23f, 0.00f);
+    c[ImGuiCol_TabDimmedSelectedOverline] = ImVec4(0.50f, 0.50f, 0.50f, 0.00f);
+    c[ImGuiCol_DockingPreview]       = ImVec4(0.62f, 0.62f, 0.62f, 0.70f);
+    c[ImGuiCol_DockingEmptyBg]       = ImVec4(0.10f, 0.10f, 0.11f, 1.00f);
     c[ImGuiCol_PlotLines]            = ImVec4(0.61f, 0.61f, 0.61f, 1.00f);
     c[ImGuiCol_PlotLinesHovered]     = ImVec4(1.00f, 0.43f, 0.35f, 1.00f);
     c[ImGuiCol_PlotHistogram]        = ImVec4(0.90f, 0.70f, 0.00f, 1.00f);
@@ -958,9 +1015,13 @@ static void set_dark_theme() {
     c[ImGuiCol_TableBorderLight]     = ImVec4(0.23f, 0.23f, 0.25f, 1.00f);
     c[ImGuiCol_TableRowBg]           = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
     c[ImGuiCol_TableRowBgAlt]        = ImVec4(1.00f, 1.00f, 1.00f, 0.04f);
-    c[ImGuiCol_TextSelectedBg]       = ImVec4(0.26f, 0.59f, 0.98f, 0.25f);
+    c[ImGuiCol_TextLink]             = brand_green(true);
+    c[ImGuiCol_TextSelectedBg]       = brand_green(true, 0.25f);
+    c[ImGuiCol_TreeLines]            = ImVec4(0.43f, 0.43f, 0.50f, 0.50f);
     c[ImGuiCol_DragDropTarget]       = ImVec4(1.00f, 1.00f, 0.00f, 0.90f);
-    c[ImGuiCol_NavCursor]            = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
+    c[ImGuiCol_DragDropTargetBg]     = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+    c[ImGuiCol_UnsavedMarker]        = ImVec4(1.00f, 1.00f, 1.00f, 1.00f);
+    c[ImGuiCol_NavCursor]            = brand_green(true);
     c[ImGuiCol_NavWindowingHighlight]= ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
     c[ImGuiCol_NavWindowingDimBg]    = ImVec4(0.80f, 0.80f, 0.80f, 0.20f);
     c[ImGuiCol_ModalWindowDimBg]     = ImVec4(0.80f, 0.80f, 0.80f, 0.35f);
