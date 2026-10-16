@@ -32,7 +32,7 @@ nav {
   position: sticky;
   top: 0;
   z-index: 1000;
-  background: var(--grad);
+  background: linear-gradient(90deg, var(--ls-yellow) 0%, var(--ls-yellow) 35%, var(--ls-green) 75%, var(--ls-teal) 100%);
   padding: 0.8rem 1.5rem;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
   display: flex;
