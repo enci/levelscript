@@ -50,6 +50,18 @@
         "path": "./syntaxes/levelscript.tmLanguage.json"
       }
     ],
+    "customEditors": [
+      {
+        "viewType": "levelscript.tileset",
+        "displayName": "LevelScript Tileset",
+        "selector": [
+          {
+            "filenamePattern": "*.png"
+          }
+        ],
+        "priority": "option"
+      }
+    ],
     "commands": [
       {
         "command": "levelscript.run",
