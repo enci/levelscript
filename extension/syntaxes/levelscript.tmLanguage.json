@@ -50,7 +50,7 @@
     },
     "builtin": {
       "name": "support.function.builtin.levelscript",
-      "match": "\\b(if|min|max|abs|clamp|random|resize|upscale|trim|mirror|pad|path)\\b(?=\\s*\\()"
+      "match": "\\b(if|min|max|abs|clamp|random|resize|upscale|trim|mirror|pad|path|bsp|voronoi|noise)\\b(?=\\s*\\()"
     },
     "wildcard": {
       "patterns": [
