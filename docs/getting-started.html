@@ -88,8 +88,8 @@ levelscript --ast [--no-spans] &lt;file.lvs&gt;</code></pre>
     <p>Compile errors and warnings go to stderr, and a compile error exits with 1. <code>use</code> paths resolve relative to the importing file.</p>
 
     <h2>Debugger</h2>
-<pre><code>levelscript-debugger [--seed N] [--entry name] &lt;file.lvs&gt;</code></pre>
-    <p>Step through generation one rule application at a time and watch the layers change. Set breakpoints by clicking the gutter next to a statement.</p>
+<pre><code>levelscript-debugger [--seed N] [--entry name] [file.lvs]</code></pre>
+    <p>Step through generation one rule application at a time and watch the layers change. Set breakpoints by clicking the gutter next to a statement. Without a file the window opens empty: open a script with the folder button (<kbd>Ctrl</kbd>+<kbd>O</kbd>, <kbd>Cmd</kbd>+<kbd>O</kbd> on macOS) or by dropping a <code>.lvs</code> file on the window.</p>
     <table>
       <tr><th>Key</th><th>Action</th></tr>
       <tr><td><kbd>F5</kbd></td><td>Run / continue to the next breakpoint</td></tr>

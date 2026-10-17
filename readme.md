@@ -88,8 +88,11 @@ An interactive window over the same program: step through the generation one
 rule application at a time and watch the layers change.
 
 ```
-levelscript-debugger [--seed N] [--entry name] <file.lvs>
+levelscript-debugger [--seed N] [--entry name] [file.lvs]
 ```
+
+Without a file the window opens empty: open a script with the folder button
+(`Ctrl+O`, `Cmd+O` on macOS) or by dropping a `.lvs` file on the window.
 
 Breakpoints are set by clicking the gutter next to a statement in the code
 view (red dot). Keys follow VS Code:

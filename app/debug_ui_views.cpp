@@ -872,6 +872,17 @@ layer_thumbs::~layer_thumbs() {
     for (auto* t : tex) if (t) SDL_DestroyTexture(t);
 }
 
+void layer_thumbs::reset(project_config& cfg) {
+    if (solo >= 0)
+        for (size_t k = 0; k < cfg.layers.size() && k < saved_visible.size(); ++k)
+            cfg.layers[k].visible = saved_visible[k] != 0;
+    for (auto* t : tex) if (t) SDL_DestroyTexture(t);
+    tex.clear(); tw.clear(); th.clear();
+    version = ~0ull;
+    solo = -1;
+    saved_visible.clear();
+}
+
 // Repaint every layer's texture from the snapshot: tag layers in the shared
 // tag palette (unions included, mask_to_slot), number layers as a heatmap
 // over the layer's own value range, empty cells in a neutral tone.

@@ -165,8 +165,6 @@ rule decorate { all
     algo[E] => { any tiles[18] tiles[19] tiles[23] tiles[24] }
 }
 
-
-
 ///////////////////////////////////////////////////////////////////////////////
 sequence main {
     resize(4, 4)    
