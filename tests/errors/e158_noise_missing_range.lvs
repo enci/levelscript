@@ -1,0 +1,8 @@
+// E158 (0.11, check 34): `noise` requires both ends of its output range.
+// @expect error
+// @expect stderr-contains requires argument 'hi='
+layers { h: grid of number }
+sequence main {
+    resize(8, 8)
+    noise(into=h, lo=0, scale=4)
+}
