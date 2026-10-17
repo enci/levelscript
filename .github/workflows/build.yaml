@@ -10,7 +10,6 @@ on:
       - "tests/**"
       - "cmake/**"
       - "resources/**"          # copied next to the debugger at build time
-      - "samples/**"            # golden outputs checked by tools/run_goldens.py
       - "CMakeLists.txt"
       - "tools/run_goldens.py"
       - "tools/check_coverage.py"
@@ -82,7 +81,7 @@ jobs:
             exit 1
           }
 
-      # Golden-output determinism gate (samples/ and tests/golden/ vs .expected). Running it on every
+      # Golden-output determinism gate (tests/golden/ vs .expected). Running it on every
       # platform is what proves the output really is a pure function of (seed, params).
       - name: Goldens
         run: python tools/run_goldens.py

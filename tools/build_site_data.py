@@ -3,7 +3,7 @@
 
 The site runs every program live through the WASM build, so this only needs the
 sources: each sample's text, pinned seed, one-line description and declared
-params, plus the modules samples `use` (samples/modules/).
+params, plus the modules samples `use` (tests/golden/programs/modules/).
 
     python tools/build_site_data.py
 
@@ -47,7 +47,7 @@ def params(src: str) -> list:
 
 def main() -> None:
     samples = []
-    for lvs in sorted((ROOT / "samples").glob("*.lvs")):
+    for lvs in sorted((ROOT / "tests" / "golden" / "programs").glob("*.lvs")):
         src = lvs.read_text(encoding="utf-8")
         seed = re.search(r"//\s*@seed\s+(\d+)", src)
         samples.append({"name": lvs.stem, "seed": int(seed.group(1)) if seed else 42,
@@ -57,7 +57,7 @@ def main() -> None:
     samples.sort(key=lambda s: (rank.get(s["name"], len(ORDER)), s["name"]))
 
     files = {f"modules/{p.name}": p.read_text(encoding="utf-8")
-             for p in sorted((ROOT / "samples" / "modules").glob("*.lvs"))}
+             for p in sorted((ROOT / "tests" / "golden" / "programs" / "modules").glob("*.lvs"))}
 
     out = ROOT / "docs" / "js" / "samples-data.js"
     out.parent.mkdir(parents=True, exist_ok=True)

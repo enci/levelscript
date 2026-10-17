@@ -30,7 +30,7 @@ function format(level) {
 
 (async () => {
   const m = await createLsModule();
-  const dir = path.join(ROOT, 'samples');
+  const dir = path.join(ROOT, 'tests', 'golden', 'programs');
   let failed = 0, checked = 0;
   for (const f of fs.readdirSync(dir).filter(n => n.endsWith('.lvs')).sort()) {
     const exp = path.join(dir, f.replace(/\.lvs$/, '.expected'));

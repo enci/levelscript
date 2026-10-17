@@ -84,7 +84,7 @@ levelscript --ast [--no-spans] &lt;file.lvs&gt;</code></pre>
       <tr><td><code>--inspect</code></td><td>Don't run; print a JSON report (diagnostics, symbols) for editor tooling.</td></tr>
       <tr><td><code>--ast</code></td><td>Don't run; print the syntax tree with source ranges. <code>--no-spans</code> leaves the ranges out.</td></tr>
     </table>
-<pre><code>levelscript --seed 7 --param difficulty=2 samples/arena.lvs</code></pre>
+<pre><code>levelscript --seed 7 --param difficulty=2 tests/golden/programs/arena.lvs</code></pre>
     <p>Compile errors and warnings go to stderr, and a compile error exits with 1. <code>use</code> paths resolve relative to the importing file.</p>
 
     <h2>Debugger</h2>

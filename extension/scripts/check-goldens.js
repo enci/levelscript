@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Runs the extension's parser + sema (the diagnostics engine) over every .lvs
-// file under samples/, tests/golden/ and tests/errors/ and checks the results against each file's
+// file under tests/golden/ and tests/errors/ and checks the results against each file's
 // `// @expect ...` annotations.
 //
 //   @expect error                  → analysis must report >= 1 error
@@ -22,7 +22,7 @@ const createLsModule = require('../ls_wasm.js');
 
 const VERBOSE = process.argv.includes('--verbose');
 const ROOT = path.resolve(__dirname, '..', '..');
-const DIRS = ['samples', 'tests/golden', 'tests/errors'].map(d => path.join(ROOT, d));
+const DIRS = ['tests/golden', 'tests/errors'].map(d => path.join(ROOT, d));
 
 let wasmModule = null;
 

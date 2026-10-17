@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Golden-output example runner — the determinism gate.
 
-Runs every .lvs under samples/ and tests/golden/ through the levelscript CLI with
+Runs every .lvs under tests/golden/ through the levelscript CLI with
 its pinned seed (a `// @seed N` comment, default 42) and compares stdout against
 the .expected file next to it. Any change to shuffle order or draw sequence fails
 loudly here. Every tests/errors/*.lvs must fail to compile.
@@ -33,10 +33,10 @@ def find_cli() -> Path:
 def main() -> None:
     update = "--update" in sys.argv
     cli = find_cli()
-    # samples/modules/ holds modules a sample uses, not programs of their own
-    modules = ROOT / "samples" / "modules"
-    goldens = sorted(p for root in ("samples", "tests/golden")
-                      for p in (ROOT / root).rglob("*.lvs") if modules not in p.parents)
+    # tests/golden/programs/modules/ holds modules a sample uses, not programs of their own
+    modules = ROOT / "tests" / "golden" / "programs" / "modules"
+    goldens = sorted(p for p in (ROOT / "tests" / "golden").rglob("*.lvs")
+                     if modules not in p.parents)
     errors = sorted((ROOT / "tests" / "errors").glob("*.lvs"))
     if not goldens and not errors:
         sys.exit("no goldens found")
