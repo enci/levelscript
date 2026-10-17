@@ -1,0 +1,25 @@
+// Showcase (v0.11): `bsp` - a partition operation (section 6.11).
+//
+// `bsp` splits the stack into rectangular leaves and writes each leaf's id
+// into `zones`; `border` then walls every cell whose right or lower neighbour
+// lies in another leaf. Leaf ids follow graph node order (section 4.3).
+//
+// @seed 7
+// @expect run-ok
+
+tag geo { wall }
+layers {
+    zones: grid of number
+    level: grid of geo
+}
+rule border(rotation=all) {
+    zones[?a *]
+    where[* (zones != ?a)]
+    =>
+    level[* wall]
+}
+sequence main {
+    resize(48, 32)
+    bsp(into=zones, min=6, max=14)
+    everywhere border
+}

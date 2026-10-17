@@ -176,7 +176,7 @@ struct compiled_rule {
 
 // ── operations ───────────────────────────────────────────────────────────────
 
-enum class op_kind { resize, upscale, trim, mirror, pad, path };
+enum class op_kind { resize, upscale, trim, mirror, pad, path, bsp, voronoi, noise };
 
 struct compiled_op {
     op_kind kind{op_kind::trim};
@@ -184,13 +184,21 @@ struct compiled_op {
     // expressions, in written order - the order they evaluate
     // in when the statement is reached. `param` is the parameter's index.
     struct int_arg { int param{0}; int expr{-1}; };
-    static constexpr int path_connectivity = 6;   // its `param` (table position)
+    // `param`s (table positions) the executors read
+    static constexpr int path_connectivity = 6;
+    static constexpr int bsp_min = 1, bsp_max = 2, bsp_split = 3;
+    static constexpr int voronoi_connectivity = 3;
+    static constexpr int noise_lo = 1, noise_hi = 2, noise_scale = 3,
+                         noise_octaves = 4, noise_persistence = 5;
     std::vector<int_arg> int_args;
-    int w{0};   // mirror axis: 1 = horizontal
-    // path
+    int w{0};   // mirror axis: 1 = horizontal; noise normalize: 1 = rank, 0 = range
+    bool has_max{false};   // bsp: `max` supplied
+    // path, voronoi
     // `pred` arguments: boolean expressions per cell (a bare tag compiles to `has`)
     int            from{-1}, to{-1};
     int            passable{-1};    // -1 → default: non-empty in any layer
+    int            sites{-1};       // voronoi
+    int            within{-1};      // voronoi; -1 → every cell
     int            into_grid{-1};
     int            write{-1};       // expr arena index, typed by into_grid
     int            over_grid{-1};   // the graph seam: validated, no effect yet
