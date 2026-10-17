@@ -2,7 +2,7 @@
 // which uses schema.lvs, but does not see schema.lvs's grid itself (section 7.3, check 8).
 // @expect error
 // @expect stderr-contains grid 'level' is not visible here
-use "../../samples/modules/carve.lvs"
+use "../golden/programs/modules/carve.lvs"
 rule mark { level[R] => level[W] }
 sequence main {
     once carve

@@ -11,6 +11,7 @@ on:
       - "docs/**"
       - "src/**"
       - "samples/**"
+      - "tests/golden/programs/**"
       - "tools/build_site_data.py"
       - "tools/check_wasm_runs.js"
       - "CMakeLists.txt"

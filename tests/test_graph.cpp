@@ -768,9 +768,9 @@ rule wall_between(rotation=all) {
 }
 
 TEST_CASE("graph: the showcase is pinned per seed") {
-    // samples/graph_rooms.lvs pins seed 2; two more seeds here, so a change
+    // tests/golden/programs/graph_rooms.lvs pins seed 2; two more seeds here, so a change
     // in extraction or graph-pattern order shows on every CI platform
-    std::ifstream in(std::string(LS_SAMPLES_DIR) + "/graph_rooms.lvs", std::ios::binary);
+    std::ifstream in(std::string(LS_PROGRAMS_DIR) + "/graph_rooms.lvs", std::ios::binary);
     std::stringstream src;
     src << in.rdbuf();
     auto gen = make(src.str());
