@@ -1,6 +1,6 @@
 # LevelScript
 
-**Status**: Draft 0.10.0
+**Status**: Draft 0.11.0
 **File extension**: `.lvs`
 **CLI**: `levelscript [--seed N] [--entry name] [--param name=value ...] <file.lvs>` (`--entry` defaults to `main`, a tool convention; section 6)
 **Embedding**: namespace `ls::` (see Appendix A)
@@ -874,6 +874,9 @@ Every argument is written as an expression (section 6 grammar), and parentheses 
 | `mirror` | `axis:enum{horizontal,vertical}` (positional) | fold one half onto the other, all layers (section 6.4) |
 | `pad` | `n:int` (positional) | uniform empty border of N on all sides (section 6.5) |
 | `path` | `from:pred`, `to:pred`, `into:grid`, `write:value`, `over:grid?`, `passable:pred?`, `connectivity:int?=4`, `cost:expr?=1` (**all named**) | write a shortest route between predicates into a grid (section 6.6) |
+| `bsp` | `into:grid`, `min:int`, `max:int?`, `split:int?=50` (**all named**) | split the grid into rectangular leaves, writing leaf ids into a number grid (section 6.11) |
+| `voronoi` | `sites:pred`, `into:grid`, `within:pred?`, `connectivity:int?=4`, `cost:expr?=1` (**all named**) | partition the cells by nearest site, writing zone ids into a number grid (section 6.12) |
+| `noise` | `into:grid`, `lo:int`, `hi:int`, `scale:int`, `octaves:int?=1`, `persistence:int?=50`, `normalize:enum{rank,range}?=rank` (**all named**) | write gradient noise mapped onto `[lo, hi]` into a number grid (section 6.13) |
 
 **Binding: positional vs. named-only.** Each parameter is declared **positional** or **named-only** by convention: positional when its meaning is obvious from the operation and its order (a single argument, or an unmistakable order like width-then-height); named-only when the operation has several same-kind or optional arguments with no self-evident order. So `resize(10, 20)`, `pad(2)`, `mirror(horizontal)` read clean without names, while `path(from=..., to=..., ...)` is named throughout. A positional parameter may also be supplied by name; a named-only parameter supplied positionally is an error.
 
@@ -961,7 +964,7 @@ Semantics: the route is the minimum-total-cost sequence of adjacent traversable 
 
 1. The `from`, `to`, and `passable` predicates each evaluate in **one row-major pass** over the current extents, **in that order** (`from` first, then `to`, then `passable`). A `random` inside a predicate draws in that pass order.
 2. `cost` evaluates **once per traversable cell**, row-major, clamped to >= 1; the search runs on those fixed weights. A `random(...)` cost draws once per traversable cell, reproducibly.
-3. Tie-breaking consumes **exactly one stream draw per `path` statement**. Per-cell tie keys are derived from that single draw by hashing it with the cell index (splitmix64) - there are **no per-discovery draws**, so the number of draws a `path` statement consumes never depends on grid content or search order.
+3. Tie-breaking consumes **exactly one stream draw per `path` statement**. Per-cell tie keys are derived from that single draw `d` as `hash(d, i)`, with `i` the row-major cell index `y * W + x` (section 10.6) - there are **no per-discovery draws**, so the number of draws a `path` statement consumes never depends on grid content or search order.
 4. The route is a **pure function of the distance field** the fixed weights induce. The nearest goal is the reachable `to` cell minimizing (distance, tie key) lexicographically. The route is derived by walking backward from that goal, at each step choosing the minimum-tie-key predecessor among those on an optimal (shortest) path. The route is then stamped **start -> goal**: if `write` is an expression, it evaluates once per route cell in that order.
 
 Consequence, stated normatively: **the search algorithm is unobservable.** Any correct shortest-path implementation - BFS at uniform cost, Dijkstra, A* with an admissible heuristic - produces the identical distance field and hence the identical route, draw count, and output.
@@ -1073,6 +1076,125 @@ The body is a `statement_list` (section 6): rule applications, sequence applicat
 
 Like the reductivity warning, this check is conservative. A guard suppresses the warning, because it may be false. Silence proves nothing, because a rule in the body can still keep recreating its own match. Bounded applications (`once`, `settle(N)`) are never warned: `settle(3) grow_and_upscale` is legitimate intended growth.
 
+### 6.11 `bsp(...)`
+
+Recursively splits the grid into rectangular **leaves** that tile it, and writes each leaf's id into a number grid. `bsp` and `voronoi` (section 6.12) are the **partition** operations: the operation computes regions; rules place what goes into them, and a graph layer (section 4.3) reads their adjacency.
+
+```ls
+tag geo { wall }
+layers {
+    zones: grid of number
+    level: grid of geo
+}
+rule border(rotation=all) {
+    zones[?a *]
+    where[* (zones != ?a)]
+    =>
+    level[* wall]
+}
+sequence main {
+    resize(48, 32)
+    bsp(into=zones, min=6, max=14)
+    everywhere border
+}
+```
+
+Parameters (section 6.0, all named):
+- `into : grid` (required) - a number grid (check 35). Every cell is overwritten.
+- `min : int` (required) - the minimum leaf side. A value below 1 is treated as 1, with a runtime warning (section 7.4).
+- `max : int?` (optional, default: none) - a node with a side longer than `max` must split, if it can.
+- `split : int?` (optional, default `50`) - the percentage chance that a node `max` does not force still splits, if it can. It is clamped to 0-100, with a runtime warning.
+
+**Splitting.** The root is the whole stack, W x H. A node of width `w` and height `h` can split iff its longer side `s = max(w, h)` is at least `2 * min`; otherwise it is a leaf. A node that can split is **forced** iff `max` is given and `w > max` or `h > max`. A forced node splits. An unforced node splits iff `uniform(100) < split`; that draw is taken only when `0 < split < 100`, since at 0 such a node never splits and at 100 it always does. A splitting node splits its longer side; when `w == h`, `uniform(2)` picks the side (0 the width, 1 the height). The cut lies `c = min + uniform(s - 2 * min + 1)` cells from the node's left (or top) edge: the first child is the `c` columns (or rows) before the cut, the second the rest, and both are at least `min`.
+
+**Draw contract.** Nodes are visited in pre-order, the first child's whole subtree before the second child. Each node takes, in this order and only where the rule above leaves a choice: the split decision, the side, the cut. The draws therefore depend only on the stack size and the arguments, never on grid content.
+
+**Output.** Leaves are numbered from 0 in row-major order of their top-left cells, which is also the order of graph nodes (section 4.3): over `bsp`'s output, `graph of zones` has node `i` = leaf `i`. Every cell of `into` receives its leaf's id. A zero-sized stack writes nothing, with a runtime warning.
+
+**Guarantees.** Every leaf side is at least `min`, unless the stack itself is shorter than `min` along that axis. A leaf side exceeds `max` only where splitting it would leave a child shorter than `min` (the side is below `2 * min`). With `split=100` and no `max`, every leaf side is below `2 * min`. A `max` below `min` needs no special case: every node that can split is forced.
+
+### 6.12 `voronoi(...)`
+
+Partitions the cells by nearest **site**, measured through the grid, and writes each cell's site id into a number grid. Rules place the sites, with their usual modes and counts; the operation only partitions.
+
+```ls
+tag geo  { floor }
+tag mark { site }
+layers {
+    level: grid of geo
+    marks: grid of mark
+    zones: grid of number
+}
+rule place_site { level[floor] marks[.] => marks[site] }
+sequence main {
+    // ... carve floor ...
+    scatter(12) place_site
+    voronoi(sites=site, within=floor, into=zones)
+}
+```
+
+Parameters (section 6.0, all named):
+- `sites : pred` (required) - the site cells. Each 4-connected region of site cells is **one** site, so a blob seeds one zone.
+- `into : grid` (required) - a number grid (check 35). Every cell is overwritten.
+- `within : pred?` (optional, default: every cell) - the cells that can be claimed; distance is measured through them. Site cells always count as `within`.
+- `connectivity : int?` (optional, default `4`) - 4- or 8-neighbour adjacency, as for `path`. Any other value is treated as `4`, with a runtime warning (section 7.4).
+- `cost : expr?` (optional, default `1`) - the per-step weight at the entered cell, as for `path`. Non-positive cost is treated as 1.
+
+**Semantics.** Sites are indexed from 0 in row-major order of each region's first cell; the index keys tie-breaking (below). The distance from site `s` to a cell is the minimum total cost of a route of adjacent `within` cells from any cell of `s`, charging each entered cell's `cost`; a site's own cells are at distance 0. Each reachable cell is claimed by the site minimizing (distance, tie key) lexicographically. Each site claims at least its own cells, so there are as many **zones** (a site's claimed cells) as sites. Zones are numbered from 0 in row-major order of each zone's first cell, which is also the order of graph nodes (section 4.3): under `connectivity=4`, `graph of zones` has node `i` = zone `i`. `into` receives the claiming site's zone id at every claimed cell, and empty everywhere else: outside `within`, and wherever no site reaches. With no site cell at all, every cell is empty, with a runtime warning. A zero-sized stack writes nothing, with a runtime warning.
+
+**Draw contract.**
+1. `sites` and `within` each evaluate in one row-major pass over the current extents, in that order; a `random` in either draws in that order.
+2. `cost` evaluates once per `within` cell, row-major, and is clamped to at least 1.
+3. Tie-breaking consumes **exactly one raw draw** `d` per `voronoi` statement. Site `s`'s tie key is `hash(d, s)` (section 10.6), keyed by site index rather than by cell: two sites resolve every tie between them the same way, which keeps borders coherent rather than jagged.
+4. The claims are a pure function of the distances and tie keys, so, as for `path`, the search algorithm is unobservable.
+
+**Zones are connected.** Every cell on a shortest route from a site to a cell it claims is claimed by the same site, so each zone is connected under the statement's `connectivity`. Under `connectivity=8` a zone may hold together only diagonally in places; a graph layer (section 4.3), which is 4-connected, then reads it as several nodes.
+
+### 6.13 `noise(...)`
+
+Writes two-dimensional gradient noise (Perlin's improved noise, in fixed-point arithmetic) into a number grid, mapped onto a declared range.
+
+```ls
+tag geo { water }
+layers {
+    level:  grid of geo
+    height: grid of number
+}
+rule flood { level[*] where[ (height < 30) ] => level[water] }
+sequence main {
+    resize(64, 64)
+    noise(into=height, lo=0, hi=99, scale=16, octaves=3)
+    everywhere flood
+}
+```
+
+Under the default `normalize=rank`, `height < 30` selects 30% of the cells for every seed and every `scale`.
+
+Parameters (section 6.0, all named):
+- `into : grid` (required) - a number grid (check 35). Every cell is overwritten.
+- `lo : int`, `hi : int` (required) - the inclusive output range. With `hi < lo`, every cell receives `lo`, with a runtime warning (section 7.4).
+- `scale : int` (required) - the lattice spacing of the first octave, in cells. A value below 1 is treated as 1, with a runtime warning.
+- `octaves : int?` (optional, default `1`) - octave `k` (from 0) has spacing `scale >> k`. Octaves whose spacing would fall below 1 are dropped, and a value below 1 is treated as 1, each with a runtime warning.
+- `persistence : int?` (optional, default `50`) - each octave's amplitude as a percentage of the previous octave's. It is clamped to 0-100, with a runtime warning.
+- `normalize : enum{rank, range}?` (optional, default `rank`) - how the raw field maps onto `[lo, hi]`.
+
+**Normalization.** Let `N = W * H` and `R = hi - lo + 1`.
+- `rank`: order the cells by (raw value, `hash(d, i)`, `i`), ascending, where `i` is the row-major cell index and `d` the statement's raw draw (below). The cell at position `r` (from 0) receives `lo + floor(r * R / N)`. Hashed tie-breaking matters at small `scale`, where many cells share a raw value: ordering ties by index alone would band the output from top to bottom. Each output value then covers the same share of the cells, to within one cell, so a threshold selects a fixed fraction of the grid whatever the seed and scale.
+- `range`: with `mn` and `mx` the least and greatest raw values, each cell receives `lo + floor((raw - mn) * (hi - lo) / (mx - mn))`, and every cell receives `lo` when `mx == mn`. The field's shape is kept; its extremes map to `lo` and `hi`.
+
+Both products are computed exactly (wider than 64 bits where needed).
+
+**The algorithm.** Normative, so that the output is identical on every platform (section 7.2). Every value is a signed 64-bit integer; `>>` is an arithmetic shift (floor division by a power of two), and `/` is applied to non-negative operands only. Let `d` be the statement's one raw draw. Octave `k` has spacing `s = scale >> k` and amplitude `a(k)`, with `a(0) = 65536` and `a(k + 1) = a(k) * persistence / 100`. For each octave and each cell `(x, y)`:
+
+1. **Lattice position**, sampled at the cell's centre (Q16 fixed point): `fx = ((2x + 1) * 65536) / (2s)`, `ix = fx >> 16`, `tx = fx & 65535`; likewise `fy`, `iy`, `ty` from `y`. Because cells are sampled at their centres, no cell sits on a lattice point.
+2. **Gradients.** The gradient at lattice point `(i, j)` is entry `hash(hash(d, k), i | (j << 32)) & 7` (unsigned) of the table `(1,0) (-1,0) (0,1) (0,-1) (1,1) (-1,1) (1,-1) (-1,-1)`, indexed from 0.
+3. **Corners.** For each corner `(cx, cy)` in `{0,1} x {0,1}`, with gradient `(gx, gy)` at `(ix + cx, iy + cy)`: `n(cx, cy) = gx * (tx - 65536 * cx) + gy * (ty - 65536 * cy)`.
+4. **Fade**, `6t^5 - 15t^4 + 10t^3` in Q16: `q = ((t * (6 * t - 983040)) >> 16) + 655360`, then `fade(t) = (((((t * t) >> 16) * t) >> 16) * q) >> 16`.
+5. **Interpolation**, with `lerp(a, b, f) = a + (((b - a) * f) >> 16)`: `v = lerp(lerp(n(0,0), n(1,0), fade(tx)), lerp(n(0,1), n(1,1), fade(tx)), fade(ty))`.
+6. **Octave sum**: the cell's raw value is the sum over octaves of `(v * a(k)) >> 16`.
+
+**Draw contract.** A `noise` statement consumes **exactly one raw draw**, taken after its `int` arguments evaluate; every gradient is a hash of it. A zero-sized stack writes nothing, with a runtime warning.
+
 ---
 
 ## 7. Execution model
@@ -1089,7 +1211,7 @@ The snapshot mechanism is independent of the write-protection mask (section 6.8)
 
 A LevelScript run's output is a pure function of **(entry, seed, params, implementation version)**. Entry, seed, and params are part of the runtime invocation, not the source; given the same entry, seed, and parameter values (section 4.2), an implementation version produces the same output, bit for bit, **on every platform and compiler**. A seed therefore names one level everywhere the version runs, which is what curated seed pools rely on.
 
-The mechanism is a **single sequential PRNG stream** - `mt19937_64` as specified by the C++ standard, seeded with the 64-bit invocation seed - with **pinned draw primitives** (section 10.6: every mapping from the stream to a decision is integer arithmetic defined in this document, never a standard-library distribution or shuffle, whose algorithms differ between libraries) and a **pinned draw order**: every stochastic decision - candidate shuffling, weighted `{ any }` selection, `random(...)` calls, `path` tie keys - consumes draws from that one stream at points fixed by the execution model (section 10.6). There is **no position-keyed PRNG**: one stream is deliberately kept for simplicity, accepting the relaxed cross-version claim below (a position-keyed PRNG would decouple draws from evaluation order and permit parallel matching; it remains a possible future change).
+The mechanism is a **single sequential PRNG stream** - `mt19937_64` as specified by the C++ standard, seeded with the 64-bit invocation seed - with **pinned draw primitives** (section 10.6: every mapping from the stream to a decision is integer arithmetic defined in this document, never a standard-library distribution or shuffle, whose algorithms differ between libraries) and a **pinned draw order**: every stochastic decision - candidate shuffling, weighted `{ any }` selection, `random(...)` calls, `path` and `voronoi` tie keys, `bsp` splits, `noise` gradients - consumes draws from that one stream at points fixed by the execution model (section 10.6). There is **no position-keyed PRNG**: one stream is deliberately kept for simplicity, accepting the relaxed cross-version claim below (a position-keyed PRNG would decouple draws from evaluation order and permit parallel matching; it remains a possible future change).
 
 Consequences:
 - Param expressions are evaluated **once**, at startup, so each param is constant for the run. A `when` guard or a count is evaluated each time its statement is reached, so it is constant unless it calls `random`, which draws on every evaluation, reproducibly.
@@ -1135,7 +1257,7 @@ The compiler must reject:
 32. **Unknown operation.** An `op_call` (section 6.0) whose name is not in the operation table.
 33. **Operation argument arity/binding.** More positional arguments than the operation's positional parameters; a named-only parameter supplied positionally; a named argument preceding a positional one; or a parameter supplied both positionally and by name.
 34. **Missing required operation argument.** A required parameter not supplied.
-35. **Operation argument kind / enum.** An argument whose kind does not match the parameter (e.g. `grid` given a non-grid, or an expression that is not a single name where a name is required); an `enum` value outside its set (`mirror` axis not in {horizontal, vertical}); or an ambiguous bare-tag `pred` (no layer the module sees, or more than one, could hold the tag - section 6.6).
+35. **Operation argument kind / enum.** An argument whose kind does not match the parameter (e.g. `grid` given a non-grid; a tag grid where an operation requires a number grid - the `into` of `bsp`, `voronoi`, and `noise`; or an expression that is not a single name where a name is required); an `enum` value outside its set (`mirror` axis not in {horizontal, vertical}); or an ambiguous bare-tag `pred` (no layer the module sees, or more than one, could hold the tag - section 6.6).
 36. **Operation value constraint.** Retired in 0.9.2: out-of-range `resize`, `upscale`, and `pad` values are handled at run time, with a warning (sections 6.1, 6.2, 6.5, 7.4).
 37. **Mode on a sequence.** `scatter`, `everywhere`, or `grow` applied to a sequence (section 6.10).
 38. **Sequence cycle.** A sequence that applies itself, directly or through other sequences.
@@ -1176,6 +1298,10 @@ Every warning goes to the generator's warning handler (Appendix A), formatted li
 - A count below 0, treated as 0, or a `scatter` percentage above 100, treated as 100 (section 6).
 - `path(...)` with a `connectivity` other than 4 or 8; it is treated as 4 (section 6.6).
 - `path(...)` with no reachable route, or an empty `from`/`to` set (section 6.6); `path` before any `resize` (zero-sized stack).
+- `bsp(...)` with `min` below 1, treated as 1; or `split` outside 0-100, clamped (section 6.11).
+- `voronoi(...)` with a `connectivity` other than 4 or 8, treated as 4; or with no site cell, writing every cell empty (section 6.12).
+- `noise(...)` with `scale` below 1, treated as 1; `octaves` below 1, treated as 1, or more than `scale` allows, the excess dropped; `persistence` outside 0-100, clamped; or `hi` below `lo`, every cell `lo` (section 6.13).
+- `bsp`, `voronoi`, or `noise` on a zero-sized stack, writing nothing (sections 6.11-6.13).
 
 ---
 
@@ -1288,7 +1414,7 @@ Deferred, in rough priority order:
 
 **Graphs beyond views.** The reason for the language's forward-looking design (and its name making room for more than grids). Graph layers are read-only views extracted from grids (section 4.3), read by graph patterns (section 5.12). Deferred beyond that: rewrite semantics over nodes and edges (mission graphs generated first and laid out after); directed and labelled edges; routing over a graph through `path`'s `over=` (the prepared seam, section 6.6); node identity in patterns (a graph-pattern cell binding a pattern variable to its node, so that two cells can be tested for lying in the same node); and selection by extremes - "the dead end farthest from Start" needs either a rank written by a query or aggregate expressions, and neither exists yet.
 
-**The structural-operation family.** `path` is the first of a family conforming to the section 6.0 envelope (predicate/grid arguments in, result written into a grid, seeded, table-resolved): BSP subdivision, flood-fill regions, MST/room-linking, Voronoi, a full distance field. The graph-generalizable members - `path`, MST, distance - share the `over` seam; BSP and Voronoi are grid-native. Each is a table row plus an executor; none needs a grammar change.
+**The structural-operation family.** `path` was the first of a family conforming to the section 6.0 envelope (predicate/grid arguments in, result written into a grid, seeded, table-resolved); `bsp`, `voronoi`, and `noise` (sections 6.11-6.13) followed. Still deferred: flood-fill regions, MST/room-linking, and a full distance field. The graph-generalizable members - `path`, MST, distance - share the `over` seam; `bsp`, `voronoi`, and `noise` are grid-native. `noise` may gain a `kind` (simplex) once that algorithm is pinned as exactly as its gradient noise. Each is a table row plus an executor; none needs a grammar change.
 
 **Templates.** Named constant grids stamped by rules (`template Vault3x3 { ... }`). Modules (section 2.6) are their distribution mechanism: a Spelunky-style chunk library is a module of templates.
 
@@ -1353,12 +1479,14 @@ A single PRNG stream (`mt19937_64` in the reference implementation), seeded from
 4. **Candidate ordering** draws next: the pass's seeded shuffle (batch modes and `settle` sweeps) or the single uniform pick (step modes), per section 10.4.
 5. **At application**: one draw per `{ any }` node on the resolved write path, outer before inner, earlier sibling first (a single-item `{ any }` still draws, section 5.2); then write-cell expressions, row-major per resolved leaf.
 6. **`path` statements** follow the section 6.6 draw contract: predicate passes (`from`, `to`, `passable`), per-cell `cost`, exactly one tie-key draw, then the start-to-goal `write` stamps.
+7. **`bsp`, `voronoi`, and `noise` statements** follow their draw contracts (sections 6.11-6.13): `bsp`'s per-node draws in pre-order; `voronoi`'s predicate passes (`sites`, `within`), per-cell `cost`, then one tie-key draw; `noise`'s one raw draw.
 
-A sequence application (section 6.10) adds no draw sites: its body statements draw per items 2-6 as each one is reached, and the stability check draws nothing.
+A sequence application (section 6.10) adds no draw sites: its body statements draw per items 2-7 as each one is reached, and the stability check draws nothing.
 
 **Draw primitives.** Every draw site maps the stream to its decision with one of the following, in unsigned 64-bit integer arithmetic. They are part of the determinism contract (section 7.2): an implementation must reproduce them exactly, so it may not substitute library equivalents such as `std::shuffle` or `std::uniform_int_distribution`.
 
-- **Raw draw**: the stream's next 64-bit output. Used once per `path` statement for the tie key (section 6.6).
+- **Raw draw**: the stream's next 64-bit output. Used once per `path`, `voronoi`, and `noise` statement (sections 6.6, 6.12, 6.13).
+- **`hash(d, i)`**, a 64-bit key from a raw draw `d` and an index `i`, consuming no draw: `mix(d ^ i)`, where `mix(z)` (splitmix64) computes `z = z + 0x9E3779B97F4A7C15`, then `z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9`, then `z = (z ^ (z >> 27)) * 0x94D049BB133111EB`, and returns `z ^ (z >> 31)`, all modulo 2^64. Used for `path` tie keys (by cell index), `voronoi` tie keys (by site id), and `noise` gradients (section 6.13).
 - **`uniform(n)`**, an integer in `[0, n)` for `n >= 1`, without bias: let `t = (2^64 - n) mod n` (in 64-bit arithmetic, `(0 - n) % n`); take raw draws until one, `x`, satisfies `x >= t`; the result is `x mod n`. It may consume more than one raw draw, but it counts as one draw for the order above.
 - **Shuffle** of a vector of `k` candidates (Fisher-Yates): for `i` from `k - 1` down to `1`, swap the items at `i` and `uniform(i + 1)`.
 - **Uniform pick** of one of `k` candidates (step modes): the item at `uniform(k)`.
