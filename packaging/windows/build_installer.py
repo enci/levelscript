@@ -1,7 +1,7 @@
 """Build the Windows LevelScript installer (levelscript + levelscript-debugger).
 
 Configures and builds a Release tree, stages a bundle
-(bin\\levelscript.exe, bin\\levelscript-debugger.exe, bin\\resources\\, examples\\)
+(bin\\levelscript.exe, bin\\levelscript-debugger.exe, bin\\resources\\, samples\\)
 and wraps it in a per-user Inno Setup installer that puts bin\\ on the user PATH.
 
 Requires CMake, a C++ toolchain, and Inno Setup 6.3+ (ISCC.exe).
@@ -84,8 +84,8 @@ def stage(build_dir: Path, bundle: Path) -> None:
         shutil.copy2(find_exe(build_dir, name), bundle / "bin")
     # The debugger resolves fonts as <exe dir>/resources/...
     shutil.copytree(ROOT / "resources", bundle / "bin" / "resources")
-    shutil.copytree(ROOT / "examples", bundle / "examples",
-                    ignore=shutil.ignore_patterns("errors", "*.expected"))
+    shutil.copytree(ROOT / "samples", bundle / "samples",
+                    ignore=shutil.ignore_patterns("*.expected"))
     shutil.copy2(ROOT / "readme.md", bundle)
 
 

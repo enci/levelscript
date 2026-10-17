@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=LevelScript
+Comment=LevelScript debugger
+Exec=levelscript-debugger
+Icon=levelscript
+Terminal=false
+Categories=Development;
+StartupWMClass=levelscript
+NoDisplay=true

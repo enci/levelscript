@@ -138,6 +138,9 @@ project_config project_config::load(std::string const& ls_path,
                               / project_config::base_cell_px;
             }
             cfg.mini_px = jget(j, "mini_px", 24.f);
+            if (j.contains("graphs") && j["graphs"].is_array())
+                for (auto const& jg : j["graphs"])
+                    if (jg.is_string()) cfg.shown_graphs.push_back(jg.get<std::string>());
             uint32_t bg;
             if (hex_to_color(jget(j, "grid_bg_color", std::string{}), bg))
                 cfg.grid_bg_color = bg;
@@ -239,6 +242,7 @@ void project_config::save(std::string const& ls_path) const {
             {"corner", corner_str(lc.corner)},
         });
     }
+    if (!shown_graphs.empty()) j["graphs"] = shown_graphs;
     if (!tag_colors.empty()) {
         json jtc;
         for (auto const& [tname, vmap] : tag_colors) {

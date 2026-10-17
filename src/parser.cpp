@@ -135,9 +135,9 @@ struct parser {
             if (is_call) {
                 eat();   // '('
                 if (!at(token_type::rparen)) {
-                    e->args.push_back(parse_expr());
+                    e->args.push_back(parse_arg());
                     while (accept(token_type::comma))
-                        e->args.push_back(parse_expr());
+                        e->args.push_back(parse_arg());
                 }
                 expect(token_type::rparen, "')'");
                 close(e->loc);
@@ -147,6 +147,27 @@ struct parser {
         error_at(peek(), "expected an expression");
         eat_bad();
         return make_expr(expr_kind::int_lit);
+    }
+
+    // arg ::= expr | selector. A selector `g[m]` is one cell: an integer or a
+    // whitespace-free tag mask. Sema checks where one may stand.
+    expr_ptr parse_arg() {
+        if (!(at(token_type::ident) && peek(1).is(token_type::lbracket))) return parse_expr();
+        auto e = make_expr(expr_kind::selector);
+        e->ident = eat().text;
+        eat();   // '['
+        expr_ptr cell;
+        if (at(token_type::integer)) {
+            cell = make_expr(expr_kind::int_lit);
+            cell->int_val = eat().int_val;
+        } else {
+            cell = parse_tag_mask();
+        }
+        bool ok = cell && expect(token_type::rbracket, "']' after a selector's one cell");
+        if (cell) e->args.push_back(std::move(cell));
+        if (!ok) recover_to(token_type::rbracket);
+        close(e->loc);
+        return e;
     }
 
     expr_ptr parse_unary() {
@@ -237,19 +258,47 @@ struct parser {
         if (!expect(token_type::lbrace, "'{'")) return;
         while (!at(token_type::rbrace) && !at_end()) {
             layer_decl l;
-            if (!expect(token_type::ident, "a grid name")) { eat_bad(); list_sep(); continue; }
+            if (!expect(token_type::ident, "a layer name")) { eat_bad(); list_sep(); continue; }
             l.name = prev_ident();
             if (!expect(token_type::colon, "':'"))         { list_sep(); continue; }
-            if (!expect(token_type::kw_grid, "'grid'"))    { list_sep(); continue; }
+            l.is_graph = accept(token_type::kw_graph);
+            if (!l.is_graph && !expect(token_type::kw_grid, "'grid' or 'graph'")) { list_sep(); continue; }
             if (!expect(token_type::kw_of, "'of'"))        { list_sep(); continue; }
-            if (accept(token_type::kw_number))       l.type = "number";
-            else if (expect(token_type::ident, "a tagset name or 'number'"))
+            if (l.is_graph) {
+                if (!expect(token_type::ident, "a grid name")) { list_sep(); continue; }
                 l.type = toks[pos - 1].text;
-            else { list_sep(); continue; }
+                if (accept(token_type::lparen) && !parse_graph_args(l)) {
+                    recover_to(token_type::rparen);
+                    list_sep();
+                    continue;
+                }
+            } else if (accept(token_type::kw_number)) {
+                l.type = "number";
+            } else if (expect(token_type::ident, "a tagset name or 'number'")) {
+                l.type = toks[pos - 1].text;
+            } else {
+                list_sep();
+                continue;
+            }
             out.layers.layers.push_back(std::move(l));
             list_sep();
         }
         expect(token_type::rbrace, "'}'");
+    }
+
+    // graph_args ::= '(' graph_arg (',' graph_arg)* ')', after the '('.
+    // graph_arg ::= IDENT '=' tag_mask; sema checks the names.
+    bool parse_graph_args(layer_decl& l) {
+        do {
+            graph_arg a;
+            if (!expect(token_type::ident, "'nodes' or 'edges'")) return false;
+            a.name = prev_ident();
+            if (!expect(token_type::equals, "'='")) return false;
+            a.mask = parse_tag_mask();
+            if (!a.mask) return false;
+            l.args.push_back(std::move(a));
+        } while (accept(token_type::comma));
+        return expect(token_type::rparen, "')'");
     }
 
     // ── params ───────────────────────────────────────────────────────────────
@@ -317,6 +366,24 @@ struct parser {
         return e;
     }
 
+    // tag_mask ::= mask_atom ('|' mask_atom)*, whitespace-free: each '|'
+    // touches the atoms on both sides. Null after reporting an error.
+    expr_ptr parse_tag_mask() {
+        auto e = parse_mask_atom();
+        while (e && at(token_type::pipe) && adjacent(toks[pos - 1], peek())) {
+            token const& bar = eat();
+            if (!adjacent(bar, peek())) {
+                error_at(peek(), "a bare mask is whitespace-free; "
+                         "wrap a spaced union in parentheses");
+                return nullptr;
+            }
+            auto atom = parse_mask_atom();
+            if (!atom) return nullptr;
+            e = make_binary(expr_kind::bit_or, std::move(e), std::move(atom));
+        }
+        return e;
+    }
+
     // One pattern cell, as described at `pattern`. Null after reporting an error.
     expr_ptr parse_cell() {
         if (at(token_type::star)) {
@@ -348,22 +415,8 @@ struct parser {
             }
             return e;
         }
-        if (at(token_type::ident) || at(token_type::bang) || at(token_type::dot)) {
-            auto e = parse_mask_atom();
-            // whitespace-free unions: a|b|c (each '|' adjacent on both sides)
-            while (e && at(token_type::pipe) && adjacent(toks[pos - 1], peek())) {
-                token const& bar = eat();
-                if (!adjacent(bar, peek())) {
-                    error_at(peek(), "a bare mask cell is whitespace-free; "
-                             "wrap a spaced union in parentheses");
-                    return nullptr;
-                }
-                auto atom = parse_mask_atom();
-                if (!atom) return nullptr;
-                e = make_binary(expr_kind::bit_or, std::move(e), std::move(atom));
-            }
-            return e;
-        }
+        if (at(token_type::ident) || at(token_type::bang) || at(token_type::dot))
+            return parse_tag_mask();
         error_at(peek(), "expected a pattern cell (*, ., a tag value, an integer, "
                  "a pattern variable, or a parenthesized expression)");
         return nullptr;

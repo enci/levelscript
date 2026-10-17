@@ -1,0 +1,9 @@
+// E142 (0.10, check 50): a cell is a node or a connector, never both.
+// @expect error
+// @expect stderr-contains share
+tag algo { R, H, open = R | H }
+layers {
+    level: grid of algo
+    map:   graph of level(nodes=R, edges=open)
+}
+sequence main { resize(2, 2) }

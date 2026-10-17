@@ -15,6 +15,7 @@ const KINDS: Record<OutlineSymbol['kind'], vscode.SymbolKind> = {
     union: vscode.SymbolKind.EnumMember,
     layers: vscode.SymbolKind.Struct,
     grid: vscode.SymbolKind.Field,
+    graph: vscode.SymbolKind.Interface,
     params: vscode.SymbolKind.Struct,
     param: vscode.SymbolKind.Variable,
     rule: vscode.SymbolKind.Function,

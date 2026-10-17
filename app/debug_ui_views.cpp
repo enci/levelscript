@@ -294,6 +294,8 @@ char const* stmt_icon(program_stmt const& s, compiled_stmt const& cs) {
 
 static std::string pattern_grid_name(compiled const& meta, compiled_pattern const& pat) {
     if (pat.is_where || pat.grid_id == where_grid) return "where";
+    if (pat.graph_id >= 0 && pat.graph_id < (int)meta.graphs.size())
+        return meta.graphs[(size_t)pat.graph_id].name;
     if (pat.grid_id >= 0 && pat.grid_id < (int)meta.layers.size())
         return meta.layers[pat.grid_id].name;
     return "?";
@@ -870,6 +872,17 @@ layer_thumbs::~layer_thumbs() {
     for (auto* t : tex) if (t) SDL_DestroyTexture(t);
 }
 
+void layer_thumbs::reset(project_config& cfg) {
+    if (solo >= 0)
+        for (size_t k = 0; k < cfg.layers.size() && k < saved_visible.size(); ++k)
+            cfg.layers[k].visible = saved_visible[k] != 0;
+    for (auto* t : tex) if (t) SDL_DestroyTexture(t);
+    tex.clear(); tw.clear(); th.clear();
+    version = ~0ull;
+    solo = -1;
+    saved_visible.clear();
+}
+
 // Repaint every layer's texture from the snapshot: tag layers in the shared
 // tag palette (unions included, mask_to_slot), number layers as a heatmap
 // over the layer's own value range, empty cells in a neutral tone.
@@ -1016,6 +1029,98 @@ void draw_layers_window(script const& sc, debug_run const& run, project_config& 
         }
         ImGui::EndChild();
         ImGui::PopID();
+    }
+
+    // Graph layers: a card each, with the overlay toggle and the graph's size
+    // in the current snapshot.
+    for (auto const& gm : sc.meta.graphs) {
+        ImGui::PushID(("graph:" + gm.name).c_str());
+        ImGui::BeginChild("##graph", { 0.f, 0.f },
+                          ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysUseWindowPadding);
+        ImGui::TextUnformatted(gm.name.c_str());
+        ImGui::SameLine();
+        ImGui::TextDisabled("graph of %s", gm.source >= 0
+            ? sc.meta.layers[(size_t)gm.source].name.c_str() : "?");
+        bool shown = cfg.graph_shown(gm.name);
+        if (!shown)
+            ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        bool toggled = ImGui::Button(shown ? phosphor::PH_EYE : phosphor::PH_EYE_SLASH, { 28.f, 0.f });
+        if (!shown) ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip(shown ? "Hide this graph's overlay in the viewport"
+                                    : "Overlay this graph's nodes and edges in the viewport");
+        if (toggled) {
+            auto& v = cfg.shown_graphs;
+            if (shown) v.erase(std::remove(v.begin(), v.end(), gm.name), v.end());
+            else       v.push_back(gm.name);
+        }
+        graph g = lv.graph(gm.name);
+        int edges = 0;
+        for (int n = 0; n < g.node_count(); ++n) edges += (int)g.neighbors(n).size();
+        ImGui::SameLine();
+        ImGui::TextDisabled("%d nodes, %d edges", g.node_count(), edges / 2);
+        ImGui::EndChild();
+        ImGui::PopID();
+    }
+}
+
+// ── graph overlay ─────────────────────────────────────────────────────────────
+
+// One graph over the composite: each node's region outlined in its own color,
+// a dot at the region's centre (with the node id when cells are large enough),
+// and a line between the centres of adjacent nodes.
+static void draw_graph_overlay(ImDrawList* dl, graph const& g, ImVec2 origin, float cell_px,
+                               int cols, int rows) {
+    int n = g.node_count();
+    if (n == 0) return;
+    std::vector<ImVec2> centre((size_t)n, {0.f, 0.f});
+    for (int y = 0; y < rows; ++y)
+        for (int x = 0; x < cols; ++x) {
+            int id = g.node_at(x, y);
+            if (id < 0) continue;
+            centre[(size_t)id].x += x + 0.5f;
+            centre[(size_t)id].y += y + 0.5f;
+        }
+    for (int id = 0; id < n; ++id) {
+        float k = cell_px / (float)g.node_size(id);
+        centre[(size_t)id] = { origin.x + centre[(size_t)id].x * k,
+                               origin.y + centre[(size_t)id].y * k };
+    }
+    auto color = [](int id, int alpha) {
+        ImU32 c = tag_color(-1, id * 7 + 3, nullptr);   // the number-layer hash colors
+        return (c & 0x00FFFFFF) | ((ImU32)alpha << 24);
+    };
+
+    // region outlines: each cell side where the node changes
+    float thick = std::max(1.f, cell_px * 0.1f);
+    for (int y = 0; y < rows; ++y)
+        for (int x = 0; x < cols; ++x) {
+            int id = g.node_at(x, y);
+            if (id < 0) continue;
+            ImU32 col = color(id, 220);
+            float x0 = origin.x + x * cell_px, y0 = origin.y + y * cell_px;
+            float x1 = x0 + cell_px, y1 = y0 + cell_px;
+            if (g.node_at(x - 1, y) != id) dl->AddLine({x0, y0}, {x0, y1}, col, thick);
+            if (g.node_at(x + 1, y) != id) dl->AddLine({x1, y0}, {x1, y1}, col, thick);
+            if (g.node_at(x, y - 1) != id) dl->AddLine({x0, y0}, {x1, y0}, col, thick);
+            if (g.node_at(x, y + 1) != id) dl->AddLine({x0, y1}, {x1, y1}, col, thick);
+        }
+
+    // edges, then nodes on top
+    float line = std::max(1.5f, cell_px * 0.12f);
+    for (int a = 0; a < n; ++a)
+        for (int b : g.neighbors(a))
+            if (a < b) dl->AddLine(centre[(size_t)a], centre[(size_t)b], IM_COL32(255, 255, 255, 200), line);
+    float r = std::max(3.f, cell_px * 0.3f);
+    for (int id = 0; id < n; ++id) {
+        dl->AddCircleFilled(centre[(size_t)id], r, color(id, 255));
+        dl->AddCircle(centre[(size_t)id], r, IM_COL32(0, 0, 0, 200), 0, 1.f);
+        if (cell_px >= 12.f) {
+            std::string label = std::to_string(id);
+            ImVec2 ts = ImGui::CalcTextSize(label.c_str());
+            dl->AddText({centre[(size_t)id].x - ts.x * 0.5f, centre[(size_t)id].y - ts.y * 0.5f},
+                        contrast_text_color(color(id, 255)), label.c_str());
+        }
     }
 }
 
@@ -1226,6 +1331,11 @@ void draw_grid_composite(script const& sc, debug_run const& run,
         }
     }
 
+    // Graph overlays, over every layer.
+    for (auto const& name : cfg.shown_graphs)
+        if (sc.meta.graph_id(name) >= 0)
+            draw_graph_overlay(dl, lv.graph(name), origin, cell_px, cols, rows);
+
     // Grid-line overlay, drawn last so cell boundaries stay legible over any layer.
     if (cell_px >= 3.f) {
         ImU32 grid_col = IM_COL32(255, 255, 255, 25);
@@ -1274,6 +1384,25 @@ void draw_grid_composite(script const& sc, debug_run const& run,
                                      ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
                 ImGui::Text("%s: %s", lc.name.c_str(), val_label.c_str());
                 if (!lc.visible) ImGui::PopStyleColor();
+            }
+            // every graph's node here (hidden overlays dimmed)
+            if (!sc.meta.graphs.empty()) ImGui::Separator();
+            for (auto const& gm : sc.meta.graphs) {
+                graph g = lv.graph(gm.name);
+                int id = g.node_at(hx, hy);
+                bool shown = cfg.graph_shown(gm.name);
+                if (!shown) ImGui::PushStyleColor(ImGuiCol_Text,
+                                ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+                if (id < 0) {
+                    ImGui::Text("%s: no node", gm.name.c_str());
+                } else {
+                    std::string nb;
+                    for (int m : g.neighbors(id)) nb += (nb.empty() ? "" : ", ") + std::to_string(m);
+                    ImGui::Text("%s: node %d, size %d, degree %d%s%s", gm.name.c_str(), id,
+                                g.node_size(id), (int)g.neighbors(id).size(),
+                                nb.empty() ? "" : " -> ", nb.c_str());
+                }
+                if (!shown) ImGui::PopStyleColor();
             }
             ImGui::EndTooltip();
         }

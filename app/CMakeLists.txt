@@ -21,7 +21,7 @@ add_executable(levelscript-debugger debugger_main.cpp debug_ui.cpp debug_ui_view
     project_config.cpp stb_image.cpp
     ${LS_PLATFORM_SRC}
     ${imgui_SOURCE_DIR}/misc/freetype/imgui_freetype.cpp)
-target_link_libraries(levelscript-debugger PRIVATE ls_lib imgui_lib nlohmann_json::nlohmann_json freetype)
+target_link_libraries(levelscript-debugger PRIVATE ls_lib imgui_lib nlohmann_json::nlohmann_json freetype tinyfd)
 target_include_directories(levelscript-debugger PRIVATE
     ${stb_SOURCE_DIR}
     ${imgui_SOURCE_DIR}/misc/freetype

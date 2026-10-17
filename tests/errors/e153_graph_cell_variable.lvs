@@ -1,0 +1,12 @@
+// E153 (0.10, check 46): a bare variable in a graph pattern; its cells are booleans.
+// @expect error
+// @expect stderr-contains cannot be a bare pattern variable
+tag algo { R, H }
+tag room { Start }
+layers {
+    level: grid of algo
+    rooms: grid of room
+    map:   graph of level(nodes=R, edges=H)
+}
+rule r { level[?v] map[?v] => level[H] }
+sequence main { resize(2, 2) everywhere r }

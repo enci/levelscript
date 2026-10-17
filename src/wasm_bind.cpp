@@ -166,8 +166,9 @@ std::string state_json(session const& s, ls::level const& lvl) {
 // Compile + start a progressive run of sequence `entry` (application
 // granularity, observe on). Returns a session id, or -1 on a compile error
 // or an unknown entry (see run_last_error()).
+// `params` is a plain JS object of integer overrides ({difficulty: 2}), or undefined.
 int run_begin(std::string const& source, std::string const& name, unsigned int seed,
-              std::string const& entry, val resolve) {
+              std::string const& entry, val resolve, val params) {
     ls::generator gen = ls::generator::compile(source, name, js_resolver(resolve));
     if (!gen) {
         g_last_error = gen.error();
@@ -186,7 +187,15 @@ int run_begin(std::string const& source, std::string const& name, unsigned int s
         g_last_error += "\n";
         return -1;
     }
-    ls::run r = gen.run(eid, seed, ls::step_mode::application, ls::observe::on);
+    std::vector<std::pair<std::string, int>> overrides;
+    if (!params.isUndefined() && !params.isNull()) {
+        val keys = val::global("Object").call<val>("keys", params);
+        for (unsigned i = 0; i < keys["length"].as<unsigned>(); ++i) {
+            std::string k = keys[i].as<std::string>();
+            overrides.emplace_back(k, params[k].as<int>());
+        }
+    }
+    ls::run r = gen.run(eid, seed, ls::step_mode::application, ls::observe::on, overrides);
     int id = g_next_id++;
     g_sessions.emplace(id, session{std::move(gen), std::move(r), seed, false, eid});
     return id;

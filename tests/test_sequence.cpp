@@ -445,7 +445,7 @@ sequence main {
 )");
 }
 
-TEST_CASE("sequence Q19: a sequence equals its unrolled statements (mixed policies)") {
+TEST_CASE("sequence Q19: a sequence equals its unrolled statements (mixed modes)") {
     check_equivalent(noise_poke + R"(
 sequence s {
     grow(5) poke
@@ -545,6 +545,7 @@ rule fill { g[.] => g[a] }
 )";
 
 TEST_CASE("sequence Q23-Q26: a sequence takes once or settle only") {
+    // check 37
     for (char const* stmt : {"everywhere s", "grow s", "grow(3) s", "scatter(3) s", "scatter(50%) s"}) {
         INFO(stmt);
         CHECK(compile_result(fill_decls + "sequence s { everywhere fill }\nsequence main { resize(2, 2)  " +
@@ -559,17 +560,20 @@ TEST_CASE("sequence Q23-Q26: a sequence takes once or settle only") {
 }
 
 TEST_CASE("sequence Q27: a direct cycle is rejected even when never applied") {
+    // check 38
     CHECK(compile_result("sequence s { once s }\nlayers { }\nsequence main { resize(1, 1) }\n")
           .has_error("sequence 's' applies itself"));
 }
 
 TEST_CASE("sequence Q28: an indirect cycle") {
+    // check 38
     CHECK(compile_result("sequence a { once b }\nsequence b { settle(2) a }\n"
                          "layers { }\nsequence main { resize(1, 1)  once a }\n")
           .has_error("sequence cycle: 'a' -> 'b' -> 'a'"));
 }
 
 TEST_CASE("sequence Q29-Q30: rules and sequences share one namespace") {
+    // check 39
     CHECK(compile_result(fill_decls + "sequence fill { resize(1, 1) }\nsequence main { resize(1, 1) }\n")
           .has_error("already declared as a rule on line 4"));
     CHECK(compile_result(fill_decls + "sequence s { everywhere fill }\nsequence s { once fill }\n"
@@ -578,6 +582,7 @@ TEST_CASE("sequence Q29-Q30: rules and sequences share one namespace") {
 }
 
 TEST_CASE("sequence Q31: unknown name, with a suggestion across both kinds") {
+    // check 8
     CHECK(compile_result(fill_decls + "sequence smooth { everywhere fill }\n"
                          "sequence main { resize(2, 2)  everywhere smoth }\n")
           .has_error("undeclared rule or sequence 'smoth'; did you mean sequence 'smooth'?"));
@@ -617,6 +622,7 @@ TEST_CASE("sequence Q34: sequences take no attributes") {
 }
 
 TEST_CASE("sequence Q35: rule-level checks still apply inside a body") {
+    // check 21
     CHECK(compile_result(fill_decls + "sequence s { scatter(1 > 0) fill }\n"
                          "sequence main { resize(1, 1)  once s }\n")
           .has_error("a count must be a number (sequence 's')"));

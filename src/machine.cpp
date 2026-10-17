@@ -1,19 +1,30 @@
 #include "machine.hpp"
 #include <algorithm>
-#include <iostream>
 #include <limits>
 #include <queue>
 #include <tuple>
 
 namespace ls::internal {
 
-machine::machine(std::shared_ptr<compiled const> prog, uint64_t seed, int entry)
-    : prog_(std::move(prog)), entry_(entry), rng_(seed) {
+machine::machine(std::shared_ptr<compiled const> prog, uint64_t seed, int entry,
+                 std::function<void(std::string const&)> warn)
+    : prog_(std::move(prog)), entry_(entry), warn_(std::move(warn)), rng_(seed) {
     grids_.resize(prog_->layers.size());
     for (int i = 0; i < (int)grids_.size(); ++i)
         grids_[i].is_number = prog_->layers[i].tag_id < 0;
     params_.assign(prog_->param_names.size(), 0);
     param_supplied_.assign(prog_->param_names.size(), 0);
+    graphs_.resize(prog_->graphs.size());
+    selections_.resize(prog_->selectors.size());
+}
+
+void machine::warn(std::string msg) const {
+    if (!warn_) return;
+    auto const& labels = prog_->module_labels;
+    std::string file = stmt_loc_.mod >= 0 && stmt_loc_.mod < (int)labels.size()
+                     ? labels[(size_t)stmt_loc_.mod] : "";
+    warn_(diagnostic{false, file, stmt_loc_.line, stmt_loc_.col,
+                     stmt_loc_.end_line, stmt_loc_.end_col, std::move(msg)}.format());
 }
 
 void machine::set_param(std::string const& name, long long value) {
@@ -102,6 +113,12 @@ long long machine::eval(int idx, int x, int y) {
         if (y < 0 || y >= g.rows || x < 0 || x >= g.cols) return 0;
         return (g.get(y, x) & e.val) != 0;
     }
+    case ce_kind::degree_:
+    case ce_kind::size_:
+    case ce_kind::distance_:
+    case ce_kind::distance_raw:
+    case ce_kind::neighbors_:
+        return eval_graph(e, x, y);
     case ce_kind::and_: return eval(e.a, x, y) != 0 && eval(e.b, x, y) != 0;   // lazy
     case ce_kind::or_:  return eval(e.a, x, y) != 0 || eval(e.b, x, y) != 0;
     case ce_kind::random_: {   // inclusive [lo, hi]; exactly one draw per call
@@ -116,6 +133,75 @@ long long machine::eval(int idx, int x, int y) {
         long long b = e.b >= 0 ? eval(e.b, x, y) : 0;
         long long c = e.c >= 0 ? eval(e.c, x, y) : 0;
         return ce_pure(e.kind, a, b, c);
+    }
+    }
+}
+
+// ── graphs: extracted from the snapshot, cached until their inputs change ────
+
+graph_data const& machine::graph(int id) {
+    auto& c = graphs_[(size_t)id];
+    auto const& g = prog_->graphs[(size_t)id];
+    grid_state const& src = grids_[(size_t)g.source];
+    if (c.version != src.version) {
+        c.data = extract_graph(g, src.is_number, src.front, src.cols, src.rows);
+        c.version = src.version;
+    }
+    return c.data;
+}
+
+std::vector<int> const& machine::selection(int id, int sel, bool distance) {
+    auto& c = selections_[(size_t)sel];
+    auto const& s = prog_->selectors[(size_t)sel];
+    grid_state const& src = grids_[(size_t)prog_->graphs[(size_t)id].source];
+    grid_state const& sg  = grids_[(size_t)s.grid];
+    if (c.source_version == src.version && c.grid_version == sg.version) return c.per_node;
+    c.source_version = src.version;
+    c.grid_version   = sg.version;
+
+    graph_data const& g = graph(id);
+    std::vector<char> picked((size_t)g.node_count(), 0);
+    for (size_t i = 0; i < g.node_of.size() && i < sg.front.size(); ++i) {
+        int node = g.node_of[i];
+        if (node < 0 || picked[(size_t)node]) continue;
+        int64_t v = sg.front[i];
+        if (sg.is_number ? (v == s.val) != s.ne : (v & s.val) != 0) picked[(size_t)node] = 1;
+    }
+    c.per_node.assign((size_t)g.node_count(), distance ? -1 : 0);
+    if (distance) {   // one breadth-first search from every selected node
+        std::queue<int> q;
+        for (int n = 0; n < g.node_count(); ++n)
+            if (picked[(size_t)n]) { c.per_node[(size_t)n] = 0; q.push(n); }
+        while (!q.empty()) {
+            int n = q.front();
+            q.pop();
+            for (int m : g.adj[(size_t)n])
+                if (c.per_node[(size_t)m] < 0) {
+                    c.per_node[(size_t)m] = c.per_node[(size_t)n] + 1;
+                    q.push(m);
+                }
+        }
+    } else {
+        for (int n = 0; n < g.node_count(); ++n)
+            for (int m : g.adj[(size_t)n]) c.per_node[(size_t)n] += picked[(size_t)m];
+    }
+    return c.per_node;
+}
+
+// A graph function at (x, y): about the node covering it (none reads as 0).
+long long machine::eval_graph(compiled_expr const& e, int x, int y) {
+    graph_data const& g = graph(e.ref);
+    int node = g.node_at(x, y);
+    if (node < 0) return 0;
+    switch (e.kind) {
+    case ce_kind::degree_: return (long long)g.adj[(size_t)node].size();
+    case ce_kind::size_:   return g.sizes[(size_t)node];
+    case ce_kind::neighbors_:
+        return e.val < 0 ? 0 : selection(e.ref, (int)e.val, false)[(size_t)node];
+    default: {   // distance: unreachable is empty, and reads as 0 unless raw
+        int d = e.val < 0 ? -1 : selection(e.ref, (int)e.val, true)[(size_t)node];
+        if (d >= 0) return d;
+        return e.kind == ce_kind::distance_raw ? num_empty : 0;
     }
     }
 }
@@ -169,21 +255,23 @@ sequence<step_event> machine::run() {
 }
 
 int machine::eval_count(compiled_stmt const& st) {
+    stmt_loc_ = st.loc;
     if (st.count < 0) return -1;
     long long v = eval(st.count, 0, 0);
     char const* pct = st.percent ? "%" : "";
     if (v < 0) {
-        std::cerr << "warning: a count of " << v << pct << " is below 0; treating it as 0\n";
+        warn("a count of " + std::to_string(v) + std::string(pct) + " is below 0; treating it as 0");
         v = 0;
     }
     if (st.percent && v > 100) {
-        std::cerr << "warning: a percentage of " << v << "% is above 100; treating it as 100%\n";
+        warn("a percentage of " + std::to_string(v) + "% is above 100; treating it as 100%");
         v = 100;
     }
     return (int)v;
 }
 
 sequence<step_event> machine::run_leaf(compiled_stmt const& st, int top, int count) {
+    stmt_loc_ = st.loc;
     if (st.what == compiled_stmt::kind::op_call) {
         exec_op(st.op);
     } else if (count == 0) {
@@ -387,6 +475,7 @@ static void rebuild(grid_state& g, int nr, int nc, F&& src) {
     g.cols = nc;
     g.front = std::move(nf);
     g.back.assign((size_t)nr * nc, g.empty_raw());
+    ++g.version;
 }
 
 void machine::exec_op(compiled_op const& op) {
@@ -399,8 +488,7 @@ void machine::exec_op(compiled_op const& op) {
 
     case op_kind::resize: { // content-preserving, top-left anchored
         if (arg[0] < 1 || arg[1] < 1) {
-            std::cerr << "warning: resize(" << arg[0] << ", " << arg[1]
-                      << ") has a dimension below 1; leaving grids unchanged\n";
+            warn("resize(" + std::to_string(arg[0]) + ", " + std::to_string(arg[1]) + ") has a dimension below 1; leaving grids unchanged");
             return;
         }
         int w = (int)arg[0], h = (int)arg[1];
@@ -415,8 +503,7 @@ void machine::exec_op(compiled_op const& op) {
 
     case op_kind::upscale: { // duplicate every cell into an n x m block
         if (arg[0] < 1 || arg[1] < 1)
-            std::cerr << "warning: upscale(" << arg[0] << ", " << arg[1]
-                      << ") has a factor below 1; treating it as 1\n";
+            warn("upscale(" + std::to_string(arg[0]) + ", " + std::to_string(arg[1]) + ") has a factor below 1; treating it as 1");
         int n = arg[0] < 1 ? 1 : (int)arg[0], m = arg[1] < 1 ? 1 : (int)arg[1];
         rows_ *= m;
         cols_ *= n;
@@ -429,8 +516,7 @@ void machine::exec_op(compiled_op const& op) {
 
     case op_kind::pad: {    // uniform empty border on all sides
         if (arg[0] < 0)
-            std::cerr << "warning: pad(" << arg[0]
-                      << ") has a margin below 0; treating it as 0\n";
+            warn("pad(" + std::to_string(arg[0]) + ") has a margin below 0; treating it as 0");
         int n = arg[0] < 0 ? 0 : (int)arg[0];
         if (n == 0) return;
         rows_ += 2 * n;
@@ -457,8 +543,7 @@ void machine::exec_op(compiled_op const& op) {
                     }
                 }
         if (!found) {
-            std::cerr << "warning: trim() on an entirely empty stack; "
-                         "leaving grids unchanged\n";
+            warn("trim() on an entirely empty stack; leaving grids unchanged");
             return;
         }
         rows_ = max_r - min_r + 1;
@@ -483,14 +568,14 @@ void machine::exec_op(compiled_op const& op) {
                         g.front[(g.rows - 1 - r) * g.cols + c] = g.get(r, c);
             }
             g.back = g.front;
+            ++g.version;
         }
         return;
 
     case op_kind::path: {
         long long conn = arg[compiled_op::path_connectivity];
         if (conn != 4 && conn != 8)
-            std::cerr << "warning: path() connectivity " << conn
-                      << " is not 4 or 8; treating it as 4\n";
+            warn("path() connectivity " + std::to_string(conn) + " is not 4 or 8; treating it as 4");
         run_path(op, conn == 8 ? 8 : 4);
         return;
     }
@@ -516,7 +601,7 @@ static uint64_t mix64(uint64_t v) {
 // output, and a future A* is a pure optimization.
 void machine::run_path(compiled_op const& op, int ndirs) {
     if (grids_.empty() || grids_[0].rows <= 0 || op.into_grid < 0) {
-        std::cerr << "warning: path() before any resize; leaving grids unchanged\n";
+        warn("path() before any resize; leaving grids unchanged");
         return;
     }
     int W = grids_[0].cols, H = grids_[0].rows;
@@ -596,8 +681,7 @@ void machine::run_path(compiled_op const& op, int ndirs) {
             goal = (int)i;
     }
     if (goal < 0) {
-        std::cerr << "warning: path() found no route from 'from' to 'to'; "
-                     "leaving grids unchanged\n";
+        warn("path() found no route from 'from' to 'to'; leaving grids unchanged");
         return;
     }
 
@@ -627,14 +711,7 @@ void machine::run_path(compiled_op const& op, int ndirs) {
         g.front[i] = v;
     }
     g.back = g.front;
-}
-
-uint64_t machine::uniform(uint64_t n) {
-    uint64_t threshold = (0 - n) % n;   // 2^64 mod n, in 64-bit arithmetic
-    for (;;) {
-        uint64_t x = rng_();
-        if (x >= threshold) return x % n;
-    }
+    ++g.version;
 }
 
 // Candidates in the pinned collection order: anchors row-major, and at each
@@ -689,6 +766,13 @@ bool machine::match_at(compiled_pair const& pair, int row, int col) {
             var_value(pair, k.slot, row, col)) return false;
     for (auto const& pat : pair.lhs) {
         if (pat.computed.empty()) continue;
+        if (pat.graph_id >= 0) {   // each cell tests the node covering it
+            for (auto const& p : pat.computed) {
+                if (graph(pat.graph_id).node_at(col + p.c, row + p.r) < 0) return false;
+                if (eval(p.expr, col + p.c, row + p.r) == 0) return false;
+            }
+            continue;
+        }
         if (pat.is_where) {   // every cell's boolean must hold
             for (auto const& p : pat.computed)
                 if (eval(p.expr, col + p.c, row + p.r) == 0) return false;
@@ -765,6 +849,7 @@ void machine::apply(compiled_pair const& pair, match const& m,
         auto const& pat = *pp;
         if (pat.grid_id < 0) continue;
         grid_state& g = grids_[pat.grid_id];
+        ++g.version;
         for (int r = 0; r < pat.rows; ++r)
             for (int c = 0; c < pat.cols; ++c) {
                 auto const& cell = pat.at(r, c);

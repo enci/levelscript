@@ -1,10 +1,13 @@
 #include "ls.hpp"
+#include "graph.hpp"
 #include "machine.hpp"
 #include "modules.hpp"
 #include "sema.hpp"
+#include <iostream>
 
 namespace ls {
 
+using internal::graph_data;
 using internal::level_data;
 using internal::machine;
 using internal::sequence;
@@ -82,6 +85,24 @@ std::string grid::valueName(int mask) const {
     return vals[value_id];
 }
 
+// ── graph ────────────────────────────────────────────────────────────────────
+
+graph::graph(std::shared_ptr<graph_data const> data) : data_(std::move(data)) {}
+
+int graph::node_count() const { return data_ ? data_->node_count() : 0; }
+
+int graph::node_at(int x, int y) const { return data_ ? data_->node_at(x, y) : -1; }
+
+int graph::node_size(int node) const {
+    if (!data_ || node < 0 || node >= data_->node_count()) return 0;
+    return data_->sizes[(size_t)node];
+}
+
+std::vector<int> graph::neighbors(int node) const {
+    if (!data_ || node < 0 || node >= data_->node_count()) return {};
+    return data_->adj[(size_t)node];
+}
+
 // ── level ────────────────────────────────────────────────────────────────────
 
 level::level(std::shared_ptr<level_data const> data) : data_(std::move(data)) {}
@@ -113,6 +134,16 @@ std::string level::layer_name(int index) const {
     return "";
 }
 
+class graph level::graph(const std::string& name) const {
+    if (!data_) return {};
+    int id = data_->info->graph_id(name);
+    if (id < 0) return {};
+    auto const& g = data_->info->graphs[(size_t)id];
+    auto const& src = data_->layers[(size_t)g.source];
+    return ls::graph{std::make_shared<graph_data const>(
+        internal::extract_graph(g, src.tag_id < 0, src.cells, data_->width, data_->height))};
+}
+
 // ── run ──────────────────────────────────────────────────────────────────────
 
 namespace internal {
@@ -130,8 +161,9 @@ struct run_state {
 
     run_state(std::shared_ptr<compiled const> prog, int entry, uint64_t seed,
               step_mode md, observe obs,
-              std::vector<std::pair<std::string, int>> const& params)
-        : m(std::move(prog), seed, entry), seq(m.run()), mode(md) {
+              std::vector<std::pair<std::string, int>> const& params,
+              warning_handler const& warn)
+        : m(std::move(prog), seed, entry, warn), seq(m.run()), mode(md) {
         m.set_observe(obs == observe::on);
         for (auto const& [name, value] : params) m.set_param(name, value);
     }
@@ -206,8 +238,10 @@ level run::finish() {
 // ── generator ────────────────────────────────────────────────────────────────
 
 generator generator::compile(const std::string& source, const std::string& name,
-                             resolver resolve) {
+                             resolver resolve, warning_handler warn) {
     generator g;
+    g.warn_ = warn ? std::move(warn)
+                   : [](std::string const& w) { std::cerr << w << '\n'; };
     diagnostics diags;
     std::string label = name.empty() ? "generator" : name;
 
@@ -219,7 +253,10 @@ generator generator::compile(const std::string& source, const std::string& name,
             g.prog_ = std::move(prog);
     }
     if (!g.prog_) g.error_ = diags.format_all();
-    else if (!diags.all.empty()) g.warnings_ = diags.format_all();
+    else if (!diags.all.empty()) {
+        g.warnings_ = diags.format_all();
+        for (auto const& d : diags.all) g.warn_(d.format());
+    }
     return g;
 }
 
@@ -249,7 +286,7 @@ std::string generator::sequence_name(int id) const {
 level generator::generate(int entry, uint64_t seed,
                           std::vector<std::pair<std::string, int>> const& params) const {
     if (!prog_ || entry < 0 || entry >= sequence_count()) return {};
-    machine m(prog_, seed, entry);
+    machine m(prog_, seed, entry, warn_);
     for (auto const& [name, value] : params) m.set_param(name, value);
     auto seq = m.run();
     while (seq.next()) {}
@@ -260,7 +297,7 @@ class run generator::run(int entry, uint64_t seed, step_mode mode, observe obs,
                          std::vector<std::pair<std::string, int>> const& params) const {
     if (!prog_) return ls::run{};
     return ls::run{std::make_unique<internal::run_state>(prog_, entry, seed, mode, obs,
-                                                         params)};
+                                                         params, warn_)};
 }
 
 int generator::statement_count(int entry) const {

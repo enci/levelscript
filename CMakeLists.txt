@@ -49,7 +49,22 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/freetype/freetype.git
     GIT_TAG        master
 )
-FetchContent_MakeAvailable(sdl3 imgui nlohmann_json stb freetype)
+# tinyfiledialogs: the debugger's Open dialog (native on Windows, osascript on
+# macOS, zenity/kdialog on Linux). Plain C, one file; built as tinyfd below.
+# Pinned: the upstream lives on SourceForge and has no release tags.
+FetchContent_Declare(
+    tinyfd
+    GIT_REPOSITORY https://git.code.sf.net/p/tinyfiledialogs/code
+    GIT_TAG        db67fa7e6f5d893551079c5dd0b1ddd1faeeb8b7
+)
+FetchContent_MakeAvailable(sdl3 imgui nlohmann_json stb freetype tinyfd)
+
+enable_language(C)
+add_library(tinyfd STATIC ${tinyfd_SOURCE_DIR}/tinyfiledialogs.c)
+target_include_directories(tinyfd PUBLIC ${tinyfd_SOURCE_DIR})
+if(WIN32)
+    target_link_libraries(tinyfd PUBLIC comdlg32 ole32)
+endif()
 
 # Patch to ImGui's docking branch: stock ImGui only rounds the corners
 # of a docked pane that touch the dock host's outer edge, so inner panes stay

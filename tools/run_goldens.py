@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Golden-output example runner — the determinism gate.
 
-Runs every examples/*.lvs through the levelscript CLI with its pinned seed (a `// @seed N`
-comment, default 42) and compares stdout against the .expected file next to
-it. Any change to shuffle order or draw sequence fails loudly here.
+Runs every .lvs under tests/golden/ through the levelscript CLI with
+its pinned seed (a `// @seed N` comment, default 42) and compares stdout against
+the .expected file next to it. Any change to shuffle order or draw sequence fails
+loudly here. Every tests/errors/*.lvs must fail to compile.
 
-    python tools/run_examples.py             # verify all
-    python tools/run_examples.py --update    # regenerate goldens (intended changes)
+    python tools/run_goldens.py             # verify all
+    python tools/run_goldens.py --update    # regenerate goldens (intended changes)
 """
 import re
 import subprocess
@@ -32,15 +33,18 @@ def find_cli() -> Path:
 def main() -> None:
     update = "--update" in sys.argv
     cli = find_cli()
-    examples = sorted((ROOT / "examples").glob("*.lvs"))
-    error_examples = sorted((ROOT / "examples" / "errors").glob("*.lvs"))
-    if not examples and not error_examples:
-        sys.exit("no examples found")
+    # tests/golden/programs/modules/ holds modules a sample uses, not programs of their own
+    modules = ROOT / "tests" / "golden" / "programs" / "modules"
+    goldens = sorted(p for p in (ROOT / "tests" / "golden").rglob("*.lvs")
+                     if modules not in p.parents)
+    errors = sorted((ROOT / "tests" / "errors").glob("*.lvs"))
+    if not goldens and not errors:
+        sys.exit("no goldens found")
 
     failed = 0
 
-    # examples/errors/*.lvs must FAIL to compile (exit != 0, diagnostics on stderr)
-    for ex in error_examples:
+    # tests/errors/*.lvs must FAIL to compile (exit != 0, diagnostics on stderr)
+    for ex in errors:
         run = subprocess.run([str(cli), "--seed", "1", str(ex)],
                              capture_output=True, text=True)
         if run.returncode == 0:
@@ -52,7 +56,8 @@ def main() -> None:
         else:
             print(f"ok   errors/{ex.name}")
 
-    for ex in examples:
+    for ex in goldens:
+        name = ex.relative_to(ROOT).as_posix()
         src = ex.read_text(encoding="utf-8")
         m = re.search(r"@seed\s+(\d+)", src)
         seed = m.group(1) if m else "42"
@@ -62,27 +67,27 @@ def main() -> None:
             capture_output=True, text=True,
         )
         if run.returncode != 0:
-            print(f"FAIL {ex.name}: exit {run.returncode}\n{run.stderr}")
+            print(f"FAIL {name}: exit {run.returncode}\n{run.stderr}")
             failed += 1
             continue
 
         expected = ex.with_suffix(".expected")
         if update:
             expected.write_text(run.stdout, encoding="utf-8", newline="\n")
-            print(f"UPDATED {ex.name}")
+            print(f"UPDATED {name}")
         elif not expected.is_file():
-            print(f"FAIL {ex.name}: no .expected file (run with --update)")
+            print(f"FAIL {name}: no .expected file (run with --update)")
             failed += 1
         elif run.stdout.replace("\r\n", "\n") != expected.read_text(encoding="utf-8"):
-            print(f"FAIL {ex.name}: output differs from {expected.name}")
+            print(f"FAIL {name}: output differs from {expected.name}")
             failed += 1
         else:
-            print(f"ok   {ex.name}")
+            print(f"ok   {name}")
 
-    total = len(examples) + len(error_examples)
+    total = len(goldens) + len(errors)
     if failed:
-        sys.exit(f"{failed}/{total} examples failed")
-    print(f"all {total} examples pass")
+        sys.exit(f"{failed}/{total} goldens failed")
+    print(f"all {total} goldens pass")
 
 
 if __name__ == "__main__":

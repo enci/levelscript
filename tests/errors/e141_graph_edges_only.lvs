@@ -1,0 +1,9 @@
+// E141 (0.10, check 49): edges= needs nodes=.
+// @expect error
+// @expect stderr-contains without
+tag algo { R, H }
+layers {
+    level: grid of algo
+    map:   graph of level(edges=H)
+}
+sequence main { resize(2, 2) }

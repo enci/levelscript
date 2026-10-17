@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LevelScript - procedural level generation language</title>
+  <meta name="description" content="LevelScript is a scripting language for procedural level generation: pattern-rewrite rules over a stack of grids, deterministic by seed.">
+  <meta name="keywords" content="procedural generation, level generation, scripting language, pattern rewriting, roguelike, game development">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" type="image/png" href="img/levelscript.png">
+</head>
+<body>
+  <nav>
+    <a href="index.html" class="nav-logo"><img src="img/levelscript.png" alt="LevelScript logo"></a>
+    <ul class="nav-links">
+      <li><a href="index.html"><i class="fas fa-layer-group"></i> levelscript</a></li>
+      <li><a href="getting-started.html"><i class="fas fa-rocket"></i> getting started</a></li>
+      <li><a href="samples.html"><i class="fas fa-border-all"></i> samples</a></li>
+      <li><a href="spec.html"><i class="fas fa-book"></i> language spec</a></li>
+      <li><a href="https://github.com/enci/levelscript/releases/latest" target="_blank"><i class="fas fa-download"></i> download</a></li>
+      <li><a href="https://github.com/enci/levelscript" target="_blank"><i class="fab fa-github"></i> github</a></li>
+    </ul>
+  </nav>
+  <header class="hero">
+    <div class="hero-inner">
+      <div>
+        <h1><span>LevelScript</span></h1>
+        <p class="tagline">A scripting language for procedural level generation.</p>
+        <p class="sub">Describe how a stack of grids is rewritten, rule by rule. The output is a pure function of seed and parameters, so every level is reproducible.</p>
+        <div class="hero-buttons">
+          <a href="getting-started.html" class="btn"><i class="fas fa-rocket"></i> Get started</a>
+          <a href="https://github.com/enci/levelscript/releases/latest" class="btn btn-secondary"><i class="fas fa-download"></i> Download</a>
+          <a href="https://github.com/enci/levelscript" class="btn btn-secondary"><i class="fab fa-github"></i> GitHub</a>
+        </div>
+      </div>
+      <div class="hero-visual">
+        <div id="hero-widget"></div>
+        <p class="hero-note">Live: tests/golden/programs/dungeon.lvs, seed 42, running in your browser.</p>
+      </div>
+    </div>
+  </header>
+
+  <div class="container">
+    <h2>Rules that look like the levels they make</h2>
+    <p class="lead">A rule is a pattern on the left and what to write on the right. The cells are laid out as a grid, so you can read a rule the way you would read the map. This is the whole cave generator. It runs live in your browser, so edit it, change the seed or step through it:</p>
+
+    <div data-demo="cave"></div>
+
+    <div class="features">
+      <div class="feature-card">
+        <div class="feature-icon"><i class="fas fa-border-none"></i></div>
+        <h3>Visual patterns</h3>
+        <p>Pattern bodies are drawn as grids. Rotations and reflections are one attribute away, and editors can colour cells by tag.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon"><i class="fas fa-layer-group"></i></div>
+        <h3>Correlated layers</h3>
+        <p>Terrain, entities, items and numbers live in separate grids that rules read and write together.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon"><i class="fas fa-dice"></i></div>
+        <h3>Deterministic</h3>
+        <p>Output is a pure function of <code>(seed, params)</code>. Goldens in CI catch any change to the draw sequence.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon"><i class="fas fa-diagram-project"></i></div>
+        <h3>Graph layers</h3>
+        <p>Read rooms and halls out of a grid as a graph, then label dead ends, hubs and distance from the start.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon"><i class="fas fa-bug"></i></div>
+        <h3>Step debugger</h3>
+        <p>A native window that steps through generation one rule application at a time, with breakpoints and playback.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon"><i class="fas fa-plug"></i></div>
+        <h3>Made for games</h3>
+        <p>A small C++ library first and a CLI second. Compile once, then generate with any seed at runtime.</p>
+      </div>
+    </div>
+
+    <h2>Four ideas</h2>
+    <ol class="steps">
+      <li><strong>Tags</strong> name the values a cell can hold: <code>tag geo { wall, floor }</code>.</li>
+      <li><strong>Layers</strong> are the grids of those tags that make up a level.</li>
+      <li><strong>Rules</strong> match a pattern and rewrite it. Alternatives can be weighted, filtered with <code>where</code>, and run in any rotation.</li>
+      <li><strong>Sequences</strong> orchestrate the work with <code>resize</code>, <code>scatter</code>, <code>everywhere</code>, <code>grow</code>, <code>settle</code> and friends.</li>
+    </ol>
+
+    <h2>Tools</h2>
+    <div class="features">
+      <div class="feature-card">
+        <div class="feature-icon"><i class="fas fa-terminal"></i></div>
+        <h3>levelscript</h3>
+        <p>Compile a <code>.lvs</code> file, run a sequence with a seed and parameters, and print every layer.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon"><i class="fas fa-play"></i></div>
+        <h3>levelscript-debugger</h3>
+        <p>Step, pause, restart and set breakpoints. Per-layer display settings can use text or tilesets.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon"><i class="fas fa-code"></i></div>
+        <h3>VS Code extension</h3>
+        <p>Highlighting, diagnostics as you type, hover, go-to-definition, completion and a live AST view. Get it from the <a href="https://marketplace.visualstudio.com/items?itemName=BojanEndrovski.levelscript" target="_blank">Marketplace</a>.</p>
+      </div>
+    </div>
+
+    <h2>Embed it</h2>
+    <p>Compile a generator once, then ask it for levels:</p>
+<pre><code class="language-cpp">auto gen   = ls::generator::compile(source, "dungeon.lvs", resolve);  // resolve maps `use` paths
+auto level = gen.generate(gen.sequence("main"), seed);
+auto geo   = level["level"];
+int  wall  = gen.tag("geo.wall");
+if (geo.at(x, y) == wall) { /* ... */ }</code></pre>
+
+    <h2>Install</h2>
+    <p>Installers for Windows and macOS are attached to every <a href="https://github.com/enci/levelscript/releases/latest">release</a>. Both install <code>levelscript</code> and <code>levelscript-debugger</code> and add them to your PATH. Then:</p>
+<pre><code>levelscript --seed 42 tests/golden/programs/dungeon.lvs</code></pre>
+    <p>Continue with <a href="getting-started.html">Getting started</a>, browse the <a href="samples.html">samples</a>, or read the <a href="spec.html">language spec</a>.</p>
+
+    <div class="note warn">
+      <strong>Draft:</strong> the language is at version 0.10 and the spec is a draft. Expect changes between versions.
+    </div>
+  </div>
+  <footer>
+    LevelScript is MIT licensed &middot; <a href="https://github.com/enci/levelscript">github.com/enci/levelscript</a>
+  </footer>
+  <script src="wasm/ls_wasm.js"></script>
+  <script src="js/samples-data.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

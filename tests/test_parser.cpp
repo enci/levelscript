@@ -37,6 +37,7 @@ TEST_CASE("parser: misplaced and malformed use declarations") {
 // ── step 2: match blocks, write trees, attributes, body combinators ──────────
 
 TEST_CASE("parser: weight inside { all } is an error") {
+    // check 5
     CHECK(parse_fails(R"(
 rule r {
     g[.]
@@ -122,6 +123,7 @@ TEST_CASE("parser: an inline rule is always braced") {
 }
 
 TEST_CASE("parser: ordered on a match or write side is an error") {
+    // check 29
     CHECK(parse_fails("rule r { { ordered g[a] h[b] } => g[c] }"));
     CHECK(parse_fails("rule r { g[.] => { ordered g[a] g[b] } }"));
 }
@@ -145,6 +147,7 @@ TEST_CASE("parser: '!' and '|' touch the atoms of a bare mask") {
 }
 
 TEST_CASE("parser: empty pattern rows around commas are errors") {
+    // check 2
     CHECK(parse_fails("rule r { g[a,, b] => g[a, b] }"));
     CHECK(parse_fails("rule r { g[, a] => g[a] }"));
     CHECK(parse_fails("rule r { g[a, b,] => g[a, b] }"));
@@ -152,6 +155,7 @@ TEST_CASE("parser: empty pattern rows around commas are errors") {
 }
 
 TEST_CASE("parser: one params block per module") {
+    // check 17
     CHECK(parse_fails("params { a: number = 1 }\nparams { b: number = 2 }"));
 }
 
@@ -163,6 +167,7 @@ TEST_CASE("parser: an unclosed pattern reports the missing bracket once") {
 }
 
 TEST_CASE("parser: an unknown attribute is parsed whole — one diagnostic") {
+    // check 7
     for (char const* attrs : {"colour=red", "colour=3", "colour=all", "colour={90, 180}"}) {
         diagnostics diags;
         parse(std::string("rule r(") + attrs + ") { g[.] => g[a] }\n", "test", diags);

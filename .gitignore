@@ -14,3 +14,7 @@ extension/package-lock.json
 *.vsix
 dist
 build-release
+
+# Website build products (CI generates these; see tools/build_site_data.py)
+docs/wasm/
+docs/js/samples-data.js
