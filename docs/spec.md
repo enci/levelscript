@@ -1157,18 +1157,18 @@ Writes two-dimensional gradient noise (Perlin's improved noise, in fixed-point a
 ```ls
 tag geo { water }
 layers {
-    level:  grid of geo
-    height: grid of number
+    level:     grid of geo
+    elevation: grid of number
 }
-rule flood { level[*] where[ (height < 30) ] => level[water] }
+rule flood { level[*] where[ (elevation < 30) ] => level[water] }
 sequence main {
     resize(64, 64)
-    noise(into=height, lo=0, hi=99, scale=16, octaves=3)
+    noise(into=elevation, lo=0, hi=99, scale=16, octaves=3)
     everywhere flood
 }
 ```
 
-Under the default `normalize=rank`, `height < 30` selects 30% of the cells for every seed and every `scale`.
+Under the default `normalize=rank`, `elevation < 30` selects 30% of the cells for every seed and every `scale`.
 
 Parameters (section 6.0, all named):
 - `into : grid` (required) - a number grid (check 35). Every cell is overwritten.
