@@ -67,6 +67,12 @@ enum class ce_kind {
     is_empty, is_not_empty,   // ref = grid id; val = 1 when a number grid
     has,           // ref = tag grid id, val = mask: the cell overlaps it (a bare-tag pred)
     var_read,      // ref = the pair's variable slot
+    // graph functions, in graph-pattern cells only: ref = graph id; they
+    // describe the node covering the current position
+    degree_, size_,
+    distance_,     // val = selector id; unreachable reads as 0
+    distance_raw,  // the same, unreachable as the empty sentinel (`!= .` tests)
+    neighbors_,    // val = selector id
 };
 
 struct compiled_expr {
@@ -100,7 +106,8 @@ struct match_probe {
 };
 
 struct compiled_pattern {
-    int  grid_id{-1};        // layer index, or where_grid
+    int  grid_id{-1};        // layer index (a graph's source), or where_grid
+    int  graph_id{-1};       // a graph pattern: the graph it tests
     bool is_number{false};
     bool is_where{false};
     int  rows{0}, cols{0};
@@ -217,15 +224,36 @@ struct compiled_layer {
     int         tag_id{-1};   // index into tag_names/tag_values; -1 = number grid
 };
 
+// A graph layer: a read-only view of its source grid, extracted on every
+// read. Node cells are the source's non-empty cells overlapping `nodes`
+// (every non-empty cell of a number grid); connector cells overlap `edges`.
+struct compiled_graph {
+    std::string name;
+    int         source{-1};   // grid id
+    int64_t     nodes{0};     // value bits; tag sources only
+    int64_t     edges{0};     // value bits; 0 = no connectors
+};
+
+// The argument of `distance` and `neighbors`: a one-cell pattern on a grid.
+// It selects a node when one of the node's cells matches.
+struct compiled_selector {
+    int     grid{-1};
+    int64_t val{0};     // a mask (tag grid) or a number
+    bool    ne{false};  // number grid: matches any value but `val` (`!.`)
+};
+
 struct compiled {
     std::vector<std::string>              tag_names;
     std::vector<std::vector<std::string>> tag_values;   // [tag_id][value_id]
     // named unions per tagset: (name, resolved mask)
     std::vector<std::vector<std::pair<std::string, int64_t>>> tag_unions;
     std::vector<compiled_layer>           layers;
+    std::vector<compiled_graph>           graphs;   // not in the layer order
+    std::vector<compiled_selector>        selectors;
     std::vector<compiled_rule>            rules;
     std::vector<compiled_sequence>        sequences;   // canonical order = API ids
     std::vector<std::string>              modules;     // canonical names, canonical order
+    std::vector<std::string>              module_labels;   // by module id: names in diagnostics
     std::vector<compiled_expr>            exprs;   // the expression arena
 
     // params: startup_exprs run once, in declaration order, when the
@@ -244,6 +272,7 @@ struct compiled {
     }
 
     int layer_id(std::string_view name) const { return index_of(layers, name, &compiled_layer::name); }
+    int graph_id(std::string_view name) const { return index_of(graphs, name, &compiled_graph::name); }
     int tag_id(std::string_view name) const   { return index_of(tag_names, name); }
     int value_id(int tag, std::string_view name) const {
         if (tag < 0 || tag >= (int)tag_values.size()) return -1;

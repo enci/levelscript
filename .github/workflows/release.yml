@@ -62,6 +62,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          lfs: true
 
       - name: Configure
         run: cmake -S . -B build
@@ -73,8 +75,8 @@ jobs:
       - name: Unit tests
         run: build\tests\Release\ls_tests.exe
 
-      - name: Examples
-        run: python tools/run_examples.py
+      - name: Goldens
+        run: python tools/run_goldens.py
 
       - name: Smoke-test the build
         run: |
@@ -89,7 +91,7 @@ jobs:
         run: choco install innosetup -y --no-progress
 
       # build_installer.py stages bin\ (levelscript, levelscript-debugger, resources\),
-      # examples\ and readme.md, renders packaging/windows/levelscript_installer.iss.in and
+      # samples\ and readme.md, renders packaging/windows/levelscript_installer.iss.in and
       # compiles it with ISCC into dist/LevelScript-setup-<version>-x64.exe (per-user,
       # adds bin\ to the user PATH; the fixed AppId keeps in-place upgrades working).
       - name: Build installer
@@ -117,6 +119,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          lfs: true
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -139,8 +143,8 @@ jobs:
       - name: Unit tests
         run: ./build/tests/ls_tests
 
-      - name: Examples
-        run: python tools/run_examples.py
+      - name: Goldens
+        run: python tools/run_goldens.py
 
       - name: Smoke-test the build
         run: |
@@ -152,7 +156,7 @@ jobs:
           }
 
       # build_pkg.py stages /usr/local/levelscript (bin/, bin/resources/,
-      # examples/, uninstall.sh) plus /etc/paths.d/levelscript (puts bin/ on PATH) and
+      # samples/, uninstall.sh) plus /etc/paths.d/levelscript (puts bin/ on PATH) and
       # wraps it with pkgbuild + productbuild into
       # dist/LevelScript-<version>-macos-arm64.pkg. The fixed package id keeps
       # upgrades in place; a preinstall script clears the previous install first.

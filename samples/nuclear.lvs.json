@@ -1,0 +1,34 @@
+{
+  "cell_zoom": 1.0,
+  "grid_bg_color": "282828",
+  "layers": [
+    {
+      "corner": "normal",
+      "mode": "color",
+      "name": "algo",
+      "opacity": 1.0,
+      "tileset": "",
+      "visible": true
+    },
+    {
+      "corner": "normal",
+      "mode": "tile",
+      "name": "tiles",
+      "opacity": 1.0,
+      "tileset": "Tiles",
+      "visible": true
+    }
+  ],
+  "mini_px": 24.0,
+  "tag_colors": {
+    "algo": null
+  },
+  "tilesets": [
+    {
+      "name": "Tiles",
+      "path": "tiles/tilemap_packed_f.png",
+      "tile_h": 8,
+      "tile_w": 8
+    }
+  ]
+}

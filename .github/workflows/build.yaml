@@ -10,9 +10,10 @@ on:
       - "tests/**"
       - "cmake/**"
       - "resources/**"          # copied next to the debugger at build time
-      - "examples/**"           # golden outputs checked by tools/run_examples.py
       - "CMakeLists.txt"
-      - "tools/run_examples.py"
+      - "tools/run_goldens.py"
+      - "tools/check_coverage.py"
+      - "docs/spec.md"          # its compile-time checks, for the coverage gate
       - ".github/workflows/build.yaml"
   pull_request:
     paths: *build_paths
@@ -43,6 +44,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          lfs: true
 
       # SDL3 only enables the video backends whose headers it finds; the debugger needs X11/Wayland.
       - name: Install Linux dependencies
@@ -78,7 +81,12 @@ jobs:
             exit 1
           }
 
-      # Golden-output determinism gate (examples/*.lvs vs .expected). Running it on every
+      # Golden-output determinism gate (tests/golden/ vs .expected). Running it on every
       # platform is what proves the output really is a pure function of (seed, params).
-      - name: Examples
-        run: python tools/run_examples.py
+      - name: Goldens
+        run: python tools/run_goldens.py
+
+      # Every compile-time check of the spec (section 7.3) has a negative test:
+      # a `// check N` tag in tests/, or a tests/errors header naming it.
+      - name: Check coverage
+        run: python tools/check_coverage.py

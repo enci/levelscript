@@ -7,7 +7,10 @@
   (union blocker wall door))
 (layers
   (grid level geo)
-  (grid tiles number))
+  (grid tiles number)
+  (graph whole tiles)
+  (graph floors level (nodes floor))
+  (graph map level (nodes (| floor door)) (edges (! blocker))))
 (input difficulty 3)
 (input rooms (call random 2 5))
 (derived budget (* difficulty 10))

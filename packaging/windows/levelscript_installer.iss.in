@@ -41,7 +41,7 @@ WizardSmallImageFile=@ART_DIR@\wizard-small.bmp,@ART_DIR@\wizard-small@2x.bmp
 
 [Files]
 ; bin\levelscript.exe, bin\levelscript-debugger.exe, bin\resources\ (fonts the
-; debugger loads relative to its exe), examples\.
+; debugger loads relative to its exe), samples\.
 Source: "{#BundleDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]

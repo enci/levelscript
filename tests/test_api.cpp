@@ -1,5 +1,6 @@
 #include "test_support.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <map>
 #include <vector>
 
 using ts::make;
@@ -1411,4 +1412,74 @@ TEST_CASE("api: int arguments evaluate after the guard, drawing like a count") {
     for (uint64_t seed = 1; seed <= 10; ++seed)
         CHECK(dump(skipped.generate(skipped.sequence("main"), seed), "level") ==
               dump(c.generate(c.sequence("main"), seed), "level"));
+}
+
+// ── warnings ─────────────────────────────────────────────────────────────────
+
+namespace {
+
+// Every warning of compiling `src` and generating its main once.
+std::vector<std::string> warnings_of(std::string const& src) {
+    std::vector<std::string> got;
+    auto gen = ls::generator::compile(src, "w.lvs", {},
+                                      [&](std::string const& w) { got.push_back(w); });
+    INFO(gen.error());
+    REQUIRE(static_cast<bool>(gen));
+    gen.generate(gen.sequence("main"), 1);
+    return got;
+}
+
+}  // namespace
+
+TEST_CASE("api: the warning handler gets compile warnings") {
+    auto got = warnings_of("tag t { a }\nlayers { g: grid of t }\n"
+                           "rule keep { g[a] => g[a] }\n"
+                           "sequence main {\n    resize(1, 1)\n    grow keep\n}\n");
+    REQUIRE(got.size() == 1);
+    CHECK(got[0].rfind("w.lvs:6:5: warning: 'grow' over rule 'keep' may never terminate", 0) == 0);
+}
+
+TEST_CASE("api: every runtime warning reaches the handler at its statement") {
+    std::string decls = "tag t { a, b }\nlayers { g: grid of t }\nsequence main {\n";
+    struct row { char const* stmt; char const* message; size_t count = 1; };
+    row const rows[] = {
+        {"trim()",                     "trim() on an entirely empty stack"},
+        {"resize(0, 5)",               "resize(0, 5) has a dimension below 1"},
+        {"upscale(0, 2)",              "upscale(0, 2) has a factor below 1"},
+        {"pad(-1)",                    "pad(-1) has a margin below 0"},
+        {"scatter(-2) { g[.] => g[a] }",   "a count of -2 is below 0"},
+        {"scatter(250%) { g[.] => g[a] }", "a percentage of 250% is above 100"},
+        // on an empty grid it also finds no route
+        {"path(from=a, to=b, into=g, write=a, connectivity=5)", "path() connectivity 5 is not 4 or 8", 2},
+        {"path(from=a, to=b, into=g, write=a)", "path() found no route"},
+    };
+    for (auto const& r : rows) {
+        INFO(r.stmt);
+        auto got = warnings_of(decls + "    resize(3, 3)\n    " + r.stmt + "\n}\n");
+        REQUIRE(got.size() == r.count);
+        CHECK(got[0].rfind("w.lvs:5:5: warning: " + std::string(r.message), 0) == 0);
+    }
+    auto early = warnings_of(decls + "    path(from=a, to=b, into=g, write=a)\n}\n");
+    REQUIRE(early.size() == 1);
+    CHECK(early[0] == "w.lvs:4:5: warning: path() before any resize; leaving grids unchanged");
+}
+
+TEST_CASE("api: runs share their generator's handler, and a warning names its module") {
+    std::vector<std::string> got;
+    std::map<std::string, std::string> files = {
+        {"lib.lvs", "tag t { a }\nlayers { g: grid of t }\nsequence shrink {\n    pad(-1)\n}\n"},
+    };
+    auto gen = ls::generator::compile(
+        "use \"lib.lvs\"\nsequence main {\n    resize(2, 2)\n    once shrink\n}\n", "main.lvs",
+        [&](std::string const& path, std::string const&) -> std::optional<ls::module_source> {
+            auto it = files.find(path);
+            if (it == files.end()) return std::nullopt;
+            return ls::module_source{path, it->second};
+        },
+        [&](std::string const& w) { got.push_back(w); });
+    REQUIRE(static_cast<bool>(gen));
+    auto r = gen.run(gen.sequence("main"), 1);
+    r.finish();
+    REQUIRE(got.size() == 1);
+    CHECK(got[0].rfind("lib.lvs:4:5: warning: pad(-1)", 0) == 0);
 }

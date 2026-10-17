@@ -19,9 +19,11 @@
 //     "symbols": {
 //       "tags":   [{"name","values":[{"name","loc"}],"unions":[{"name","loc"}]}],
 //       "layers": [{"name","type"}],       // type: tagset name or "number"
+//       "graphs": [{"name","source"}],     // source: the grid it is built from
 //       "params": [{"name","derived"}],
 //       "rules":  [...], "sequences": [{"name","loc"}],
-//       "ops":    [...], "builtins": [...] // completion vocabulary
+//       "ops":    [...], "builtins": [...], // completion vocabulary
+//       "graph_functions": [...]           // built-ins of graph-pattern cells
 //     }
 //   }
 

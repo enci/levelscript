@@ -96,7 +96,8 @@ compiled_pair transform_pair(transform k, compiled_pair const& pair) {
 }
 
 bool patterns_equal(compiled_pattern const& a, compiled_pattern const& b) {
-    if (a.grid_id != b.grid_id || a.rows != b.rows || a.cols != b.cols) return false;
+    if (a.grid_id != b.grid_id || a.graph_id != b.graph_id || a.rows != b.rows ||
+        a.cols != b.cols) return false;
     for (int i = 0; i < (int)a.cells.size(); ++i)
         if (a.cells[i].what != b.cells[i].what || a.cells[i].val != b.cells[i].val ||
             a.cells[i].expr != b.cells[i].expr ||  // transforms share arena indices
@@ -226,7 +227,7 @@ struct analyzer {
 
     // Declaring module of each table entry, aligned with out.tag_names,
     // out.layers and out.param_names (rules and sequences align with the AST).
-    std::vector<int> tag_mod, layer_mod, param_mod;
+    std::vector<int> tag_mod, layer_mod, graph_mod, param_mod;
 
     scope scope_{};
 
@@ -249,6 +250,10 @@ struct analyzer {
         }
     };
     pair_vars* vars_{nullptr};
+
+    // The graph whose pattern cell is being compiled; -1 elsewhere, where
+    // calling a graph function is an error.
+    int graph_{-1};
 
     std::string type_name(int type) const {
         return type < 0 ? "number" : "tagset '" + out.tag_names[(size_t)type] + "'";
@@ -343,14 +348,19 @@ struct analyzer {
         return n == "x" || n == "y" || n == "width" || n == "height";
     }
 
-    struct builtin_spec { char const* name; ce_kind kind; int arity; };
+    struct builtin_spec { char const* name; ce_kind kind; int arity; bool graph; };
     static constexpr builtin_spec builtins[] = {
-        {"if",     ce_kind::if_,     3},
-        {"min",    ce_kind::min_,    2},
-        {"max",    ce_kind::max_,    2},
-        {"abs",    ce_kind::abs_,    1},
-        {"clamp",  ce_kind::clamp_,  3},
-        {"random", ce_kind::random_, 2},
+        {"if",        ce_kind::if_,        3, false},
+        {"min",       ce_kind::min_,       2, false},
+        {"max",       ce_kind::max_,       2, false},
+        {"abs",       ce_kind::abs_,       1, false},
+        {"clamp",     ce_kind::clamp_,     3, false},
+        {"random",    ce_kind::random_,    2, false},
+        // graph functions: a selector argument, if any
+        {"degree",    ce_kind::degree_,    0, true},
+        {"size",      ce_kind::size_,      0, true},
+        {"distance",  ce_kind::distance_,  1, true},
+        {"neighbors", ce_kind::neighbors_, 1, true},
     };
 
     // Resolve a bare identifier, first match wins: x/y/width/height → param → tag
@@ -386,11 +396,19 @@ struct analyzer {
         int gid = out.layer_id(name);
         if (gid >= 0) {
             require_visible(e.loc, "grid", name, layer_mod[(size_t)gid]);
+            if (graph_ >= 0)
+                return poison(e.loc, "a graph-pattern cell reads no grid: to test '" + name +
+                              "' too, conjoin a '" + name + "[...]' pattern on the match side", t);
             if (!scope_.allow_grids)
                 return poison(e.loc, "grid '" + name + "' cannot be read here "
                               "(only params are available at this scope)", t);
             t = out.layers[gid].tag_id < 0 ? val_type::num : val_type::mask;
             return add_expr({ce_kind::grid_read, 0, gid, -1, -1, -1});
+        }
+        if (int grid = out.graph_id(name); grid >= 0) {
+            require_visible(e.loc, "graph", name, graph_mod[(size_t)grid]);
+            return poison(e.loc, "graph '" + name + "' cannot be read in an expression; "
+                          "a graph heads a match-side pattern, e.g. " + name + "[ (degree() > 1) ]", t);
         }
         // a tag value or union of the one tagset this module sees that declares it
         auto tagsets = tagsets_declaring(name, e.loc.mod);
@@ -415,6 +433,22 @@ struct analyzer {
             return fail("built-in '" + e.ident + "' takes " +
                         std::to_string(spec->arity) + " argument(s), got " +
                         std::to_string(e.args.size()));
+
+        if (spec->graph) {
+            if (graph_ < 0)
+                return fail("'" + e.ident + "' is a graph function; it is valid only in a "
+                            "graph-pattern cell, e.g. map[ (" + e.ident + "(" +
+                            (spec->arity ? "rooms[Start]" : "") + ") > 0) ]");
+            int sel = -1;
+            if (spec->arity == 1) {
+                if (e.args[0]->kind != expr_kind::selector)
+                    return fail("'" + e.ident + "' takes a selector, a one-cell pattern "
+                                "such as " + e.ident + "(rooms[Start])");
+                sel = compile_selector(*e.args[0]);
+            }
+            t = val_type::num;
+            return add_expr({spec->kind, sel, graph_, -1, -1, -1});
+        }
 
         if (spec->kind == ce_kind::if_) {
             // if(c, a, b) — eager; a bare '.' branch types from its sibling.
@@ -449,6 +483,46 @@ struct analyzer {
         return add_expr({spec->kind, 0, -1, a[0], a[1], a[2]});
     }
 
+    // A selector `g[m]`: its grid, and the one cell, tested like a pattern
+    // cell of that grid. -1 after reporting an error.
+    int compile_selector(expr const& e) {
+        auto const& name = e.ident;
+        compiled_selector s;
+        s.grid = out.layer_id(name);
+        if (s.grid < 0) {
+            if (out.graph_id(name) >= 0)
+                error(e.loc, "graph '" + name + "' cannot be a selector's grid; a selector "
+                      "reads a grid, such as the graph's source");
+            else
+                error(e.loc, "undeclared grid '" + name + "' in a selector");
+            return -1;
+        }
+        require_visible(e.loc, "grid", name, layer_mod[(size_t)s.grid]);
+        if (e.args.empty()) return -1;   // a parse error, reported
+        expr const& cell = *e.args[0];
+        int tag = out.layers[(size_t)s.grid].tag_id;
+        bool is_int = cell.kind == expr_kind::int_lit;
+        bool empty  = cell.kind == expr_kind::empty_lit;
+        bool not_empty = cell.kind == expr_kind::not_ && cell.args[0]->kind == expr_kind::empty_lit;
+        if (tag >= 0 && is_int) {
+            error(cell.loc, "an integer selector cell needs a number grid; '" + name +
+                  "' is a tag grid");
+            return -1;
+        }
+        if (tag >= 0) {
+            s.val = tag_mask(cell, tag, "for grid '" + name + "'");
+        } else if (is_int || empty || not_empty) {
+            s.val = is_int ? cell.int_val : num_empty;
+            s.ne  = not_empty;
+        } else {
+            error(cell.loc, "a selector cell on number grid '" + name + "' is an integer, "
+                  "'.', or '!.'");
+            return -1;
+        }
+        out.selectors.push_back(s);
+        return (int)out.selectors.size() - 1;
+    }
+
     // Compile + type-check one expression into the arena. `ctx_tag` is the
     // enclosing tag-grid cell's tagset (-1 when none); `hint` types a bare
     // '.' empty literal (-1 = none, else (int)val_type).
@@ -477,6 +551,9 @@ struct analyzer {
         }
         case expr_kind::call:
             return compile_call(e, ctx_tag, t, hint);
+        case expr_kind::selector:
+            return poison(e.loc, "a selector is valid only as the argument of 'distance' "
+                          "or 'neighbors'", t);
         default:
             break;
         }
@@ -495,6 +572,8 @@ struct analyzer {
                 val_type to;
                 int oc = compile_expr(a_empty ? *e.args[1] : *e.args[0], ctx_tag, to);
                 t = val_type::boolean;
+                if (out.exprs[oc].kind == ce_kind::distance_)   // unreachable stays empty
+                    out.exprs[oc].kind = ce_kind::distance_raw;
                 if (out.exprs[oc].kind == ce_kind::grid_read) {
                     // read the cell RAW and test emptiness (no number→0 coercion)
                     ce_kind k = e.kind == expr_kind::eq ? ce_kind::is_empty
@@ -581,6 +660,7 @@ struct analyzer {
         }
 
         for (auto const& l : ast.layers.layers) {
+            if (l.is_graph) continue;   // after every grid: a source may come later
             auto const& [name, loc] = l.name;
             check_name(loc, "grid", name);
             if (out.layer_id(name) >= 0) {   // across every module in the closure
@@ -600,11 +680,16 @@ struct analyzer {
             layer_mod.push_back(loc.mod);
         }
 
+        for (auto const& l : ast.layers.layers)
+            if (l.is_graph) add_graph(l);
+
         for (auto const& p : ast.params) {
             auto const& [name, loc] = p.name;
             check_name(loc, "param", name);
             if (out.layer_id(name) >= 0)
                 error(loc, "param '" + name + "' collides with a grid of the same name");
+            if (out.graph_id(name) >= 0)
+                error(loc, "param '" + name + "' collides with a graph of the same name");
             if (out.param_id(name) >= 0) {
                 error(loc, "duplicate param '" + name + "'");
                 continue;
@@ -616,6 +701,107 @@ struct analyzer {
             out.param_names.push_back(name);
             param_mod.push_back(loc.mod);
         }
+    }
+
+    // The value bits of tagset `tag`: every value, no empty bit.
+    int64_t value_bits(int tag) const {
+        int64_t full = 0;
+        for (int i = 0; i < (int)out.tag_values[(size_t)tag].size(); ++i) full |= tag_bit(i);
+        return full;
+    }
+
+    // A whitespace-free mask over tagset `tag`: its atoms' union, each `!a`
+    // the complement of `a` within the tagset. Unknown atoms are reported
+    // with `whose` ("for this grid") and add nothing.
+    int64_t tag_mask(expr const& e, int tag, std::string const& whose) {
+        std::vector<mask_atom> atoms;
+        mask_atoms(e, atoms);
+        int64_t mask = 0;
+        for (auto const& a : atoms) {
+            int64_t m = a.name == "." ? tag_empty : out.mask_of(tag, a.name);
+            if (m == 0) {
+                error(a.loc, "unknown tag value '" + a.name + "' " + whose);
+                continue;
+            }
+            mask |= a.negate ? value_bits(tag) & ~m : m;
+        }
+        return mask;
+    }
+
+    // A graph entry: its source grid, form, and masks.
+    void add_graph(layer_decl const& l) {
+        auto const& [name, loc] = l.name;
+        check_name(loc, "graph", name);
+        if (out.layer_id(name) >= 0 || out.graph_id(name) >= 0) {
+            error(loc, "duplicate layer '" + name + "': a grid or graph of that name is "
+                  "already declared");
+            return;
+        }
+        compiled_graph g;
+        g.name = name;
+        g.source = out.layer_id(l.type);
+        auto is_graph = [&](layer_decl const& o) { return o.is_graph && o.name.text == l.type; };
+        if (g.source < 0) {
+            if (std::any_of(ast.layers.layers.begin(), ast.layers.layers.end(), is_graph))
+                error(loc, "graph '" + name + "' is built from graph '" + l.type +
+                      "'; a graph's source must be a grid");
+            else if (out.tag_id(l.type) >= 0)
+                error(loc, "graph '" + name + "' is built from tagset '" + l.type +
+                      "'; a graph's source must be a grid");
+            else
+                error(loc, "graph '" + name + "' references undeclared grid '" + l.type + "'");
+        } else {
+            require_visible(loc, "grid", l.type, layer_mod[(size_t)g.source]);
+        }
+        out.graphs.push_back(g);
+        graph_mod.push_back(loc.mod);
+        if (g.source < 0) return;
+
+        int tag = out.layers[(size_t)g.source].tag_id;
+        graph_arg const* nodes = nullptr;
+        graph_arg const* edges = nullptr;
+        for (auto const& a : l.args) {
+            bool is_nodes = a.name == "nodes";
+            if (!is_nodes && !(a.name == "edges")) {
+                error(a.name.loc, "unknown graph argument '" + a.name.text +
+                      "'; allowed: nodes, edges");
+                continue;
+            }
+            graph_arg const*& slot = is_nodes ? nodes : edges;
+            if (slot) error(a.name.loc, "graph argument '" + a.name.text + "' given twice");
+            else slot = &a;
+        }
+        if (tag < 0) {
+            if (!l.args.empty())
+                error(l.args[0].name.loc, "graph '" + name + "' is built from number grid '" +
+                      l.type + "', which takes no 'nodes' or 'edges'; write 'graph of " +
+                      l.type + "'");
+            return;
+        }
+        if (edges && !nodes)
+            error(edges->name.loc, "graph '" + name + "' has 'edges' without 'nodes'");
+
+        int64_t full = value_bits(tag);
+        std::string whose = "in a mask of graph '" + name + "': its source '" + l.type +
+                            "' holds tagset '" + out.tag_names[(size_t)tag] + "'";
+        auto mask = [&](graph_arg const* a) -> int64_t {
+            int64_t m = tag_mask(*a->mask, tag, whose) & full;
+            if (m == 0)
+                error(a->mask->loc, "the '" + a->name.text + "' mask of graph '" + name +
+                      "' selects no value");
+            return m;
+        };
+        g.nodes = nodes ? mask(nodes) : full;
+        g.edges = edges ? mask(edges) : 0;
+        if (int64_t shared = g.nodes & g.edges) {
+            std::string list;
+            for (int i = 0; i < (int)out.tag_values[(size_t)tag].size(); ++i)
+                if (shared & tag_bit(i))
+                    list += (list.empty() ? "'" : ", '") + out.tag_values[(size_t)tag][(size_t)i] + "'";
+            error(edges->mask->loc, "the 'nodes' and 'edges' masks of graph '" + name +
+                  "' share " + list + "; a cell is a node or a connector, not both");
+        }
+        out.graphs.back() = g;
     }
 
     // Param startup expressions: derived params and input defaults share
@@ -646,6 +832,15 @@ struct analyzer {
             if (is_rhs)
                 error(p.loc, "'where' is a match-side pseudo-layer; it cannot "
                       "appear on the write side");
+        } else if (int gid = out.graph_id(p.grid.text); gid >= 0) {
+            require_visible(p.grid.loc, "graph", p.grid.text, graph_mod[(size_t)gid]);
+            cp.graph_id = gid;
+            cp.grid_id  = out.graphs[(size_t)gid].source;
+            if (is_rhs) {
+                error(p.grid.loc, "graph '" + p.grid.text + "' cannot be written; a graph "
+                      "changes only through writes to its source grid");
+                cp.grid_id = -1;
+            }
         } else {
             cp.grid_id = out.layer_id(p.grid.text);
             if (cp.grid_id < 0) {
@@ -679,7 +874,9 @@ struct analyzer {
             int w = (int)p.cells[r].size() < p.cols ? (int)p.cells[r].size() : p.cols;
             for (int c = 0; c < w; ++c)
                 cp.cells[r * cp.cols + c] =
-                    compile_cell(*p.cells[r][c], tag, cp.is_number, p.is_where, is_rhs);
+                    cp.graph_id >= 0 ? compile_graph_cell(*p.cells[r][c], cp.graph_id)
+                                     : compile_cell(*p.cells[r][c], tag, cp.is_number,
+                                                    p.is_where, is_rhs);
         }
         return cp;
     }
@@ -789,26 +986,40 @@ struct analyzer {
         if (is_rhs && has_empty && atoms.size() > 1)
             error(in.loc, "'.' cannot be written in a union: a cell holds empty or "
                   "values, never both");
-        int64_t full = 0;
-        for (int i = 0; i < (int)out.tag_values[tag].size(); ++i)
-            full |= tag_bit(i);
-        int64_t mask = 0;
-        for (auto const& a : atoms) {
-            int64_t m = a.name == "." ? tag_empty : out.mask_of(tag, a.name);
-            if (m == 0) {
-                error(a.loc, "unknown tag value '" + a.name + "' for this grid");
-                continue;
-            }
-            if (a.negate) {
-                if (is_rhs)   // complement is match-side only
+        if (is_rhs)   // complement is match-side only
+            for (auto const& a : atoms)
+                if (a.negate)
                     error(a.loc, "tag complement '!" + a.name +
                           "' is not allowed on the write side");
-                mask |= full & ~m;
-            } else {
-                mask |= m;
-            }
+        cc.val = tag_mask(in, tag, "for this grid");
+        return cc;
+    }
+
+    // A graph-pattern cell: '*', or a boolean expression about the node
+    // covering the cell, which reads no grid.
+    compiled_cell compile_graph_cell(expr const& in, int graph) {
+        compiled_cell cc;
+        if (in.kind == expr_kind::wildcard) {
+            cc.what = compiled_cell::kind::wildcard;
+            return cc;
         }
-        cc.val = mask;
+        cc.what = compiled_cell::kind::expr;
+        if (in.kind == expr_kind::variable) {
+            error(in.loc, "a graph-pattern cell cannot be a bare pattern variable; its cells "
+                  "are boolean expressions, e.g. (size() == " + in.ident + ")");
+            cc.expr = num_lit(1);
+        } else if (in.kind != expr_kind::paren) {
+            error(in.loc, "graph-pattern cells must be '*' or a parenthesized boolean "
+                  "expression about the node, e.g. (degree() == 1)");
+            cc.expr = num_lit();
+        } else {
+            int saved = graph_;
+            graph_ = graph;
+            cc.expr = compile_as(*in.args[0], val_type::boolean, in.loc,
+                                 "a graph-pattern cell must evaluate to a boolean",
+                                 scope{false, true, -1});
+            graph_ = saved;
+        }
         return cc;
     }
 
@@ -827,6 +1038,11 @@ struct analyzer {
             ct.items.push_back(compile_write_term(it, exp_rows, exp_cols));
         if (ct.what == compiled_write_term::kind::all)
             check_all_no_overlap(ct, t.loc);
+        if (ct.what == compiled_write_term::kind::any && !ct.items.empty() &&
+            std::none_of(ct.items.begin(), ct.items.end(),
+                         [](compiled_write_term const& it) { return it.weight > 0; }))
+            error(t.loc, "every item of this '{ any }' has weight 0; at least one needs a "
+                  "positive weight to be picked");
         return ct;
     }
 
@@ -1074,7 +1290,9 @@ struct analyzer {
             return -1;
         }
         int id = out.layer_id(*name);
-        if (id < 0)
+        if (id < 0 && out.graph_id(*name) >= 0)
+            error(a.loc, arg_ctx(op, pn) + ": '" + *name + "' is a graph layer; it takes a grid");
+        else if (id < 0)
             error(a.loc, arg_ctx(op, pn) + ": '" + *name + "' is not a declared grid");
         else
             require_visible(a.loc, "grid", *name, layer_mod[(size_t)id]);
@@ -1397,6 +1615,7 @@ struct analyzer {
 
     void run(bool best_effort) {
         for (int id : mods.order) out.modules.push_back(mods.names[(size_t)id]);
+        out.module_labels = mods.names;
         build_tables();
         if (!best_effort && diags.has_errors()) return;
         compile_params();
@@ -1414,7 +1633,7 @@ struct analyzer {
 
 bool analyze(module_closure const& mods, compiled& out, diagnostics& diags,
              bool best_effort) {
-    analyzer a{mods.merged, out, diags, mods, {}, {}, {}};
+    analyzer a{mods.merged, out, diags, mods, {}, {}, {}, {}};
     a.run(best_effort);
     return !diags.has_errors();
 }

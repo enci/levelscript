@@ -15,6 +15,7 @@
 //   auto level = gen.generate(entry, seed);             // pure in (entry, seed, params)
 //   auto geo   = level["level"];
 //   if (geo.at(x, y) == wall) ...
+//   auto map   = level.graph("map");                    // a graph layer, by name
 //
 // generator is a reusable factory (keep one per root module and its closure;
 // share across threads). level is a self-contained value: it owns its cells and outlives
@@ -28,6 +29,7 @@ namespace ls {
 struct compiled;
 namespace internal {
 struct level_data;
+struct graph_data;
 struct run_state;
 }
 
@@ -46,6 +48,13 @@ struct module_source {
 /// denotes the same module.
 using resolver = std::function<std::optional<module_source>(const std::string& path,
                                                             const std::string& from)>;
+
+/// Receives each warning of a generator, formatted like a diagnostic
+/// ("dungeon.lvs:14:5: warning: path() found no route ..."): the compile's
+/// warnings, then those of every run it starts (a count below 0, a path
+/// with no route, ...), positioned at their statement. Runs may call it
+/// from any thread that drives them.
+using warning_handler = std::function<void(const std::string& warning)>;
 
 // ── grid — one layer of a generated level ────────────────────────────────────
 
@@ -81,6 +90,32 @@ private:
     int layer_{-1};
 };
 
+// ── graph — one graph layer of a generated level ─────────────────────────────
+
+/// Nodes are value regions of the graph's source grid, numbered from 0 in
+/// row-major order of each region's first cell. A graph is a self-contained
+/// value, extracted once by level::graph; queries on an invalid graph read
+/// as empty.
+class graph {
+public:
+    graph() = default;
+
+    int node_count() const;
+    /// Id of the node whose region covers (x, y); -1 when none does (or out
+    /// of range / invalid).
+    int node_at(int x, int y) const;
+    /// Number of cells in the node's region (0 if out of range).
+    int node_size(int node) const;
+    /// Ids of the adjacent nodes, ascending (empty if out of range).
+    std::vector<int> neighbors(int node) const;
+
+private:
+    friend class level;
+    explicit graph(std::shared_ptr<internal::graph_data const> data);
+
+    std::shared_ptr<internal::graph_data const> data_;
+};
+
 // ── level — one generated outcome: the stack of co-registered grids ─────────
 
 class level {
@@ -90,10 +125,15 @@ public:
     int width() const;
     int height() const;
 
+    /// Grid layers only: graph layers are not in the layer order.
     int  layer_count() const;
     grid operator[](const std::string& layer_name) const;
     grid layer(int index) const;              // layer order: canonical module order
     std::string layer_name(int index) const;
+    /// Graph layer by name, extracted from the level's final grids; invalid
+    /// if no graph layer has that name. Named `class graph` in the return
+    /// position for the reason given at generator::run.
+    class graph graph(const std::string& name) const;
 
 private:
     friend class generator;
@@ -189,15 +229,18 @@ public:
     /// `name`. The game owns file/asset IO: each `use` is mapped to a module
     /// by `resolve`; with no resolver every `use` is unresolved. Diagnostics
     /// are labelled with canonical module names ("dungeon.lvs:12:3: error: ...").
+    /// Warnings go to `warn`; with none, each is written to stderr.
     static generator compile(const std::string& source,
                              const std::string& name = "generator",
-                             resolver resolve = {});
+                             resolver resolve = {},
+                             warning_handler warn = {});
 
     explicit operator bool() const { return prog_ != nullptr; }
     /// Formatted diagnostics when compile failed; "" when it succeeded.
     std::string error() const { return error_; }
     /// Formatted warnings of a successful compile (e.g. a fixpoint statement
-    /// over a rule that can never terminate); "" when there are none.
+    /// over a rule that can never terminate); "" when there are none. They
+    /// also went to the warning handler.
     std::string warnings() const { return warnings_; }
 
     /// Value mask, qualified by tagset: tag("geo.wall") -> that value's bit;
@@ -242,6 +285,7 @@ private:
     std::string                     error_;
     std::string                     warnings_;
     std::vector<std::string>        modules_;
+    warning_handler                 warn_;
 };
 
 }  // namespace ls

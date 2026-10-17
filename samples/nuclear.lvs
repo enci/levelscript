@@ -1,0 +1,180 @@
+// Nuclear throne level script that tries to mimic the procedural generation style of the game
+
+tag algo {
+    T,  // tail
+    H,  // head
+    W,  // wall
+    F,  // floor
+    C,  // crate
+    E   // enemy
+}
+
+// Everything in the algo grid 
+layers {
+    algo : grid of algo
+    tiles : grid of number
+}
+
+// The very start of the level
+rule start {
+    algo[
+        . . . 
+        . . . 
+        . . . 
+    ] => algo[
+        . . . 
+        . F . 
+        . . . 
+    ]
+}
+
+// Pick from the floor to start carving
+rule seed(rotation=all) {
+    algo[F F . ]  => algo[T H . ]
+}
+
+// Carve out the paths from the seed
+// symmetry=all makes sure we can turn both left and right (relative)
+// rotation=all makes sure we can match the pattern in all orientations
+rule step(rotation=all, symmetry=all) { ordered
+    // Carve out the paths from the seed in all directions
+    // While 3:2 preferring to carve straight paths (in one rule)
+    algo[
+        T H . 
+        * . * 
+     ] => { any
+        (weight=3) algo[
+            F T H 
+            * * * ]
+        (weight=2) algo[
+            F T * 
+            * H * ]
+    }
+
+    // Fallback rule to continue carving straight paths
+    algo[T H . ] => algo[F T H ]    
+}
+
+rule finish {
+    algo[T|H] => { any
+        algo[C]
+        algo[F]
+        algo[E]
+    }    
+}
+
+sequence carve {
+    once seed
+    grow(random(4, 7)) step
+    everywhere finish
+}
+
+rule walls(rotation=all) { any
+    algo[!W . ] => algo[* W]
+    algo[
+        !W * 
+        *  . ] =>
+    algo[
+        * * 
+        * W ]
+}
+
+
+///////////////////////////////////////////////////////////////////////////////
+// Paint the tiles layer from the algo layer (tilemap_packed_f.png, 5x5 of 8x8).
+// Walls are drawn as lines joining wall neighbours, so the tile is picked by
+// which of the four sides (N E S W) are walls. Straight pieces come in two
+// variants (5/7 vertical, 1/11 horizontal) for a bit of texture.
+rule decorate { all
+    // lone pillar
+    algo[
+        *    !W|. *
+        !W|. W    !W|.
+        *    !W|. * ] => tiles[* * *, * 13 *, * * *]
+    // dead end, vertical
+    algo[
+        *    W    *
+        !W|. W    !W|.
+        *    !W|. * ] => { any tiles[* * *, * 5 *, * * *] tiles[* * *, * 7 *, * * *] }
+    algo[
+        *    !W|. *
+        !W|. W    !W|.
+        *    W    * ] => { any tiles[* * *, * 5 *, * * *] tiles[* * *, * 7 *, * * *] }
+    // dead end, horizontal
+    algo[
+        *    !W|. *
+        !W|. W    W 
+        *    !W|. * ] => { any tiles[* * *, * 1 *, * * *] tiles[* * *, * 11 *, * * *] }
+    algo[
+        *    !W|. *
+        W    W    !W|.
+        *    !W|. * ] => { any tiles[* * *, * 1 *, * * *] tiles[* * *, * 11 *, * * *] }
+    // straight runs
+    algo[
+        *    W    *
+        !W|. W    !W|.
+        *    W    * ] => { any tiles[* * *, * 5 *, * * *] tiles[* * *, * 7 *, * * *] }
+    algo[
+        *    !W|. *
+        W    W    W 
+        *    !W|. * ] => { any tiles[* * *, * 1 *, * * *] tiles[* * *, * 11 *, * * *] }
+    // corners
+    algo[
+        *    !W|. *
+        !W|. W    W 
+        *    W    * ] => tiles[* * *, * 0 *, * * *]
+    algo[
+        *    !W|. *
+        W    W    !W|.
+        *    W    * ] => tiles[* * *, * 2 *, * * *]
+    algo[
+        *    W    *
+        !W|. W    W 
+        *    !W|. * ] => tiles[* * *, * 10 *, * * *]
+    algo[
+        *    W    *
+        W    W    !W|.
+        *    !W|. * ] => tiles[* * *, * 12 *, * * *]
+    // tees
+    algo[
+        *    W    *
+        !W|. W    W 
+        *    W    * ] => tiles[* * *, * 3 *, * * *]
+    algo[
+        *    W    *
+        W    W    !W|.
+        *    W    * ] => tiles[* * *, * 4 *, * * *]
+    algo[
+        *    !W|. *
+        W    W    W 
+        *    W    * ] => tiles[* * *, * 8 *, * * *]
+    algo[
+        *    W    *
+        W    W    W 
+        *    !W|. * ] => tiles[* * *, * 9 *, * * *]
+    // cross
+    algo[
+        *    W    *
+        W    W    W 
+        *    W    * ] => tiles[* * *, * 6 *, * * *]
+
+    // Floor is the sheet's blank tile, crates the yellow block,
+    // enemies one of the four critters
+    algo[F] => tiles[14]
+    algo[C] => tiles[15]
+    algo[E] => { any tiles[18] tiles[19] tiles[23] tiles[24] }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+sequence main {
+    resize(4, 4)    
+    once start
+    upscale(3, 3)
+    pad(2)
+    settle(10) carve
+    trim()
+    pad(2)
+    everywhere walls
+    everywhere decorate
+}
+

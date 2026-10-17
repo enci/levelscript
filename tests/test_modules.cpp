@@ -64,6 +64,7 @@ TEST_CASE("modules: the spec example compiles and runs") {
 }
 
 TEST_CASE("modules: a use is not re-exported") {
+    // check 8
     auto f = spec_example();
     // dungeon.lvs writes `level`, declared in schema.lvs, which it does not use
     f.src["dungeon.lvs"] =
@@ -158,6 +159,7 @@ TEST_CASE("modules: params evaluate in canonical order across modules") {
 }
 
 TEST_CASE("modules: a path predicate considers only the grids its module sees") {
+    // check 35
     files f;
     f.src["a.lvs"] = "tag ta { v }\nlayers { ga: grid of ta }\n";
     f.src["b.lvs"] = "tag tb { v }\nlayers { gb: grid of tb }\n";
@@ -175,6 +177,7 @@ TEST_CASE("modules: a path predicate considers only the grids its module sees") 
 // ── module errors ────────────────────────────────────────────────────────────
 
 TEST_CASE("modules: an unresolved use is an error") {
+    // check 9
     files f;
     f.src["root.lvs"] = "use \"missing.lvs\"\nsequence main { }\n";
     auto gen = f.compile("root.lvs");
@@ -186,6 +189,7 @@ TEST_CASE("modules: an unresolved use is an error") {
 }
 
 TEST_CASE("modules: use cycles are an error") {
+    // check 40
     files f;
     f.src["self.lvs"] = "use \"self.lvs\"\n";
     CHECK(has(f.compile("self.lvs").error(), "module cycle: 'self.lvs' -> 'self.lvs'"));
@@ -199,6 +203,7 @@ TEST_CASE("modules: use cycles are an error") {
 }
 
 TEST_CASE("modules: using one module twice is an error") {
+    // check 41
     files f;
     f.src["lib.lvs"] = "tag t { a }\n";
     f.src["root.lvs"] = "use \"lib.lvs\"\nuse \"lib.lvs\"\n";
@@ -231,6 +236,7 @@ TEST_CASE("modules: names are unique across the closure") {
 }
 
 TEST_CASE("modules: one layers block per module") {
+    // check 43
     CHECK(ts::compile_result("layers { }\nlayers { }\n").has_error("only one 'layers' block per module"));
 }
 
@@ -342,6 +348,7 @@ TEST_CASE("run: begin events are off by default") {
 }
 
 TEST_CASE("modules: an inline rule resolves names in its sequence's module") {
+    // check 8
     files f;
     f.src["schema.lvs"] = "tag t { a }\nlayers { g: grid of t }\n";
     f.src["walls.lvs"] = "use \"schema.lvs\"\nsequence fill { everywhere { g[.] => g[a] } }\n";

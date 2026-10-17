@@ -1,12 +1,26 @@
 #pragma once
+#include "graph.hpp"
 #include "sema.hpp"
 #include "sequence.hpp"
+#include <functional>
 #include <memory>
 #include <random>
 #include <unordered_set>
 #include <vector>
 
 namespace ls::internal {
+
+// uniform(n): an unbiased integer in [0, n), n >= 1, from a stream of raw
+// 64-bit draws `next`. Rejection sampling: discard raw outputs below
+// 2^64 mod n, return x mod n. Plain 64-bit arithmetic, so a seed gives the
+// same draws on every platform and compiler.
+template <class Next> uint64_t uniform_draw(Next&& next, uint64_t n) {
+    uint64_t threshold = (0 - n) % n;   // 2^64 mod n, in 64-bit arithmetic
+    for (;;) {
+        uint64_t x = next();
+        if (x >= threshold) return x % n;
+    }
+}
 
 // ── generated output (owned values; what level/grid hand to the game) ────────
 
@@ -44,6 +58,9 @@ struct grid_state {
     int rows{0}, cols{0};
     bool is_number{false};
     std::vector<int64_t> front, back;   // double-buffered
+    // Bumped by every write, so caches derived from the front buffer
+    // (graph extractions) know when they are stale.
+    uint64_t version{0};
 
     int64_t empty_raw() const { return is_number ? num_empty : tag_empty; }
     int64_t get(int r, int c) const { return front[r * cols + c]; }
@@ -61,7 +78,9 @@ struct highlight {
 class machine {
 public:
     // `entry`: the sequence a run applies; an invalid id runs nothing.
-    machine(std::shared_ptr<compiled const> prog, uint64_t seed, int entry);
+    // `warn` receives each runtime warning, formatted; it may be empty.
+    machine(std::shared_ptr<compiled const> prog, uint64_t seed, int entry,
+            std::function<void(std::string const&)> warn = {});
 
     // Supply an input param before run(); unknown names are ignored.
     void set_param(std::string const& name, long long value);
@@ -106,6 +125,9 @@ private:
     }
     bool unchanged_since(stack_state const& s) const;
 
+    // Report a runtime warning at the statement being run.
+    void warn(std::string msg) const;
+
     void exec_op(compiled_op const& op);
     void run_path(compiled_op const& op, int ndirs);   // ndirs = 4 or 8
     // Evaluate an arena expression at position (x, y). Total: /0 = 0,
@@ -120,10 +142,7 @@ private:
     // platform and compiler - unlike std::shuffle and
     // std::uniform_int_distribution, whose algorithms the standard leaves
     // to each library.
-    //
-    // uniform(n): unbiased integer in [0, n), n >= 1. Rejection sampling:
-    // discard raw outputs below 2^64 mod n, return x mod n.
-    uint64_t uniform(uint64_t n);
+    uint64_t uniform(uint64_t n) { return uniform_draw(rng_, n); }
     // Fisher-Yates: for i = size-1 down to 1, swap item i with item uniform(i+1).
     template <class T> void shuffle(std::vector<T>& v) {
         for (size_t i = v.size(); i > 1; --i)
@@ -165,14 +184,35 @@ private:
     bool grids_differ() const;   // back vs front (settle change detection)
     void record_highlights(compiled_pair const& pair, match const& m);
 
+    // Graph `id` as extracted from its source's front buffer, re-extracted
+    // only after the source has been written.
+    graph_data const& graph(int id);
+    // What selector `sel` of graph `id` gives each node: the distance to the
+    // nearest selected node (-1 = unreachable), or the number of selected
+    // neighbours.
+    std::vector<int> const& selection(int id, int sel, bool distance);
+    long long eval_graph(compiled_expr const& e, int x, int y);
+
     static uint64_t mask_key(int grid_id, int flat) {
         return ((uint64_t)grid_id << 40) | (uint64_t)flat;
     }
 
     std::shared_ptr<compiled const> prog_;
     int                             entry_{-1};
+    std::function<void(std::string const&)> warn_;
+    source_loc                      stmt_loc_;   // the statement being run, for warnings
     std::mt19937_64                 rng_;
     std::vector<grid_state>         grids_;    // indexed by grid id
+    struct graph_cache {
+        uint64_t   version{~0ull};   // the source's, when extracted
+        graph_data data;
+    };
+    std::vector<graph_cache>        graphs_;   // indexed by graph id
+    struct selection_cache {
+        uint64_t         source_version{~0ull}, grid_version{~0ull};
+        std::vector<int> per_node;
+    };
+    std::vector<selection_cache>    selections_;   // indexed by selector id
     // The stack's dimensions - kept apart from the layers so a layer-less
     // program still has a size (width/height, stability, the level).
     int                             rows_{0}, cols_{0};

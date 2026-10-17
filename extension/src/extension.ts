@@ -7,6 +7,7 @@ import { editorResolver } from './resolve';
 import * as path from 'path';
 import { registerDebugger } from './debugger';
 import { registerAstView } from './ast_view';
+import { registerTilesetView } from './tileset_view';
 import { documentSymbolProvider, foldingRangeProvider, selectionRangeProvider } from './structure';
 
 const LS_LANG = 'levelscript';
@@ -52,6 +53,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
 
   registerDebugger(ctx);
   registerAstView(ctx);
+  registerTilesetView(ctx);
 
   if (vscode.window.activeTextEditor?.document.languageId === LS_LANG) {
     analyse(vscode.window.activeTextEditor.document);

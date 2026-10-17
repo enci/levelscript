@@ -94,12 +94,14 @@ void emit_pattern_tokens(std::string& o, comma_list& cl,
         for (auto const& c : row) paint(paint, *c);
 }
 
-// Collect grid names and rule names as hover/definition references
-void emit_pattern_refs(std::string& o, comma_list& cl, pattern const& p) {
+// A pattern head as a hover/definition reference: a grid ("layer") or a graph.
+void emit_pattern_refs(std::string& o, comma_list& cl, compiled const& prog, pattern const& p) {
     if (p.is_where) return;
     if (p.grid.text.empty()) return;
+    bool graph = prog.layer_id(p.grid.text) < 0 && prog.graph_id(p.grid.text) >= 0;
     cl.next();
-    o += "{" + span_json(p.grid.loc) + ",\"kind\":\"layer\",\"target\":";
+    o += "{" + span_json(p.grid.loc) + ",\"kind\":\"" + (graph ? "graph" : "layer") +
+         "\",\"target\":";
     js(o, p.grid.text);
     o += "}";
 }
@@ -257,7 +259,7 @@ std::string inspect_json(std::string const& source, std::string const& name,
             if (in_root(sq.loc)) stmt_refs(sq.stmts);
         // Grid references in rule patterns, named and inline
         for_each_root_pattern(*ast, mods.root, [&](pattern const& p) {
-            emit_pattern_refs(o, cl, p);
+            emit_pattern_refs(o, cl, prog, p);
         });
     }
     o += "]";
@@ -284,7 +286,8 @@ std::string inspect_json(std::string const& source, std::string const& name,
             comma_list gl{o};
             for (auto const& l : ast->layers.layers) {
                 if (!in_root(l.name.loc)) continue;
-                emit_symbol(o, gl, "grid", l.name.text, l.name.loc, l.name.loc);
+                emit_symbol(o, gl, l.is_graph ? "graph" : "grid", l.name.text, l.name.loc,
+                            l.name.loc);
                 o += "}";
             }
             o += "]}";
@@ -388,6 +391,20 @@ std::string inspect_json(std::string const& source, std::string const& name,
             o += "}";
         }
     }
+    o += "],\"graphs\":[";
+    {
+        comma_list cl{o};
+        for (auto const& g : prog.graphs) {
+            cl.next();
+            o += "{\"name\":";
+            js(o, g.name);
+            o += ",\"source\":";
+            js(o, g.source >= 0 ? prog.layers[(size_t)g.source].name : "");
+            if (auto al = lookup(ast->layers.layers, g.name))   // first declaration wins
+                emit_loc(o, mods, al->name);
+            o += "}";
+        }
+    }
     o += "],\"params\":[";
     {
         comma_list cl{o};
@@ -430,6 +447,7 @@ std::string inspect_json(std::string const& source, std::string const& name,
     // completion vocabulary — kept in sync with the sema tables by the tests
     o += "],\"ops\":[\"resize\",\"upscale\",\"trim\",\"mirror\",\"pad\",\"path\"]";
     o += ",\"builtins\":[\"if\",\"min\",\"max\",\"abs\",\"clamp\",\"random\"]";
+    o += ",\"graph_functions\":[\"degree\",\"size\",\"distance\",\"neighbors\"]";
     o += "}}";
     return o;
 }

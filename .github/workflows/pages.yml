@@ -1,0 +1,74 @@
+name: Website
+
+# Builds the WASM module and the sample data on every deploy, so neither is committed.
+# One-time setup: repo Settings > Pages > Source: "GitHub Actions".
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "docs/**"
+      - "src/**"
+      - "samples/**"
+      - "tests/golden/programs/**"
+      - "tools/build_site_data.py"
+      - "tools/check_wasm_runs.js"
+      - "CMakeLists.txt"
+      - ".github/workflows/pages.yml"
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: mymindstorm/setup-emsdk@v14
+
+      - name: Build WASM
+        run: |
+          emcmake cmake -B build/wasm -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/wasm --parallel
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The live demos must match the native goldens, or the site would lie.
+      - name: Check WASM output against goldens
+        run: node tools/check_wasm_runs.js
+
+      - name: Assemble site
+        run: |
+          python3 tools/build_site_data.py
+          mkdir -p docs/wasm
+          cp extension/ls_wasm.js extension/ls_wasm.wasm docs/wasm/
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

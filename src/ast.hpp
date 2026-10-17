@@ -38,6 +38,8 @@ enum class expr_kind {
     // pattern cells only
     wildcard,      // '*'
     paren,         // '(' expr ')': a computed cell; args [the expr]
+    // graph-function arguments only
+    selector,      // 'g[m]': ident = the grid, args [the one cell]
 };
 
 struct expr;
@@ -67,9 +69,17 @@ struct tag_decl {
     std::vector<tag_union> unions;
 };
 
+// A graph entry's argument: `nodes=M` or `edges=E`.
+struct graph_arg {
+    ident    name;
+    expr_ptr mask;   // a whitespace-free tag mask
+};
+
 struct layer_decl {
-    ident       name;
-    std::string type;   // tagset name, or "number"
+    ident                  name;
+    std::string            type;   // grid: tagset name, or "number"; graph: its source grid
+    bool                   is_graph{false};
+    std::vector<graph_arg> args;   // graph only
 };
 
 struct layers_decl {

@@ -1,5 +1,5 @@
 // Declarations: uses head the file; tagsets with values and named unions;
-// one layers block; input and derived params.
+// one layers block of grids and graphs; input and derived params.
 use "schema.lvs"
 use "lib/rules.lvs"
 
@@ -8,6 +8,9 @@ tag geo { wall, door, floor, blocker = wall | door }
 layers {
     level: grid of geo
     tiles: grid of number
+    whole: graph of tiles
+    floors: graph of level(nodes=floor)
+    map:   graph of level(nodes=floor|door, edges=!blocker)
 }
 
 params {

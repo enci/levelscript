@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Getting started - LevelScript</title>
+  <meta name="description" content="Install LevelScript, write your first generator and run it.">
+  <meta name="keywords" content="procedural generation, level generation, scripting language, pattern rewriting, roguelike, game development">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" type="image/png" href="img/levelscript.png">
+</head>
+<body>
+  <nav>
+    <a href="index.html" class="nav-logo"><img src="img/levelscript.png" alt="LevelScript logo"></a>
+    <ul class="nav-links">
+      <li><a href="index.html"><i class="fas fa-layer-group"></i> levelscript</a></li>
+      <li><a href="getting-started.html"><i class="fas fa-rocket"></i> getting started</a></li>
+      <li><a href="samples.html"><i class="fas fa-border-all"></i> samples</a></li>
+      <li><a href="spec.html"><i class="fas fa-book"></i> language spec</a></li>
+      <li><a href="https://github.com/enci/levelscript/releases/latest" target="_blank"><i class="fas fa-download"></i> download</a></li>
+      <li><a href="https://github.com/enci/levelscript" target="_blank"><i class="fab fa-github"></i> github</a></li>
+    </ul>
+  </nav>
+  <div class="container">
+    <h1 style="font-size:2.4rem;margin-bottom:.5rem">Getting started</h1>
+    <p class="lead">From install to your first generated level in a few minutes.</p>
+
+    <h2>1. Install</h2>
+    <p>Download the installer for your platform from the <a href="https://github.com/enci/levelscript/releases/latest">latest release</a>. It installs <code>levelscript</code> and <code>levelscript-debugger</code> and adds them to your PATH, so open a new terminal afterwards.</p>
+    <div class="note"><strong>macOS:</strong> the package is unsigned. The first time, allow it under System Settings &rsaquo; Privacy &amp; Security &rsaquo; Open Anyway. Uninstall with <code>sudo /usr/local/levelscript/uninstall.sh</code>.</div>
+    <p>To build from source, see <a href="#build">Build from source</a>.</p>
+
+    <h2>2. Your first generator</h2>
+    <p>Save this as <code>hello.lvs</code>:</p>
+<pre><code class="lvs">tag geo { wall, floor }
+
+layers {
+    level: grid of geo
+}
+
+rule fill {
+    level[.]
+    =>
+    level[floor]
+}
+
+sequence main {
+    resize(8, 4)
+    everywhere fill
+}</code></pre>
+    <p>Run it:</p>
+<pre><code>levelscript hello.lvs</code></pre>
+    <p>The output is every layer printed as text, one letter per tag value. <code>.</code> is an empty cell.</p>
+    <ul>
+      <li><code>tag</code> declares the values a cell can hold.</li>
+      <li><code>layers</code> declares the grids. A level can have several.</li>
+      <li><code>rule fill</code> matches every empty cell (<code>.</code>) and writes <code>floor</code>.</li>
+      <li><code>sequence main</code> is the entry point: size the grid, then apply the rule everywhere.</li>
+    </ul>
+
+    <h2>3. Add some randomness</h2>
+    <p>Weighted alternatives pick one outcome per match, driven by the seed. Replace the rule with this one and try a few seeds:</p>
+<pre><code class="lvs">rule fill {
+    level[.]
+    =>
+    { any
+      (weight=1) level[wall]
+      (weight=3) level[floor]
+    }
+}</code></pre>
+<pre><code>levelscript --seed 1 hello.lvs
+levelscript --seed 2 hello.lvs</code></pre>
+    <p>The same seed always gives the same level. From here, look at <a href="samples.html#cave">cave</a> for cellular automata, <a href="samples.html#rooms">rooms</a> for placement with overlap checks, and <a href="samples.html#dungeon">dungeon</a> for several layers working together.</p>
+
+    <h2>Command line</h2>
+<pre><code>levelscript [--seed N] [--entry name] [--param name=value ...] [--inspect] &lt;file.lvs&gt;
+levelscript --ast [--no-spans] &lt;file.lvs&gt;</code></pre>
+    <table>
+      <tr><th>Option</th><th>Meaning</th></tr>
+      <tr><td><code>--seed N</code></td><td>Seed for the run. Omitted, a random seed is used.</td></tr>
+      <tr><td><code>--entry name</code></td><td>Sequence to run (default <code>main</code>). If it doesn't exist, the available sequences are listed.</td></tr>
+      <tr><td><code>--param name=value</code></td><td>Set an integer parameter; repeatable.</td></tr>
+      <tr><td><code>--inspect</code></td><td>Don't run; print a JSON report (diagnostics, symbols) for editor tooling.</td></tr>
+      <tr><td><code>--ast</code></td><td>Don't run; print the syntax tree with source ranges. <code>--no-spans</code> leaves the ranges out.</td></tr>
+    </table>
+<pre><code>levelscript --seed 7 --param difficulty=2 tests/golden/programs/arena.lvs</code></pre>
+    <p>Compile errors and warnings go to stderr, and a compile error exits with 1. <code>use</code> paths resolve relative to the importing file.</p>
+
+    <h2>Debugger</h2>
+<pre><code>levelscript-debugger [--seed N] [--entry name] [file.lvs]</code></pre>
+    <p>Step through generation one rule application at a time and watch the layers change. Set breakpoints by clicking the gutter next to a statement. Without a file the window opens empty: open a script with the folder button (<kbd>Ctrl</kbd>+<kbd>O</kbd>, <kbd>Cmd</kbd>+<kbd>O</kbd> on macOS) or by dropping a <code>.lvs</code> file on the window.</p>
+    <table>
+      <tr><th>Key</th><th>Action</th></tr>
+      <tr><td><kbd>F5</kbd></td><td>Run / continue to the next breakpoint</td></tr>
+      <tr><td><kbd>F6</kbd></td><td>Pause</td></tr>
+      <tr><td><kbd>F10</kbd></td><td>Step over: finish the statement, called sequences included</td></tr>
+      <tr><td><kbd>F11</kbd></td><td>Step into: one rule application</td></tr>
+      <tr><td><kbd>Shift</kbd>+<kbd>F11</kbd></td><td>Step out: finish the current sequence</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F5</kbd>, <kbd>R</kbd></td><td>Restart</td></tr>
+      <tr><td><kbd>Space</kbd></td><td>Toggle timed playback</td></tr>
+      <tr><td><kbd>Q</kbd></td><td>Quit</td></tr>
+    </table>
+    <p>Per-layer display settings (text or tileset, opacity, visibility, zoom, background colour) are saved next to the script as <code>&lt;file&gt;.lvs.json</code>.</p>
+
+    <h2>VS Code</h2>
+    <p>Install the <a href="https://marketplace.visualstudio.com/items?itemName=BojanEndrovski.levelscript" target="_blank">LevelScript extension</a> for syntax highlighting, diagnostics from the compiler as you type, pattern cells coloured by tag value, hover, go-to-definition and completion. <strong>LevelScript: Show AST</strong> opens the syntax tree beside your file, and another command opens the file in the native debugger.</p>
+
+    <h2>Embedding in a game</h2>
+<pre><code class="language-cpp">auto gen   = ls::generator::compile(source, "dungeon.lvs", resolve);  // resolve maps `use` paths
+auto level = gen.generate(gen.sequence("main"), seed);
+auto geo   = level["level"];
+int  wall  = gen.tag("geo.wall");
+if (geo.at(x, y) == wall) { /* ... */ }</code></pre>
+    <p>The library compiles a self-contained artifact once and generates from it as often as you like. See Appendix A of the <a href="spec.html">spec</a> for the full API.</p>
+
+    <h2 id="build">Build from source</h2>
+<pre><code>cmake -S . -B build
+cmake --build build --config Debug --parallel
+build/tests/Debug/ls_tests.exe
+python tools/run_goldens.py</code></pre>
+    <p>To build the installers yourself, run <code>python packaging/windows/build_installer.py</code> (needs Inno Setup 6.3+) or <code>python packaging/macos/build_pkg.py</code>.</p>
+  </div>
+  <footer>
+    LevelScript is MIT licensed &middot; <a href="https://github.com/enci/levelscript">github.com/enci/levelscript</a>
+  </footer>
+  <script src="js/samples-data.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

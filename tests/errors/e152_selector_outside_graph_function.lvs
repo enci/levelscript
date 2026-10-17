@@ -1,0 +1,12 @@
+// E152 (0.10, check 53): a selector is only the argument of distance or neighbors.
+// @expect error
+// @expect stderr-contains a selector is valid only
+tag algo { R, H }
+tag room { Start }
+layers {
+    level: grid of algo
+    rooms: grid of room
+    map:   graph of level(nodes=R, edges=H)
+}
+rule r { map[ (max(rooms[Start], 1) > 0) ] => level[H] }
+sequence main { resize(2, 2) everywhere r }

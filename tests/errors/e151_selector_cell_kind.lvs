@@ -1,0 +1,12 @@
+// E151 (0.10, check 53): a selector cell fits its grid: no integer on a tag grid.
+// @expect error
+// @expect stderr-contains needs a number grid
+tag algo { R, H }
+tag room { Start }
+layers {
+    level: grid of algo
+    rooms: grid of room
+    map:   graph of level(nodes=R, edges=H)
+}
+rule r { map[ (neighbors(rooms[1]) > 0) ] => level[H] }
+sequence main { resize(2, 2) everywhere r }

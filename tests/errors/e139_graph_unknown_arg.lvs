@@ -1,0 +1,9 @@
+// E139 (0.10, check 49): a graph takes only nodes= and edges=.
+// @expect error
+// @expect stderr-contains unknown graph argument
+tag algo { R, H }
+layers {
+    level: grid of algo
+    map:   graph of level(rooms=R)
+}
+sequence main { resize(2, 2) }

@@ -1,0 +1,14 @@
+// Draw site (v0.10.0, sections 5.10 and 10.6 item 5): an eager if draws twice.
+//
+// Both branches of `if` evaluate, so each cell draws two numbers and keeps
+// one; the next cell starts two draws later.
+//
+// @seed 4
+// @expect run-ok
+
+layers { n: grid of number }
+
+sequence main {
+    resize(6, 2)
+    everywhere { n[.] => n[ (if(x < 3, random(0, 9), random(10, 19))) ] }
+}

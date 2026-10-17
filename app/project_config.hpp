@@ -51,6 +51,12 @@ struct project_config {
     uint32_t                      grid_bg_color{0xFF282828};   // 0xAABBGGRR
     std::vector<tileset_config>   tilesets;
     std::vector<layer_config>     layers;   // composite order: index 0 = bottom
+    // Graph layers overlaid on the viewport, by name; hidden by default.
+    std::vector<std::string>      shown_graphs;
+    bool graph_shown(std::string const& name) const {
+        for (auto const& g : shown_graphs) if (g == name) return true;
+        return false;
+    }
     // tag_name -> value_id -> 0xAABBGGRR
     std::unordered_map<std::string, std::unordered_map<int, uint32_t>> tag_colors;
     // tag_name -> value_id -> shape; absent means tag_shape::none

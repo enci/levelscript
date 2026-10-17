@@ -16,6 +16,7 @@
 #include <imgui_freetype.h>
 #include <nlohmann/json.hpp>
 #include <stb_image.h>
+#include <tinyfiledialogs.h>
 
 #include <algorithm>
 #include <chrono>
@@ -35,6 +36,17 @@ static constexpr ImGuiWindowFlags k_bar_flags =
     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoDocking
     | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar
     | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus;
+
+// Corner radius of the docked panes: 3x the 5px of frames, popups and
+// tooltips. Pushed only around the Begin() of the dock host (its tab bars and
+// pane backgrounds) and of each pane, so nothing opened inside one inherits it.
+static constexpr float k_pane_rounding = 5.f;
+
+static void begin_pane(char const* name, ImGuiWindowFlags flags = 0) {
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, k_pane_rounding);
+    ImGui::Begin(name, nullptr, flags);
+    ImGui::PopStyleVar();
+}
 
 // ── script loading ────────────────────────────────────────────────────────────
 
@@ -125,29 +137,78 @@ static void set_window_icon(SDL_Window* window) {
     stbi_image_free(px);
 }
 
+// The logo at the left of the control bar. Windows already draws the window
+// icon in the caption right above it, so there the bar goes without; macOS
+// title bars never show one, and most Linux desktops (GNOME) don't either.
+#ifdef _WIN32
+static constexpr bool k_logo_in_bar = false;
+#else
+static constexpr bool k_logo_in_bar = true;
+#endif
+
+// The logo as a texture (the unpadded icon, so it fills its square).
+// nullptr when the resource is missing - the bar then just starts with its buttons.
+static SDL_Texture* load_logo(SDL_Renderer* renderer) {
+    std::string path = find_resource("resources/icon/levelscript.png");
+    if (path.empty()) return nullptr;
+    int w, h, ch;
+    unsigned char* px = stbi_load(path.c_str(), &w, &h, &ch, 4);
+    if (!px) return nullptr;
+    SDL_Texture* tex = nullptr;
+    if (SDL_Surface* surf = SDL_CreateSurfaceFrom(w, h, SDL_PIXELFORMAT_RGBA32, px, w * 4)) {
+        tex = SDL_CreateTextureFromSurface(renderer, surf);
+        SDL_DestroySurface(surf);
+    }
+    stbi_image_free(px);
+    return tex;
+}
+
 // ── themes (defined below run_debug_ui) ──────────────────────────────────────
 
 // Color of the gaps between docked panes (the dock host's background).
 static ImVec4 g_dock_gap;
+
+// The LevelScript accent: the brand green (#3FC46E, the site's --ls-green and
+// the icon's middle stop) on dark, a deeper shade on light so text and thin
+// marks keep their contrast.
+static ImVec4 brand_green(bool dark, float alpha = 1.f) {
+    return dark ? ImVec4(0.247f, 0.769f, 0.431f, alpha)     // #3FC46E
+                : ImVec4(0.137f, 0.620f, 0.329f, alpha);    // #239E54
+}
+// The brand's teal (the icon's last stop), for the one control that must
+// read apart from the green ones.
+static ImVec4 brand_teal(bool dark) {
+    return dark ? ImVec4(0.302f, 0.788f, 0.690f, 1.f)       // #4DC9B0
+                : ImVec4(0.059f, 0.549f, 0.447f, 1.f);      // #0F8C72
+}
 static void set_style_metrics();
 static void set_light_theme();
 static void set_dark_theme();
 
 // ── entry point ───────────────────────────────────────────────────────────────
 
-int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
+int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_seed,
                  std::string const& entry) {
+    // The open script; empty until one is opened. Open (button, Ctrl/Cmd+O,
+    // a dropped file) replaces it in place.
+    std::string path = start_path;
     script sc;
     sc.path = path;
     sc.entry_name = entry;
-    if (!load_script(sc)) {
+    if (!path.empty() && !load_script(sc)) {
         std::fprintf(stderr, "%s", sc.full_error.c_str());
         return 1;
     }
 
-    project_config cfg = project_config::load(path, sc.layer_names());
+    project_config cfg = path.empty() ? project_config{}
+                                      : project_config::load(path, sc.layer_names());
+    auto window_title = [&] {
+        return path.empty() ? std::string("LevelScript") : "LevelScript - " + path;
+    };
 
     // ── prefs (theme + window geometry + seed) -- SDL's per-user location ────
+    // The app id is what Wayland/GNOME matches to levelscript.desktop for the dock icon.
+    SDL_SetAppMetadata("LevelScript", nullptr, "levelscript");
     SDL_Init(SDL_INIT_VIDEO);
     platform::set_app_icon(find_resource(k_app_icon).c_str());   // before the Dock tile shows
     char* pref_raw = SDL_GetPrefPath("levelscript", "debugger");
@@ -221,13 +282,14 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
 
     // ── SDL3 window ───────────────────────────────────────────────────────────
     SDL_Window* window = SDL_CreateWindow(
-        ("LevelScript - " + path).c_str(), win_w, win_h,
+        window_title().c_str(), win_w, win_h,
         SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (win_x && win_y) SDL_SetWindowPosition(window, *win_x, *win_y);
     set_window_icon(window);
 
     SDL_Renderer* renderer = SDL_CreateRenderer(window, nullptr);
     SDL_SetRenderVSync(renderer, 1);
+    SDL_Texture* logo = k_logo_in_bar ? load_logo(renderer) : nullptr;
 
     std::unordered_map<std::string, tile_texture> tile_textures;
     sync_tilesets(renderer, path, cfg, tile_textures);
@@ -339,6 +401,7 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
     auto action_step_into = [&] { run.step_into(); };
     auto action_step_out  = [&] { run.begin(debug_run::command::step_out); };
     auto action_reset     = [&] {
+        if (path.empty()) return;
         if (!seed_locked) seed = make_seed();
         // Reload from disk so edits made in an external editor are picked up;
         // on failure the previous compile stays live and the status bar shows
@@ -356,6 +419,39 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
     bool playing = false;
     using clock = std::chrono::steady_clock;
     auto last_advance = clock::now();
+
+    // Switch this window to another script. A file that fails to compile
+    // still opens: the status bar and the Viewport show its errors, and
+    // Restart reloads it once it is fixed.
+    auto open_script = [&](std::string const& next) {
+        thumbs.reset(cfg);                 // ends a solo before the save below
+        if (!path.empty()) cfg.save(path);
+        path = next;
+        sc = script{};
+        sc.path = path;
+        sc.entry_name = entry;
+        load_script(sc);
+        cfg = project_config::load(path, sc.layer_names());
+        if (!seed_locked) seed = make_seed();
+        run.restart(sc.gen, sc.entry, seed);
+        playing = false;
+        SDL_SetWindowTitle(window, window_title().c_str());
+    };
+    // The Open dialog starts in the open script's folder, else the working one.
+    auto browse_script = [&] {
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        fs::path dir = path.empty() ? fs::current_path(ec) : fs::path(path).parent_path();
+        std::string start = (dir / "").string();
+        char const* filters[] = { "*.lvs" };
+        char const* picked = tinyfd_openFileDialog("Open LevelScript", start.c_str(),
+                                                   1, filters, "LevelScript files (*.lvs)", 0);
+        if (picked) open_script(picked);
+    };
+    // Requests from events and widgets, served between frames (the dialog
+    // blocks, and a switch mid-frame would hand half the views the old script).
+    bool                       want_browse = false;
+    std::optional<std::string> want_open;
 
     // Event-driven redraw: block in SDL_WaitEvent when idle so an untouched
     // window consumes ~0 CPU/GPU. Keep pumping frames while playback runs or
@@ -375,6 +471,9 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
                 apply_theme();
             }
         }
+        if (ev.type == SDL_EVENT_DROP_FILE && ev.drop.data &&
+                std::filesystem::path(ev.drop.data).extension() == ".lvs")
+            want_open = ev.drop.data;
         if (ev.type == SDL_EVENT_KEY_DOWN && !io.WantCaptureKeyboard) {
             bool shift = (ev.key.mod & SDL_KMOD_SHIFT) != 0;
             bool cmd   = (ev.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) != 0;
@@ -388,6 +487,7 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
                 case SDL_SCANCODE_F11:
                     if (shift) action_step_out(); else action_step_into();
                     break;
+                case SDL_SCANCODE_O:   if (cmd) want_browse = true; break;
                 case SDL_SCANCODE_R:   action_reset();     break;
                 case SDL_SCANCODE_Q:   running = false;    break;
                 case SDL_SCANCODE_SPACE:
@@ -414,6 +514,9 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
         }
         if (had_event) redraw_frames = k_cooldown_frames;
         else if (redraw_frames > 0) redraw_frames--;
+
+        if (want_browse) { want_browse = false; browse_script(); }
+        if (want_open)   { open_script(*want_open); want_open.reset(); }
 
         // A running debug command: a few ms of events per frame, so the
         // viewport updates live and Pause (F6) can interrupt.
@@ -473,7 +576,7 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
             ImGui::SetNextWindowPos(viewport->WorkPos);
             ImGui::SetNextWindowSize(viewport->WorkSize);
             ImGui::SetNextWindowViewport(viewport->ID);
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.f);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, k_pane_rounding);   // no background; rounds the panes' tab bars
             ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.f);
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, { 0.f, 0.f });
             ImGui::Begin(label, nullptr,
@@ -520,6 +623,14 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
             ImGui::PopStyleColor();
             ImGui::PopStyleVar();
 
+            if (logo) {
+                const float side = ImGui::GetFrameHeight();
+                ImGui::Image((ImTextureID)(intptr_t)logo, { side, side });
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("LevelScript " LS_VERSION_STRING);
+                ImGui::SameLine(0.f, 12.f);
+            }
+            bool loaded = (bool)sc.gen;   // compiled at least once; else nothing to run
+
             // Icon button with a hover tooltip carrying the full label and
             // shortcut. When `active` is true it renders held-down (a "stays
             // pressed" toggle) by borrowing the button's active color.
@@ -535,12 +646,20 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
                 return clicked;
             };
 
-            // VS Code's debug toolbar: same order, names, keys and colors -
-            // blue stepping icons, a green restart.
-            ImVec4 dbg_blue  = dark_theme ? ImVec4(0.459f, 0.745f, 1.000f, 1.f)    // #75BEFF
-                                          : ImVec4(0.000f, 0.478f, 0.800f, 1.f);   // #007ACC
-            ImVec4 dbg_green = dark_theme ? ImVec4(0.537f, 0.820f, 0.522f, 1.f)    // #89D185
-                                          : ImVec4(0.220f, 0.541f, 0.204f, 1.f);   // #388A34
+#ifdef __APPLE__
+            char const* open_tip = "Open a .lvs file (Cmd+O)";
+#else
+            char const* open_tip = "Open a .lvs file (Ctrl+O)";
+#endif
+            if (toolbtn(phosphor::PH_FOLDER_OPEN, open_tip)) want_browse = true;
+            ImGui::SameLine();
+            ImGui::Text("|");
+            ImGui::SameLine();
+
+            // VS Code's debug toolbar: same order, names and keys; in brand
+            // colors - green stepping icons, a teal restart.
+            ImVec4 dbg_step    = brand_green(dark_theme);
+            ImVec4 dbg_restart = brand_teal(dark_theme);
             auto dbgbtn = [&](char const* icon, char const* tip, ImVec4 col, bool enabled) {
                 ImGui::BeginDisabled(!enabled);
                 ImGui::PushStyleColor(ImGuiCol_Text, col);
@@ -550,29 +669,29 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
                 ImGui::SameLine();
                 return clicked;
             };
-            bool can_step = !run.done && !run.busy();
+            bool can_step = loaded && !run.done && !run.busy();
             if (run.busy()) {
-                if (dbgbtn(phosphor::PH_PAUSE, "Pause (F6)", dbg_blue, true)) action_pause();
+                if (dbgbtn(phosphor::PH_PAUSE, "Pause (F6)", dbg_step, true)) action_pause();
             } else {
                 if (dbgbtn(phosphor::PH_PLAY,
                            run.started ? "Continue (F5) - run to the next breakpoint"
                                        : "Run (F5) - run to the first breakpoint",
-                           dbg_blue, !run.done))
+                           dbg_step, loaded && !run.done))
                     action_continue();
             }
             if (dbgbtn(phosphor::PH_ARROW_ARC_RIGHT,
                        "Step Over (F10) - finish the statement, sequences included",
-                       dbg_blue, can_step))
+                       dbg_step, can_step))
                 action_step_over();
             if (dbgbtn(phosphor::PH_ARROW_LINE_DOWN,
-                       "Step Into (F11) - one rule application", dbg_blue, can_step))
+                       "Step Into (F11) - one rule application", dbg_step, can_step))
                 action_step_into();
             if (dbgbtn(phosphor::PH_ARROW_LINE_UP,
                        "Step Out (Shift+F11) - finish the current sequence",
-                       dbg_blue, can_step))
+                       dbg_step, can_step))
                 action_step_out();
             if (dbgbtn(phosphor::PH_ARROW_CLOCKWISE, "Restart (Ctrl+Shift+F5, R)",
-                       dbg_green, true))
+                       dbg_restart, !path.empty()))
                 action_reset();
             ImGui::Text("|");
             ImGui::SameLine();
@@ -663,10 +782,33 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
         // ── grid (layer strip + canvas) ─────────────────────────────────────
         // Title case; "###ID" keeps each window's id - and its saved dock
         // position in layout.ini - independent of the title.
-        ImGui::Begin("Viewport###VIEWPORT");
-        ImGui::BeginChild("##grid", {0.f, 0.f}, false, ImGuiWindowFlags_HorizontalScrollbar);
-        draw_grid_composite(sc, run, cfg, tile_textures, cfg.cell_px());
-        ImGui::EndChild();
+        bool loaded = (bool)sc.gen;
+        begin_pane("Viewport###VIEWPORT");
+        if (loaded) {
+            ImGui::BeginChild("##grid", {0.f, 0.f}, false, ImGuiWindowFlags_HorizontalScrollbar);
+            draw_grid_composite(sc, run, cfg, tile_textures, cfg.cell_px());
+            ImGui::EndChild();
+        } else if (path.empty()) {
+            // Nothing open: one centered call to action.
+            char const* label = "  Open a .lvs file...  ";
+            char const* hint  = "or drop one on this window";
+            ImVec2 avail = ImGui::GetContentRegionAvail();
+            ImVec2 btn   = { ImGui::CalcTextSize(label).x + 24.f, ImGui::GetFrameHeight() * 1.4f };
+            float  hint_w = ImGui::CalcTextSize(hint).x;
+            float  y = std::max(0.f, (avail.y - btn.y) * 0.45f);
+            ImGui::SetCursorPos({ ImGui::GetCursorPosX() + std::max(0.f, (avail.x - btn.x) * 0.5f),
+                                  ImGui::GetCursorPosY() + y });
+            std::string text = std::string(phosphor::PH_FOLDER_OPEN) + label;
+            if (ImGui::Button(text.c_str(), btn)) want_browse = true;
+            ImGui::SetCursorPosX(std::max(0.f, (ImGui::GetWindowWidth() - hint_w) * 0.5f));
+            ImGui::TextDisabled("%s", hint);
+        } else {
+            // Opened but never compiled: its errors, in full.
+            ImGui::TextUnformatted(path.c_str());
+            ImGui::TextDisabled("did not compile - fix it and Restart (R) to reload");
+            ImGui::Separator();
+            ImGui::TextWrapped("%s", sc.full_error.c_str());
+        }
         ImGui::End();
 
 #ifdef LS_ENABLE_IMGUI_DEMO
@@ -680,25 +822,26 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
         }
 #endif
 
-        ImGui::Begin("Tags###TAGS");
-        draw_tags_window(sc.meta, cfg);
+        // The other panes stay empty until a script has compiled.
+        begin_pane("Tags###TAGS");
+        if (loaded) draw_tags_window(sc.meta, cfg);
         ImGui::End();
 
-        ImGui::Begin("Rule###RULE", nullptr, ImGuiWindowFlags_HorizontalScrollbar);
-        draw_rule_window(sc, run, cfg.mini_px, cfg);
+        begin_pane("Rule###RULE", ImGuiWindowFlags_HorizontalScrollbar);
+        if (loaded) draw_rule_window(sc, run, cfg.mini_px, cfg);
         ImGui::End();
 
-        ImGui::Begin("Program###PROGRAM");
-        draw_program_window(sc, run);
+        begin_pane("Program###PROGRAM");
+        if (loaded) draw_program_window(sc, run);
         ImGui::End();
 
         ImGui::SetNextWindowSize({260.f, 420.f}, ImGuiCond_FirstUseEver);
-        ImGui::Begin("Layers###LAYERS");
-        draw_layers_window(sc, run, cfg, renderer, thumbs);
+        begin_pane("Layers###LAYERS");
+        if (loaded) draw_layers_window(sc, run, cfg, renderer, thumbs);
         ImGui::End();
 
-        ImGui::Begin("Settings###SETTINGS");
-        draw_settings_window(cfg, tile_textures, renderer, path);
+        begin_pane("Settings###SETTINGS");
+        if (loaded) draw_settings_window(cfg, tile_textures, renderer, path);
         ImGui::End();
 
         // ── status bar ──────────────────────────────────────────────────────
@@ -708,12 +851,13 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
             ImGui::SetNextWindowSize({ viewport->Size.x, statusbar_h });
 
             // VS Code (Dark+/Light+) style: a saturated bar with white text --
-            // blue while the script is healthy, red when the last (re)load
+            // brand green while the script is healthy, red when the last (re)load
             // failed. The right-hand chip is a darker block carrying the load
             // status so a failure is hard to miss.
-            const ImVec4 bar_col  = sc.ok ? ImVec4(0.000f, 0.478f, 0.800f, 1.f)   // #007ACC
+            const bool   bar_ok   = sc.ok || path.empty();   // nothing open is not an error
+            const ImVec4 bar_col  = bar_ok ? brand_green(false)                    // #239E54
                                           : ImVec4(0.780f, 0.180f, 0.180f, 1.f);
-            const ImVec4 chip_col = sc.ok ? ImVec4(0.000f, 0.360f, 0.600f, 1.f)
+            const ImVec4 chip_col = sc.ok ? ImVec4(0.102f, 0.478f, 0.255f, 1.f)   // #1A7A41
                                           : ImVec4(0.520f, 0.070f, 0.070f, 1.f);
             const ImVec4 text_col = { 1.f, 1.f, 1.f, 1.f };
             const ImVec4 dim_col  = { 1.f, 1.f, 1.f, 0.78f };
@@ -729,7 +873,8 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
             ImGui::Begin("##StatusBar", nullptr, k_bar_flags);
             ImGui::PopStyleVar();
 
-            std::string status = std::string(phosphor::PH_STEPS) + " stmt "
+            std::string status = path.empty() ? std::string("No script open")
+                : std::string(phosphor::PH_STEPS) + " stmt "
                 + std::to_string(run.current_stmt()) + "/"
                 + std::to_string(run.stmt_count);
             if (run.started && run.apps_in_stmt > 0)
@@ -800,12 +945,14 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
     }
 
     // ── save config + cleanup ─────────────────────────────────────────────────
-    cfg.save(path);
+    thumbs.reset(cfg);   // a solo's hidden layers are not saved as hidden
+    if (!path.empty()) cfg.save(path);
     save_prefs();
 
     ImGui_ImplSDLRenderer3_Shutdown();
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
+    if (logo) SDL_DestroyTexture(logo);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();
@@ -858,7 +1005,7 @@ static void set_light_theme() {
     colors[ImGuiCol_ScrollbarGrab]          = ImVec4(0.70f, 0.70f, 0.72f, 1.00f);
     colors[ImGuiCol_ScrollbarGrabHovered]   = ImVec4(0.60f, 0.60f, 0.62f, 1.00f);
     colors[ImGuiCol_ScrollbarGrabActive]    = ImVec4(0.50f, 0.50f, 0.52f, 1.00f);
-    colors[ImGuiCol_CheckMark]              = ImVec4(0.50f, 0.50f, 0.52f, 1.00f);
+    colors[ImGuiCol_CheckMark]              = brand_green(false);   // also the views' accent
     colors[ImGuiCol_CheckboxSelectedBg]     = ImVec4(0.83f, 0.83f, 0.85f, 0.42f);
     colors[ImGuiCol_SliderGrab]             = ImVec4(0.55f, 0.55f, 0.57f, 1.00f);
     colors[ImGuiCol_SliderGrabActive]       = ImVec4(0.45f, 0.45f, 0.47f, 1.00f);
@@ -869,16 +1016,16 @@ static void set_light_theme() {
     colors[ImGuiCol_HeaderHovered]          = ImVec4(0.53f, 0.53f, 0.53f, 0.25f);
     colors[ImGuiCol_HeaderActive]           = ImVec4(0.53f, 0.53f, 0.53f, 0.38f);
     colors[ImGuiCol_Separator]              = ImVec4(0.70f, 0.70f, 0.72f, 0.50f);
-    colors[ImGuiCol_SeparatorHovered]       = ImVec4(0.26f, 0.59f, 0.98f, 0.60f);
-    colors[ImGuiCol_SeparatorActive]        = ImVec4(0.26f, 0.59f, 0.98f, 0.80f);
-    colors[ImGuiCol_ResizeGrip]             = ImVec4(0.26f, 0.59f, 0.98f, 0.20f);
-    colors[ImGuiCol_ResizeGripHovered]      = ImVec4(0.26f, 0.59f, 0.98f, 0.50f);
-    colors[ImGuiCol_ResizeGripActive]       = ImVec4(0.26f, 0.59f, 0.98f, 0.80f);
+    colors[ImGuiCol_SeparatorHovered]       = brand_green(false, 0.60f);
+    colors[ImGuiCol_SeparatorActive]        = brand_green(false, 0.80f);
+    colors[ImGuiCol_ResizeGrip]             = brand_green(false, 0.20f);
+    colors[ImGuiCol_ResizeGripHovered]      = brand_green(false, 0.50f);
+    colors[ImGuiCol_ResizeGripActive]       = brand_green(false, 0.80f);
     colors[ImGuiCol_InputTextCursor]        = ImVec4(1.00f, 1.00f, 1.00f, 1.00f);
     colors[ImGuiCol_TabHovered]             = ImVec4(0.53f, 0.53f, 0.53f, 0.32f);
     colors[ImGuiCol_Tab]                    = ImVec4(0.78f, 0.78f, 0.80f, 0.00f);
     colors[ImGuiCol_TabSelected]            = ImVec4(0.70f, 0.70f, 0.72f, 0.00f);
-    colors[ImGuiCol_TabSelectedOverline]    = ImVec4(0.26f, 0.59f, 0.98f, 0.00f);
+    colors[ImGuiCol_TabSelectedOverline]    = brand_green(false, 0.00f);
     colors[ImGuiCol_TabDimmed]              = ImVec4(0.78f, 0.78f, 0.80f, 0.00f);
     colors[ImGuiCol_TabDimmedSelected]      = ImVec4(0.78f, 0.78f, 0.80f, 0.00f);
     colors[ImGuiCol_TabDimmedSelectedOverline]  = ImVec4(0.50f, 0.50f, 0.50f, 0.00f);
@@ -893,13 +1040,13 @@ static void set_light_theme() {
     colors[ImGuiCol_TableBorderLight]       = ImVec4(0.78f, 0.78f, 0.80f, 1.00f);
     colors[ImGuiCol_TableRowBg]             = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
     colors[ImGuiCol_TableRowBgAlt]          = ImVec4(0.00f, 0.00f, 0.00f, 0.04f);
-    colors[ImGuiCol_TextLink]               = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
-    colors[ImGuiCol_TextSelectedBg]         = ImVec4(0.26f, 0.59f, 0.98f, 0.25f);
+    colors[ImGuiCol_TextLink]               = brand_green(false);
+    colors[ImGuiCol_TextSelectedBg]         = brand_green(false, 0.25f);
     colors[ImGuiCol_TreeLines]              = ImVec4(0.43f, 0.43f, 0.50f, 0.50f);
     colors[ImGuiCol_DragDropTarget]         = ImVec4(1.00f, 1.00f, 0.00f, 0.90f);
     colors[ImGuiCol_DragDropTargetBg]       = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
     colors[ImGuiCol_UnsavedMarker]          = ImVec4(1.00f, 1.00f, 1.00f, 1.00f);
-    colors[ImGuiCol_NavCursor]              = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
+    colors[ImGuiCol_NavCursor]              = brand_green(false);
     colors[ImGuiCol_NavWindowingHighlight]  = ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
     colors[ImGuiCol_NavWindowingDimBg]      = ImVec4(0.80f, 0.80f, 0.80f, 0.20f);
     colors[ImGuiCol_ModalWindowDimBg]       = ImVec4(0.20f, 0.20f, 0.20f, 0.35f);
@@ -913,40 +1060,50 @@ static void set_dark_theme() {
     c[ImGuiCol_WindowBg]             = ImVec4(0.16f, 0.16f, 0.17f, 1.00f);
     c[ImGuiCol_ChildBg]              = ImVec4(0.00f, 0.00f, 0.00f, 0.15f);
     c[ImGuiCol_PopupBg]              = ImVec4(0.12f, 0.12f, 0.13f, 0.96f);
-    c[ImGuiCol_Border]               = ImVec4(0.35f, 0.35f, 0.38f, 0.40f);
+    // Docking draws its splitters in Border: the gap color (as in light), so
+    // splitters, the outer frame and the rounded corners show one backdrop.
+    c[ImGuiCol_Border]               = ImVec4(0.10f, 0.10f, 0.11f, 1.00f);
     c[ImGuiCol_BorderShadow]         = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
     c[ImGuiCol_FrameBg]              = ImVec4(0.22f, 0.22f, 0.23f, 1.00f);
     c[ImGuiCol_FrameBgHovered]       = ImVec4(0.28f, 0.28f, 0.30f, 1.00f);
     c[ImGuiCol_FrameBgActive]        = ImVec4(0.34f, 0.34f, 0.36f, 1.00f);
-    c[ImGuiCol_TitleBg]              = ImVec4(0.10f, 0.10f, 0.11f, 1.00f);
-    c[ImGuiCol_TitleBgActive]        = ImVec4(0.16f, 0.29f, 0.48f, 1.00f);
-    c[ImGuiCol_TitleBgCollapsed]     = ImVec4(0.00f, 0.00f, 0.00f, 0.51f);
+    // Title bar = pane background (as in light): a docked pane's tab bar is
+    // drawn with these, so the pane reads as one rounded card over the gap.
+    c[ImGuiCol_TitleBg]              = ImVec4(0.16f, 0.16f, 0.17f, 1.00f);
+    c[ImGuiCol_TitleBgActive]        = ImVec4(0.16f, 0.16f, 0.17f, 1.00f);
+    c[ImGuiCol_TitleBgCollapsed]     = ImVec4(0.16f, 0.16f, 0.17f, 0.75f);
     c[ImGuiCol_MenuBarBg]            = ImVec4(0.14f, 0.14f, 0.15f, 1.00f);
     c[ImGuiCol_ScrollbarBg]          = ImVec4(0.14f, 0.14f, 0.15f, 1.00f);
     c[ImGuiCol_ScrollbarGrab]        = ImVec4(0.28f, 0.28f, 0.30f, 1.00f);
     c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.34f, 0.34f, 0.36f, 1.00f);
     c[ImGuiCol_ScrollbarGrabActive]  = ImVec4(0.40f, 0.40f, 0.42f, 1.00f);
-    c[ImGuiCol_CheckMark]            = ImVec4(0.40f, 0.68f, 0.98f, 1.00f);
+    c[ImGuiCol_CheckMark]            = brand_green(true);   // also the views' accent
+    c[ImGuiCol_CheckboxSelectedBg]   = ImVec4(0.22f, 0.22f, 0.23f, 0.42f);
     c[ImGuiCol_SliderGrab]           = ImVec4(0.38f, 0.39f, 0.40f, 1.00f);
     c[ImGuiCol_SliderGrabActive]     = ImVec4(0.48f, 0.49f, 0.50f, 1.00f);
     c[ImGuiCol_Button]               = ImVec4(0.22f, 0.22f, 0.23f, 1.00f);
     c[ImGuiCol_ButtonHovered]        = ImVec4(0.28f, 0.28f, 0.30f, 1.00f);
     c[ImGuiCol_ButtonActive]         = ImVec4(0.34f, 0.34f, 0.36f, 1.00f);
-    c[ImGuiCol_Header]               = ImVec4(0.26f, 0.59f, 0.98f, 0.25f);
-    c[ImGuiCol_HeaderHovered]        = ImVec4(0.26f, 0.59f, 0.98f, 0.60f);
-    c[ImGuiCol_HeaderActive]         = ImVec4(0.26f, 0.59f, 0.98f, 0.80f);
+    c[ImGuiCol_Header]               = brand_green(true, 0.25f);
+    c[ImGuiCol_HeaderHovered]        = brand_green(true, 0.45f);
+    c[ImGuiCol_HeaderActive]         = brand_green(true, 0.60f);
     c[ImGuiCol_Separator]            = ImVec4(0.35f, 0.35f, 0.38f, 0.50f);
-    c[ImGuiCol_SeparatorHovered]     = ImVec4(0.10f, 0.40f, 0.75f, 0.78f);
-    c[ImGuiCol_SeparatorActive]      = ImVec4(0.10f, 0.40f, 0.75f, 1.00f);
-    c[ImGuiCol_ResizeGrip]           = ImVec4(0.26f, 0.59f, 0.98f, 0.20f);
-    c[ImGuiCol_ResizeGripHovered]    = ImVec4(0.26f, 0.59f, 0.98f, 0.50f);
-    c[ImGuiCol_ResizeGripActive]     = ImVec4(0.26f, 0.59f, 0.98f, 0.80f);
-    c[ImGuiCol_TabHovered]           = ImVec4(0.26f, 0.59f, 0.98f, 0.60f);
-    c[ImGuiCol_Tab]                  = ImVec4(0.18f, 0.35f, 0.58f, 0.86f);
-    c[ImGuiCol_TabSelected]          = ImVec4(0.20f, 0.41f, 0.68f, 1.00f);
-    c[ImGuiCol_TabSelectedOverline]  = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
-    c[ImGuiCol_TabDimmed]            = ImVec4(0.07f, 0.10f, 0.15f, 0.97f);
-    c[ImGuiCol_TabDimmedSelected]    = ImVec4(0.14f, 0.26f, 0.42f, 1.00f);
+    c[ImGuiCol_SeparatorHovered]     = brand_green(true, 0.60f);
+    c[ImGuiCol_SeparatorActive]      = brand_green(true, 0.80f);
+    c[ImGuiCol_ResizeGrip]           = brand_green(true, 0.20f);
+    c[ImGuiCol_ResizeGripHovered]    = brand_green(true, 0.50f);
+    c[ImGuiCol_ResizeGripActive]     = brand_green(true, 0.80f);
+    c[ImGuiCol_InputTextCursor]      = ImVec4(0.85f, 0.85f, 0.85f, 1.00f);
+    // Tabs are see-through (as in light), only hover shows.
+    c[ImGuiCol_TabHovered]           = ImVec4(0.53f, 0.53f, 0.53f, 0.32f);
+    c[ImGuiCol_Tab]                  = ImVec4(0.22f, 0.22f, 0.23f, 0.00f);
+    c[ImGuiCol_TabSelected]          = ImVec4(0.28f, 0.28f, 0.30f, 0.00f);
+    c[ImGuiCol_TabSelectedOverline]  = brand_green(true, 0.00f);
+    c[ImGuiCol_TabDimmed]            = ImVec4(0.22f, 0.22f, 0.23f, 0.00f);
+    c[ImGuiCol_TabDimmedSelected]    = ImVec4(0.22f, 0.22f, 0.23f, 0.00f);
+    c[ImGuiCol_TabDimmedSelectedOverline] = ImVec4(0.50f, 0.50f, 0.50f, 0.00f);
+    c[ImGuiCol_DockingPreview]       = ImVec4(0.62f, 0.62f, 0.62f, 0.70f);
+    c[ImGuiCol_DockingEmptyBg]       = ImVec4(0.10f, 0.10f, 0.11f, 1.00f);
     c[ImGuiCol_PlotLines]            = ImVec4(0.61f, 0.61f, 0.61f, 1.00f);
     c[ImGuiCol_PlotLinesHovered]     = ImVec4(1.00f, 0.43f, 0.35f, 1.00f);
     c[ImGuiCol_PlotHistogram]        = ImVec4(0.90f, 0.70f, 0.00f, 1.00f);
@@ -956,9 +1113,13 @@ static void set_dark_theme() {
     c[ImGuiCol_TableBorderLight]     = ImVec4(0.23f, 0.23f, 0.25f, 1.00f);
     c[ImGuiCol_TableRowBg]           = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
     c[ImGuiCol_TableRowBgAlt]        = ImVec4(1.00f, 1.00f, 1.00f, 0.04f);
-    c[ImGuiCol_TextSelectedBg]       = ImVec4(0.26f, 0.59f, 0.98f, 0.25f);
+    c[ImGuiCol_TextLink]             = brand_green(true);
+    c[ImGuiCol_TextSelectedBg]       = brand_green(true, 0.25f);
+    c[ImGuiCol_TreeLines]            = ImVec4(0.43f, 0.43f, 0.50f, 0.50f);
     c[ImGuiCol_DragDropTarget]       = ImVec4(1.00f, 1.00f, 0.00f, 0.90f);
-    c[ImGuiCol_NavCursor]            = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
+    c[ImGuiCol_DragDropTargetBg]     = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+    c[ImGuiCol_UnsavedMarker]        = ImVec4(1.00f, 1.00f, 1.00f, 1.00f);
+    c[ImGuiCol_NavCursor]            = brand_green(true);
     c[ImGuiCol_NavWindowingHighlight]= ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
     c[ImGuiCol_NavWindowingDimBg]    = ImVec4(0.80f, 0.80f, 0.80f, 0.20f);
     c[ImGuiCol_ModalWindowDimBg]     = ImVec4(0.80f, 0.80f, 0.80f, 0.35f);

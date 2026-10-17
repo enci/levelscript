@@ -299,6 +299,9 @@ struct layer_thumbs {
     layer_thumbs(layer_thumbs const&)            = delete;
     layer_thumbs& operator=(layer_thumbs const&) = delete;
     ~layer_thumbs();
+    // Before another script replaces this one: drop the textures and end any
+    // solo, giving `cfg` back the layer visibility the solo hid.
+    void reset(project_config& cfg);
 };
 void draw_layers_window(script const& sc, debug_run const& run, project_config& cfg,
                         SDL_Renderer* renderer, layer_thumbs& thumbs);

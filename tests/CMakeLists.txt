@@ -6,10 +6,13 @@ add_executable(ls_tests
     test_inspect.cpp
     test_sequence.cpp
     test_modules.cpp
+    test_graph.cpp
+    test_coverage.cpp
 )
 
 target_link_libraries(ls_tests PRIVATE ls_lib Catch2::Catch2WithMain)
-target_compile_definitions(ls_tests PRIVATE LS_AST_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/ast")
+target_compile_definitions(ls_tests PRIVATE LS_AST_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/ast"
+                                           LS_PROGRAMS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden/programs")
 if(MSVC)
     target_compile_options(ls_tests PRIVATE /W4)
 else()

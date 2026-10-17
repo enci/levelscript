@@ -1,0 +1,8 @@
+// E140 (0.10, check 49): a number-grid source takes the argument-free form only.
+// @expect error
+// @expect stderr-contains takes no
+layers {
+    zones: grid of number
+    areas: graph of zones(nodes=!.)
+}
+sequence main { resize(2, 2) }

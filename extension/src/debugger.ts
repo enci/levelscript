@@ -93,26 +93,63 @@ async function resolveDebugger(forcePrompt = false): Promise<string | undefined>
     return browse();
 }
 
+// `levelscript-debugger --version` prints "levelscript-debugger X.Y.Z".
+function versionOf(exe: string): string | undefined {
+    try {
+        const out = cp.execFileSync(exe, ['--version'], { timeout: 5000, encoding: 'utf8' });
+        return /(\d+\.\d+\.\d+)/.exec(out)?.[1];
+    } catch { return undefined; }
+}
+
 export function registerDebugger(ctx: vscode.ExtensionContext) {
+    // The debugger's own output (load errors, crashes) lands here; it has no
+    // window to show them in when the script fails before one opens.
+    const output = vscode.window.createOutputChannel('LevelScript');
+    const ours: string = ctx.extension.packageJSON.version;
+    const warnedFor = new Set<string>();
+
     async function launch(doc: vscode.TextDocument) {
         // The debugger reads the file from disk.
         if (doc.isDirty && !(await doc.save())) return;
         const exe = await resolveDebugger();
         if (!exe) return;
+
+        const version = versionOf(exe);
+        output.appendLine(`[${new Date().toLocaleTimeString()}] ${exe} (${version ?? 'unknown version'}) ${doc.uri.fsPath}`);
+        if (version && version !== ours && !warnedFor.has(exe)) {
+            warnedFor.add(exe);
+            vscode.window.showWarningMessage(
+                `LevelScript debugger is ${version} but the extension is ${ours} (${exe}).`, 'Locate…')
+                .then(async choice => { if (choice === 'Locate…') await resolveDebugger(true); });
+        }
+
         const child = cp.spawn(exe, [doc.uri.fsPath], {
             cwd: path.dirname(doc.uri.fsPath),
             detached: true,
-            stdio: 'ignore',
+            stdio: ['ignore', 'pipe', 'pipe'],
         });
+        child.stdout?.on('data', d => output.append(d.toString()));
+        child.stderr?.on('data', d => output.append(d.toString()));
+        let failedToStart = false;   // 'exit' may follow 'error'; report once
         child.on('error', async err => {
+            failedToStart = true;
+            output.appendLine(`could not start: ${err.message}`);
             const choice = await vscode.window.showErrorMessage(
                 `Could not start the LevelScript debugger (${exe}): ${err.message}`, 'Locate…');
             if (choice === 'Locate…' && await resolveDebugger(true)) launch(doc);
+        });
+        child.on('exit', async (code, signal) => {
+            if (code === 0 || failedToStart) return;
+            output.appendLine(`debugger exited with ${signal ?? `code ${code}`}`);
+            const choice = await vscode.window.showErrorMessage(
+                `LevelScript debugger exited with ${signal ?? `code ${code}`}.`, 'Show Output');
+            if (choice === 'Show Output') output.show(true);
         });
         child.unref();
     }
 
     ctx.subscriptions.push(
+        output,
         vscode.commands.registerCommand('levelscript.run', () => {
             const editor = vscode.window.activeTextEditor;
             if (!editor || editor.document.languageId !== 'levelscript') {

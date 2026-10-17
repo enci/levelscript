@@ -1,0 +1,14 @@
+// Tiles game level script to give the levels nice visuals based on 
+// the Kenney.nl asset (minimap and the rogueike)
+
+layers {
+    tiles : grid of number
+}
+
+rule {
+    algo    
+}
+
+sequence tiles {
+
+}
