@@ -16,6 +16,7 @@
 #include <imgui_freetype.h>
 #include <nlohmann/json.hpp>
 #include <stb_image.h>
+#include <tinyfiledialogs.h>
 
 #include <algorithm>
 #include <chrono>
@@ -35,6 +36,17 @@ static constexpr ImGuiWindowFlags k_bar_flags =
     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoDocking
     | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar
     | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus;
+
+// Corner radius of the docked panes: 3x the 5px of frames, popups and
+// tooltips. Pushed only around the Begin() of the dock host (its tab bars and
+// pane backgrounds) and of each pane, so nothing opened inside one inherits it.
+static constexpr float k_pane_rounding = 5.f;
+
+static void begin_pane(char const* name, ImGuiWindowFlags flags = 0) {
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, k_pane_rounding);
+    ImGui::Begin(name, nullptr, flags);
+    ImGui::PopStyleVar();
+}
 
 // ── script loading ────────────────────────────────────────────────────────────
 
@@ -175,17 +187,24 @@ static void set_dark_theme();
 
 // ── entry point ───────────────────────────────────────────────────────────────
 
-int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
+int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_seed,
                  std::string const& entry) {
+    // The open script; empty until one is opened. Open (button, Ctrl/Cmd+O,
+    // a dropped file) replaces it in place.
+    std::string path = start_path;
     script sc;
     sc.path = path;
     sc.entry_name = entry;
-    if (!load_script(sc)) {
+    if (!path.empty() && !load_script(sc)) {
         std::fprintf(stderr, "%s", sc.full_error.c_str());
         return 1;
     }
 
-    project_config cfg = project_config::load(path, sc.layer_names());
+    project_config cfg = path.empty() ? project_config{}
+                                      : project_config::load(path, sc.layer_names());
+    auto window_title = [&] {
+        return path.empty() ? std::string("LevelScript") : "LevelScript - " + path;
+    };
 
     // ── prefs (theme + window geometry + seed) -- SDL's per-user location ────
     // The app id is what Wayland/GNOME matches to levelscript.desktop for the dock icon.
@@ -263,7 +282,7 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
 
     // ── SDL3 window ───────────────────────────────────────────────────────────
     SDL_Window* window = SDL_CreateWindow(
-        ("LevelScript - " + path).c_str(), win_w, win_h,
+        window_title().c_str(), win_w, win_h,
         SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (win_x && win_y) SDL_SetWindowPosition(window, *win_x, *win_y);
     set_window_icon(window);
@@ -382,6 +401,7 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
     auto action_step_into = [&] { run.step_into(); };
     auto action_step_out  = [&] { run.begin(debug_run::command::step_out); };
     auto action_reset     = [&] {
+        if (path.empty()) return;
         if (!seed_locked) seed = make_seed();
         // Reload from disk so edits made in an external editor are picked up;
         // on failure the previous compile stays live and the status bar shows
@@ -399,6 +419,39 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
     bool playing = false;
     using clock = std::chrono::steady_clock;
     auto last_advance = clock::now();
+
+    // Switch this window to another script. A file that fails to compile
+    // still opens: the status bar and the Viewport show its errors, and
+    // Restart reloads it once it is fixed.
+    auto open_script = [&](std::string const& next) {
+        thumbs.reset(cfg);                 // ends a solo before the save below
+        if (!path.empty()) cfg.save(path);
+        path = next;
+        sc = script{};
+        sc.path = path;
+        sc.entry_name = entry;
+        load_script(sc);
+        cfg = project_config::load(path, sc.layer_names());
+        if (!seed_locked) seed = make_seed();
+        run.restart(sc.gen, sc.entry, seed);
+        playing = false;
+        SDL_SetWindowTitle(window, window_title().c_str());
+    };
+    // The Open dialog starts in the open script's folder, else the working one.
+    auto browse_script = [&] {
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        fs::path dir = path.empty() ? fs::current_path(ec) : fs::path(path).parent_path();
+        std::string start = (dir / "").string();
+        char const* filters[] = { "*.lvs" };
+        char const* picked = tinyfd_openFileDialog("Open LevelScript", start.c_str(),
+                                                   1, filters, "LevelScript files (*.lvs)", 0);
+        if (picked) open_script(picked);
+    };
+    // Requests from events and widgets, served between frames (the dialog
+    // blocks, and a switch mid-frame would hand half the views the old script).
+    bool                       want_browse = false;
+    std::optional<std::string> want_open;
 
     // Event-driven redraw: block in SDL_WaitEvent when idle so an untouched
     // window consumes ~0 CPU/GPU. Keep pumping frames while playback runs or
@@ -418,6 +471,9 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
                 apply_theme();
             }
         }
+        if (ev.type == SDL_EVENT_DROP_FILE && ev.drop.data &&
+                std::filesystem::path(ev.drop.data).extension() == ".lvs")
+            want_open = ev.drop.data;
         if (ev.type == SDL_EVENT_KEY_DOWN && !io.WantCaptureKeyboard) {
             bool shift = (ev.key.mod & SDL_KMOD_SHIFT) != 0;
             bool cmd   = (ev.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) != 0;
@@ -431,6 +487,7 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
                 case SDL_SCANCODE_F11:
                     if (shift) action_step_out(); else action_step_into();
                     break;
+                case SDL_SCANCODE_O:   if (cmd) want_browse = true; break;
                 case SDL_SCANCODE_R:   action_reset();     break;
                 case SDL_SCANCODE_Q:   running = false;    break;
                 case SDL_SCANCODE_SPACE:
@@ -457,6 +514,9 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
         }
         if (had_event) redraw_frames = k_cooldown_frames;
         else if (redraw_frames > 0) redraw_frames--;
+
+        if (want_browse) { want_browse = false; browse_script(); }
+        if (want_open)   { open_script(*want_open); want_open.reset(); }
 
         // A running debug command: a few ms of events per frame, so the
         // viewport updates live and Pause (F6) can interrupt.
@@ -516,7 +576,7 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
             ImGui::SetNextWindowPos(viewport->WorkPos);
             ImGui::SetNextWindowSize(viewport->WorkSize);
             ImGui::SetNextWindowViewport(viewport->ID);
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.f);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, k_pane_rounding);   // no background; rounds the panes' tab bars
             ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.f);
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, { 0.f, 0.f });
             ImGui::Begin(label, nullptr,
@@ -569,6 +629,7 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("LevelScript " LS_VERSION_STRING);
                 ImGui::SameLine(0.f, 12.f);
             }
+            bool loaded = (bool)sc.gen;   // compiled at least once; else nothing to run
 
             // Icon button with a hover tooltip carrying the full label and
             // shortcut. When `active` is true it renders held-down (a "stays
@@ -585,6 +646,16 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
                 return clicked;
             };
 
+#ifdef __APPLE__
+            char const* open_tip = "Open a .lvs file (Cmd+O)";
+#else
+            char const* open_tip = "Open a .lvs file (Ctrl+O)";
+#endif
+            if (toolbtn(phosphor::PH_FOLDER_OPEN, open_tip)) want_browse = true;
+            ImGui::SameLine();
+            ImGui::Text("|");
+            ImGui::SameLine();
+
             // VS Code's debug toolbar: same order, names and keys; in brand
             // colors - green stepping icons, a teal restart.
             ImVec4 dbg_step    = brand_green(dark_theme);
@@ -598,14 +669,14 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
                 ImGui::SameLine();
                 return clicked;
             };
-            bool can_step = !run.done && !run.busy();
+            bool can_step = loaded && !run.done && !run.busy();
             if (run.busy()) {
                 if (dbgbtn(phosphor::PH_PAUSE, "Pause (F6)", dbg_step, true)) action_pause();
             } else {
                 if (dbgbtn(phosphor::PH_PLAY,
                            run.started ? "Continue (F5) - run to the next breakpoint"
                                        : "Run (F5) - run to the first breakpoint",
-                           dbg_step, !run.done))
+                           dbg_step, loaded && !run.done))
                     action_continue();
             }
             if (dbgbtn(phosphor::PH_ARROW_ARC_RIGHT,
@@ -620,7 +691,7 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
                        dbg_step, can_step))
                 action_step_out();
             if (dbgbtn(phosphor::PH_ARROW_CLOCKWISE, "Restart (Ctrl+Shift+F5, R)",
-                       dbg_restart, true))
+                       dbg_restart, !path.empty()))
                 action_reset();
             ImGui::Text("|");
             ImGui::SameLine();
@@ -711,10 +782,33 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
         // ── grid (layer strip + canvas) ─────────────────────────────────────
         // Title case; "###ID" keeps each window's id - and its saved dock
         // position in layout.ini - independent of the title.
-        ImGui::Begin("Viewport###VIEWPORT");
-        ImGui::BeginChild("##grid", {0.f, 0.f}, false, ImGuiWindowFlags_HorizontalScrollbar);
-        draw_grid_composite(sc, run, cfg, tile_textures, cfg.cell_px());
-        ImGui::EndChild();
+        bool loaded = (bool)sc.gen;
+        begin_pane("Viewport###VIEWPORT");
+        if (loaded) {
+            ImGui::BeginChild("##grid", {0.f, 0.f}, false, ImGuiWindowFlags_HorizontalScrollbar);
+            draw_grid_composite(sc, run, cfg, tile_textures, cfg.cell_px());
+            ImGui::EndChild();
+        } else if (path.empty()) {
+            // Nothing open: one centered call to action.
+            char const* label = "  Open a .lvs file...  ";
+            char const* hint  = "or drop one on this window";
+            ImVec2 avail = ImGui::GetContentRegionAvail();
+            ImVec2 btn   = { ImGui::CalcTextSize(label).x + 24.f, ImGui::GetFrameHeight() * 1.4f };
+            float  hint_w = ImGui::CalcTextSize(hint).x;
+            float  y = std::max(0.f, (avail.y - btn.y) * 0.45f);
+            ImGui::SetCursorPos({ ImGui::GetCursorPosX() + std::max(0.f, (avail.x - btn.x) * 0.5f),
+                                  ImGui::GetCursorPosY() + y });
+            std::string text = std::string(phosphor::PH_FOLDER_OPEN) + label;
+            if (ImGui::Button(text.c_str(), btn)) want_browse = true;
+            ImGui::SetCursorPosX(std::max(0.f, (ImGui::GetWindowWidth() - hint_w) * 0.5f));
+            ImGui::TextDisabled("%s", hint);
+        } else {
+            // Opened but never compiled: its errors, in full.
+            ImGui::TextUnformatted(path.c_str());
+            ImGui::TextDisabled("did not compile - fix it and Restart (R) to reload");
+            ImGui::Separator();
+            ImGui::TextWrapped("%s", sc.full_error.c_str());
+        }
         ImGui::End();
 
 #ifdef LS_ENABLE_IMGUI_DEMO
@@ -728,25 +822,26 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
         }
 #endif
 
-        ImGui::Begin("Tags###TAGS");
-        draw_tags_window(sc.meta, cfg);
+        // The other panes stay empty until a script has compiled.
+        begin_pane("Tags###TAGS");
+        if (loaded) draw_tags_window(sc.meta, cfg);
         ImGui::End();
 
-        ImGui::Begin("Rule###RULE", nullptr, ImGuiWindowFlags_HorizontalScrollbar);
-        draw_rule_window(sc, run, cfg.mini_px, cfg);
+        begin_pane("Rule###RULE", ImGuiWindowFlags_HorizontalScrollbar);
+        if (loaded) draw_rule_window(sc, run, cfg.mini_px, cfg);
         ImGui::End();
 
-        ImGui::Begin("Program###PROGRAM");
-        draw_program_window(sc, run);
+        begin_pane("Program###PROGRAM");
+        if (loaded) draw_program_window(sc, run);
         ImGui::End();
 
         ImGui::SetNextWindowSize({260.f, 420.f}, ImGuiCond_FirstUseEver);
-        ImGui::Begin("Layers###LAYERS");
-        draw_layers_window(sc, run, cfg, renderer, thumbs);
+        begin_pane("Layers###LAYERS");
+        if (loaded) draw_layers_window(sc, run, cfg, renderer, thumbs);
         ImGui::End();
 
-        ImGui::Begin("Settings###SETTINGS");
-        draw_settings_window(cfg, tile_textures, renderer, path);
+        begin_pane("Settings###SETTINGS");
+        if (loaded) draw_settings_window(cfg, tile_textures, renderer, path);
         ImGui::End();
 
         // ── status bar ──────────────────────────────────────────────────────
@@ -759,7 +854,8 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
             // brand green while the script is healthy, red when the last (re)load
             // failed. The right-hand chip is a darker block carrying the load
             // status so a failure is hard to miss.
-            const ImVec4 bar_col  = sc.ok ? brand_green(false)                     // #239E54
+            const bool   bar_ok   = sc.ok || path.empty();   // nothing open is not an error
+            const ImVec4 bar_col  = bar_ok ? brand_green(false)                    // #239E54
                                           : ImVec4(0.780f, 0.180f, 0.180f, 1.f);
             const ImVec4 chip_col = sc.ok ? ImVec4(0.102f, 0.478f, 0.255f, 1.f)   // #1A7A41
                                           : ImVec4(0.520f, 0.070f, 0.070f, 1.f);
@@ -777,7 +873,8 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
             ImGui::Begin("##StatusBar", nullptr, k_bar_flags);
             ImGui::PopStyleVar();
 
-            std::string status = std::string(phosphor::PH_STEPS) + " stmt "
+            std::string status = path.empty() ? std::string("No script open")
+                : std::string(phosphor::PH_STEPS) + " stmt "
                 + std::to_string(run.current_stmt()) + "/"
                 + std::to_string(run.stmt_count);
             if (run.started && run.apps_in_stmt > 0)
@@ -848,7 +945,8 @@ int run_debug_ui(std::string const& path, std::optional<uint64_t> fixed_seed,
     }
 
     // ── save config + cleanup ─────────────────────────────────────────────────
-    cfg.save(path);
+    thumbs.reset(cfg);   // a solo's hidden layers are not saved as hidden
+    if (!path.empty()) cfg.save(path);
     save_prefs();
 
     ImGui_ImplSDLRenderer3_Shutdown();

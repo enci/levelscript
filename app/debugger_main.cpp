@@ -9,8 +9,9 @@
 // public run API (compile once, step application by application).
 
 static void usage(char const* argv0) {
-    std::cerr << "Usage: " << argv0 << " [--seed N] [--entry name] <file.lvs>\n"
-              << "  --entry  the sequence to run (default: main)\n";
+    std::cerr << "Usage: " << argv0 << " [--seed N] [--entry name] [file.lvs]\n"
+              << "  --entry  the sequence to run (default: main)\n"
+              << "  Without a file the window opens empty; open one from there.\n";
 }
 
 int main(int argc, char* argv[]) {
@@ -38,10 +39,5 @@ int main(int argc, char* argv[]) {
             return 1;
         }
     }
-    if (path.empty()) {
-        usage(argv[0]);
-        return 1;
-    }
-
     return ls::run_debug_ui(path, seed, entry);
 }
