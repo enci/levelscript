@@ -82,6 +82,23 @@ nav .nav-links a:hover {
 
 nav .nav-links a.active { background: var(--ls-deep); color: var(--ls-yellow); }
 
+nav .nav-toggle {
+  display: none;
+  border: 0;
+  background: none;
+  padding: 0.5rem;
+  cursor: pointer;
+}
+
+nav .nav-toggle span {
+  display: block;
+  width: 1.4rem;
+  height: 2px;
+  margin: 4px 0;
+  border-radius: 2px;
+  background: var(--ls-deep);
+}
+
 /* ---------- Layout ---------- */
 .container { max-width: 1080px; margin: 0 auto; padding: 2rem; }
 
@@ -560,4 +577,20 @@ footer {
   .ref-row { grid-template-columns: 1fr auto auto; }
   .ref-row code { grid-column: 1 / -1; }
   .ref-sum { grid-column: 1; }
+}
+
+@media (max-width: 600px) {
+  nav { justify-content: space-between; gap: 0.5rem; padding: 0.5rem 0.65rem; }
+  nav .nav-logo img { width: 34px; height: 34px; }
+  nav .nav-toggle { display: block; margin-left: auto; }
+  nav .nav-links { display: none; }
+  nav.nav-open { flex-wrap: wrap; }
+  nav.nav-open .nav-links {
+    display: flex;
+    flex: 0 0 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.35rem;
+  }
+  nav.nav-open .nav-links a { padding: 0.65rem; }
 }
