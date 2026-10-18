@@ -45,6 +45,97 @@ def params(src: str) -> list:
             for p in re.finditer(r"(\w+)\s*:\s*number\s*=\s*(-?\d+)", m.group(1))]
 
 
+def slug(heading: str) -> str:
+    """The id the spec viewer gives a heading (docs/js/main.js, spec viewer)."""
+    return re.sub(r"^-|-$", "", re.sub(r"[^\w]+", "-", heading.lower())) or "section"
+
+
+def table(md: str, heading: str) -> list:
+    """Rows of the first pipe table after `heading`, as lists of cell text."""
+    start = md.find(heading)
+    if start < 0:
+        raise SystemExit(f"spec.md: heading not found: {heading!r}")
+    rows, seen = [], False
+    for ln in md[start:].splitlines()[1:]:
+        if ln.startswith("|"):
+            seen = True
+            cells = [c.strip() for c in ln.strip().strip("|").split("|")]
+            if not all(re.fullmatch(r":?-+:?", c) for c in cells):
+                rows.append(cells)
+        elif seen:
+            break
+    return rows[1:]  # drop the header row
+
+
+def plain(text: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[`*]", "", text)).strip()
+
+
+def section_of(md: str, ref: str, default: str) -> str:
+    """Anchor of the spec section a table row cites, e.g. 'section 6.6' -> 6-6-...."""
+    m = re.search(r"section (\d+\.\d+)", ref)
+    if not m:
+        return default
+    h = re.search(rf"^#+ {re.escape(m.group(1))} .*$", md, re.M)
+    return slug(h.group(0).lstrip("# ")) if h else default
+
+
+def api_entries(md: str) -> list:
+    """Searchable language reference, distilled from the spec's own tables.
+
+    One entry per function (5.10), operation (6.0), mode (6) and keyword (2.4):
+    {name, kind, signature, summary, anchor}. Fails if a table moves or empties.
+    """
+    out = []
+    fn_anchor = slug("5.10 Built-in functions")
+    for call, sig, result in table(md, "### 5.10 Built-in functions"):
+        name = re.match(r"`(\w+)", call).group(1)
+        out.append({"name": name, "kind": "function", "signature": plain(call),
+                    "summary": plain(result).split(". ")[0].rstrip("."), "anchor": fn_anchor,
+                    "detail": plain(sig)})
+    for op, params, effect in table(md, "**Operation table.**"):
+        name = plain(op)
+        sig = name + "(" + ", ".join(re.findall(r"`([^`]+)`", params)) + ")"
+        out.append({"name": name, "kind": "operation", "signature": sig,
+                    "summary": re.sub(r"\s*\(section [^)]*\)", "", plain(effect)),
+                    "anchor": section_of(md, effect, slug("6.0 Built-in operations"))})
+    mode_anchor = slug("6.7 Rule application semantics")
+    for mode, over_rule, _ in table(md, "**Modes.**"):
+        for form in re.findall(r"`([^`]+)`", mode):
+            out.append({"name": re.match(r"\w+", form).group(0), "kind": "mode", "signature": form,
+                        "summary": plain(over_rule), "anchor": mode_anchor})
+    kw = re.search(r"### 2\.4 Reserved keywords\s+```\n(.*?)```", md, re.S)
+    declared = {e["name"] for e in out}
+    for word in kw.group(1).split() if kw else []:
+        if word not in declared:
+            out.append({"name": word, "kind": "keyword", "signature": word, "summary": KEYWORDS.get(word, ""),
+                        "anchor": slug("2.4 Reserved keywords")})
+    missing = [e["name"] for e in out if e["kind"] == "keyword" and not e["summary"]]
+    if missing or not any(e["kind"] == "function" for e in out):
+        raise SystemExit(f"API extraction incomplete; add KEYWORDS entries for: {missing}")
+    # dedupe: a mode keyword listed twice (scatter(N) / scatter(P%)) keeps the first
+    seen, uniq = set(), []
+    for e in out:
+        k = (e["name"], e["kind"])
+        if k not in seen:
+            seen.add(k)
+            uniq.append(e)
+    return sorted(uniq, key=lambda e: (e["kind"], e["name"]))
+
+
+# One-line meaning for keywords, which the spec lists but does not tabulate.
+KEYWORDS = {
+    "tag": "declare a tagset: named cell values and unions", "layers": "declare the grids a generator works on",
+    "grid": "a layer of cells", "graph": "a graph layer: regions as nodes, adjacency as edges",
+    "of": "binds a grid to its tagset (grid of tagset)", "number": "numeric cell type",
+    "rule": "a pattern => pattern rewrite", "sequence": "a named, reusable list of statements",
+    "params": "inputs and derived values of a generator", "where": "pseudo-layer matching on a boolean expression",
+    "when": "guard: run the statement only if the param expression holds", "use": "import another module",
+    "any": "pick one alternative at random", "all": "every sub-rule must match",
+    "ordered": "sub-rules tried in priority order", "weight": "relative chance of an alternative",
+}
+
+
 def main() -> None:
     samples = []
     for lvs in sorted((ROOT / "tests" / "golden" / "programs").glob("*.lvs")):
@@ -59,13 +150,16 @@ def main() -> None:
     files = {f"modules/{p.name}": p.read_text(encoding="utf-8")
              for p in sorted((ROOT / "tests" / "golden" / "programs" / "modules").glob("*.lvs"))}
 
+    api = api_entries((ROOT / "docs" / "spec.md").read_text(encoding="utf-8"))
+
     out = ROOT / "docs" / "js" / "samples-data.js"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("// Generated by tools/build_site_data.py - do not edit or commit.\n"
                    "window.LVS_SAMPLES = " + json.dumps(samples, separators=(",", ":")) + ";\n"
-                   "window.LVS_FILES = " + json.dumps(files, separators=(",", ":")) + ";\n",
+                   "window.LVS_FILES = " + json.dumps(files, separators=(",", ":")) + ";\n"
+                   "window.LVS_API = " + json.dumps(api, separators=(",", ":")) + ";\n",
                    encoding="utf-8")
-    print(f"wrote {out.relative_to(ROOT)}: {len(samples)} samples, {len(files)} modules")
+    print(f"wrote {out.relative_to(ROOT)}: {len(samples)} samples, {len(files)} modules, {len(api)} api entries")
 
 
 if __name__ == "__main__":
