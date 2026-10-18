@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sandbox - LevelScript</title>
+  <meta name="description" content="Write a LevelScript program in your browser, run it, and look up the language.">
+  <meta name="keywords" content="procedural generation, level generation, scripting language, pattern rewriting, roguelike, game development">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" type="image/png" href="img/levelscript.png">
+</head>
+<body>
+  <nav>
+    <a href="index.html" class="nav-logo"><img src="img/levelscript.png" alt="LevelScript logo"></a>
+    <ul class="nav-links">
+      <li><a href="index.html"><i class="fas fa-layer-group"></i> levelscript</a></li>
+      <li><a href="getting-started.html"><i class="fas fa-rocket"></i> getting started</a></li>
+      <li><a href="samples.html"><i class="fas fa-border-all"></i> samples</a></li>
+      <li><a href="sandbox.html"><i class="fas fa-flask"></i> sandbox</a></li>
+      <li><a href="spec.html"><i class="fas fa-book"></i> language spec</a></li>
+      <li><a href="https://github.com/enci/levelscript/releases/latest" target="_blank"><i class="fas fa-download"></i> download</a></li>
+      <li><a href="https://github.com/enci/levelscript" target="_blank"><i class="fab fa-github"></i> github</a></li>
+    </ul>
+  </nav>
+  <div class="container">
+    <h1 style="font-size:2.4rem;margin-bottom:.5rem">Sandbox</h1>
+    <p class="lead">Write a program, press Run, change the seed. Your draft is kept in this browser, so you can leave for another page and come back to it. Below the editor is a searchable reference for the built-in functions, operations and modes.</p>
+    <div class="sandbox-bar">
+      <select id="sb-sample" aria-label="Load a sample"><option value="">load a sample&hellip;</option></select>
+      <button type="button" id="sb-reset" title="Back to the default sample"><i class="fas fa-rotate-left"></i> Reset</button>
+      <button type="button" id="sb-prev" title="Bring back the draft that was replaced last" disabled><i class="fas fa-clock-rotate-left"></i> Restore previous</button>
+      <button type="button" id="sb-download"><i class="fas fa-download"></i> Download .lvs</button>
+      <label class="file-btn"><i class="fas fa-folder-open"></i> Open .lvs<input type="file" id="sb-open" accept=".lvs,text/plain" hidden></label>
+      <span id="sb-note" role="status"></span>
+    </div>
+    <div id="sandbox"></div>
+    <section id="reference">
+      <h2>Reference</h2>
+      <p class="muted">Generated from the <a href="spec.html">language spec</a>.</p>
+      <input type="search" id="ref-q" placeholder="search: random, path, grow, ..." aria-label="Search the reference" autocomplete="off">
+      <div class="layer-chips" id="ref-kinds"></div>
+      <div id="ref-results"></div>
+    </section>
+  </div>
+  <footer>
+    LevelScript is MIT licensed &middot; <a href="https://github.com/enci/levelscript">github.com/enci/levelscript</a>
+  </footer>
+  <script src="wasm/ls_wasm.js"></script>
+  <script src="js/samples-data.js"></script>
+  <script src="js/api-search.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

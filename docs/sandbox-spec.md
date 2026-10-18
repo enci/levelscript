@@ -37,7 +37,7 @@ Sample widgets get an "open in sandbox" action that navigates to `sandbox.html#s
 - First visit with no draft and no hash loads the `dungeon` sample.
 
 **D3. Reset and one-level undo.**
-A "reset" action loads the default sample. Before any replacement of a non-empty draft (reset, or opening a sample), the previous draft is kept under `lvs.sandbox.v1.prev`, and a "restore previous" action swaps it back. Only one level is kept.
+A "reset" action loads the default sample, without a prompt, since it can be undone. Before any replacement of a non-empty draft (reset, opening a sample, importing a file), the previous draft is kept under `lvs.sandbox.v1.prev`, and a "restore previous" action swaps it back. Only one level is kept.
 
 **D4. Export and import.**
 "Download .lvs" saves the source as `sandbox.lvs`. "Open .lvs" loads a local file into the editor through a file input. Nothing is uploaded anywhere. Importing goes through the same replace prompt as D2.
@@ -65,6 +65,7 @@ Entry shape:
   kind: "operation",               // function | operation | mode | keyword
   signature: "voronoi(sites:pred, into:grid, ...)",
   summary: "partition the cells by nearest site, ...",
+  insert: "voronoi(sites=sites, into=into)",  // what the insert button puts at the caret
   anchor: "6-12-voronoi",          // heading id in spec.html
   detail: "..."                    // functions only: the typed signature
 }
@@ -80,7 +81,7 @@ A text box filters `LVS_API` as the user types.
 - Case-insensitive. A query matches an entry when every whitespace-separated term is a substring of `name`, `kind` or `summary`.
 - Ranking, best first: exact name, name prefix, name substring, then summary/kind matches. Ties keep the sorted order (kind, then name).
 - Kind chips (all, function, operation, mode, keyword) narrow the results.
-- Each result shows `signature`, `summary`, a link to the spec section, and an **insert** button that puts the call at the editor's caret (the signature with its parameter names as placeholders, no selection handling).
+- Each result shows `signature`, `summary`, a link to the spec section, and an **insert** button that puts `insert` at the editor's caret (required parameters only, as `name=name` for operations whose parameters are all named; no selection handling).
 - An empty query lists everything, grouped by kind.
 - No match shows "No results for *query*" and a link to the full spec.
 
@@ -90,14 +91,16 @@ The editor and run view sit on top; the reference is below, on the same page. At
 ## Page behaviour
 
 - The wasm module (about 700 KB) loads on page open. Until it resolves the editor is usable and Run is disabled with a "loading" label. If loading fails the page shows the same message the widgets show today.
-- A run that is still going can be stopped. A run is also capped by a step limit, so an accidental non-terminating program (`grow` without a count) cannot lock the tab. The status says "stopped" with the limit reached.
+- Runs happen in a Web Worker (`docs/js/run-worker.js`). A run is cut off after 5 s by terminating the worker, so an accidental non-terminating program (`grow` without a count) cannot lock the tab. The status says "stopped" and the error box says why. The step, statement and play buttons still run on the main thread, one application at a time.
 - The nav gets a "sandbox" link on every page, and the home page hero and sample cards link to it.
 - The seed field and the params panel persist with the draft (D1) so a rerun reproduces.
 
 ## Affects
 
-- `docs/sandbox.html` (new): nav, editor host, reference section; loads `ls_wasm.js`, `samples-data.js`, `main.js`.
-- `docs/js/main.js`: a `createSandbox` entry alongside `createWidget`, the storage helpers, search, and the "open in sandbox" action in the sample widgets.
+- `docs/sandbox.html` (new): nav, toolbar, editor host, reference section; loads `ls_wasm.js`, `samples-data.js`, `api-search.js`, `main.js`.
+- `docs/js/main.js`: sandbox setup next to `createWidget` (storage, toolbar, reference), widget options for the sandbox (`initial`, `onChange`, `worker`, `dynamicParams`), and the "open in sandbox" link on the samples page.
+- `docs/js/api-search.js` (new): the pure search function.
+- `docs/js/run-worker.js` (new): runs a program off the main thread.
 - `docs/css/style.css`: sandbox layout, search box, chips, result rows.
 - `docs/index.html`, `docs/getting-started.html`, `docs/samples.html`, `docs/spec.html`: add the nav link.
 - `tools/build_site_data.py`: `api_entries()` and the `KEYWORDS` dict, emitting `window.LVS_API` (done).
@@ -112,7 +115,7 @@ The editor and run view sit on top; the reference is below, on the same page. At
 - **A6.** Insert on `resize` puts `resize(w, h)` at the caret, and the result link goes to the 6.1 heading in `spec.html`.
 - **A7.** Deleting a row from the 5.10 table and rebuilding removes that entry from search. Emptying the table makes `build_site_data.py` fail.
 - **A8.** A program using `use "does/not/exist.lvs"` shows the compiler's error in the diagnostics list and does not run.
-- **A9.** A `grow` with no count that never reaches a fixpoint stops at the step limit and the page stays responsive.
+- **A9.** A `grow` with no count that never reaches a fixpoint stops after 5 s and the page stays responsive.
 - **A10.** At 360 px wide the page has no horizontal scroll.
 
 ## Parked
