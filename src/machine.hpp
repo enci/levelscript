@@ -25,7 +25,7 @@ template <class Next> uint64_t uniform_draw(Next&& next, uint64_t n) {
 // hash(d, i): a 64-bit key from a raw draw `d` and an index `i`, consuming no
 // draw - splitmix64's finalizer over d ^ i (section 10.6). A bijection in i
 // for a fixed d, so distinct indices never share a key.
-inline uint64_t hash_draw(uint64_t d, uint64_t i) {
+inline uint64_t hash(uint64_t d, uint64_t i) {
     uint64_t z = (d ^ i) + 0x9e3779b97f4a7c15ull;
     z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ull;
     z = (z ^ (z >> 27)) * 0x94d049bb133111ebull;
