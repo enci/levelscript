@@ -1,0 +1,27 @@
+// Showcase (v0.11): `voronoi` - a partition operation (section 6.12).
+//
+// Rules place the sites; `voronoi` claims every floor cell for its nearest
+// site and writes zone ids into `zones`. Under `metric=manhattan` distance is
+// route length through floor, so a wall with one gap makes it geodesic: a site
+// reaches the far side only through the gap, and pays for the detour.
+//
+// @seed 5
+// @expect run-ok
+
+tag geo  { floor, wall }
+tag mark { site }
+layers {
+    level: grid of geo
+    marks: grid of mark
+    zones: grid of number
+}
+rule barrier    { where[ (x == 12 && y != 8) ] => level[wall] }
+rule ground     { level[.] => level[floor] }
+rule place_site { level[floor] marks[.] => marks[site] }
+sequence main {
+    resize(24, 16)
+    everywhere barrier
+    everywhere ground
+    scatter(6) place_site
+    voronoi(sites=site, within=floor, into=zones, metric=manhattan)
+}

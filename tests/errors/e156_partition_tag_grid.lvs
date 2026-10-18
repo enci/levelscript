@@ -1,0 +1,10 @@
+// E156 (0.11, check 35): `bsp`, `voronoi`, and `noise` write ids and values
+// only a number grid can hold; `into` given a tag grid is a kind error.
+// @expect error
+// @expect stderr-contains is a tag grid; it takes a number grid
+tag t { a }
+layers { g: grid of t }
+sequence main {
+    resize(8, 8)
+    bsp(into=g, min=2)
+}

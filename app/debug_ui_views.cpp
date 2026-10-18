@@ -287,6 +287,9 @@ char const* stmt_icon(program_stmt const& s, compiled_stmt const& cs) {
     if (s.op_name == "mirror")  return phosphor::PH_ARROWS_LEFT_RIGHT;
     if (s.op_name == "pad")     return phosphor::PH_ARROWS_OUT_SIMPLE;
     if (s.op_name == "path")    return phosphor::PH_PATH;
+    if (s.op_name == "bsp")     return phosphor::PH_SQUARES_FOUR;
+    if (s.op_name == "voronoi") return phosphor::PH_POLYGON;
+    if (s.op_name == "noise")   return phosphor::PH_WAVES;
     return phosphor::PH_QUESTION;
 }
 

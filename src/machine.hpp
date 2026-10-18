@@ -22,6 +22,37 @@ template <class Next> uint64_t uniform_draw(Next&& next, uint64_t n) {
     }
 }
 
+// uniform_hash(d, i): a 64-bit key from a raw draw `d` and an index `i`, consuming no
+// draw - splitmix64's finalizer over d ^ i (section 10.6). A bijection in i
+// for a fixed d, so distinct indices never share a key.
+inline uint64_t uniform_hash(uint64_t d, uint64_t i) {
+    uint64_t z = (d ^ i) + 0x9e3779b97f4a7c15ull;
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ull;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebull;
+    return z ^ (z >> 31);
+}
+
+// floor(a * b / c) with the product computed exactly in 128 bits, for a
+// quotient that fits in 64. Portable (MSVC has no __int128).
+inline uint64_t mul_div(uint64_t a, uint64_t b, uint64_t c) {
+    // 128-bit product as hi:lo from 32-bit halves
+    uint64_t al = a & 0xffffffffu, ah = a >> 32, bl = b & 0xffffffffu, bh = b >> 32;
+    uint64_t ll = al * bl, lh = al * bh, hl = ah * bl, hh = ah * bh;
+    uint64_t mid = (ll >> 32) + (lh & 0xffffffffu) + (hl & 0xffffffffu);
+    uint64_t lo = (mid << 32) | (ll & 0xffffffffu);
+    uint64_t hi = hh + (lh >> 32) + (hl >> 32) + (mid >> 32);
+    if (hi == 0) return lo / c;
+    // restoring long division of hi:lo by c, one bit at a time
+    uint64_t q = 0, r = 0;
+    for (int bit = 127; bit >= 0; --bit) {
+        bool top = (r >> 63) != 0;
+        r = (r << 1) | ((bit >= 64 ? hi >> (bit - 64) : lo >> bit) & 1);
+        q <<= 1;
+        if (top || r >= c) { r -= c; q |= 1; }
+    }
+    return q;
+}
+
 // ── generated output (owned values; what level/grid hand to the game) ────────
 
 struct level_data {
@@ -130,6 +161,17 @@ private:
 
     void exec_op(compiled_op const& op);
     void run_path(compiled_op const& op, int ndirs);   // ndirs = 4 or 8
+    void run_bsp(compiled_op const& op, long long min, long long max, long long split);
+    void run_voronoi(compiled_op const& op);
+    void grow_euclidean(int W, int H, uint64_t d, int nsites, std::vector<int> const& site_of,
+                        std::vector<char> const& within, std::vector<int>& claim);
+    void grow_steps(int W, int H, uint64_t d, int ndirs, std::vector<int> const& site_of,
+                    std::vector<char> const& within, std::vector<long long> const& costv,
+                    std::vector<int>& claim);
+    void run_noise(compiled_op const& op, long long lo, long long hi, long long scale,
+                   long long octaves, long long persistence);
+    // Write a full W x H field into number grid `id`.
+    void write_field(int id, std::vector<int64_t> const& cells);
     // Evaluate an arena expression at position (x, y). Total: /0 = 0,
     // wrap at 32 bits, empty number cells read as 0. `random` draws — which is
     // why the whole matching path is non-const.

@@ -1,0 +1,8 @@
+// E157 (0.11, check 35): `normalize` of `noise` is an enum in {rank, range}.
+// @expect error
+// @expect stderr-contains invalid noise normalize 'sorted'
+layers { h: grid of number }
+sequence main {
+    resize(8, 8)
+    noise(into=h, lo=0, hi=9, scale=4, normalize=sorted)
+}
