@@ -11,34 +11,16 @@
   });
 
   // ---------- syntax highlighting for .lvs ----------
-  const KW = new Set(['tag', 'layers', 'grid', 'graph', 'of', 'number', 'rule', 'sequence', 'params',
-    'where', 'when', 'use', 'any', 'all', 'ordered', 'once', 'scatter', 'everywhere', 'grow', 'settle', 'weight']);
-  const OPS = new Set(['resize', 'upscale', 'trim', 'mirror', 'pad', 'path', 'bsp', 'voronoi', 'noise']);
-  const FNS = new Set(['count', 'degree', 'distance', 'neighbors', 'min', 'max', 'abs', 'random']);
-  const TOKEN = /(\/\/[^\n]*)|("[^"\n]*")|(=>)|(\b\d+%?)|([A-Za-z_]\w*)|([\s\S])/g;
+  // The vocabulary comes from the grammar (window.LVS_EDITOR, built by tools/build_site_data.py);
+  // the lexer and renderers live in editor-model.js.
+  const model = window.LVS_model;
 
   function esc(s) {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
   function highlight(src) {
-    let out = '';
-    let m;
-    TOKEN.lastIndex = 0;
-    while ((m = TOKEN.exec(src))) {
-      const [t, cm, str, arrow, num, id] = m;
-      if (cm) out += '<span class="tk-cm">' + esc(cm) + '</span>';
-      else if (str) out += '<span class="tk-str">' + esc(str) + '</span>';
-      else if (arrow) out += '<span class="tk-op">=&gt;</span>';
-      else if (num) out += '<span class="tk-num">' + num + '</span>';
-      else if (id) {
-        if (KW.has(id)) out += '<span class="tk-kw">' + id + '</span>';
-        else if (OPS.has(id)) out += '<span class="tk-fn">' + id + '</span>';
-        else if (FNS.has(id) && src[TOKEN.lastIndex] === '(') out += '<span class="tk-fn">' + id + '</span>';
-        else out += id;
-      } else out += esc(t);
-    }
-    return out;
+    return model.highlightHtml(src, window.LVS_EDITOR);
   }
 
   document.querySelectorAll('pre code.lvs, pre code.language-ls, pre code.language-lvs').forEach(el => {
@@ -212,12 +194,13 @@
         '</div>' +
         '<div class="layer-chips"></div>' +
         '<div class="legend"></div>' +
+        '<div class="diag-list" hidden></div>' +
         '<pre class="error" hidden></pre>' +
       '</div>';
 
     const $ = s => host.querySelector(s);
     const canvas = $('canvas'), status = $('.status'), errBox = $('.error');
-    const ta = $('textarea'), hl = $('.hl code');
+    const ta = $('textarea'), hl = $('.hl code'), diagBox = $('.diag-list');
     const seedInput = $('.seed');
     seedInput.value = seed;
 
@@ -283,10 +266,73 @@
         ' / ' + state.statementCount) + ' · ' + lvl.width + '×' + lvl.height;
     }
 
+    // ---- inspection: decorations and diagnostics come from one inspect_json call per edit ----
+    let insp = null, diag = null;
+    function inspectNow() {
+      insp = null;
+      if (!mod || !ta) return;
+      try { insp = JSON.parse(mod.inspect_json(ta.value, fileName, resolver(fileName))); } catch (e) { insp = null; }
+    }
+    function hasErrors() { return !!insp && (insp.diagnostics || []).some(d => d.severity === 'error'); }
+    // Compile errors are shown by the diagnostics list, so a program that does not compile is not run.
+    function blocked() {
+      inspectNow();
+      if (!hasErrors()) return false;
+      stopPlay();
+      endSession();
+      if (worker) stopWorker();
+      showError('');
+      status.textContent = 'compile error';
+      return true;
+    }
+    function scrollSync() { hl.parentNode.scrollTop = ta.scrollTop; hl.parentNode.scrollLeft = ta.scrollLeft; }
+    function sync() {
+      const src = ta.value;
+      inspectNow();
+      const lex = model.lexRuns(src, window.LVS_EDITOR);
+      const bgs = insp ? model.cellRanges(src, insp, window.LVS_EDITOR, fileName) : [];
+      diag = insp ? model.diagnosticRanges(src, insp, fileName) : null;
+      hl.innerHTML = model.renderHtml(src, lex, bgs, diag) + '\n';
+      renderDiagList();
+      scrollSync();
+    }
+    function renderDiagList() {
+      const rows = diag ? diag.rows : [];
+      diagBox.hidden = !rows.length;
+      diagBox.innerHTML = '';
+      rows.forEach(r => {
+        const el = document.createElement(r.at === null ? 'div' : 'button');
+        el.className = 'diag-row ' + r.severity;
+        el.textContent = (r.module ? r.module + ': ' : '') + r.line + ':' + r.col + '  ' + r.message;
+        if (r.at !== null) { el.type = 'button'; el.onclick = () => goTo(r.at); }
+        diagBox.appendChild(el);
+      });
+      markActive();
+    }
+    function goTo(at) {
+      ta.focus();
+      ta.setSelectionRange(at, at);
+      const line = ta.value.slice(0, at).split('\n').length - 1;
+      const lh = parseFloat(getComputedStyle(ta).lineHeight) || 20;
+      ta.scrollTop = Math.max(0, line * lh - ta.clientHeight / 3);
+      scrollSync();
+      markActive();
+    }
+    // there is no hover (the textarea covers the overlay), so the row under the caret is marked
+    function markActive() {
+      if (!diag) return;
+      const p = ta.selectionStart;
+      [...diagBox.children].forEach((el, i) => {
+        const r = diag.rows[i];
+        el.classList.toggle('active', r.from !== null && p >= r.from && p <= r.to);
+      });
+    }
+
     function begin() {
       stopPlay();
       endSession();
       showError('');
+      if (blocked()) return false;
       const id = mod.run_begin(source(), fileName, seed >>> 0, 'main', resolver(fileName), params);
       if (id < 0) { showError(mod.run_last_error()); status.textContent = 'compile error'; return false; }
       sessionId = id;
@@ -313,6 +359,7 @@
       endSession();
       showError('');
       if (pending) stopWorker();
+      if (blocked()) return;
       if (!worker) {
         try { worker = new Worker('js/run-worker.js'); }
         catch (err) { opts.worker = false; runAll(); return; }
@@ -388,14 +435,14 @@
 
     if (ta) {
       ta.value = typeof init.source === 'string' ? init.source : sample.source;
-      const sync = () => { hl.innerHTML = highlight(ta.value) + '\n'; hl.parentNode.scrollTop = ta.scrollTop; hl.parentNode.scrollLeft = ta.scrollLeft; };
       ta.addEventListener('input', () => {
         sync();
         if (opts.dynamicParams) buildParams(parseParams(ta.value));
         changed();
         scheduleRun();
       });
-      ta.addEventListener('scroll', sync);
+      ta.addEventListener('scroll', scrollSync);
+      ['keyup', 'click', 'select'].forEach(ev => ta.addEventListener(ev, markActive));
       ta.addEventListener('keydown', e => {
         if (e.key === 'Tab') {
           e.preventDefault();
@@ -434,6 +481,7 @@
     return loadRuntime().then(m => {
       mod = m;
       host.querySelectorAll('.controls button').forEach(b => { b.disabled = false; });
+      if (ta) sync();
       if (opts.autoplay) { $('.play').click(); } else { runAll(); }
       return api;
     }).catch(err => {
