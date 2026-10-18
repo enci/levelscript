@@ -9,6 +9,14 @@
   document.querySelectorAll('nav .nav-links a').forEach(a => {
     if (a.getAttribute('href') === here) a.classList.add('active');
   });
+  document.querySelectorAll('nav .nav-toggle').forEach(toggle => {
+    toggle.addEventListener('click', () => {
+      const open = toggle.getAttribute('aria-expanded') !== 'true';
+      toggle.setAttribute('aria-expanded', open);
+      toggle.setAttribute('aria-label', open ? 'Close navigation' : 'Open navigation');
+      toggle.closest('nav').classList.toggle('nav-open', open);
+    });
+  });
 
   // ---------- syntax highlighting for .lvs ----------
   // The vocabulary comes from the grammar (window.LVS_EDITOR, built by tools/build_site_data.py);
