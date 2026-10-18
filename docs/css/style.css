@@ -229,13 +229,37 @@ code {
   color: var(--ls-yellow);
 }
 
-.tk-kw { color: #f5dd7e; font-weight: 600; }
+.tk-kw { color: #f5dd7e; }
 .tk-ty { color: #6fd8c0; }
 .tk-fn { color: #8fd3ff; }
 .tk-num { color: #ffb286; }
-.tk-cm { color: #6b8179; font-style: italic; }
+.tk-cm { color: #6b8179; }
 .tk-op { color: #ff8fb1; }
 .tk-str { color: #a8e07a; }
+.tk-var { color: #c9a7ff; }
+
+/* diagnostics in the editor overlay: decorations only, nothing here may change a glyph's advance */
+.dg-error { text-decoration: underline wavy #ef476f; text-decoration-skip-ink: none; }
+.dg-warning { text-decoration: underline wavy #f5b83d; text-decoration-skip-ink: none; }
+.dg-point { position: relative; }
+.dg-point::after { content: ""; position: absolute; left: -0.3em; bottom: 0.1em; width: 0.6em; height: 2px; background: #ef476f; }
+.dg-point.dg-warning::after { background: #f5b83d; }
+
+.diag-list { margin-top: 0.7rem; display: grid; gap: 2px; max-height: 10rem; overflow: auto; }
+.diag-list[hidden] { display: none; }
+.diag-row {
+  text-align: left;
+  font: 0.78rem/1.5 var(--mono);
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 4px solid #ef476f;
+  border-radius: 4px;
+  padding: 0.35rem 0.7rem;
+}
+.diag-row.warning { border-left-color: #f5b83d; }
+button.diag-row { cursor: pointer; }
+button.diag-row:hover, .diag-row.active { border-color: var(--ls-green); background: rgba(63, 196, 110, 0.12); }
 
 /* ---------- Live widget: editor | output ---------- */
 .lvs-widget {
