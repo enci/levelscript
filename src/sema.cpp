@@ -207,6 +207,10 @@ static const operator_row operators[] = {
 // The `mirror` operation's axis: 1 = horizontal.
 struct axis_row { char const* name; int w; };
 static const axis_row mirror_axes[] = {{"horizontal", 1}, {"vertical", 0}};
+// The `voronoi` operation's metric: 0 = euclidean, else the step adjacency.
+static const axis_row voronoi_metrics[] = {{"euclidean", 0}, {"manhattan", 4}, {"chebyshev", 8}};
+// The `noise` operation's normalization: 1 = rank.
+static const axis_row noise_normalizations[] = {{"rank", 1}, {"range", 0}};
 
 // Identifier scope for the position being compiled. Cell/where exprs are
 // permissive; statement exprs and param exprs are restricted.
@@ -1253,6 +1257,22 @@ struct analyzer {
                                            {"passable",     arg_kind::pred,  false, false},
                                            {"connectivity", arg_kind::int_,  false, false},
                                            {"cost",         arg_kind::expr,  false, false}}},
+            {"bsp",     op_kind::bsp,     {{"into",         arg_kind::grid,  false, true},
+                                           {"min",          arg_kind::int_,  false, true},
+                                           {"max",          arg_kind::int_,  false, false},
+                                           {"split",        arg_kind::int_,  false, false}}},
+            {"voronoi", op_kind::voronoi, {{"sites",        arg_kind::pred,  false, true},
+                                           {"into",         arg_kind::grid,  false, true},
+                                           {"within",       arg_kind::pred,  false, false},
+                                           {"metric",       arg_kind::enum_, false, false},
+                                           {"cost",         arg_kind::expr,  false, false}}},
+            {"noise",   op_kind::noise,   {{"into",         arg_kind::grid,  false, true},
+                                           {"lo",           arg_kind::int_,  false, true},
+                                           {"hi",           arg_kind::int_,  false, true},
+                                           {"scale",        arg_kind::int_,  false, true},
+                                           {"octaves",      arg_kind::int_,  false, false},
+                                           {"persistence",  arg_kind::int_,  false, false},
+                                           {"normalize",    arg_kind::enum_, false, false}}},
         };
         return table;
     }
@@ -1296,6 +1316,17 @@ struct analyzer {
             error(a.loc, arg_ctx(op, pn) + ": '" + *name + "' is not a declared grid");
         else
             require_visible(a.loc, "grid", *name, layer_mod[(size_t)id]);
+        return id;
+    }
+
+    // A grid that receives ids or values only a number grid can hold.
+    int op_number_grid(op_arg const& a, char const* op, char const* pn) {
+        int id = op_grid(a, op, pn);
+        if (id >= 0 && out.layers[(size_t)id].tag_id >= 0) {
+            error(a.loc, arg_ctx(op, pn) + ": '" + *bare_name(a) +
+                  "' is a tag grid; it takes a number grid");
+            return -1;
+        }
         return id;
     }
 
@@ -1446,6 +1477,71 @@ struct analyzer {
             assert(index("connectivity") == compiled_op::path_connectivity);
             if (!arg("connectivity"))   // the default, as an `int` argument
                 op.int_args.push_back({compiled_op::path_connectivity, num_lit(4)});
+            break;
+        }
+        case op_kind::bsp: {
+            auto index = [&](std::string_view n) {
+                return (int)(lookup(spec->params, n) - spec->params.data());
+            };
+            auto arg = [&](char const* n) { return bound[(size_t)index(n)]; };
+            op.into_grid = op_number_grid(*arg("into"), spec->name, "into");
+            assert(index("min") == compiled_op::bsp_min && index("max") == compiled_op::bsp_max &&
+                   index("split") == compiled_op::bsp_split);
+            op.has_max = arg("max") != nullptr;
+            if (!arg("split"))
+                op.int_args.push_back({compiled_op::bsp_split, num_lit(50)});
+            break;
+        }
+        case op_kind::voronoi: {
+            auto index = [&](std::string_view n) {
+                return (int)(lookup(spec->params, n) - spec->params.data());
+            };
+            auto arg = [&](char const* n) { return bound[(size_t)index(n)]; };
+            op.into_grid = op_number_grid(*arg("into"), spec->name, "into");
+            op.sites     = op_pred(*arg("sites"), spec->name, "sites");
+            if (arg("within")) op.within = op_pred(*arg("within"), spec->name, "within");
+            op.w = 0;   // euclidean
+            if (auto a = arg("metric")) {
+                auto m = lookup(voronoi_metrics, arg_render(*a));
+                if (!m) {
+                    invalid(a->loc, "voronoi metric", arg_render(*a), voronoi_metrics);
+                    return false;
+                }
+                op.w = m->w;
+            }
+            if (auto a = arg("cost")) {
+                if (op.w == 0) {
+                    error(a->loc, arg_ctx(spec->name, "cost") + " measures route length; it "
+                          "takes metric=manhattan or metric=chebyshev, not euclidean");
+                    return false;
+                }
+                op.cost = op_num(*a, spec->name, "cost", false);
+            }
+            break;
+        }
+        case op_kind::noise: {
+            auto index = [&](std::string_view n) {
+                return (int)(lookup(spec->params, n) - spec->params.data());
+            };
+            auto arg = [&](char const* n) { return bound[(size_t)index(n)]; };
+            op.into_grid = op_number_grid(*arg("into"), spec->name, "into");
+            assert(index("lo") == compiled_op::noise_lo && index("hi") == compiled_op::noise_hi &&
+                   index("scale") == compiled_op::noise_scale &&
+                   index("octaves") == compiled_op::noise_octaves &&
+                   index("persistence") == compiled_op::noise_persistence);
+            if (!arg("octaves"))
+                op.int_args.push_back({compiled_op::noise_octaves, num_lit(1)});
+            if (!arg("persistence"))
+                op.int_args.push_back({compiled_op::noise_persistence, num_lit(50)});
+            op.w = 1;   // rank
+            if (auto a = arg("normalize")) {
+                auto mode = lookup(noise_normalizations, arg_render(*a));
+                if (!mode) {
+                    invalid(a->loc, "noise normalize", arg_render(*a), noise_normalizations);
+                    return false;
+                }
+                op.w = mode->w;
+            }
             break;
         }
         }

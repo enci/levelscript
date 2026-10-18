@@ -445,7 +445,7 @@ std::string inspect_json(std::string const& source, std::string const& name,
         }
     }
     // completion vocabulary — kept in sync with the sema tables by the tests
-    o += "],\"ops\":[\"resize\",\"upscale\",\"trim\",\"mirror\",\"pad\",\"path\"]";
+    o += "],\"ops\":[\"resize\",\"upscale\",\"trim\",\"mirror\",\"pad\",\"path\",\"bsp\",\"voronoi\",\"noise\"]";
     o += ",\"builtins\":[\"if\",\"min\",\"max\",\"abs\",\"clamp\",\"random\"]";
     o += ",\"graph_functions\":[\"degree\",\"size\",\"distance\",\"neighbors\"]";
     o += "}}";

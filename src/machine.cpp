@@ -579,15 +579,369 @@ void machine::exec_op(compiled_op const& op) {
         run_path(op, conn == 8 ? 8 : 4);
         return;
     }
+
+    case op_kind::bsp: {
+        long long min = arg[compiled_op::bsp_min], split = arg[compiled_op::bsp_split];
+        if (min < 1) {
+            warn("bsp() min " + std::to_string(min) + " is below 1; treating it as 1");
+            min = 1;
+        }
+        if (split < 0 || split > 100) {
+            warn("bsp() split " + std::to_string(split) + " is outside 0-100; clamping it");
+            split = std::clamp(split, 0LL, 100LL);
+        }
+        run_bsp(op, min, arg[compiled_op::bsp_max], split);
+        return;
+    }
+
+    case op_kind::voronoi:
+        run_voronoi(op);
+        return;
+
+    case op_kind::noise: {
+        long long scale = arg[compiled_op::noise_scale], octaves = arg[compiled_op::noise_octaves];
+        long long persistence = arg[compiled_op::noise_persistence];
+        if (scale < 1) {
+            warn("noise() scale " + std::to_string(scale) + " is below 1; treating it as 1");
+            scale = 1;
+        }
+        if (octaves < 1) {
+            warn("noise() octaves " + std::to_string(octaves) + " is below 1; treating it as 1");
+            octaves = 1;
+        }
+        long long fit = 0;   // octaves whose spacing scale >> k is at least 1
+        while (fit < 63 && (scale >> fit) >= 1) ++fit;
+        if (octaves > fit) {
+            warn("noise() octaves " + std::to_string(octaves) + " exceeds the " +
+                 std::to_string(fit) + " that scale " + std::to_string(scale) +
+                 " allows; dropping the rest");
+            octaves = fit;
+        }
+        if (persistence < 0 || persistence > 100) {
+            warn("noise() persistence " + std::to_string(persistence) +
+                 " is outside 0-100; clamping it");
+            persistence = std::clamp(persistence, 0LL, 100LL);
+        }
+        run_noise(op, arg[compiled_op::noise_lo], arg[compiled_op::noise_hi], scale, octaves,
+                  persistence);
+        return;
+    }
     }
 }
 
-// Stateless per-cell mixer (splitmix64) for path tie keys.
-static uint64_t mix64(uint64_t v) {
-    v += 0x9e3779b97f4a7c15ull;
-    v = (v ^ (v >> 30)) * 0xbf58476d1ce4e5b9ull;
-    v = (v ^ (v >> 27)) * 0x94d049bb133111ebull;
-    return v ^ (v >> 31);
+void machine::write_field(int id, std::vector<int64_t> const& cells) {
+    grid_state& g = grids_[(size_t)id];
+    g.front = cells;
+    g.back = g.front;
+    ++g.version;
+}
+
+// bsp(...): recursively split the stack into rectangular leaves.
+//
+// Draw contract: nodes in pre-order (first child's subtree first), each
+// drawing - in this order, and only where the rule leaves a choice - the
+// split decision, the side, the cut. So the draws depend on the stack size
+// and the arguments alone, never on grid content.
+void machine::run_bsp(compiled_op const& op, long long min, long long max, long long split) {
+    if (grids_.empty() || grids_[0].rows <= 0 || op.into_grid < 0) {
+        warn("bsp() before any resize; leaving grids unchanged");
+        return;
+    }
+    int W = grids_[0].cols, H = grids_[0].rows;
+    struct rect { int x, y, w, h; };
+    std::vector<rect> leaves, stack{{0, 0, W, H}};
+    while (!stack.empty()) {
+        rect n = stack.back();
+        stack.pop_back();
+        long long s = std::max(n.w, n.h);
+        bool splits = false;
+        if (s >= 2 * min) {
+            bool forced = op.has_max && (n.w > max || n.h > max);
+            splits = forced || split >= 100 || (split > 0 && (long long)uniform(100) < split);
+        }
+        if (!splits) {
+            leaves.push_back(n);
+            continue;
+        }
+        bool cut_width = n.w > n.h || (n.w == n.h && uniform(2) == 0);
+        long long range = s - 2 * min + 1;
+        int c = (int)(min + (range > 1 ? (long long)uniform((uint64_t)range) : 0));
+        rect a = n, b = n;
+        if (cut_width) { a.w = c; b.x += c; b.w -= c; }
+        else           { a.h = c; b.y += c; b.h -= c; }
+        stack.push_back(b);   // popped after a's whole subtree: pre-order
+        stack.push_back(a);
+    }
+
+    // ids: row-major order of top-left cells - graph node order
+    std::sort(leaves.begin(), leaves.end(), [](rect const& p, rect const& q) {
+        return p.y != q.y ? p.y < q.y : p.x < q.x;
+    });
+    std::vector<int64_t> cells((size_t)W * H);
+    for (size_t id = 0; id < leaves.size(); ++id) {
+        auto const& l = leaves[id];
+        for (int y = l.y; y < l.y + l.h; ++y)
+            for (int x = l.x; x < l.x + l.w; ++x)
+                cells[(size_t)y * W + x] = (int64_t)id;
+    }
+    write_field(op.into_grid, cells);
+}
+
+// voronoi's neighbour offsets: the first 4 orthogonal, all 8 for chebyshev.
+static const int vdx[] = {1, -1, 0, 0, 1, 1, -1, -1};
+static const int vdy[] = {0, 0, 1, -1, 1, -1, 1, -1};
+
+// voronoi(...): partition the cells by nearest site, through `within`.
+//
+// Draw contract: `sites` then `within` row-major, per-cell `cost` under a
+// step metric, then ONE raw draw; a site's tie key is uniform_hash(d, site
+// index), so two sites resolve every tie between them alike. Either metric's
+// claims are a pure function, so the search order is unobservable.
+void machine::run_voronoi(compiled_op const& op) {
+    if (grids_.empty() || grids_[0].rows <= 0 || op.into_grid < 0) {
+        warn("voronoi() before any resize; leaving grids unchanged");
+        return;
+    }
+    int W = grids_[0].cols, H = grids_[0].rows;
+    size_t n = (size_t)W * H;
+
+    std::vector<char> is_site(n), within(n);
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x)
+            is_site[(size_t)y * W + x] = eval(op.sites, x, y) != 0;
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x) {
+            size_t i = (size_t)y * W + x;
+            within[i] = op.within < 0 || eval(op.within, x, y) != 0 || is_site[i];
+        }
+
+    std::vector<long long> costv(n, 1);
+    if (op.cost >= 0)   // step metrics only
+        for (int y = 0; y < H; ++y)
+            for (int x = 0; x < W; ++x) {
+                size_t i = (size_t)y * W + x;
+                if (!within[i]) continue;
+                long long cv = eval(op.cost, x, y);
+                costv[i] = cv < 1 ? 1 : cv;
+            }
+
+    uint64_t d = rng_();
+
+    // sites: 4-connected site regions, indexed in row-major order of their first cell
+    std::vector<int> site_of(n, -1);
+    int nsites = 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (!is_site[i] || site_of[i] >= 0) continue;
+        std::vector<size_t> stack{i};
+        site_of[i] = nsites;
+        while (!stack.empty()) {
+            size_t c = stack.back();
+            stack.pop_back();
+            int x = (int)(c % W), y = (int)(c / W);
+            for (int k = 0; k < 4; ++k) {
+                int nx = x + vdx[k], ny = y + vdy[k];
+                if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
+                size_t j = (size_t)ny * W + nx;
+                if (is_site[j] && site_of[j] < 0) { site_of[j] = nsites; stack.push_back(j); }
+            }
+        }
+        ++nsites;
+    }
+    if (nsites == 0) {
+        warn("voronoi() found no site cell; writing every cell empty");
+        write_field(op.into_grid, std::vector<int64_t>(n, num_empty));
+        return;
+    }
+
+    std::vector<int> claim(n, -1);
+    for (size_t i = 0; i < n; ++i)
+        if (site_of[i] >= 0) claim[i] = site_of[i];
+    if (op.w == 0) grow_euclidean(W, H, d, nsites, site_of, within, claim);
+    else           grow_steps(W, H, d, op.w, site_of, within, costv, claim);
+
+    // zone ids: row-major order of each zone's first cell - graph node order
+    std::vector<int64_t> zone_of(nsites, -1), cells(n, num_empty);
+    int64_t nzones = 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (claim[i] < 0) continue;
+        int64_t& z = zone_of[(size_t)claim[i]];
+        if (z < 0) z = nzones++;
+        cells[i] = z;
+    }
+    write_field(op.into_grid, cells);
+}
+
+// metric=euclidean: zones grow 4-adjacently, each claim the least (squared
+// distance to the claiming site's nearest cell, site key, cell) pair - so
+// zones are 4-connected, and on open ground the cell-sampled Euclidean
+// Voronoi diagram. A queued pair's priority never changes.
+void machine::grow_euclidean(int W, int H, uint64_t d, int nsites, std::vector<int> const& site_of,
+                             std::vector<char> const& within, std::vector<int>& claim) {
+    size_t n = (size_t)W * H;
+    // a site's nearest cell to any outside cell has a non-site 4-neighbour
+    // (a step from it toward that cell is closer), so only those are measured
+    std::vector<std::vector<std::pair<int, int>>> rim((size_t)nsites);
+    for (size_t i = 0; i < n; ++i) {
+        if (site_of[i] < 0) continue;
+        int x = (int)(i % W), y = (int)(i / W);
+        for (int k = 0; k < 4; ++k) {
+            int nx = x + vdx[k], ny = y + vdy[k];
+            if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
+            if (site_of[(size_t)ny * W + nx] != site_of[i]) {
+                rim[(size_t)site_of[i]].push_back({x, y});
+                break;
+            }
+        }
+    }
+    auto dist2 = [&](int s, int x, int y) {
+        long long best = std::numeric_limits<long long>::max();
+        for (auto [px, py] : rim[(size_t)s]) {
+            long long ddx = x - px, ddy = y - py;
+            best = std::min(best, ddx * ddx + ddy * ddy);
+        }
+        return best;
+    };
+    std::vector<uint64_t> key((size_t)nsites);
+    for (int s = 0; s < nsites; ++s) key[(size_t)s] = uniform_hash(d, (uint64_t)s);
+
+    using entry = std::tuple<long long, uint64_t, int, int>;   // D, key, cell, site
+    std::priority_queue<entry, std::vector<entry>, std::greater<entry>> pq;
+    auto offer = [&](int c, int s) {   // the unclaimed within neighbours of c, for s
+        int x = c % W, y = c / W;
+        for (int k = 0; k < 4; ++k) {
+            int nx = x + vdx[k], ny = y + vdy[k];
+            if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
+            int j = ny * W + nx;
+            if (within[(size_t)j] && claim[(size_t)j] < 0)
+                pq.push({dist2(s, nx, ny), key[(size_t)s], j, s});
+        }
+    };
+    for (size_t i = 0; i < n; ++i)
+        if (site_of[i] >= 0) offer((int)i, site_of[i]);
+    while (!pq.empty()) {
+        auto [dd, kk, c, s] = pq.top();
+        pq.pop();
+        if (claim[(size_t)c] >= 0) continue;   // claimed by a smaller pair
+        claim[(size_t)c] = s;
+        offer(c, s);
+    }
+}
+
+// metric=manhattan / chebyshev: multi-source Dijkstra over (distance, key) -
+// keys are per site, so the lexicographic minimum propagates along routes and
+// one search gives every cell its claim.
+void machine::grow_steps(int W, int H, uint64_t d, int ndirs, std::vector<int> const& site_of,
+                         std::vector<char> const& within, std::vector<long long> const& costv,
+                         std::vector<int>& claim) {
+    size_t n = (size_t)W * H;
+    const long long inf = std::numeric_limits<long long>::max();
+    std::vector<long long> dist(n, inf);
+    std::vector<uint64_t>  key(n, 0);
+    using entry = std::tuple<long long, uint64_t, int>;
+    std::priority_queue<entry, std::vector<entry>, std::greater<entry>> pq;
+    for (size_t i = 0; i < n; ++i)
+        if (site_of[i] >= 0) {
+            dist[i] = 0;
+            key[i] = uniform_hash(d, (uint64_t)site_of[i]);
+            pq.push({0, key[i], (int)i});
+        }
+    while (!pq.empty()) {
+        auto [dd, kk, i] = pq.top();
+        pq.pop();
+        if (dd != dist[i] || kk != key[i]) continue;   // stale
+        int x = i % W, y = i / W;
+        for (int k = 0; k < ndirs; ++k) {
+            int nx = x + vdx[k], ny = y + vdy[k];
+            if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
+            int j = ny * W + nx;
+            if (!within[j]) continue;
+            long long nd = dd + costv[j];
+            if (nd < dist[j] || (nd == dist[j] && kk < key[j])) {
+                dist[j] = nd;
+                key[j] = kk;
+                claim[j] = claim[i];
+                pq.push({nd, kk, j});
+            }
+        }
+    }
+}
+
+// noise(...): fixed-point gradient noise (section 6.13), every step in
+// signed 64-bit integers so the output is identical on every platform.
+//
+// Draw contract: ONE raw draw; every gradient (and rank tie key) is a hash of it.
+void machine::run_noise(compiled_op const& op, long long lo, long long hi, long long scale,
+                        long long octaves, long long persistence) {
+    if (grids_.empty() || grids_[0].rows <= 0 || op.into_grid < 0) {
+        warn("noise() before any resize; leaving grids unchanged");
+        return;
+    }
+    int W = grids_[0].cols, H = grids_[0].rows;
+    size_t n = (size_t)W * H;
+    uint64_t d = rng_();
+
+    if (hi < lo) {
+        warn("noise() hi " + std::to_string(hi) + " is below lo " + std::to_string(lo) +
+             "; writing lo everywhere");
+        write_field(op.into_grid, std::vector<int64_t>(n, lo));
+        return;
+    }
+
+    static const int64_t grad[8][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1},
+                                       {1, 1}, {-1, 1}, {1, -1}, {-1, -1}};
+    auto fade = [](int64_t t) {
+        int64_t q = ((t * (6 * t - 983040)) >> 16) + 655360;
+        return (((((t * t) >> 16) * t) >> 16) * q) >> 16;
+    };
+    auto lerp = [](int64_t a, int64_t b, int64_t f) { return a + (((b - a) * f) >> 16); };
+
+    std::vector<int64_t> raw(n, 0);
+    int64_t amp = 65536;
+    for (long long k = 0; k < octaves; ++k) {
+        int64_t s = scale >> k;
+        uint64_t dk = uniform_hash(d, (uint64_t)k);
+        auto g = [&](int64_t i, int64_t j) {
+            return grad[uniform_hash(dk, (uint64_t)i | ((uint64_t)j << 32)) & 7];
+        };
+        for (int y = 0; y < H; ++y) {
+            int64_t fy = ((2 * (int64_t)y + 1) * 65536) / (2 * s);
+            int64_t iy = fy >> 16, ty = fy & 65535;
+            for (int x = 0; x < W; ++x) {
+                int64_t fx = ((2 * (int64_t)x + 1) * 65536) / (2 * s);
+                int64_t ix = fx >> 16, tx = fx & 65535;
+                auto corner = [&](int64_t cx, int64_t cy) {
+                    auto const& gr = g(ix + cx, iy + cy);
+                    return gr[0] * (tx - 65536 * cx) + gr[1] * (ty - 65536 * cy);
+                };
+                int64_t u = fade(tx);
+                int64_t v = lerp(lerp(corner(0, 0), corner(1, 0), u),
+                                 lerp(corner(0, 1), corner(1, 1), u), fade(ty));
+                raw[(size_t)y * W + x] += (v * amp) >> 16;
+            }
+        }
+        amp = amp * persistence / 100;
+    }
+
+    std::vector<int64_t> cells(n);
+    uint64_t R = (uint64_t)(hi - lo) + 1;
+    if (op.w == 1) {   // rank: order by (raw, uniform_hash(d, i), i); position r gets lo + r*R/N
+        std::vector<int> order(n);
+        for (size_t i = 0; i < n; ++i) order[i] = (int)i;
+        std::sort(order.begin(), order.end(), [&](int a, int b) {
+            if (raw[a] != raw[b]) return raw[a] < raw[b];
+            uint64_t ka = uniform_hash(d, (uint64_t)a), kb = uniform_hash(d, (uint64_t)b);
+            return ka != kb ? ka < kb : a < b;
+        });
+        for (size_t r = 0; r < n; ++r)
+            cells[(size_t)order[r]] = lo + (int64_t)mul_div(r, R, n);
+    } else {           // range: the field's extremes map to lo and hi
+        auto [mn, mx] = std::minmax_element(raw.begin(), raw.end());
+        int64_t lo_raw = *mn, span = *mx - *mn;
+        for (size_t i = 0; i < n; ++i)
+            cells[i] = span == 0 ? lo
+                     : lo + (int64_t)mul_div((uint64_t)(raw[i] - lo_raw), R - 1, (uint64_t)span);
+    }
+    write_field(op.into_grid, cells);
 }
 
 // path(...): stamp a minimum-cost route from any `from` cell to the
@@ -643,7 +997,7 @@ void machine::run_path(compiled_op const& op, int ndirs) {
 
     // ONE stream draw; every tie key is a stateless hash of it and the cell
     uint64_t tie_seed = rng_();
-    auto key = [tie_seed](int i) { return mix64(tie_seed ^ (uint64_t)i); };
+    auto key = [tie_seed](int i) { return uniform_hash(tie_seed, (uint64_t)i); };
 
     // multi-source Dijkstra → the distance field (unique; the search is a
     // black box, nothing downstream observes its expansion order)

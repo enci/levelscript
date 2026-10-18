@@ -13,7 +13,7 @@
   // ---------- syntax highlighting for .lvs ----------
   const KW = new Set(['tag', 'layers', 'grid', 'graph', 'of', 'number', 'rule', 'sequence', 'params',
     'where', 'when', 'use', 'any', 'all', 'ordered', 'once', 'scatter', 'everywhere', 'grow', 'settle', 'weight']);
-  const OPS = new Set(['resize', 'upscale', 'trim', 'mirror', 'pad', 'path']);
+  const OPS = new Set(['resize', 'upscale', 'trim', 'mirror', 'pad', 'path', 'bsp', 'voronoi', 'noise']);
   const FNS = new Set(['count', 'degree', 'distance', 'neighbors', 'min', 'max', 'abs', 'random']);
   const TOKEN = /(\/\/[^\n]*)|("[^"\n]*")|(=>)|(\b\d+%?)|([A-Za-z_]\w*)|([\s\S])/g;
 
