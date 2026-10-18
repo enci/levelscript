@@ -964,7 +964,7 @@ Semantics: the route is the minimum-total-cost sequence of adjacent traversable 
 
 1. The `from`, `to`, and `passable` predicates each evaluate in **one row-major pass** over the current extents, **in that order** (`from` first, then `to`, then `passable`). A `random` inside a predicate draws in that pass order.
 2. `cost` evaluates **once per traversable cell**, row-major, clamped to >= 1; the search runs on those fixed weights. A `random(...)` cost draws once per traversable cell, reproducibly.
-3. Tie-breaking consumes **exactly one stream draw per `path` statement**. Per-cell tie keys are derived from that single draw `d` as `hash(d, i)`, with `i` the row-major cell index `y * W + x` (section 10.6) - there are **no per-discovery draws**, so the number of draws a `path` statement consumes never depends on grid content or search order.
+3. Tie-breaking consumes **exactly one stream draw per `path` statement**. Per-cell tie keys are derived from that single draw `d` as `uniform_hash(d, i)`, with `i` the row-major cell index `y * W + x` (section 10.6) - there are **no per-discovery draws**, so the number of draws a `path` statement consumes never depends on grid content or search order.
 4. The route is a **pure function of the distance field** the fixed weights induce. The nearest goal is the reachable `to` cell minimizing (distance, tie key) lexicographically. The route is derived by walking backward from that goal, at each step choosing the minimum-tie-key predecessor among those on an optimal (shortest) path. The route is then stamped **start -> goal**: if `write` is an expression, it evaluates once per route cell in that order.
 
 Consequence, stated normatively: **the search algorithm is unobservable.** Any correct shortest-path implementation - BFS at uniform cost, Dijkstra, A* with an admissible heuristic - produces the identical distance field and hence the identical route, draw count, and output.
@@ -1145,7 +1145,7 @@ Parameters (section 6.0, all named):
 **Draw contract.**
 1. `sites` and `within` each evaluate in one row-major pass over the current extents, in that order; a `random` in either draws in that order.
 2. `cost` evaluates once per `within` cell, row-major, and is clamped to at least 1.
-3. Tie-breaking consumes **exactly one raw draw** `d` per `voronoi` statement. Site `s`'s tie key is `hash(d, s)` (section 10.6), keyed by site index rather than by cell: two sites resolve every tie between them the same way, which keeps borders coherent rather than jagged.
+3. Tie-breaking consumes **exactly one raw draw** `d` per `voronoi` statement. Site `s`'s tie key is `uniform_hash(d, s)` (section 10.6), keyed by site index rather than by cell: two sites resolve every tie between them the same way, which keeps borders coherent rather than jagged.
 4. The claims are a pure function of the distances and tie keys, so, as for `path`, the search algorithm is unobservable.
 
 **Zones are connected.** Every cell on a shortest route from a site to a cell it claims is claimed by the same site, so each zone is connected under the statement's `connectivity`. Under `connectivity=8` a zone may hold together only diagonally in places; a graph layer (section 4.3), which is 4-connected, then reads it as several nodes.
@@ -1179,7 +1179,7 @@ Parameters (section 6.0, all named):
 - `normalize : enum{rank, range}?` (optional, default `rank`) - how the raw field maps onto `[lo, hi]`.
 
 **Normalization.** Let `N = W * H` and `R = hi - lo + 1`.
-- `rank`: order the cells by (raw value, `hash(d, i)`, `i`), ascending, where `i` is the row-major cell index and `d` the statement's raw draw (below). The cell at position `r` (from 0) receives `lo + floor(r * R / N)`. Hashed tie-breaking matters at small `scale`, where many cells share a raw value: ordering ties by index alone would band the output from top to bottom. Each output value then covers the same share of the cells, to within one cell, so a threshold selects a fixed fraction of the grid whatever the seed and scale.
+- `rank`: order the cells by (raw value, `uniform_hash(d, i)`, `i`), ascending, where `i` is the row-major cell index and `d` the statement's raw draw (below). The cell at position `r` (from 0) receives `lo + floor(r * R / N)`. Hashed tie-breaking matters at small `scale`, where many cells share a raw value: ordering ties by index alone would band the output from top to bottom. Each output value then covers the same share of the cells, to within one cell, so a threshold selects a fixed fraction of the grid whatever the seed and scale.
 - `range`: with `mn` and `mx` the least and greatest raw values, each cell receives `lo + floor((raw - mn) * (hi - lo) / (mx - mn))`, and every cell receives `lo` when `mx == mn`. The field's shape is kept; its extremes map to `lo` and `hi`.
 
 Both products are computed exactly (wider than 64 bits where needed).
@@ -1187,7 +1187,7 @@ Both products are computed exactly (wider than 64 bits where needed).
 **The algorithm.** Normative, so that the output is identical on every platform (section 7.2). Every value is a signed 64-bit integer; `>>` is an arithmetic shift (floor division by a power of two), and `/` is applied to non-negative operands only. Let `d` be the statement's one raw draw. Octave `k` has spacing `s = scale >> k` and amplitude `a(k)`, with `a(0) = 65536` and `a(k + 1) = a(k) * persistence / 100`. For each octave and each cell `(x, y)`:
 
 1. **Lattice position**, sampled at the cell's centre (Q16 fixed point): `fx = ((2x + 1) * 65536) / (2s)`, `ix = fx >> 16`, `tx = fx & 65535`; likewise `fy`, `iy`, `ty` from `y`. Because cells are sampled at their centres, no cell sits on a lattice point.
-2. **Gradients.** The gradient at lattice point `(i, j)` is entry `hash(hash(d, k), i | (j << 32)) & 7` (unsigned) of the table `(1,0) (-1,0) (0,1) (0,-1) (1,1) (-1,1) (1,-1) (-1,-1)`, indexed from 0.
+2. **Gradients.** The gradient at lattice point `(i, j)` is entry `uniform_hash(uniform_hash(d, k), i | (j << 32)) & 7` (unsigned) of the table `(1,0) (-1,0) (0,1) (0,-1) (1,1) (-1,1) (1,-1) (-1,-1)`, indexed from 0.
 3. **Corners.** For each corner `(cx, cy)` in `{0,1} x {0,1}`, with gradient `(gx, gy)` at `(ix + cx, iy + cy)`: `n(cx, cy) = gx * (tx - 65536 * cx) + gy * (ty - 65536 * cy)`.
 4. **Fade**, `6t^5 - 15t^4 + 10t^3` in Q16: `q = ((t * (6 * t - 983040)) >> 16) + 655360`, then `fade(t) = (((((t * t) >> 16) * t) >> 16) * q) >> 16`.
 5. **Interpolation**, with `lerp(a, b, f) = a + (((b - a) * f) >> 16)`: `v = lerp(lerp(n(0,0), n(1,0), fade(tx)), lerp(n(0,1), n(1,1), fade(tx)), fade(ty))`.
@@ -1486,7 +1486,7 @@ A sequence application (section 6.10) adds no draw sites: its body statements dr
 **Draw primitives.** Every draw site maps the stream to its decision with one of the following, in unsigned 64-bit integer arithmetic. They are part of the determinism contract (section 7.2): an implementation must reproduce them exactly, so it may not substitute library equivalents such as `std::shuffle` or `std::uniform_int_distribution`.
 
 - **Raw draw**: the stream's next 64-bit output. Used once per `path`, `voronoi`, and `noise` statement (sections 6.6, 6.12, 6.13).
-- **`hash(d, i)`**, a 64-bit key from a raw draw `d` and an index `i`, consuming no draw: `mix(d ^ i)`, where `mix(z)` (splitmix64) computes `z = z + 0x9E3779B97F4A7C15`, then `z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9`, then `z = (z ^ (z >> 27)) * 0x94D049BB133111EB`, and returns `z ^ (z >> 31)`, all modulo 2^64. Used for `path` tie keys (by cell index), `voronoi` tie keys (by site id), and `noise` gradients (section 6.13).
+- **`uniform_hash(d, i)`**, a 64-bit key from a raw draw `d` and an index `i`, consuming no draw: `mix(d ^ i)`, where `mix(z)` (splitmix64) computes `z = z + 0x9E3779B97F4A7C15`, then `z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9`, then `z = (z ^ (z >> 27)) * 0x94D049BB133111EB`, and returns `z ^ (z >> 31)`, all modulo 2^64. Used for `path` tie keys (by cell index), `voronoi` tie keys (by site id), and `noise` gradients (section 6.13).
 - **`uniform(n)`**, an integer in `[0, n)` for `n >= 1`, without bias: let `t = (2^64 - n) mod n` (in 64-bit arithmetic, `(0 - n) % n`); take raw draws until one, `x`, satisfies `x >= t`; the result is `x mod n`. It may consume more than one raw draw, but it counts as one draw for the order above.
 - **Shuffle** of a vector of `k` candidates (Fisher-Yates): for `i` from `k - 1` down to `1`, swap the items at `i` and `uniform(i + 1)`.
 - **Uniform pick** of one of `k` candidates (step modes): the item at `uniform(k)`.

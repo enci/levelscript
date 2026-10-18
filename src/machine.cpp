@@ -694,7 +694,7 @@ void machine::run_bsp(compiled_op const& op, long long min, long long max, long 
 // voronoi(...): partition the cells by nearest site, through `within`.
 //
 // Draw contract: `sites` then `within` row-major, per-cell `cost`, then ONE
-// raw draw; a site's tie key is hash(d, site index), so two sites resolve
+// raw draw; a site's tie key is uniform_hash(d, site index), so two sites resolve
 // every tie between them alike. A cell's claim is the site minimizing
 // (distance, key) - a pure function, so the search order is unobservable.
 void machine::run_voronoi(compiled_op const& op, int ndirs) {
@@ -768,7 +768,7 @@ void machine::run_voronoi(compiled_op const& op, int ndirs) {
     for (size_t i = 0; i < n; ++i)
         if (site_of[i] >= 0) {
             dist[i] = 0;
-            key[i] = hash(d, (uint64_t)site_of[i]);
+            key[i] = uniform_hash(d, (uint64_t)site_of[i]);
             claim[i] = site_of[i];
             pq.push({0, key[i], (int)i});
         }
@@ -837,9 +837,9 @@ void machine::run_noise(compiled_op const& op, long long lo, long long hi, long 
     int64_t amp = 65536;
     for (long long k = 0; k < octaves; ++k) {
         int64_t s = scale >> k;
-        uint64_t dk = hash(d, (uint64_t)k);
+        uint64_t dk = uniform_hash(d, (uint64_t)k);
         auto g = [&](int64_t i, int64_t j) {
-            return grad[hash(dk, (uint64_t)i | ((uint64_t)j << 32)) & 7];
+            return grad[uniform_hash(dk, (uint64_t)i | ((uint64_t)j << 32)) & 7];
         };
         for (int y = 0; y < H; ++y) {
             int64_t fy = ((2 * (int64_t)y + 1) * 65536) / (2 * s);
@@ -862,12 +862,12 @@ void machine::run_noise(compiled_op const& op, long long lo, long long hi, long 
 
     std::vector<int64_t> cells(n);
     uint64_t R = (uint64_t)(hi - lo) + 1;
-    if (op.w == 1) {   // rank: order by (raw, hash(d, i), i); position r gets lo + r*R/N
+    if (op.w == 1) {   // rank: order by (raw, uniform_hash(d, i), i); position r gets lo + r*R/N
         std::vector<int> order(n);
         for (size_t i = 0; i < n; ++i) order[i] = (int)i;
         std::sort(order.begin(), order.end(), [&](int a, int b) {
             if (raw[a] != raw[b]) return raw[a] < raw[b];
-            uint64_t ka = hash(d, (uint64_t)a), kb = hash(d, (uint64_t)b);
+            uint64_t ka = uniform_hash(d, (uint64_t)a), kb = uniform_hash(d, (uint64_t)b);
             return ka != kb ? ka < kb : a < b;
         });
         for (size_t r = 0; r < n; ++r)
@@ -935,7 +935,7 @@ void machine::run_path(compiled_op const& op, int ndirs) {
 
     // ONE stream draw; every tie key is a stateless hash of it and the cell
     uint64_t tie_seed = rng_();
-    auto key = [tie_seed](int i) { return hash(tie_seed, (uint64_t)i); };
+    auto key = [tie_seed](int i) { return uniform_hash(tie_seed, (uint64_t)i); };
 
     // multi-source Dijkstra → the distance field (unique; the search is a
     // black box, nothing downstream observes its expansion order)
