@@ -84,11 +84,11 @@ void check_ids_are_nodes(ls::level const& lv) {
 // ── hash ─────────────────────────────────────────────────────────────────────
 
 TEST_CASE("partition: hash is splitmix64's finalizer over d ^ i") {
-    using ls::internal::hash_draw;
+    using ls::internal::hash;
     // splitmix64 seeded with 0: its first output is mix(0)
-    CHECK(hash_draw(0, 0) == 0xe220a8397b1dcdafull);
-    CHECK(hash_draw(5, 3) == hash_draw(6, 0));   // only d ^ i matters
-    CHECK(hash_draw(1, 2) != hash_draw(1, 3));
+    CHECK(hash(0, 0) == 0xe220a8397b1dcdafull);
+    CHECK(hash(5, 3) == hash(6, 0));   // only d ^ i matters
+    CHECK(hash(1, 2) != hash(1, 3));
 }
 
 TEST_CASE("partition: mul_div is exact beyond 64 bits") {
