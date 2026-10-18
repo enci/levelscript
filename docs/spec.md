@@ -875,7 +875,7 @@ Every argument is written as an expression (section 6 grammar), and parentheses 
 | `pad` | `n:int` (positional) | uniform empty border of N on all sides (section 6.5) |
 | `path` | `from:pred`, `to:pred`, `into:grid`, `write:value`, `over:grid?`, `passable:pred?`, `connectivity:int?=4`, `cost:expr?=1` (**all named**) | write a shortest route between predicates into a grid (section 6.6) |
 | `bsp` | `into:grid`, `min:int`, `max:int?`, `split:int?=50` (**all named**) | split the grid into rectangular leaves, writing leaf ids into a number grid (section 6.11) |
-| `voronoi` | `sites:pred`, `into:grid`, `within:pred?`, `connectivity:int?=4`, `cost:expr?=1` (**all named**) | partition the cells by nearest site, writing zone ids into a number grid (section 6.12) |
+| `voronoi` | `sites:pred`, `into:grid`, `within:pred?`, `metric:enum{euclidean,manhattan,chebyshev}?=euclidean`, `cost:expr?` (**all named**) | partition the cells by nearest site, writing zone ids into a number grid (section 6.12) |
 | `noise` | `into:grid`, `lo:int`, `hi:int`, `scale:int`, `octaves:int?=1`, `persistence:int?=50`, `normalize:enum{rank,range}?=rank` (**all named**) | write gradient noise mapped onto `[lo, hi]` into a number grid (section 6.13) |
 
 **Binding: positional vs. named-only.** Each parameter is declared **positional** or **named-only** by convention: positional when its meaning is obvious from the operation and its order (a single argument, or an unmistakable order like width-then-height); named-only when the operation has several same-kind or optional arguments with no self-evident order. So `resize(10, 20)`, `pad(2)`, `mirror(horizontal)` read clean without names, while `path(from=..., to=..., ...)` is named throughout. A positional parameter may also be supplied by name; a named-only parameter supplied positionally is an error.
@@ -1115,7 +1115,7 @@ Parameters (section 6.0, all named):
 
 ### 6.12 `voronoi(...)`
 
-Partitions the cells by nearest **site**, measured through the grid, and writes each cell's site id into a number grid. Rules place the sites, with their usual modes and counts; the operation only partitions.
+Partitions the cells by nearest **site** and writes each cell's zone id into a number grid. On open ground the default `metric=euclidean` gives the Euclidean Voronoi diagram of the sites; `within` confines the zones, and the step metrics measure distance as route length through it. Rules place the sites, with their usual modes and counts; the operation only partitions.
 
 ```ls
 tag geo  { floor }
@@ -1137,18 +1137,20 @@ Parameters (section 6.0, all named):
 - `sites : pred` (required) - the site cells. Each 4-connected region of site cells is **one** site, so a blob seeds one zone.
 - `into : grid` (required) - a number grid (check 35). Every cell is overwritten.
 - `within : pred?` (optional, default: every cell) - the cells that can be claimed; distance is measured through them. Site cells always count as `within`.
-- `connectivity : int?` (optional, default `4`) - 4- or 8-neighbour adjacency, as for `path`. Any other value is treated as `4`, with a runtime warning (section 7.4).
-- `cost : expr?` (optional, default `1`) - the per-step weight at the entered cell, as for `path`. Non-positive cost is treated as 1.
+- `metric : enum{euclidean, manhattan, chebyshev}?` (optional, default `euclidean`) - how distance is measured (below).
+- `cost : expr?` (optional, default `1`; step metrics only) - the per-step weight at the entered cell, as for `path`. Non-positive cost is treated as 1. Given under `metric=euclidean`, it is a compile error (check 35).
 
-**Semantics.** Sites are indexed from 0 in row-major order of each region's first cell; the index keys tie-breaking (below). The distance from site `s` to a cell is the minimum total cost of a route of adjacent `within` cells from any cell of `s`, charging each entered cell's `cost`; a site's own cells are at distance 0. Each reachable cell is claimed by the site minimizing (distance, tie key) lexicographically. Each site claims at least its own cells, so there are as many **zones** (a site's claimed cells) as sites. Zones are numbered from 0 in row-major order of each zone's first cell, which is also the order of graph nodes (section 4.3): under `connectivity=4`, `graph of zones` has node `i` = zone `i`. `into` receives the claiming site's zone id at every claimed cell, and empty everywhere else: outside `within`, and wherever no site reaches. With no site cell at all, every cell is empty, with a runtime warning. A zero-sized stack writes nothing, with a runtime warning.
+**Sites and zones.** Sites are indexed from 0 in row-major order of each region's first cell; site `s`'s **tie key** is `uniform_hash(d, s)` (section 10.6), with `d` the statement's raw draw. Each site's own cells are claimed by it, and every other `within` cell is claimed by at most one site, as the metric decides. A site's claimed cells are its **zone**; every site has one. Zones are numbered from 0 in row-major order of each zone's first cell, which is also the order of graph nodes (section 4.3): under `euclidean` and `manhattan`, `graph of zones` has node `i` = zone `i`. `into` receives the claiming site's zone id at every claimed cell, and empty everywhere else: outside `within`, and wherever no site reaches. With no site cell at all, every cell is empty, with a runtime warning. A zero-sized stack writes nothing, with a runtime warning.
+
+**`metric=euclidean`: growing by straight-line distance.** Let `D(s, c)` be the squared Euclidean distance from cell `c` to the nearest cell of site `s`, `(cx - px)^2 + (cy - py)^2` over cell coordinates, computed exactly. The zones grow one cell at a time: among the unclaimed `within` cells 4-adjacent to a cell claimed by some site `s`, the pair `(s, c)` minimizing (`D(s, c)`, tie key of `s`, row-major index of `c`) lexicographically claims `c` for `s`; this repeats until no such cell remains. On open ground the zones are the Euclidean Voronoi diagram of the sites, cell-sampled, with one exception: where that diagram would give a zone a cell it touches only diagonally - which no 4-connected zone can hold - the cell joins the zone it grows from instead. Such cells are rare - about one in several thousand with random sites - and lie on borders, where the competing distances are close. `within` only stops growth: a cell around a wall is still measured by the straight line. Every zone grows 4-adjacently from its site, so it is 4-connected.
+
+**`metric=manhattan` and `metric=chebyshev`: route length.** The distance from site `s` to a cell is the least total cost of a route of adjacent `within` cells from any cell of `s`, charging each entered cell's `cost` - 4-neighbour adjacency under `manhattan`, 8-neighbour under `chebyshev`; a site's own cells are at distance 0. Each reachable cell is claimed by the site minimizing (distance, tie key) lexicographically. Every cell on a shortest route from a site to a cell it claims is claimed by the same site, so each zone is connected under the metric's adjacency. Under `chebyshev` a zone may hold together only diagonally in places; a graph layer, which is 4-connected, then reads it as several nodes.
 
 **Draw contract.**
 1. `sites` and `within` each evaluate in one row-major pass over the current extents, in that order; a `random` in either draws in that order.
-2. `cost` evaluates once per `within` cell, row-major, and is clamped to at least 1.
-3. Tie-breaking consumes **exactly one raw draw** `d` per `voronoi` statement. Site `s`'s tie key is `uniform_hash(d, s)` (section 10.6), keyed by site index rather than by cell: two sites resolve every tie between them the same way, which keeps borders coherent rather than jagged.
-4. The claims are a pure function of the distances and tie keys, so, as for `path`, the search algorithm is unobservable.
-
-**Zones are connected.** Every cell on a shortest route from a site to a cell it claims is claimed by the same site, so each zone is connected under the statement's `connectivity`. Under `connectivity=8` a zone may hold together only diagonally in places; a graph layer (section 4.3), which is 4-connected, then reads it as several nodes.
+2. Under a step metric, `cost` evaluates once per `within` cell, row-major, and is clamped to at least 1.
+3. Tie-breaking consumes **exactly one raw draw** `d` per `voronoi` statement. Tie keys are keyed by site index rather than by cell: two sites resolve every tie between them the same way, which keeps borders coherent rather than jagged.
+4. The claims are a pure function of the sites, `within`, the costs, and the tie keys, so, as for `path`, the search algorithm is unobservable.
 
 ### 6.13 `noise(...)`
 
@@ -1257,7 +1259,7 @@ The compiler must reject:
 32. **Unknown operation.** An `op_call` (section 6.0) whose name is not in the operation table.
 33. **Operation argument arity/binding.** More positional arguments than the operation's positional parameters; a named-only parameter supplied positionally; a named argument preceding a positional one; or a parameter supplied both positionally and by name.
 34. **Missing required operation argument.** A required parameter not supplied.
-35. **Operation argument kind / enum.** An argument whose kind does not match the parameter (e.g. `grid` given a non-grid; a tag grid where an operation requires a number grid - the `into` of `bsp`, `voronoi`, and `noise`; or an expression that is not a single name where a name is required); an `enum` value outside its set (`mirror` axis not in {horizontal, vertical}); or an ambiguous bare-tag `pred` (no layer the module sees, or more than one, could hold the tag - section 6.6).
+35. **Operation argument kind / enum.** An argument whose kind does not match the parameter (e.g. `grid` given a non-grid; a tag grid where an operation requires a number grid - the `into` of `bsp`, `voronoi`, and `noise`; `cost` given to `voronoi` under `metric=euclidean`; or an expression that is not a single name where a name is required); an `enum` value outside its set (`mirror` axis not in {horizontal, vertical}, `voronoi` metric, `noise` normalize); or an ambiguous bare-tag `pred` (no layer the module sees, or more than one, could hold the tag - section 6.6).
 36. **Operation value constraint.** Retired in 0.9.2: out-of-range `resize`, `upscale`, and `pad` values are handled at run time, with a warning (sections 6.1, 6.2, 6.5, 7.4).
 37. **Mode on a sequence.** `scatter`, `everywhere`, or `grow` applied to a sequence (section 6.10).
 38. **Sequence cycle.** A sequence that applies itself, directly or through other sequences.
@@ -1299,7 +1301,7 @@ Every warning goes to the generator's warning handler (Appendix A), formatted li
 - `path(...)` with a `connectivity` other than 4 or 8; it is treated as 4 (section 6.6).
 - `path(...)` with no reachable route, or an empty `from`/`to` set (section 6.6); `path` before any `resize` (zero-sized stack).
 - `bsp(...)` with `min` below 1, treated as 1; or `split` outside 0-100, clamped (section 6.11).
-- `voronoi(...)` with a `connectivity` other than 4 or 8, treated as 4; or with no site cell, writing every cell empty (section 6.12).
+- `voronoi(...)` with no site cell, writing every cell empty (section 6.12).
 - `noise(...)` with `scale` below 1, treated as 1; `octaves` below 1, treated as 1, or more than `scale` allows, the excess dropped; `persistence` outside 0-100, clamped; or `hi` below `lo`, every cell `lo` (section 6.13).
 - `bsp`, `voronoi`, or `noise` on a zero-sized stack, writing nothing (sections 6.11-6.13).
 
@@ -1479,14 +1481,14 @@ A single PRNG stream (`mt19937_64` in the reference implementation), seeded from
 4. **Candidate ordering** draws next: the pass's seeded shuffle (batch modes and `settle` sweeps) or the single uniform pick (step modes), per section 10.4.
 5. **At application**: one draw per `{ any }` node on the resolved write path, outer before inner, earlier sibling first (a single-item `{ any }` still draws, section 5.2); then write-cell expressions, row-major per resolved leaf.
 6. **`path` statements** follow the section 6.6 draw contract: predicate passes (`from`, `to`, `passable`), per-cell `cost`, exactly one tie-key draw, then the start-to-goal `write` stamps.
-7. **`bsp`, `voronoi`, and `noise` statements** follow their draw contracts (sections 6.11-6.13): `bsp`'s per-node draws in pre-order; `voronoi`'s predicate passes (`sites`, `within`), per-cell `cost`, then one tie-key draw; `noise`'s one raw draw.
+7. **`bsp`, `voronoi`, and `noise` statements** follow their draw contracts (sections 6.11-6.13): `bsp`'s per-node draws in pre-order; `voronoi`'s predicate passes (`sites`, `within`), per-cell `cost` under a step metric, then one tie-key draw; `noise`'s one raw draw.
 
 A sequence application (section 6.10) adds no draw sites: its body statements draw per items 2-7 as each one is reached, and the stability check draws nothing.
 
 **Draw primitives.** Every draw site maps the stream to its decision with one of the following, in unsigned 64-bit integer arithmetic. They are part of the determinism contract (section 7.2): an implementation must reproduce them exactly, so it may not substitute library equivalents such as `std::shuffle` or `std::uniform_int_distribution`.
 
 - **Raw draw**: the stream's next 64-bit output. Used once per `path`, `voronoi`, and `noise` statement (sections 6.6, 6.12, 6.13).
-- **`uniform_hash(d, i)`**, a 64-bit key from a raw draw `d` and an index `i`, consuming no draw: `mix(d ^ i)`, where `mix(z)` (splitmix64) computes `z = z + 0x9E3779B97F4A7C15`, then `z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9`, then `z = (z ^ (z >> 27)) * 0x94D049BB133111EB`, and returns `z ^ (z >> 31)`, all modulo 2^64. Used for `path` tie keys (by cell index), `voronoi` tie keys (by site id), and `noise` gradients (section 6.13).
+- **`uniform_hash(d, i)`**, a 64-bit key from a raw draw `d` and an index `i`, consuming no draw: `mix(d ^ i)`, where `mix(z)` (splitmix64) computes `z = z + 0x9E3779B97F4A7C15`, then `z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9`, then `z = (z ^ (z >> 27)) * 0x94D049BB133111EB`, and returns `z ^ (z >> 31)`, all modulo 2^64. Used for `path` tie keys (by cell index), `voronoi` tie keys (by site index), and `noise` gradients (section 6.13).
 - **`uniform(n)`**, an integer in `[0, n)` for `n >= 1`, without bias: let `t = (2^64 - n) mod n` (in 64-bit arithmetic, `(0 - n) % n`); take raw draws until one, `x`, satisfies `x >= t`; the result is `x mod n`. It may consume more than one raw draw, but it counts as one draw for the order above.
 - **Shuffle** of a vector of `k` candidates (Fisher-Yates): for `i` from `k - 1` down to `1`, swap the items at `i` and `uniform(i + 1)`.
 - **Uniform pick** of one of `k` candidates (step modes): the item at `uniform(k)`.

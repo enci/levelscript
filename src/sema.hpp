@@ -187,11 +187,11 @@ struct compiled_op {
     // `param`s (table positions) the executors read
     static constexpr int path_connectivity = 6;
     static constexpr int bsp_min = 1, bsp_max = 2, bsp_split = 3;
-    static constexpr int voronoi_connectivity = 3;
     static constexpr int noise_lo = 1, noise_hi = 2, noise_scale = 3,
                          noise_octaves = 4, noise_persistence = 5;
     std::vector<int_arg> int_args;
-    int w{0};   // mirror axis: 1 = horizontal; noise normalize: 1 = rank, 0 = range
+    int w{0};   // mirror axis: 1 = horizontal; noise normalize: 1 = rank, 0 = range;
+                // voronoi metric: 0 = euclidean, else the step adjacency (4 or 8)
     bool has_max{false};   // bsp: `max` supplied
     // path, voronoi
     // `pred` arguments: boolean expressions per cell (a bare tag compiles to `has`)

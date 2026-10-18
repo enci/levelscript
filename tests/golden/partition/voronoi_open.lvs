@@ -1,0 +1,20 @@
+// Showcase (v0.11): `voronoi` under the default `metric=euclidean` (section 6.12).
+//
+// On open ground the zones are the Euclidean Voronoi diagram of the sites:
+// straight borders on the perpendicular bisectors, at any angle - not the
+// 45-degree diamonds of a step metric.
+//
+// @seed 3
+// @expect run-ok
+
+tag mark { site }
+layers {
+    marks: grid of mark
+    zones: grid of number
+}
+rule place_site { marks[.] => marks[site] }
+sequence main {
+    resize(40, 24)
+    scatter(9) place_site
+    voronoi(sites=site, into=zones)
+}
