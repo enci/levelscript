@@ -95,8 +95,13 @@ def api_entries(md: str) -> list:
                     "detail": plain(sig)})
     for op, params, effect in table(md, "**Operation table.**"):
         name = plain(op)
-        sig = name + "(" + ", ".join(re.findall(r"`([^`]+)`", params)) + ")"
-        out.append({"name": name, "kind": "operation", "signature": sig,
+        items = re.findall(r"`([^`]+)`", params)
+        sig = name + "(" + ", ".join(items) + ")"
+        # what the sandbox inserts: required parameters only, as name=name when all are named
+        named = "all named" in params
+        req = [i.split(":")[0].strip() for i in items if ":" in i and "?" not in i]
+        insert = name + "(" + ", ".join(f"{r}={r}" if named else r for r in req) + ")"
+        out.append({"name": name, "kind": "operation", "signature": sig, "insert": insert,
                     "summary": re.sub(r"\s*\(section [^)]*\)", "", plain(effect)),
                     "anchor": section_of(md, effect, slug("6.0 Built-in operations"))})
     mode_anchor = slug("6.7 Rule application semantics")
@@ -113,6 +118,8 @@ def api_entries(md: str) -> list:
     missing = [e["name"] for e in out if e["kind"] == "keyword" and not e["summary"]]
     if missing or not any(e["kind"] == "function" for e in out):
         raise SystemExit(f"API extraction incomplete; add KEYWORDS entries for: {missing}")
+    for e in out:
+        e.setdefault("insert", e["signature"])
     # dedupe: a mode keyword listed twice (scatter(N) / scatter(P%)) keeps the first
     seen, uniq = set(), []
     for e in out:

@@ -179,9 +179,11 @@
   // rule applications. `opts.editor` false hides the source (used by the hero).
   function createWidget(host, sample, opts) {
     opts = opts || {};
+    const init = opts.initial || {};
+    const fileName = opts.fileName || sample.name + '.lvs';
     const params = {};
-    (sample.params || []).forEach(p => { params[p.name] = p.default; });
-    let seed = sample.seed;
+    let seed = Number.isInteger(init.seed) ? init.seed : sample.seed;
+    let worker = null, runToken = 0, runTimer = null, pending = false;
     let sessionId = -1;
     let mod = null;
     let visible = new Set();
@@ -219,18 +221,32 @@
     const seedInput = $('.seed');
     seedInput.value = seed;
 
-    // params inputs
+    // params inputs; the sandbox rebuilds them from the source as it is edited, keeping the
+    // values of names that survive and dropping the rest
     const paramBox = $('.params');
-    (sample.params || []).forEach(p => {
-      const lab = document.createElement('label');
-      lab.innerHTML = esc(p.name) + ' <input type="number" step="1" value="' + p.default + '">';
-      lab.querySelector('input').addEventListener('input', e => {
-        const v = parseInt(e.target.value, 10);
-        params[p.name] = Number.isNaN(v) ? p.default : v;
-        scheduleRun();
+    let paramKey = null;
+    function changed() { opts.onChange && opts.onChange({ source: source(), seed, params: Object.assign({}, params) }); }
+    function buildParams(list, saved) {
+      const key = JSON.stringify(list);
+      if (key === paramKey) return;
+      paramKey = key;
+      const keep = Object.assign({}, saved || params);
+      Object.keys(params).forEach(k => delete params[k]);
+      paramBox.innerHTML = '';
+      list.forEach(p => {
+        params[p.name] = Number.isInteger(keep[p.name]) ? keep[p.name] : p.default;
+        const lab = document.createElement('label');
+        lab.innerHTML = esc(p.name) + ' <input type="number" step="1" value="' + params[p.name] + '">';
+        lab.querySelector('input').addEventListener('input', e => {
+          const v = parseInt(e.target.value, 10);
+          params[p.name] = Number.isNaN(v) ? p.default : v;
+          changed();
+          scheduleRun();
+        });
+        paramBox.appendChild(lab);
       });
-      paramBox.appendChild(lab);
-    });
+    }
+    buildParams(sample.params || [], init.params);
 
     function source() { return ta ? ta.value : sample.source; }
     function showError(msg) { errBox.hidden = !msg; errBox.textContent = msg || ''; }
@@ -271,15 +287,55 @@
       stopPlay();
       endSession();
       showError('');
-      const id = mod.run_begin(source(), sample.name + '.lvs', seed >>> 0, 'main', resolver(sample.name + '.lvs'), params);
+      const id = mod.run_begin(source(), fileName, seed >>> 0, 'main', resolver(fileName), params);
       if (id < 0) { showError(mod.run_last_error()); status.textContent = 'compile error'; return false; }
       sessionId = id;
       return true;
     }
 
     function runAll() {
+      if (opts.worker && window.Worker) { runInWorker(); return; }
       if (!begin()) return;
       render(JSON.parse(mod.run_finish(sessionId)));
+    }
+
+    // The sandbox runs programs in a worker. A program that never reaches its fixpoint
+    // (a `grow` or `settle` without a count) is cut off after RUN_LIMIT_MS rather than
+    // freezing the page.
+    const RUN_LIMIT_MS = 5000;
+    function stopWorker() {
+      if (worker) { worker.terminate(); worker = null; }
+      clearTimeout(runTimer);
+      pending = false;
+    }
+    function runInWorker() {
+      stopPlay();
+      endSession();
+      showError('');
+      if (pending) stopWorker();
+      if (!worker) {
+        try { worker = new Worker('js/run-worker.js'); }
+        catch (err) { opts.worker = false; runAll(); return; }
+      }
+      const token = ++runToken;
+      pending = true;
+      status.textContent = 'running…';
+      worker.onmessage = e => {
+        if (e.data.token !== token) return;
+        clearTimeout(runTimer);
+        pending = false;
+        if (e.data.error) { showError(e.data.error); status.textContent = 'compile error'; return; }
+        render(JSON.parse(e.data.state));
+      };
+      worker.onerror = () => { stopWorker(); showError('The run worker failed to start.'); status.textContent = 'runtime unavailable'; };
+      runTimer = setTimeout(() => {
+        stopWorker();
+        showError('Stopped: the run took longer than ' + RUN_LIMIT_MS / 1000 + ' s. A grow or settle without a count ' +
+          'may never reach its fixpoint.');
+        status.textContent = 'stopped';
+      }, RUN_LIMIT_MS);
+      worker.postMessage({ token, source: source(), name: fileName, seed, params: Object.assign({}, params),
+        files: window.LVS_FILES || {} });
     }
 
     function scheduleRun() { clearTimeout(debounce); debounce = setTimeout(runAll, 250); }
@@ -307,10 +363,10 @@
       $('.play').innerHTML = '<i class="fas fa-pause"></i> Pause';
       play();
     };
-    $('.dice').onclick = () => { seed = Math.floor(Math.random() * 1e6); seedInput.value = seed; runAll(); };
+    $('.dice').onclick = () => { seed = Math.floor(Math.random() * 1e6); seedInput.value = seed; changed(); runAll(); };
     seedInput.addEventListener('input', () => {
       const v = parseInt(seedInput.value, 10);
-      if (!Number.isNaN(v) && v >= 0) { seed = v; scheduleRun(); }
+      if (!Number.isNaN(v) && v >= 0) { seed = v; changed(); scheduleRun(); }
     });
 
     // Animate: steps per frame accelerate so long generations still finish in a few seconds.
@@ -331,9 +387,14 @@
     }
 
     if (ta) {
-      ta.value = sample.source;
+      ta.value = typeof init.source === 'string' ? init.source : sample.source;
       const sync = () => { hl.innerHTML = highlight(ta.value) + '\n'; hl.parentNode.scrollTop = ta.scrollTop; hl.parentNode.scrollLeft = ta.scrollLeft; };
-      ta.addEventListener('input', () => { sync(); scheduleRun(); });
+      ta.addEventListener('input', () => {
+        sync();
+        if (opts.dynamicParams) buildParams(parseParams(ta.value));
+        changed();
+        scheduleRun();
+      });
       ta.addEventListener('scroll', sync);
       ta.addEventListener('keydown', e => {
         if (e.key === 'Tab') {
@@ -346,14 +407,47 @@
       sync();
     }
 
+    const api = {
+      host, replay: () => $('.play').click(), restart: runAll,
+      // replace the whole program (sandbox): source, and optionally seed and param values
+      setSource(src, newSeed, savedParams) {
+        ta.value = src;
+        if (Number.isInteger(newSeed)) { seed = newSeed; seedInput.value = seed; }
+        buildParams(parseParams(src), savedParams);
+        ta.dispatchEvent(new Event('scroll'));
+        ta.dispatchEvent(new Event('input'));
+      },
+      // put text at the caret, without replacing a selection
+      insert(text) {
+        const at = ta.selectionStart;
+        ta.setRangeText(text, at, at, 'end');
+        ta.focus();
+        ta.dispatchEvent(new Event('input'));
+      }
+    };
+    opts.onApi && opts.onApi(api);
+    if (opts.dynamicParams) {
+      host.querySelectorAll('.controls button').forEach(b => { b.disabled = true; });
+      status.textContent = 'loading…';
+    }
+
     return loadRuntime().then(m => {
       mod = m;
+      host.querySelectorAll('.controls button').forEach(b => { b.disabled = false; });
       if (opts.autoplay) { $('.play').click(); } else { runAll(); }
-      return { host, replay: () => $('.play').click(), restart: runAll };
+      return api;
     }).catch(err => {
       showError(String(err.message || err));
       status.textContent = 'runtime unavailable';
     });
+  }
+
+  // `params { name: number = 5 }` -> [{name, default}], the same reading build_site_data.py does
+  function parseParams(src) {
+    const m = /\bparams\s*\{([\s\S]*?)\}/.exec(src);
+    if (!m) return [];
+    return [...m[1].matchAll(/(\w+)\s*:\s*number\s*=\s*(-?\d+)/g)]
+      .map(p => ({ name: p[1], default: parseInt(p[2], 10) }));
   }
 
   function sampleByName(name) {
@@ -390,7 +484,9 @@
       const card = document.createElement('article');
       card.className = 'sample-card';
       card.id = s.name;
-      card.innerHTML = '<header><h3>' + esc(s.name) + '.lvs</h3></header>' +
+      card.innerHTML = '<header><h3>' + esc(s.name) + '.lvs</h3>' +
+        '<a class="open-sandbox" href="sandbox.html#sample=' + encodeURIComponent(s.name) + '">' +
+        '<i class="fas fa-up-right-from-square"></i> open in sandbox</a></header>' +
         (s.about ? '<p class="about">' + esc(s.about) + '</p>' : '') + '<div class="host"></div>';
       gallery.appendChild(card);
       lazy(card, () => createWidget(card.querySelector('.host'), s, { height: 420 }));
@@ -398,6 +494,197 @@
     if (location.hash) {
       const t = document.getElementById(decodeURIComponent(location.hash.slice(1)));
       if (t) t.scrollIntoView();
+    }
+  }
+
+
+  // ---------- sandbox: one editor, a draft kept in localStorage, a searchable reference ----------
+  const sandboxEl = document.getElementById('sandbox');
+  if (sandboxEl) {
+    const KEY = 'lvs.sandbox.v1', PREV = KEY + '.prev';
+    const DEFAULT_SAMPLE = 'dungeon';
+    const note = document.getElementById('sb-note');
+    const store = (() => { try { const st = window.localStorage; st.getItem(KEY); return st; } catch (e) { return null; } })();
+
+    function read(key) {
+      if (!store) return null;
+      try {
+        const d = JSON.parse(store.getItem(key));
+        return d && typeof d.source === 'string' ? d : null;
+      } catch (e) { return null; }
+    }
+    function write(key, d) {
+      if (!store) return false;
+      try { store.setItem(key, JSON.stringify(d)); return true; } catch (e) { return false; }
+    }
+    function say(msg) { note.textContent = msg || ''; }
+    if (!store) say('Your draft will not be kept: this browser is blocking local storage.');
+
+    let draft = read(KEY);       // what is stored (and what the editor holds, after a flush)
+    let dirty = null;            // an edit not yet written
+    let timer = null;
+    let widget = null;
+
+    function flush() {
+      clearTimeout(timer);
+      if (!dirty) return;
+      const d = Object.assign({}, dirty, { savedAt: Date.now() });
+      dirty = null;
+      draft = d;
+      if (store && !write(KEY, d)) say('Could not save the draft (storage is full).');
+    }
+    function onChange(d) {
+      dirty = Object.assign({ base: draft && draft.base || null }, d);
+      clearTimeout(timer);
+      timer = setTimeout(flush, 400);
+    }
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
+
+    function current() {
+      flush();
+      return draft;
+    }
+    // A draft is worth asking about unless it is empty or still exactly a bundled sample.
+    function modified(d) {
+      if (!d || !d.source.trim()) return false;
+      const base = d.base && sampleByName(d.base);
+      return !(base && base.source === d.source);
+    }
+    // Replace the whole program. The old draft is kept one level deep for "restore previous".
+    function replaceWith(next, label, confirmFirst) {
+      const cur = current();
+      if (confirmFirst && modified(cur) && !window.confirm('Replace your current draft with ' + label + '?')) return;
+      if (cur && cur.source.trim()) write(PREV, cur);
+      draft = { source: next.source, seed: next.seed, params: next.params || {}, base: next.base || null };
+      dirty = null;
+      write(KEY, Object.assign({ savedAt: Date.now() }, draft));
+      widget.setSource(next.source, next.seed, next.params);
+      updatePrev();
+    }
+    function fromSample(s) { return { source: s.source, seed: s.seed, params: {}, base: s.name }; }
+
+    const prevBtn = document.getElementById('sb-prev');
+    function updatePrev() { prevBtn.disabled = !read(PREV); }
+
+    // the starting point: a #sample= link, else the stored draft, else the default sample
+    const hashed = /^#sample=([\w.-]+)$/.exec(location.hash);
+    const linked = hashed && sampleByName(decodeURIComponent(hashed[1]));
+    if (hashed) history.replaceState(null, '', location.pathname + location.search);
+    let start = draft;
+    let asked = false;
+    if (linked) {
+      if (!modified(draft) || window.confirm('Replace your current draft with ' + linked.name + '.lvs?')) {
+        if (draft && modified(draft)) write(PREV, draft);
+        start = fromSample(linked);
+      }
+      asked = true;
+    }
+    if (!start || !start.source.trim()) start = fromSample(sampleByName(DEFAULT_SAMPLE) || (window.LVS_SAMPLES || [])[0]);
+    draft = { source: start.source, seed: start.seed, params: start.params || {}, base: start.base || null };
+    if (asked) write(KEY, Object.assign({ savedAt: Date.now() }, draft));
+
+    createWidget(sandboxEl, {
+      name: 'sandbox', source: start.source, seed: start.seed, params: parseParams(start.source)
+    }, {
+      height: 420, worker: true, dynamicParams: true, fileName: 'sandbox.lvs',
+      initial: { source: start.source, seed: start.seed, params: start.params },
+      onChange, onApi: api => { widget = api; window.LVS_sandbox = api; }
+    });
+
+    // toolbar
+    const pick = document.getElementById('sb-sample');
+    (window.LVS_SAMPLES || []).forEach(s => {
+      const o = document.createElement('option');
+      o.value = s.name;
+      o.textContent = s.name + '.lvs';
+      pick.appendChild(o);
+    });
+    pick.addEventListener('change', () => {
+      const s = sampleByName(pick.value);
+      pick.value = '';
+      if (s) replaceWith(fromSample(s), s.name + '.lvs', true);
+    });
+    document.getElementById('sb-reset').addEventListener('click', () => {
+      const s = sampleByName(DEFAULT_SAMPLE) || (window.LVS_SAMPLES || [])[0];
+      if (s) replaceWith(fromSample(s), s.name + '.lvs', false);
+    });
+    prevBtn.addEventListener('click', () => {
+      const prev = read(PREV);
+      if (!prev) return;
+      const cur = current();
+      if (cur && cur.source.trim()) write(PREV, cur); else if (store) store.removeItem(PREV);
+      draft = { source: prev.source, seed: prev.seed, params: prev.params || {}, base: prev.base || null };
+      dirty = null;
+      write(KEY, Object.assign({ savedAt: Date.now() }, draft));
+      widget.setSource(prev.source, prev.seed, prev.params);
+      updatePrev();
+    });
+    document.getElementById('sb-download').addEventListener('click', () => {
+      const src = (current() || draft).source;
+      const url = URL.createObjectURL(new Blob([src], { type: 'text/plain' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'sandbox.lvs';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    });
+    document.getElementById('sb-open').addEventListener('change', e => {
+      const f = e.target.files[0];
+      e.target.value = '';
+      if (!f) return;
+      f.text().then(text => replaceWith({ source: text, seed: draft.seed, params: {}, base: null }, f.name, true));
+    });
+    updatePrev();
+
+    // reference
+    const refRoot = document.getElementById('reference');
+    if (refRoot) {
+      const entries = window.LVS_API || [];
+      const q = document.getElementById('ref-q');
+      const chips = document.getElementById('ref-kinds');
+      const out = document.getElementById('ref-results');
+      let kind = 'all';
+      ['all', 'function', 'operation', 'mode', 'keyword'].forEach(k => {
+        const c = document.createElement('span');
+        c.className = 'chip' + (k === 'all' ? ' on' : '');
+        c.textContent = k;
+        c.onclick = () => {
+          kind = k;
+          chips.querySelectorAll('.chip').forEach(el => el.classList.toggle('on', el === c));
+          show();
+        };
+        chips.appendChild(c);
+      });
+      function row(e) {
+        const el = document.createElement('div');
+        el.className = 'ref-row';
+        el.innerHTML = '<code>' + esc(e.signature) + '</code><span class="ref-sum">' + esc(e.summary) + '</span>' +
+          '<a href="spec.html#' + e.anchor + '">spec</a><button type="button">insert</button>';
+        el.querySelector('button').onclick = () => widget && widget.insert(e.insert);
+        return el;
+      }
+      function show() {
+        out.innerHTML = '';
+        const hits = window.LVS_searchApi(entries, q.value, kind);
+        if (!hits.length) {
+          out.innerHTML = '<p class="ref-none">No results for <em>' + esc(q.value) +
+            '</em>. See the <a href="spec.html">full spec</a>.</p>';
+          return;
+        }
+        let group = null;
+        hits.forEach(e => {
+          if (!q.value.trim() && kind === 'all' && e.kind !== group) {
+            group = e.kind;
+            const h = document.createElement('h3');
+            h.textContent = e.kind + 's';
+            out.appendChild(h);
+          }
+          out.appendChild(row(e));
+        });
+      }
+      q.addEventListener('input', show);
+      show();
     }
   }
 

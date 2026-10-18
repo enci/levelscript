@@ -476,6 +476,55 @@ footer {
   font-size: 0.9rem;
 }
 
+/* ---------- Sandbox ---------- */
+.sandbox-bar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 1.2rem 0 0; font: 0.8rem var(--mono); color: var(--muted); }
+.sandbox-bar button, .sandbox-bar select, .file-btn, .ref-row button {
+  font: 600 0.8rem var(--sans);
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 0.4rem 0.7rem;
+  cursor: pointer;
+}
+.sandbox-bar select { background: var(--bg-2); }
+.sandbox-bar button:hover:not(:disabled), .file-btn:hover, .ref-row button:hover { border-color: var(--ls-green); color: var(--ls-yellow); }
+.sandbox-bar button:disabled, .controls button:disabled { opacity: 0.45; cursor: default; }
+#sb-note { color: #ffb3c4; }
+
+#reference { margin-top: 2.5rem; }
+#reference h2 { margin-bottom: 0.2rem; }
+#reference .muted { color: var(--muted); font-size: 0.9rem; margin-bottom: 0.8rem; }
+#ref-q {
+  width: 100%;
+  max-width: 28rem;
+  background: var(--bg-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.55rem 0.8rem;
+  font: 0.9rem var(--mono);
+}
+#ref-q:focus { outline: none; border-color: var(--ls-green); box-shadow: 0 0 0 2px rgba(63, 196, 110, 0.2); }
+#ref-results h3 { margin: 1.2rem 0 0.2rem; color: var(--ls-yellow); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.06em; }
+.ref-row {
+  display: grid;
+  grid-template-columns: minmax(10rem, 22rem) minmax(0, 1fr) auto auto;
+  gap: 0.8rem;
+  align-items: baseline;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.9rem;
+}
+.ref-row code { font: 0.85rem var(--mono); color: var(--text); overflow-wrap: anywhere; }
+.ref-sum { color: var(--muted); }
+.ref-row button { padding: 0.2rem 0.6rem; }
+.ref-none { color: var(--muted); margin-top: 1rem; }
+
+.sample-card header { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
+.open-sandbox { font: 0.78rem var(--mono); color: var(--muted); text-decoration: none; }
+.open-sandbox:hover { color: var(--ls-yellow); }
+
 /* ---------- Responsive ---------- */
 @media (max-width: 860px) {
   .hero-inner, .lvs-widget { grid-template-columns: 1fr; }
@@ -484,4 +533,7 @@ footer {
   .spec-layout { grid-template-columns: 1fr; }
   .toc { position: static; max-height: none; }
   .container { padding: 1.2rem; }
+  .ref-row { grid-template-columns: 1fr auto auto; }
+  .ref-row code { grid-column: 1 / -1; }
+  .ref-sum { grid-column: 1; }
 }
