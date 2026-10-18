@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <algorithm>
 #include <map>
+#include <random>
 #include <set>
 #include <string>
 #include <vector>
@@ -159,13 +160,14 @@ TEST_CASE("partition: bsp draws depend only on the stack size and arguments") {
 // ── voronoi ──────────────────────────────────────────────────────────────────
 
 TEST_CASE("partition: voronoi zones are connected, one per site, in graph node order") {
+    for (char const* metric : {"euclidean", "manhattan"})
     for (uint64_t seed = 1; seed <= 30; ++seed) {
-        INFO("seed=" << seed);
+        INFO("metric=" << metric << " seed=" << seed);
         auto lv = generate(sized(24, 16,
             "everywhere { where[ (x == 12 && y != 8) ] => g[w] }\n"
             "    everywhere { g[.] => g[f] }\n"
             "    scatter(7) { g[f] => g[s] }\n"
-            "    voronoi(sites=s, within=(g != w), into=z)"), seed);
+            "    voronoi(sites=s, within=(g != w), into=z, metric=" + std::string(metric) + ")"), seed);
         // adjacent placements merge into one site, so up to 7 zones; each holds a site
         auto bs = boxes(lv, "z");
         CHECK((bs.size() >= 1 && bs.size() <= 7));
@@ -181,38 +183,103 @@ TEST_CASE("partition: voronoi zones are connected, one per site, in graph node o
     }
 }
 
-TEST_CASE("partition: voronoi distance is geodesic through within") {
+TEST_CASE("partition: voronoi euclidean is the Euclidean diagram on open ground") {
+    std::mt19937 pick(5);
+    for (int trial = 0; trial < 20; ++trial) {
+        int W = 40, H = 30;
+        std::vector<std::pair<int, int>> sites;
+        std::string pred;
+        while (sites.size() < 10) {
+            int x = (int)(pick() % W), y = (int)(pick() % H);
+            bool near = false;   // keep sites apart, so each is one cell
+            for (auto [sx, sy] : sites) near |= std::abs(sx - x) <= 1 && std::abs(sy - y) <= 1;
+            if (near) continue;
+            sites.push_back({x, y});
+            pred += (pred.empty() ? "" : " || ") + std::string("(x == ") + std::to_string(x) +
+                    " && y == " + std::to_string(y) + ")";
+        }
+        auto lv = generate(sized(W, H, "voronoi(sites=(" + pred + "), into=z)"), (uint64_t)trial + 1);
+        auto z = lv["z"];
+        // map zone ids back to sites through the site cells themselves
+        std::map<long long, int> site_of_zone;
+        for (int s = 0; s < 10; ++s) site_of_zone[z.at(sites[s].first, sites[s].second)] = s;
+        int differ = 0, decided = 0;
+        for (int y = 0; y < H; ++y)
+            for (int x = 0; x < W; ++x) {
+                long long best = -1, second = -1;
+                int who = -1;
+                for (int s = 0; s < 10; ++s) {
+                    long long dx = x - sites[s].first, dy = y - sites[s].second, d = dx * dx + dy * dy;
+                    if (best < 0 || d < best) { second = best; best = d; who = s; }
+                    else if (second < 0 || d < second) second = d;
+                }
+                if (best == second) continue;   // an exact tie: either answer is right
+                ++decided;
+                if (site_of_zone[z.at(x, y)] == who) continue;
+                // the one exception: the nearest site's zone touches the cell
+                // only diagonally, so a 4-connected zone cannot hold it
+                ++differ;
+                INFO("trial=" << trial << " cell (" << x << "," << y << ")");
+                for (auto [nx, ny] : {std::pair{x - 1, y}, {x + 1, y}, {x, y - 1}, {x, y + 1}})
+                    if (nx >= 0 && ny >= 0 && nx < W && ny < H)
+                        CHECK(site_of_zone[z.at(nx, ny)] != who);
+            }
+        INFO("trial=" << trial);
+        CHECK(differ <= 2);   // rare: one cell in thousands
+        CHECK(decided > W * H / 2);
+        check_ids_are_nodes(lv);
+    }
+}
+
+TEST_CASE("partition: voronoi euclidean and manhattan measure differently") {
+    // (4,0): Euclidean 16 from (0,0) and 13 from (6,3); Manhattan 4 and 5
+    std::string grid_rows[] = {"s . . . . . .", ". . . . . . .", ". . . . . . .", ". . . . . . s"};
+    std::vector<std::string> rows(std::begin(grid_rows), std::end(grid_rows));
+    auto euclid = generate(stamped(zone_decls, "g", rows, "voronoi(sites=s, into=z)"))["z"];
+    auto steps  = generate(stamped(zone_decls, "g", rows, "voronoi(sites=s, into=z, metric=manhattan)"))["z"];
+    CHECK(euclid.at(4, 0) == euclid.at(6, 3));
+    CHECK(steps.at(4, 0) == steps.at(0, 0));
+}
+
+TEST_CASE("partition: voronoi step metrics measure route length through within") {
     // the left site reaches the right half only through the gap at the bottom
-    auto lv = generate(stamped(zone_decls, "g", {"f s w f f", "f f w f f", "f f f f s"},
-                               "voronoi(sites=s, within=(g != w), into=z)"));
+    auto lv = generate(stamped(zone_decls, "g", {"s f w f f", "f f w f f", "f f f f f", "f f w f s"},
+                               "voronoi(sites=s, within=(g != w), into=z, metric=manhattan)"));
     auto z = lv["z"];
-    // (3,0) is 2 steps from (1,0) across the wall but 6 around it; 3 from (4,2)
-    CHECK(z.at(3, 0) == z.at(4, 2));
-    CHECK(z.at(0, 0) == z.at(1, 0));
-    CHECK(z.at(1, 0) != z.at(4, 2));
+    // (3,0) is 9 by straight line from (0,0) and 10 from (4,3), but 7 steps
+    // around the wall from (0,0) and 4 from (4,3)
+    CHECK(z.at(3, 0) == z.at(4, 3));
 }
 
 TEST_CASE("partition: voronoi ties are keyed per site, so borders are coherent") {
     // the middle column is equidistant from both sites everywhere
-    std::set<std::string> outcomes;
-    for (uint64_t seed = 1; seed <= 20; ++seed) {
-        auto lv = generate(stamped(zone_decls, "g", {". . .", ". . .", "s . s", ". . .", ". . ."},
-                                   "voronoi(sites=s, into=z)"), seed);
-        auto z = lv["z"];
-        for (int y = 1; y < 5; ++y) CHECK(z.at(1, y) == z.at(1, 0));
-        outcomes.insert(show(lv, "z"));
+    for (char const* metric : {"euclidean", "manhattan"}) {
+        std::set<std::string> outcomes;
+        for (uint64_t seed = 1; seed <= 20; ++seed) {
+            auto lv = generate(stamped(zone_decls, "g", {". . .", ". . .", "s . s", ". . .", ". . ."},
+                                       "voronoi(sites=s, into=z, metric=" + std::string(metric) + ")"), seed);
+            auto z = lv["z"];
+            for (int y = 1; y < 5; ++y) CHECK(z.at(1, y) == z.at(1, 0));
+            outcomes.insert(show(lv, "z"));
+        }
+        CHECK(outcomes.size() == 2);
     }
-    CHECK(outcomes.size() == 2);
 }
 
-TEST_CASE("partition: voronoi site blobs, unreachable cells, and connectivity 8") {
+TEST_CASE("partition: voronoi site blobs, unreachable cells, and chebyshev") {
     // a 4-connected blob is one site; the enclosed cell is unreachable
-    auto blob = generate(stamped(zone_decls, "g", {"s s . w f", ". . . w w"},
-                                 "voronoi(sites=s, within=(g != w), into=z)"));
-    CHECK(show(blob, "z") == "000../000..");
-    // diagonal neighbours: under 8 the far corner is one step closer
+    for (char const* metric : {"euclidean", "manhattan", "chebyshev"}) {
+        auto blob = generate(stamped(zone_decls, "g", {"s s . w f", ". . . w w"},
+            "voronoi(sites=s, within=(g != w), into=z, metric=" + std::string(metric) + ")"));
+        CHECK(show(blob, "z") == "000../000..");
+    }
+    // a blob is measured from its nearest cell: (3,0) is 1 from the blob's
+    // right end, 4 (squared) from the single site
+    auto near = generate(stamped(zone_decls, "g", {"s s s . . s"}, "voronoi(sites=s, into=z)"));
+    CHECK(show(near, "z") == "000011");
+    // diagonal neighbours: under chebyshev the far corner is one step closer
     auto eight = generate(stamped(zone_decls, "g", {"s . .", ". . .", ". . s"},
-                                  "voronoi(sites=s, into=z, connectivity=8)"));
+                                  "voronoi(sites=s, into=z, metric=chebyshev)"));
     auto z = eight["z"];
     CHECK(z.at(0, 0) == 0);
     CHECK(z.at(2, 2) == 1);
@@ -283,6 +350,11 @@ TEST_CASE("partition: into must be a number grid") {
     CHECK(ts::compile_result(sized(4, 4, "noise(into=z, lo=0, scale=2)"))
               .has_error("requires argument 'hi='"));
     CHECK(ts::compile_result(sized(4, 4, "bsp(z, 2)")).has_error("named-only"));
+    CHECK(ts::compile_result(sized(4, 4, "voronoi(sites=s, into=z, metric=taxicab)"))
+              .has_error("invalid voronoi metric 'taxicab'"));
+    CHECK(ts::compile_result(sized(4, 4, "voronoi(sites=s, into=z, cost=2)"))
+              .has_error("not euclidean"));
+    CHECK(ts::compile_result(sized(4, 4, "voronoi(sites=s, into=z, metric=chebyshev, cost=2)")).ok);
 }
 
 TEST_CASE("partition: every runtime warning reaches the handler") {
@@ -304,9 +376,6 @@ TEST_CASE("partition: every runtime warning reaches the handler") {
         REQUIRE(got.size() >= 1);
         CHECK(got[0].rfind("w.lvs:12:5: warning: " + std::string(r.message), 0) == 0);
     }
-    auto conn = warnings_of(head + "voronoi(sites=(x == 0), into=z, connectivity=6)\n}\n");
-    REQUIRE(conn.size() == 1);
-    CHECK(conn[0].find("voronoi() connectivity 6 is not 4 or 8; treating it as 4") != std::string::npos);
     for (char const* op : {"bsp(into=z, min=1)", "voronoi(sites=s, into=z)",
                            "noise(into=z, lo=0, hi=1, scale=1)"}) {
         auto early = warnings_of(zone_decls + "\nsequence main {\n    " + op + "\n}\n");

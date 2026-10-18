@@ -594,13 +594,9 @@ void machine::exec_op(compiled_op const& op) {
         return;
     }
 
-    case op_kind::voronoi: {
-        long long conn = arg[compiled_op::voronoi_connectivity];
-        if (conn != 4 && conn != 8)
-            warn("voronoi() connectivity " + std::to_string(conn) + " is not 4 or 8; treating it as 4");
-        run_voronoi(op, conn == 8 ? 8 : 4);
+    case op_kind::voronoi:
+        run_voronoi(op);
         return;
-    }
 
     case op_kind::noise: {
         long long scale = arg[compiled_op::noise_scale], octaves = arg[compiled_op::noise_octaves];
@@ -691,13 +687,17 @@ void machine::run_bsp(compiled_op const& op, long long min, long long max, long 
     write_field(op.into_grid, cells);
 }
 
+// voronoi's neighbour offsets: the first 4 orthogonal, all 8 for chebyshev.
+static const int vdx[] = {1, -1, 0, 0, 1, 1, -1, -1};
+static const int vdy[] = {0, 0, 1, -1, 1, -1, 1, -1};
+
 // voronoi(...): partition the cells by nearest site, through `within`.
 //
-// Draw contract: `sites` then `within` row-major, per-cell `cost`, then ONE
-// raw draw; a site's tie key is uniform_hash(d, site index), so two sites resolve
-// every tie between them alike. A cell's claim is the site minimizing
-// (distance, key) - a pure function, so the search order is unobservable.
-void machine::run_voronoi(compiled_op const& op, int ndirs) {
+// Draw contract: `sites` then `within` row-major, per-cell `cost` under a
+// step metric, then ONE raw draw; a site's tie key is uniform_hash(d, site
+// index), so two sites resolve every tie between them alike. Either metric's
+// claims are a pure function, so the search order is unobservable.
+void machine::run_voronoi(compiled_op const& op) {
     if (grids_.empty() || grids_[0].rows <= 0 || op.into_grid < 0) {
         warn("voronoi() before any resize; leaving grids unchanged");
         return;
@@ -716,7 +716,7 @@ void machine::run_voronoi(compiled_op const& op, int ndirs) {
         }
 
     std::vector<long long> costv(n, 1);
-    if (op.cost >= 0)
+    if (op.cost >= 0)   // step metrics only
         for (int y = 0; y < H; ++y)
             for (int x = 0; x < W; ++x) {
                 size_t i = (size_t)y * W + x;
@@ -726,9 +726,6 @@ void machine::run_voronoi(compiled_op const& op, int ndirs) {
             }
 
     uint64_t d = rng_();
-
-    static const int dx[] = {1, -1, 0, 0, 1, 1, -1, -1};
-    static const int dy[] = {0, 0, 1, -1, 1, -1, 1, -1};
 
     // sites: 4-connected site regions, indexed in row-major order of their first cell
     std::vector<int> site_of(n, -1);
@@ -742,7 +739,7 @@ void machine::run_voronoi(compiled_op const& op, int ndirs) {
             stack.pop_back();
             int x = (int)(c % W), y = (int)(c / W);
             for (int k = 0; k < 4; ++k) {
-                int nx = x + dx[k], ny = y + dy[k];
+                int nx = x + vdx[k], ny = y + vdy[k];
                 if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
                 size_t j = (size_t)ny * W + nx;
                 if (is_site[j] && site_of[j] < 0) { site_of[j] = nsites; stack.push_back(j); }
@@ -756,20 +753,96 @@ void machine::run_voronoi(compiled_op const& op, int ndirs) {
         return;
     }
 
-    // multi-source Dijkstra over (distance, key): keys are per site, so the
-    // lexicographic minimum propagates along routes and one search gives
-    // every cell its claim
+    std::vector<int> claim(n, -1);
+    for (size_t i = 0; i < n; ++i)
+        if (site_of[i] >= 0) claim[i] = site_of[i];
+    if (op.w == 0) grow_euclidean(W, H, d, nsites, site_of, within, claim);
+    else           grow_steps(W, H, d, op.w, site_of, within, costv, claim);
+
+    // zone ids: row-major order of each zone's first cell - graph node order
+    std::vector<int64_t> zone_of(nsites, -1), cells(n, num_empty);
+    int64_t nzones = 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (claim[i] < 0) continue;
+        int64_t& z = zone_of[(size_t)claim[i]];
+        if (z < 0) z = nzones++;
+        cells[i] = z;
+    }
+    write_field(op.into_grid, cells);
+}
+
+// metric=euclidean: zones grow 4-adjacently, each claim the least (squared
+// distance to the claiming site's nearest cell, site key, cell) pair - so
+// zones are 4-connected, and on open ground the cell-sampled Euclidean
+// Voronoi diagram. A queued pair's priority never changes.
+void machine::grow_euclidean(int W, int H, uint64_t d, int nsites, std::vector<int> const& site_of,
+                             std::vector<char> const& within, std::vector<int>& claim) {
+    size_t n = (size_t)W * H;
+    // a site's nearest cell to any outside cell has a non-site 4-neighbour
+    // (a step from it toward that cell is closer), so only those are measured
+    std::vector<std::vector<std::pair<int, int>>> rim((size_t)nsites);
+    for (size_t i = 0; i < n; ++i) {
+        if (site_of[i] < 0) continue;
+        int x = (int)(i % W), y = (int)(i / W);
+        for (int k = 0; k < 4; ++k) {
+            int nx = x + vdx[k], ny = y + vdy[k];
+            if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
+            if (site_of[(size_t)ny * W + nx] != site_of[i]) {
+                rim[(size_t)site_of[i]].push_back({x, y});
+                break;
+            }
+        }
+    }
+    auto dist2 = [&](int s, int x, int y) {
+        long long best = std::numeric_limits<long long>::max();
+        for (auto [px, py] : rim[(size_t)s]) {
+            long long ddx = x - px, ddy = y - py;
+            best = std::min(best, ddx * ddx + ddy * ddy);
+        }
+        return best;
+    };
+    std::vector<uint64_t> key((size_t)nsites);
+    for (int s = 0; s < nsites; ++s) key[(size_t)s] = uniform_hash(d, (uint64_t)s);
+
+    using entry = std::tuple<long long, uint64_t, int, int>;   // D, key, cell, site
+    std::priority_queue<entry, std::vector<entry>, std::greater<entry>> pq;
+    auto offer = [&](int c, int s) {   // the unclaimed within neighbours of c, for s
+        int x = c % W, y = c / W;
+        for (int k = 0; k < 4; ++k) {
+            int nx = x + vdx[k], ny = y + vdy[k];
+            if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
+            int j = ny * W + nx;
+            if (within[(size_t)j] && claim[(size_t)j] < 0)
+                pq.push({dist2(s, nx, ny), key[(size_t)s], j, s});
+        }
+    };
+    for (size_t i = 0; i < n; ++i)
+        if (site_of[i] >= 0) offer((int)i, site_of[i]);
+    while (!pq.empty()) {
+        auto [dd, kk, c, s] = pq.top();
+        pq.pop();
+        if (claim[(size_t)c] >= 0) continue;   // claimed by a smaller pair
+        claim[(size_t)c] = s;
+        offer(c, s);
+    }
+}
+
+// metric=manhattan / chebyshev: multi-source Dijkstra over (distance, key) -
+// keys are per site, so the lexicographic minimum propagates along routes and
+// one search gives every cell its claim.
+void machine::grow_steps(int W, int H, uint64_t d, int ndirs, std::vector<int> const& site_of,
+                         std::vector<char> const& within, std::vector<long long> const& costv,
+                         std::vector<int>& claim) {
+    size_t n = (size_t)W * H;
     const long long inf = std::numeric_limits<long long>::max();
     std::vector<long long> dist(n, inf);
     std::vector<uint64_t>  key(n, 0);
-    std::vector<int>       claim(n, -1);
     using entry = std::tuple<long long, uint64_t, int>;
     std::priority_queue<entry, std::vector<entry>, std::greater<entry>> pq;
     for (size_t i = 0; i < n; ++i)
         if (site_of[i] >= 0) {
             dist[i] = 0;
             key[i] = uniform_hash(d, (uint64_t)site_of[i]);
-            claim[i] = site_of[i];
             pq.push({0, key[i], (int)i});
         }
     while (!pq.empty()) {
@@ -778,7 +851,7 @@ void machine::run_voronoi(compiled_op const& op, int ndirs) {
         if (dd != dist[i] || kk != key[i]) continue;   // stale
         int x = i % W, y = i / W;
         for (int k = 0; k < ndirs; ++k) {
-            int nx = x + dx[k], ny = y + dy[k];
+            int nx = x + vdx[k], ny = y + vdy[k];
             if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
             int j = ny * W + nx;
             if (!within[j]) continue;
@@ -791,17 +864,6 @@ void machine::run_voronoi(compiled_op const& op, int ndirs) {
             }
         }
     }
-
-    // zone ids: row-major order of each zone's first cell - graph node order
-    std::vector<int64_t> zone_of(nsites, -1), cells(n, num_empty);
-    int64_t nzones = 0;
-    for (size_t i = 0; i < n; ++i) {
-        if (claim[i] < 0) continue;
-        int64_t& z = zone_of[(size_t)claim[i]];
-        if (z < 0) z = nzones++;
-        cells[i] = z;
-    }
-    write_field(op.into_grid, cells);
 }
 
 // noise(...): fixed-point gradient noise (section 6.13), every step in

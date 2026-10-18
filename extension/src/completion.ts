@@ -66,7 +66,7 @@ export const OPS: { name: string; params: OpParam[]; snippet: string }[] = [
       params: [{ name: 'sites', kind: 'pred', positional: false, required: true },
                { name: 'into', kind: 'grid', positional: false, required: true },
                { name: 'within', kind: 'pred', positional: false, required: false },
-               { name: 'connectivity', kind: 'int', positional: false, required: false, values: ['4', '8'] },
+               { name: 'metric', kind: 'enum', positional: false, required: false, values: ['euclidean', 'manhattan', 'chebyshev'] },
                { name: 'cost', kind: 'expr', positional: false, required: false }] },
     { name: 'noise',   snippet: 'noise(into=${1}, lo=${2:0}, hi=${3:99}, scale=${4:16})',
       params: [{ name: 'into', kind: 'grid', positional: false, required: true },

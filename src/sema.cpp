@@ -207,6 +207,8 @@ static const operator_row operators[] = {
 // The `mirror` operation's axis: 1 = horizontal.
 struct axis_row { char const* name; int w; };
 static const axis_row mirror_axes[] = {{"horizontal", 1}, {"vertical", 0}};
+// The `voronoi` operation's metric: 0 = euclidean, else the step adjacency.
+static const axis_row voronoi_metrics[] = {{"euclidean", 0}, {"manhattan", 4}, {"chebyshev", 8}};
 // The `noise` operation's normalization: 1 = rank.
 static const axis_row noise_normalizations[] = {{"rank", 1}, {"range", 0}};
 
@@ -1262,7 +1264,7 @@ struct analyzer {
             {"voronoi", op_kind::voronoi, {{"sites",        arg_kind::pred,  false, true},
                                            {"into",         arg_kind::grid,  false, true},
                                            {"within",       arg_kind::pred,  false, false},
-                                           {"connectivity", arg_kind::int_,  false, false},
+                                           {"metric",       arg_kind::enum_, false, false},
                                            {"cost",         arg_kind::expr,  false, false}}},
             {"noise",   op_kind::noise,   {{"into",         arg_kind::grid,  false, true},
                                            {"lo",           arg_kind::int_,  false, true},
@@ -1498,10 +1500,23 @@ struct analyzer {
             op.into_grid = op_number_grid(*arg("into"), spec->name, "into");
             op.sites     = op_pred(*arg("sites"), spec->name, "sites");
             if (arg("within")) op.within = op_pred(*arg("within"), spec->name, "within");
-            if (arg("cost"))   op.cost   = op_num(*arg("cost"), spec->name, "cost", false);
-            assert(index("connectivity") == compiled_op::voronoi_connectivity);
-            if (!arg("connectivity"))
-                op.int_args.push_back({compiled_op::voronoi_connectivity, num_lit(4)});
+            op.w = 0;   // euclidean
+            if (auto a = arg("metric")) {
+                auto m = lookup(voronoi_metrics, arg_render(*a));
+                if (!m) {
+                    invalid(a->loc, "voronoi metric", arg_render(*a), voronoi_metrics);
+                    return false;
+                }
+                op.w = m->w;
+            }
+            if (auto a = arg("cost")) {
+                if (op.w == 0) {
+                    error(a->loc, arg_ctx(spec->name, "cost") + " measures route length; it "
+                          "takes metric=manhattan or metric=chebyshev, not euclidean");
+                    return false;
+                }
+                op.cost = op_num(*a, spec->name, "cost", false);
+            }
             break;
         }
         case op_kind::noise: {

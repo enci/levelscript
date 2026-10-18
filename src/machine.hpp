@@ -162,7 +162,12 @@ private:
     void exec_op(compiled_op const& op);
     void run_path(compiled_op const& op, int ndirs);   // ndirs = 4 or 8
     void run_bsp(compiled_op const& op, long long min, long long max, long long split);
-    void run_voronoi(compiled_op const& op, int ndirs);
+    void run_voronoi(compiled_op const& op);
+    void grow_euclidean(int W, int H, uint64_t d, int nsites, std::vector<int> const& site_of,
+                        std::vector<char> const& within, std::vector<int>& claim);
+    void grow_steps(int W, int H, uint64_t d, int ndirs, std::vector<int> const& site_of,
+                    std::vector<char> const& within, std::vector<long long> const& costv,
+                    std::vector<int>& claim);
     void run_noise(compiled_op const& op, long long lo, long long hi, long long scale,
                    long long octaves, long long persistence);
     // Write a full W x H field into number grid `id`.
