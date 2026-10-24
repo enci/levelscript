@@ -1,4 +1,4 @@
-// @seed 42
+// @seed=42
 // Showcase: the `settle` mode — a synchronous cellular automaton.
 //
 // `settle` runs full batch sweeps back-to-back, re-snapshotting
@@ -13,8 +13,8 @@
 // floors, which needs neighbour-count rules — see the graph/WFC parked item.)
 //
 // @expect run-ok
-// @expect grid g count(f) == 0     // grown to a fixpoint: no floor remains
-// @expect grid g count(w) == 36    // 6 × 6 all wall
+// @expect grid g count(floor) == 0     // grown to a fixpoint: no floor remains
+// @expect grid g count(wall) == 36    // 6 × 6 all wall
 
 tag t { wall, floor }
 

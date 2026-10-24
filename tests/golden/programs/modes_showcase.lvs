@@ -5,7 +5,7 @@
 // (sub-rule priority as an ordering key). This file exercises the grammar;
 // the exact output is seed-fixed.
 //
-// @seed 1
+// @seed=1
 // @expect run-ok
 
 tag t { a, b, c }

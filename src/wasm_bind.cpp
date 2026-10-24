@@ -2,6 +2,7 @@
 #include "ast_dump.hpp"
 #include "inspect.hpp"
 #include "ls.hpp"
+#include "modules.hpp"
 #include <cstdio>
 #include <string>
 #include <unordered_map>
@@ -46,6 +47,11 @@ struct session {
     // recomputed as we go since a step can land mid-statement.
     int           apps_in_stmt{0};
     int           counted_stmt{-1};
+    // Display metadata for the statement stack: the entry's name, and each
+    // sequence's statements' target names (a sequence frame's body is the
+    // one the frame before applied) - what the editor matches @play against.
+    std::string   entry_name;
+    std::unordered_map<std::string, std::vector<std::string>> targets;
 };
 
 // Pull one application/statement-boundary event, updating apps_in_stmt.
@@ -153,6 +159,21 @@ std::string state_json(session const& s, ls::level const& lvl) {
     o += ",\"atStatementBoundary\":";
     o += s.r.at_statement_boundary() ? "true" : "false";
     o += ",\"appsInStatement\":" + std::to_string(s.apps_in_stmt);
+    // [{"sequence","index"}]: run::stmt_stack(), each frame named by its sequence
+    o += ",\"stack\":[";
+    std::string seq = s.entry_name;
+    bool first = true;
+    for (auto const& f : s.r.stmt_stack()) {
+        if (!first) o += ",";
+        first = false;
+        o += "{\"sequence\":";
+        js(o, seq);
+        o += ",\"index\":" + std::to_string(f.index) + "}";
+        auto it = s.targets.find(seq);
+        seq = it != s.targets.end() && f.index >= 0 && f.index < (int)it->second.size()
+            ? it->second[(size_t)f.index] : "";
+    }
+    o += "]";
     o += ",\"highlights\":";
     emit_highlights(o, s.r);
     o += ",\"level\":";
@@ -197,7 +218,14 @@ int run_begin(std::string const& source, std::string const& name, unsigned int s
     }
     ls::run r = gen.run(eid, seed, ls::step_mode::application, ls::observe::on, overrides);
     int id = g_next_id++;
-    g_sessions.emplace(id, session{std::move(gen), std::move(r), seed, false, eid});
+    session& s = g_sessions.emplace(id, session{std::move(gen), std::move(r), seed, false, eid})
+                     .first->second;
+    s.entry_name = entry;
+    ls::diagnostics ignored;
+    for (auto const& sq : ls::load_closure(source, name, js_resolver(resolve), ignored).merged.sequences) {
+        auto& t = s.targets[sq.name.text];
+        for (auto const& st : sq.stmts) t.push_back(st.rule_name.text);
+    }
     return id;
 }
 

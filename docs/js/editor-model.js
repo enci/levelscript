@@ -8,7 +8,7 @@
 (function (root) {
   'use strict';
 
-  const LEX = ['', 'tk-cm', 'tk-str', 'tk-num', 'tk-kw', 'tk-fn', 'tk-op', 'tk-var'];
+  const LEX = ['', 'tk-cm', 'tk-str', 'tk-num', 'tk-kw', 'tk-fn', 'tk-op', 'tk-var', 'tk-dir'];
   const SEVERITY = { warning: 1, error: 2 };
 
   // ---------- positions ----------
@@ -53,7 +53,8 @@
     TOKEN.lastIndex = 0;
     while ((m = TOKEN.exec(src))) {
       const from = m.index, to = from + m[0].length;
-      if (m[1]) runs.push({ from, to, cls: 'tk-cm' });
+      // a directive comment (`// @key=value`, spec Appendix B) reads apart from prose
+      if (m[1]) runs.push({ from, to, cls: /^\/\/[ \t]*@/.test(m[1]) ? 'tk-dir' : 'tk-cm' });
       else if (m[2]) runs.push({ from, to, cls: 'tk-str' });
       else if (m[3]) {
         // `*` is the any-wildcard in a pattern row and multiplication inside ( ) or outside one
@@ -126,11 +127,13 @@
 
   // ranges: underlines inside this file. points: a marker at an offset that has no character to
   // underline (end of line or file). rows: every diagnostic, for the list; `at` is the start
-  // offset for those in this file, null for other modules.
+  // offset for those in this file, null for other modules. Directive warnings (Appendix B)
+  // follow the compile diagnostics as warnings.
   function diagnosticRanges(src, insp, fileName) {
     const ix = indexLines(src);
     const ranges = [], points = [], rows = [];
-    (insp.diagnostics || []).forEach(d => {
+    const warnings = (insp.directive_warnings || []).map(d => Object.assign({ severity: 'warning' }, d));
+    (insp.diagnostics || []).concat(warnings).forEach(d => {
       const sev = SEVERITY[d.severity] || 1;
       const mine = !d.module || d.module === fileName;
       const row = { line: d.line, col: d.col, message: d.message, severity: d.severity, module: mine ? null : d.module,

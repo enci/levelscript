@@ -4,12 +4,12 @@
 // The wall column has no gap and `passable=floor`, so no route exists; the
 // grids are left unchanged (the door/exit markers survive).
 //
-// @seed 1
+// @seed=1
 // @expect run-ok
 // @expect stderr-contains no route
-// @expect grid marks count(c) == 0     // nothing stamped
-// @expect grid marks count(d) == 1     // door still there
-// @expect grid marks count(e) == 1     // exit still there
+// @expect grid marks count(corridor) == 0     // nothing stamped
+// @expect grid marks count(door) == 1     // door still there
+// @expect grid marks count(exit) == 1     // exit still there
 
 tag g { floor, wall }
 tag m { door, exit, corridor }

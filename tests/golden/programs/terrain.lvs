@@ -1,4 +1,4 @@
-// @seed 26
+// @seed=26
 // Expressions across grids: a random depth field classified into terrain by
 // where-guarded thresholds (cross-grid reads at the same position).
 tag geo { water, grass, rock }

@@ -10,11 +10,11 @@
 // by seed, section 7.2). Downstream rules would consume the route with ordinary
 // same-position reads (e.g. `marks[corridor] => level[floor]`).
 //
-// @seed 3
+// @seed=3
 // @expect run-ok
-// @expect grid marks count(c) == 17     // corridor, endpoints included
-// @expect grid marks count(d) == 0      // door overwritten by the route
-// @expect grid marks count(e) == 0      // exit overwritten by the route
+// @expect grid marks count(corridor) == 17     // corridor, endpoints included
+// @expect grid marks count(door) == 0      // door overwritten by the route
+// @expect grid marks count(exit) == 0      // exit overwritten by the route
 
 tag g { floor, wall }
 tag m { door, exit, corridor }

@@ -1,8 +1,8 @@
-// @seed 42
+// @seed=42
 // Scattered-room dungeon generator (T60 variant).
 // Seeds are placed randomly; each expands to a 3x3 room.
 // The footprint-based overlap check ensures rooms never collide.
-// @expect grid level count(f) >= 9
+// @expect grid level count(floor) >= 9
 
 tag algo    { seed, room }
 tag terrain { wall, floor }

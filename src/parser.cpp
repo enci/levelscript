@@ -907,8 +907,9 @@ struct parser {
 
 std::optional<ast_file> parse(std::string_view source, std::string_view file,
                               diagnostics& diags, int mod) {
-    auto toks = lex(source, file, diags);
     ast_file out;
+    auto toks = lex(source, file, diags, &out.directive_comments);
+    for (auto& d : out.directive_comments) d.mod = mod;
     parser p{toks, file, diags};
     p.mod = mod;
     p.run(out);

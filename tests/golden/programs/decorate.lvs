@@ -1,4 +1,4 @@
-// @seed 12
+// @seed=12
 // Cross-grid rules: an algo layer drives geometry and loot on other layers —
 // sub-rules transcode the whole grid, an all-of-any write decorates floors.
 tag algo  { S, F }

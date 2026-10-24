@@ -4,7 +4,7 @@
 // conditionally clear a cell. It is polymorphic: typed from the grid or the
 // operand it is compared against.
 //
-// @seed 1
+// @seed=1
 // @expect run-ok
 
 tag geometry { floor, wall }

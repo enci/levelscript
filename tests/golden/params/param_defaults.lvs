@@ -8,7 +8,7 @@
 // Run it:  levelscript --seed 1 tests/golden/params/param_defaults.lvs
 //     or:  levelscript --seed 1 --param difficulty=5 tests/golden/params/param_defaults.lvs
 //
-// @seed 1
+// @seed=1
 // @expect run-ok
 // @expect grid loot count(6) == 4    // budget = difficulty(3) * 2 = 6
 

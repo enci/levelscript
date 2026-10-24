@@ -1,4 +1,4 @@
-// @seed 33
+// @seed=33
 // Settle: iterated sweeps to a fixpoint. Water floods from one spring
 // through the open cells; the rock mix bounds the pools.
 tag geo { rock, water }

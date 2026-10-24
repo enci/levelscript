@@ -4,7 +4,7 @@
 // into `zones`; `border` then walls every cell whose right or lower neighbour
 // lies in another leaf. Leaf ids follow graph node order (section 4.3).
 //
-// @seed 7
+// @seed=7
 // @expect run-ok
 
 tag geo { wall }

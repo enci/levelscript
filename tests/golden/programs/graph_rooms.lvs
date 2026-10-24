@@ -7,7 +7,7 @@
 // `distance` reads empty for a room the start cannot reach, so the spread
 // tests `!= .` first.
 //
-// @seed 2
+// @seed=2
 // @expect run-ok
 
 tag algo { room, hall }

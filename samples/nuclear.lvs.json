@@ -1,21 +1,18 @@
 {
-  "cell_zoom": 1.0,
-  "grid_bg_color": "282828",
+  "cell_zoom": 1.9500000476837158,
+  "grid_bg_color": "340000",
   "layers": [
     {
       "corner": "normal",
       "mode": "color",
       "name": "algo",
       "opacity": 1.0,
-      "tileset": "",
       "visible": true
     },
     {
       "corner": "normal",
-      "mode": "tile",
       "name": "tiles",
       "opacity": 1.0,
-      "tileset": "Tiles",
       "visible": true
     }
   ],

@@ -3,7 +3,7 @@
 // Every monotone route across an open 6x6 grid has the same length, so the
 // tie key alone picks the route. A change here is a change to path ties.
 //
-// @seed 11
+// @seed=11
 // @expect run-ok
 
 tag t { a, p }

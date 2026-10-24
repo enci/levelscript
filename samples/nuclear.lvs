@@ -1,18 +1,19 @@
 // Nuclear throne level script that tries to mimic the procedural generation style of the game
 
 tag algo {
-    T,  // tail
-    H,  // head
-    W,  // wall
-    F,  // floor
-    C,  // crate
-    E   // enemy
+    T  // @name=tail
+    H  // @name=head
+    W  // @name=wall
+    F  // @name=floor
+    C  // @name=crate
+    E  // @name=enemy
+    N  // @name=nothing
 }
 
 // Everything in the algo grid 
 layers {
     algo : grid of algo
-    tiles : grid of number
+    tiles : grid of number   // @tileset=Tiles
 }
 
 // The very start of the level
@@ -163,6 +164,7 @@ rule decorate { all
     algo[F] => tiles[14]
     algo[C] => tiles[15]
     algo[E] => { any tiles[18] tiles[19] tiles[23] tiles[24] }
+    algo[N] => tiles[14]
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -173,8 +175,9 @@ sequence main {
     pad(2)
     settle(10) carve
     trim()
-    pad(2)
-    everywhere walls
-    everywhere decorate
+    pad(2)    
+    everywhere walls // @play=5
+    everywhere { algo[.] => algo[N] } // @play=10
+    everywhere decorate // @play=5
 }
 

@@ -1,4 +1,4 @@
-// @seed 42
+// @seed=42
 // Upscale: a 2x2 grid of W cells upscaled 3x2 becomes 6x4, all W.
 // @expect grid g count(W) == 24
 

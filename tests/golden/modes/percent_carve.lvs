@@ -1,4 +1,4 @@
-// @seed 42
+// @seed=42
 // Showcase: a `scatter` percentage.
 //
 // `scatter(P%)` applies P% of one batch's matches — ⌊P·total/100⌋,
@@ -9,8 +9,8 @@
 // Here every cell is rock (100 matches), then exactly 40% are carved to floor.
 //
 // @expect run-ok
-// @expect grid g count(f) == 40    // exactly 40% of 100 carved
-// @expect grid g count(r) == 60
+// @expect grid g count(floor) == 40    // exactly 40% of 100 carved
+// @expect grid g count(rock) == 60
 
 tag t { rock, floor }
 

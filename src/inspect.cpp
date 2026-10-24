@@ -1,4 +1,5 @@
 #include "inspect.hpp"
+#include "directives.hpp"
 #include "modules.hpp"
 #include "parser.hpp"
 #include "sema.hpp"
@@ -223,6 +224,44 @@ std::string inspect_json(std::string const& source, std::string const& name,
             js(o, d.file);
             o += ",\"severity\":";
             o += d.is_error ? "\"error\"" : "\"warning\"";
+            o += ",\"message\":";
+            js(o, d.message);
+            o += "}";
+        }
+    }
+    o += "]";
+
+    // Tool directives (Appendix B), and their warnings apart from the diagnostics
+    directive_set dirs = read_directives(mods);
+    o += ",\"directives\":[";
+    {
+        comma_list cl{o};
+        for (auto const& d : dirs.all) {
+            static char const* const targets[] = {"file", "tag_value", "layer", "statement"};
+            cl.next();
+            o += "{\"key\":";
+            js(o, d.key);
+            o += ",\"value\":";
+            js(o, d.value);
+            o += ",\"loc\":{" + span_json(d.loc) + ",\"module\":";
+            js(o, mods.names[(size_t)d.loc.mod]);
+            o += "},\"target\":{\"kind\":\"" + std::string(targets[(int)d.target]) + "\"";
+            if (d.target != directive_target::file) o += ",\"range\":" + range_json(d.target_loc);
+            if (!d.owner.empty()) { o += ",\"owner\":"; js(o, d.owner); }
+            if (!d.name.empty())  { o += ",\"name\":";  js(o, d.name); }   // @param: the param
+            if (d.index >= 0) o += ",\"index\":" + std::to_string(d.index);
+            o += "}}";
+        }
+    }
+    o += "],\"directive_warnings\":[";
+    {
+        comma_list cl{o};
+        for (auto const& d : dirs.warnings.all) {
+            cl.next();
+            o += "{\"line\":" + std::to_string(d.line) + ",\"col\":" + std::to_string(d.col) +
+                 ",\"end_line\":" + std::to_string(d.end_line) +
+                 ",\"end_col\":" + std::to_string(d.end_col) + ",\"module\":";
+            js(o, d.file);
             o += ",\"message\":";
             js(o, d.message);
             o += "}";

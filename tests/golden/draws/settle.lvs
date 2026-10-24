@@ -3,7 +3,7 @@
 // Overlapping pairs conflict, so each sweep fills what its shuffle allows
 // and the next sweep shuffles what is left.
 //
-// @seed 9
+// @seed=9
 // @expect run-ok
 
 tag t { a, b }

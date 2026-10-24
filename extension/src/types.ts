@@ -45,9 +45,25 @@ export interface OutlineSymbol {
     children?: OutlineSymbol[];
 }
 
+// A tool directive (`// @key=value`, spec Appendix B), attached to its target.
+export interface Directive {
+    key: 'seed' | 'name' | 'tile' | 'tileset' | 'play' | string;
+    value: string;   // as written
+    loc: Location;
+    target: {
+        kind: 'file' | 'tag_value' | 'layer' | 'statement';
+        range?: SourceRange;
+        owner?: string;   // tag_value: the tagset; statement: the sequence
+        name?: string;    // tag_value: the value; layer: the grid
+        index?: number;   // statement: its position in the sequence body
+    };
+}
+
 export interface InspectionResult {
     ok: boolean;
     diagnostics: InspectorDiagnostic[];
+    directives?: Directive[];
+    directive_warnings?: Omit<InspectorDiagnostic, 'severity'>[];
     tokens: DecorationSpan[];
     refs?: RefSpan[];
     outline?: OutlineSymbol[];

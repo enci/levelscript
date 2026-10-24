@@ -13,9 +13,9 @@
 // Each { any } node contributes exactly one PRNG draw per application, in
 // declaration order (section 10.7) — deterministic per seed.
 //
-// @seed 1
+// @seed=1
 // @expect run-ok
-// @expect grid level count(f) == 64    // floor laid at every cell (the { all } arm)
+// @expect grid level count(floor) == 64    // floor laid at every cell (the { all } arm)
 
 tag geometry { floor }
 tag item { chest, heart }

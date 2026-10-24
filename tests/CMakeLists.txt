@@ -9,6 +9,7 @@ add_executable(ls_tests
     test_graph.cpp
     test_coverage.cpp
     test_partition.cpp
+    test_directives.cpp
 )
 
 target_link_libraries(ls_tests PRIVATE ls_lib Catch2::Catch2WithMain)

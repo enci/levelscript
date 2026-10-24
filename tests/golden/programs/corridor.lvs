@@ -1,4 +1,4 @@
-// @seed 51
+// @seed=51
 // The path operation: carve the cheapest corridor between the door and the
 // exit. The rocky field is expensive to cross, so the road winds through
 // the cheap cells; equal-cost routes vary by seed, reproducibly.

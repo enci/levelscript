@@ -87,6 +87,28 @@ bool load_script(script& sc) {
         return false;
     }
 
+    sc.dirs = read_directives(mods);
+    sc.value_names.assign(meta.tag_values.size(), {});
+    sc.value_tiles.assign(meta.tag_values.size(), {});
+    for (size_t t = 0; t < meta.tag_values.size(); ++t) {
+        sc.value_names[t].assign(meta.tag_values[t].size(), "");
+        sc.value_tiles[t].assign(meta.tag_values[t].size(), -1);
+    }
+    sc.layer_tilesets.clear();
+    for (auto const& d : sc.dirs.all) {
+        if (d.target == directive_target::layer) {
+            sc.layer_tilesets[d.name] = d.value;
+            continue;
+        }
+        if (d.target != directive_target::tag_value) continue;
+        int t = meta.tag_id(d.owner);
+        int v = t < 0 ? -1 : meta.value_id(t, d.name);
+        if (v < 0) continue;
+        if (d.key == "name") sc.value_names[(size_t)t][(size_t)v] = d.value;
+        if (d.key == "tile") sc.value_tiles[(size_t)t][(size_t)v] = (int)d.number;
+    }
+    sc.full_error = sc.dirs.warnings.format_all();
+
     sc.gen    = std::move(gen);
     sc.ast    = std::move(mods.merged);
     sc.meta   = std::move(meta);
@@ -95,7 +117,9 @@ bool load_script(script& sc) {
         sc.entry      = 0;
         sc.entry_name = sc.gen.sequence_name(0);
     }
-    sc.status = "Loaded OK";
+    size_t nw = sc.dirs.warnings.all.size();
+    sc.status = nw == 0 ? "Loaded OK"
+              : "Loaded OK - " + std::to_string(nw) + " directive warning" + (nw > 1 ? "s" : "");
     sc.ok     = true;
     return true;
 }
@@ -185,6 +209,35 @@ static void set_style_metrics();
 static void set_light_theme();
 static void set_dark_theme();
 
+// ── @play pacing ─────────────────────────────────────────────────────────────
+
+// The @play pace at the run's position (spec B.6): the innermost statement on
+// the stack with one - a sequence application's covers its body. `depth` is
+// that statement's frame. -1: none; the fps timer paces.
+static int play_pace(script const& sc, std::vector<stmt_frame> const& st, size_t& depth) {
+    std::string seq = sc.entry_name;   // the sequence frame k is in
+    int pace = -1;
+    for (size_t k = 0; k < st.size(); ++k) {
+        if (auto d = sc.dirs.find("play", directive_target::statement, seq, "", st[k].index)) {
+            pace  = (int)d->number;
+            depth = k;
+        }
+        auto const* sq = lookup(sc.ast.sequences, seq);
+        if (!sq || st[k].index < 0 || st[k].index >= (int)sq->stmts.size()) break;
+        seq = sq->stmts[(size_t)st[k].index].rule_name.text;
+    }
+    return pace;
+}
+
+// Whether two statement stacks agree on their first `n` frames.
+static bool same_frames(std::vector<stmt_frame> const& a, std::vector<stmt_frame> const& b,
+                        size_t n) {
+    if (a.size() < n || b.size() < n) return false;
+    for (size_t k = 0; k < n; ++k)
+        if (a[k].index != b[k].index || a[k].iteration != b[k].iteration) return false;
+    return true;
+}
+
 // ── entry point ───────────────────────────────────────────────────────────────
 
 int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_seed,
@@ -265,6 +318,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
 
     auto make_seed = [&]() -> uint64_t {
         if (fixed_seed) return *fixed_seed;
+        if (auto s = sc.dirs.seed()) return *s;   // the file's @seed (Appendix B)
         // 32 bits is already plenty of variation for regenerating a level,
         // and keeps the seed field a tidy 8 hex digits in the UI.
         return (uint64_t)(uint32_t)
@@ -402,11 +456,11 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
     auto action_step_out  = [&] { run.begin(debug_run::command::step_out); };
     auto action_reset     = [&] {
         if (path.empty()) return;
-        if (!seed_locked) seed = make_seed();
         // Reload from disk so edits made in an external editor are picked up;
         // on failure the previous compile stays live and the status bar shows
         // the first diagnostic.
         if (load_script(sc)) cfg.sync_layers(sc.layer_names());
+        if (!seed_locked) seed = make_seed();   // after the reload: an edited @seed
         run.restart(sc.gen, sc.entry, seed);
     };
 
@@ -525,10 +579,28 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
             redraw_frames = k_cooldown_frames;
         }
 
-        // Timed playback -- advance one application per tick at play_fps;
-        // a breakpoint stops it like any other command.
+        // Timed playback -- advance one application per tick at play_fps,
+        // or at the statement's @play pace; a breakpoint stops it like any
+        // other command.
         if (playing && run.done) playing = false;
-        if (playing && !run.busy()) {
+        size_t pace_depth = 0;
+        auto   pace_stack = run.gen.stmt_stack();
+        int    pace = playing ? play_pace(sc, pace_stack, pace_depth) : -1;
+        if (playing && !run.busy() && pace >= 0) {
+            // @play=N: N steps this frame; @play=0: the whole statement (in
+            // slices of a few frames' time, so the window stays live). Stops
+            // early once the run leaves the statement that set the pace.
+            auto t0 = clock::now();
+            for (int i = 0; pace == 0 || i < pace; ++i) {
+                run.advance_cmd(sc.breakpoints);
+                if (run.done || !run.paused_at.empty()) break;
+                if (!same_frames(run.gen.stmt_stack(), pace_stack, pace_depth + 1)) break;
+                if (std::chrono::duration<float>(clock::now() - t0).count() > 0.05f) break;
+            }
+            run.refresh();
+            if (!run.paused_at.empty()) playing = false;
+            last_advance = clock::now();
+        } else if (playing && !run.busy()) {
             {
                 auto now = clock::now();
                 float elapsed = std::chrono::duration<float>(now - last_advance).count();
@@ -824,7 +896,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
 
         // The other panes stay empty until a script has compiled.
         begin_pane("Tags###TAGS");
-        if (loaded) draw_tags_window(sc.meta, cfg);
+        if (loaded) draw_tags_window(sc, cfg);
         ImGui::End();
 
         begin_pane("Rule###RULE", ImGuiWindowFlags_HorizontalScrollbar);
@@ -923,7 +995,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
                 dl->AddText({ c0.x + chip_pad, wpos.y + status_pad_y },
                             ImGui::GetColorU32(text_col), msg.c_str());
                 dl->PopClipRect();
-                if (!sc.ok && ImGui::IsMouseHoveringRect(c0, c1))
+                if (!sc.full_error.empty() && ImGui::IsMouseHoveringRect(c0, c1))
                     bar_tip = sc.full_error;
             }
             ImGui::End();

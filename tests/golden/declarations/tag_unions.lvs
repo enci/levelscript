@@ -8,9 +8,9 @@
 // Here `random` scatters wall and door across the grid, then a single `breach`
 // rule opens every blocker (wall *or* door) in one pass — the point of the union.
 //
-// @seed 1
+// @seed=1
 // @expect run-ok
-// @expect grid level count(o) == 16    // every wall and door was a blocker → open
+// @expect grid level count(open) == 16    // every wall and door was a blocker → open
 
 tag geometry { wall, door, open, blocker = wall | door }
 

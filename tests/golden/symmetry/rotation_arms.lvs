@@ -1,4 +1,4 @@
-// @seed 42
+// @seed=42
 // Showcase (v0.3.1): explicit rotation angles and the set form `rotation={..}`.
 //
 // A single `core` is placed at the grid centre, then `extend` extends an arm into
@@ -18,8 +18,8 @@
 // that way the four rotated variants never conflict on the shared core cell.
 //
 // @expect run-ok
-// @expect grid g count(c) == 1     // one core at the centre
-// @expect grid g count(a) == 3     // right, down, up — no left (180 excluded)
+// @expect grid g count(core) == 1     // one core at the centre
+// @expect grid g count(arm) == 3     // right, down, up — no left (180 excluded)
 
 tag t { core, arm }
 

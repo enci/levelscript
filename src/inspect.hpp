@@ -11,6 +11,14 @@
 //   {
 //     "ok": bool,
 //     "diagnostics": [{"line","col","severity":"error"|"warning","message"}],
+//     "directives":  [{"key","value","loc":{"line","col","len","module"},
+//                      "target":{"kind":"file"|"tag_value"|"layer"|"statement",
+//                                "range","owner","name","index"}}],
+//                    // tool directives (Appendix B); value as written.
+//                    // tag_value: owner = tagset, name = value; layer: name;
+//                    // statement: owner = sequence, index = its stmt_stack() index;
+//                    // @param (the file): name = the param, value = its number
+//     "directive_warnings": [{"line","col","end_line","end_col","module","message"}],
 //     "tokens":      [{"line","col","len","tag","value"}],   // colorable
 //                    // pattern cells (1-based positions). tag >= 0: id into
 //                    // symbols.tags, value = palette slot (values first,

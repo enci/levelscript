@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -22,17 +23,16 @@ struct layer_config {
     std::string name;
     bool        visible{true};
     float       opacity{1.0f};
-    layer_mode  mode{layer_mode::text};
-    // Name of the tileset_config this layer's Tile mode draws from ("" =
-    // none / falls back to the gray placeholder). Keyed by name like
-    // tag_colors below, so renaming a tileset in Settings breaks the
-    // reference - re-pick it there if that happens.
-    std::string tileset;
+    // The user's choice of view mode, overriding the default: tiles for a
+    // grid with a `@tileset` directive, colour otherwise (spec B.5). Unset
+    // until the user picks one; only a set mode is saved.
+    std::optional<layer_mode> mode;
     corner_size corner{corner_size::normal};   // Corner mode only
 };
 
+// A sheet, named by `@tileset=<name>` in the script.
 struct tileset_config {
-    std::string name{"Tileset"};
+    std::string name{"tileset"};
     std::string path;   // relative to the .lvs file
     int         tile_w{16};
     int         tile_h{16};

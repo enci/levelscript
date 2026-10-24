@@ -1,4 +1,4 @@
-// @seed 42
+// @seed=42
 // T36: rotation=all expands a 1x2 pattern to 4 variants (all 4 cardinal directions).
 // On a 4x4 all-S grid, `everywhere` applies matches in a seeded-shuffle order (section 6.5),
 // firing horizontal and vertical variants; conflicting overlaps are skipped.

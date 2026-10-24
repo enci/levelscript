@@ -89,6 +89,17 @@ function analyse(doc: vscode.TextDocument) {
         : vscode.DiagnosticSeverity.Warning;
       return new vscode.Diagnostic(new vscode.Range(start, end), d.message, severity);
     });
+    // Directive warnings (Appendix B) never fail a compile; only this file's
+    // are shown here - a used module's show when it is opened.
+    for (const d of result.directive_warnings ?? []) {
+      if (d.module && d.module !== doc.uri.fsPath) continue;
+      const start = new vscode.Position(Math.max(0, d.line - 1), Math.max(0, d.col - 1));
+      const end = new vscode.Position(Math.max(0, d.end_line - 1), Math.max(0, d.end_col - 1));
+      const diag = new vscode.Diagnostic(new vscode.Range(start, end), d.message,
+        vscode.DiagnosticSeverity.Warning);
+      diag.source = 'directive';
+      vsDiags.push(diag);
+    }
     diagnosticCollection.set(doc.uri, vsDiags);
 
     const editor = vscode.window.activeTextEditor;

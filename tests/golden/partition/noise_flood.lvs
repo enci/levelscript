@@ -3,7 +3,7 @@
 // Under the default `normalize=rank`, `elevation < 30` floods 30% of the cells
 // for every seed and every scale: 0.3 * 32 * 32 = 307.2, so 307 or 308.
 //
-// @seed 11
+// @seed=11
 // @expect run-ok
 
 tag geo { land, water }

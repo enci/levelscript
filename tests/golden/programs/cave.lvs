@@ -1,8 +1,8 @@
-// @seed 42
+// @seed=42
 // Cellular-automaton cave generator.
 // Fill randomly, then erode isolated walls and fill isolated floors.
-// @expect grid level count(f) >= 100
-// @expect grid level count(w) >= 100
+// @expect grid level count(floor) >= 100
+// @expect grid level count(wall) >= 100
 
 tag terrain { wall, floor }
 layers { level: grid of terrain }

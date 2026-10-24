@@ -4,7 +4,7 @@
 // `fall` rule moves boxes and gems alike. A binding cell never matches
 // empty, so `grow fall` stops once nothing has empty space below it.
 //
-// @seed 5
+// @seed=5
 // @expect run-ok
 // @expect grid items count(.) == 52   // 64 cells, 12 items: nothing is lost on the way down
 

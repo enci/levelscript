@@ -9,6 +9,7 @@
 //                                    SKIPPED, static-only)
 //   @expect run-ok                 → analysis must report 0 errors
 //   @expect grid <g> count(...)    → runtime assertion; SKIPPED (static-only)
+// The runtime ones are verified by `levelscript --check` (tools/run_goldens.py).
 //   (no @expect directives)        → treated as run-ok (must be clean)
 //
 // Exit code is non-zero if any file fails, so this doubles as a CI gate.

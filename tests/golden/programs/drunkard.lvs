@@ -1,7 +1,7 @@
-// @seed 42
+// @seed=42
 // Drunkard's walk corridor generator.
 // A single walker starts in the middle and meanders, leaving floor behind.
-// @expect grid level count(f) >= 5
+// @expect grid level count(floor) >= 5
 
 tag algo    { S, F }
 tag terrain { wall, floor }

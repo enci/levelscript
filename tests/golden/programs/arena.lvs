@@ -1,4 +1,4 @@
-// @seed 18
+// @seed=18
 // Params, where, and when together: a paved arena with a wall frame; lava
 // hazards only when the difficulty param says so (default 5; try
 // --param difficulty=2 to disable the hazard pass).

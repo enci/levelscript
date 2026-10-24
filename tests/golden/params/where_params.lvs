@@ -1,4 +1,4 @@
-// @seed 42
+// @seed=42
 // Showcase (v0.3): the `where` pseudo-layer + a runtime `params` input.
 //
 // `sea_level` is a number supplied at runtime (like the seed). The `flood`
@@ -8,10 +8,10 @@
 //
 // Run it:  levelscript --param sea_level=2 tests/golden/params/where_params.lvs
 //
-// @param sea_level 2
+// @param sea_level=2
 // @expect run-ok
-// @expect grid map count(w) == 8     // top 2 of 4 rows × 4 cols
-// @expect grid map count(g) == 8     // the remaining land
+// @expect grid map count(water) == 8     // top 2 of 4 rows × 4 cols
+// @expect grid map count(grass) == 8     // the remaining land
 
 params { sea_level: number = 0 }
 

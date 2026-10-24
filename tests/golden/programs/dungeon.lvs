@@ -1,4 +1,4 @@
-// @seed 42
+// @seed=42
 // Nuclear Throne style dungeon generator.
 tag items     { chest, heart, potion, sword, shield }
 tag entities  { player, skeleton_knife, skeleton_axe, skull, necromancer }

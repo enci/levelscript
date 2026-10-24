@@ -3,7 +3,7 @@
 // Both branches of `if` evaluate, so each cell draws two numbers and keeps
 // one; the next cell starts two draws later.
 //
-// @seed 4
+// @seed=4
 // @expect run-ok
 
 layers { n: grid of number }

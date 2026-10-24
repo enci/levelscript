@@ -2,7 +2,7 @@
 // Fill a 1x4 grid: S F S F. After sym rule, all pairs become F S.
 // The swap rule's matches overlap (the batch conflict-resolves by the seeded
 // shuffle), so the clean 2/2 swap is seed-dependent; pin a seed that yields it.
-// @seed 6
+// @seed=6
 // @expect grid g count(F) == 2
 // @expect grid g count(S) == 2
 

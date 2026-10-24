@@ -1,4 +1,4 @@
-// @seed 42
+// @seed=42
 // T31: body-level 'all' combinator applies multiple pairs in one sweep.
 // Double-buffering means the second pair (g[b]=>g[c]) never matches —
 // the snapshot still holds 'a' when the second pair is evaluated.

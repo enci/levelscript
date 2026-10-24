@@ -8,7 +8,7 @@
 //
 // Run it:  levelscript --seed 42 tests/golden/params/random_scatter.lvs
 //
-// @seed 42
+// @seed=42
 // @expect run-ok
 // @expect grid ground count(.) == 0    // every cell resolved to floor or rubble
 

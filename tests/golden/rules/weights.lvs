@@ -1,4 +1,4 @@
-// @seed 42
+// @seed=42
 // T39-T41: weighted { any } biases selection; all values still appear
 // over a large enough grid with any seed.
 // @expect grid g count(a) >= 50

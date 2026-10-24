@@ -26,12 +26,12 @@
 // but then a later pass can overwrite an earlier one (design s2 to match only
 // the leftovers if you don't want that).
 //
-// @seed 1
+// @seed=1
 // @expect run-ok
-// @expect grid perCell count(g) == 3     // `ordered` protects the diagonal gold
-// @expect grid perCell count(p) == 6
-// @expect grid global count(g) == 0      // sequential `*` pass clobbered it
-// @expect grid global count(p) == 9
+// @expect grid perCell count(gold) == 3     // `ordered` protects the diagonal gold
+// @expect grid perCell count(plain) == 6
+// @expect grid global count(gold) == 0      // sequential `*` pass clobbered it
+// @expect grid global count(plain) == 9
 
 tag t { seed, gold, plain }
 

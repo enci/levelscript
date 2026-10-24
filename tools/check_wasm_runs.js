@@ -37,12 +37,14 @@ function format(level) {
     if (!fs.existsSync(exp)) continue;
     const file = path.join(dir, f);
     const src = fs.readFileSync(file, 'utf8');
-    const seed = +((src.match(/\/\/\s*@seed\s+(\d+)/) || [])[1] ?? 42);
+    const seed = +((src.match(/\/\/\s*@seed=(\d+)/) || [])[1] ?? 42);
     const resolve = (p, from) => {
       const full = path.resolve(path.dirname(from), p);
       try { return { name: full, source: fs.readFileSync(full, 'utf8') }; } catch { return null; }
     };
-    const id = m.run_begin(src, file, seed, 'main', resolve, undefined);
+    const params = {};   // `// @param name=N` directives
+    for (const [, k, v] of src.matchAll(/\/\/\s*@param\s+(\w+)=(-?\d+)/g)) params[k] = +v;
+    const id = m.run_begin(src, file, seed, 'main', resolve, params);
     checked++;
     if (id < 0) { console.log(`FAIL ${f}: ${m.run_last_error()}`); failed++; continue; }
     const got = format(JSON.parse(m.run_finish(id)).level);

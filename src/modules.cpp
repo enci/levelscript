@@ -82,6 +82,7 @@ struct loader {
             for (auto& x : a.params)        m.params.push_back(std::move(x));
             for (auto& x : a.rules)         m.rules.push_back(std::move(x));
             for (auto& x : a.sequences)     m.sequences.push_back(std::move(x));
+            for (auto& x : a.directive_comments) m.directive_comments.push_back(std::move(x));
             m.has_layers = m.has_layers || a.has_layers;
             m.has_params = m.has_params || a.has_params;
             if (id == out.root) {

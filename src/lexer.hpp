@@ -1,4 +1,5 @@
 #pragma once
+#include "ast.hpp"   // directive_comment
 #include "diagnostic.hpp"
 #include <string>
 #include <string_view>
@@ -41,8 +42,10 @@ struct token {
 
 // Tokenize the whole source. Newlines are tokens (row separators in pattern
 // grids; the parser treats them as whitespace everywhere else); lex errors are reported and yield a `bad` token.
-// The last token is always `end`.
+// The last token is always `end`. Comments are skipped; directive comments
+// (Appendix B) are appended to `directives` when it is given.
 std::vector<token> lex(std::string_view source, std::string_view file,
-                       diagnostics& diags);
+                       diagnostics& diags,
+                       std::vector<directive_comment>* directives = nullptr);
 
 }  // namespace ls

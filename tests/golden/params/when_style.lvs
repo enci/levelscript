@@ -1,4 +1,4 @@
-// @seed 42
+// @seed=42
 // Showcase (v0.5): `when` statement guards + derived params.
 //
 // Two runtime inputs shape the generator:
@@ -12,11 +12,11 @@
 //
 // Run it:  levelscript --param style=0 --param difficulty=5 tests/golden/params/when_style.lvs
 //
-// @param style 0
-// @param difficulty 5
+// @param style=0
+// @param difficulty=5
 // @expect run-ok
-// @expect grid terrain count(c) == 9    // style 0 → cave fill
-// @expect grid actors count(b) == 9     // budget = 15 > 6 → bosses spawn
+// @expect grid terrain count(cave) == 9    // style 0 → cave fill
+// @expect grid actors count(boss) == 9     // budget = 15 > 6 → bosses spawn
 
 params {
     style:      number = 0

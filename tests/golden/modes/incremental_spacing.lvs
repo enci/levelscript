@@ -15,9 +15,9 @@
 // (This file ran under v0.6's `ranked` policy before v0.7 removed it; the
 //  spacing invariant lives in the match side and is indifferent to pick order.)
 //
-// @seed 1
+// @seed=1
 // @expect run-ok
-// @expect grid g count(o) == 0     // every cell resolved (tree or ground)
+// @expect grid g count(open) == 0     // every cell resolved (tree or ground)
 
 tag t { open, tree, ground }
 

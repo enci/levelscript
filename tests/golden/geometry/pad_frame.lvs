@@ -5,9 +5,9 @@
 // (N, N). Here a filled 3×3 becomes a 5×5 with a one-cell empty margin — handy
 // for guaranteeing a walkable edge around a generated interior.
 //
-// @seed 1
+// @seed=1
 // @expect run-ok
-// @expect grid level count(f) == 9    // the original 3×3 interior, shifted to (1,1)
+// @expect grid level count(floor) == 9    // the original 3×3 interior, shifted to (1,1)
 // @expect grid level count(.) == 16   // the added one-cell border on all sides
 
 tag geo { floor }

@@ -3,7 +3,7 @@
 // The shuffle orders candidates within each sub-rule; the stable sort puts
 // sub-rule 0 first. scatter(4) keeps the first four that do not conflict.
 //
-// @seed 5
+// @seed=5
 // @expect run-ok
 
 tag t { a, b }

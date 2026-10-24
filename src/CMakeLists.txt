@@ -7,6 +7,7 @@ add_library(ls_lib STATIC
     machine.cpp
     ls.cpp
     inspect.cpp
+    directives.cpp
     ast_dump.cpp
 )
 

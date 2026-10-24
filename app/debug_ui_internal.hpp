@@ -12,6 +12,7 @@
 #include "ls.hpp"           // execution: compile/run/step/snapshot/highlights
 #include "ast.hpp"          // metadata: statement + rule attribute display
 #include "sema.hpp"         // metadata: compiled patterns / tag + layer tables
+#include "directives.hpp"   // metadata: tool directives (@seed, @name, @tile, ...)
 #include "project_config.hpp"
 
 #include <imgui.h>
@@ -79,8 +80,25 @@ struct script {
     // survive Reset and reloads; a path that no longer exists never hits.
     std::set<std::string> breakpoints;
     std::string status;       // one-line load status for the status bar
-    std::string full_error;   // full diagnostics of a failed load
+    std::string full_error;   // full diagnostics of a failed load; directive warnings else
     bool        ok{false};
+
+    // Tool directives (spec Appendix B), and lookups of them by id
+    directive_set                         dirs;
+    std::vector<std::vector<std::string>> value_names;   // [tag][value]: @name, "" none
+    std::vector<std::vector<int>>         value_tiles;   // [tag][value]: @tile, -1 none
+    std::unordered_map<std::string, std::string> layer_tilesets;   // grid -> @tileset
+
+    // A value's display name: its @name, else its declared name.
+    std::string const& value_label(int tag_id, int value_id) const {
+        auto const& n = value_names[(size_t)tag_id][(size_t)value_id];
+        return n.empty() ? meta.tag_values[(size_t)tag_id][(size_t)value_id] : n;
+    }
+    // The sheet a grid renders with by default; "" none.
+    std::string tileset_of(std::string const& layer) const {
+        auto it = layer_tilesets.find(layer);
+        return it == layer_tilesets.end() ? std::string() : it->second;
+    }
 
     std::vector<std::string> layer_names() const {
         std::vector<std::string> names;
@@ -279,7 +297,7 @@ void sync_tilesets(SDL_Renderer* renderer, std::string const& ls_path,
 void draw_rule_window(script const& sc, debug_run const& run, float mini_px,
                       project_config const& cfg);
 void draw_program_window(script& sc, debug_run const& run);
-void draw_tags_window(compiled const& meta, project_config& cfg);
+void draw_tags_window(script const& sc, project_config& cfg);
 void draw_grid_composite(script const& sc, debug_run const& run,
                          project_config const& cfg,
                          std::unordered_map<std::string, tile_texture> const& tile_textures,

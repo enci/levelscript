@@ -178,7 +178,7 @@ def main() -> None:
     samples = []
     for lvs in sorted((ROOT / "tests" / "golden" / "programs").glob("*.lvs")):
         src = lvs.read_text(encoding="utf-8")
-        seed = re.search(r"//\s*@seed\s+(\d+)", src)
+        seed = re.search(r"//\s*@seed=(\d+)", src)
         samples.append({"name": lvs.stem, "seed": int(seed.group(1)) if seed else 42,
                         "about": header(src), "params": params(src),
                         "source": src.rstrip() + "\n"})

@@ -1,4 +1,4 @@
-// @seed 42
+// @seed=42
 // Chain of rules: empty → X → Y → Z on a 3x4 grid.
 // @expect grid g count(X) == 0
 // @expect grid g count(Y) == 0

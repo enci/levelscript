@@ -3,7 +3,7 @@
 // The default of `k` and the derived `j` draw at startup, in declaration
 // order, before any statement. Supplying `k` skips its draw (tested in C++).
 //
-// @seed 3
+// @seed=3
 // @expect run-ok
 
 tag t { a }

@@ -1,4 +1,4 @@
-// @seed 42
+// @seed=42
 // Fill all cells of a 5x5 grid then clear them.
 // @expect grid g count(a) == 0
 // @expect grid g count(b) == 25

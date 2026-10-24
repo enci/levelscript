@@ -269,17 +269,34 @@
       }
       drawState(canvas, state, visible);
       $('.legend').innerHTML = legendFor(lvl, visible)
-        .map(n => '<span><i style="background:' + NAMED[n] + '"></i>' + esc(n) + '</span>').join('');
+        .map(n => '<span><i style="background:' + NAMED[n] + '"></i>' + esc(n) +
+          (displayNames[n] ? ' <em>' + esc(displayNames[n]) + '</em>' : '') + '</span>').join('');
       status.textContent = (state.done ? 'done' : 'statement ' + Math.min(state.statementIndex + 1, state.statementCount) +
         ' / ' + state.statementCount) + ' · ' + lvl.width + '×' + lvl.height;
     }
 
     // ---- inspection: decorations and diagnostics come from one inspect_json call per edit ----
     let insp = null, diag = null;
+    // From the tool directives (spec Appendix B): value -> its @name, and
+    // "sequence#index" -> the statement's @play.
+    let displayNames = {}, plays = {};
     function inspectNow() {
       insp = null;
       if (!mod || !ta) return;
       try { insp = JSON.parse(mod.inspect_json(ta.value, fileName, resolver(fileName))); } catch (e) { insp = null; }
+      displayNames = {};
+      plays = {};
+      ((insp && insp.directives) || []).forEach(d => {
+        if (d.key === 'name') displayNames[d.target.name] = d.value;
+        if (d.key === 'play') plays[d.target.owner + '#' + d.target.index] = +d.value;
+      });
+    }
+    // The @play pace at a run state: the innermost statement on its stack with one (a sequence
+    // application's covers its body). undefined: none.
+    function paceOf(state) {
+      let pace;
+      (state.stack || []).forEach(f => { const p = plays[f.sequence + '#' + f.index]; if (p !== undefined) pace = p; });
+      return pace;
     }
     function hasErrors() { return !!insp && (insp.diagnostics || []).some(d => d.severity === 'error'); }
     // Compile errors are shown by the diagnostics list, so a program that does not compile is not run.
@@ -428,11 +445,17 @@
     function play() {
       const t0 = performance.now();
       const frame = () => {
-        const perFrame = 1 + Math.floor(Math.pow(Math.max(0, performance.now() - t0) / 700, 2.2));
+        // the statement's @play steps per frame (0: all of it), else a pace that speeds up
+        const pace = last ? paceOf(last) : undefined;
+        const perFrame = pace !== undefined ? (pace || Infinity)
+          : 1 + Math.floor(Math.pow(Math.max(0, performance.now() - t0) / 700, 2.2));
+        const at = JSON.stringify(last && last.stack), f0 = performance.now();
         let state;
         for (let i = 0; i < perFrame; i++) {
           state = JSON.parse(mod.run_step(sessionId));
-          if (state.done) break;
+          if (state.done || performance.now() - f0 > 50) break;   // keep the page live
+          // a new statement may set its own pace
+          if (pace !== undefined && JSON.stringify(state.stack) !== at) break;
         }
         render(state);
         if (state.done) { playTimer = null; stopPlay(); opts.onFinish && opts.onFinish(); return; }
@@ -607,6 +630,18 @@
       const base = d.base && sampleByName(d.base);
       return !(base && base.source === d.source);
     }
+    // The `// @seed=N` directive of a file (spec Appendix B): on its own line before the first
+    // declaration. undefined: none.
+    function fileSeed(text) {
+      for (const line of text.split('\n')) {
+        const t = line.trim();
+        if (!t) continue;
+        if (!t.startsWith('//')) return undefined;
+        const m = /^\/\/[ \t]*@.*?(?:^|[ \t])@seed=(\d+)(?=[ \t]|$)/.exec(t) || /^\/\/[ \t]*@seed=(\d+)(?=[ \t]|$)/.exec(t);
+        if (m) return +m[1];
+      }
+      return undefined;
+    }
     // Replace the whole program. The old draft is kept one level deep for "restore previous".
     function replaceWith(next, label, confirmFirst) {
       const cur = current();
@@ -689,7 +724,8 @@
       const f = e.target.files[0];
       e.target.value = '';
       if (!f) return;
-      f.text().then(text => replaceWith({ source: text, seed: draft.seed, params: {}, base: null }, f.name, true));
+      f.text().then(text => replaceWith({ source: text, seed: fileSeed(text) ?? draft.seed, params: {}, base: null },
+        f.name, true));
     });
     updatePrev();
 

@@ -251,6 +251,7 @@ code {
 .tk-fn { color: #8fd3ff; }
 .tk-num { color: #ffb286; }
 .tk-cm { color: #6b8179; }
+.tk-dir { color: #8fb8a8; font-style: italic; }
 .tk-op { color: #ff8fb1; }
 .tk-str { color: #a8e07a; }
 .tk-var { color: #c9a7ff; }

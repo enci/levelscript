@@ -217,6 +217,18 @@ struct use_decl {
     std::string path;
 };
 
+// A comment whose text starts with '@' (after spaces) - tool metadata, kept
+// by the lexer for read_directives(); the language ignores it.
+struct directive_comment {
+    int         line{0}, col{0}, end_col{0};   // the whole comment, '//' included
+    std::string text;            // after the '//'
+    bool        trailing{false}; // code before it on its line
+    bool        leading{false};  // no code anywhere before it in the file
+    int         code_line{0};    // trailing: its own line; else the next line
+                                 // with code (0: none)
+    int         mod{0};
+};
+
 // One module's declarations - or, after loading, the whole closure's,
 // merged in canonical order (each declaration's loc.mod says whose it was;
 // the block locations and `uses` are the root module's).
@@ -228,6 +240,7 @@ struct ast_file {
     std::vector<param_decl>    params;
     std::vector<rule_decl>     rules;
     std::vector<sequence_decl> sequences;
+    std::vector<directive_comment> directive_comments;   // every module's, after loading
     bool                       has_layers{false};
     bool                       has_params{false};
 };

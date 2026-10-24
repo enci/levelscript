@@ -1,8 +1,8 @@
-// @seed 42
+// @seed=1
 // Island terrain generator.
 // Randomly fills ocean, grows land masses, then classifies coast.
-// @expect grid world count(o) >= 100
-// @expect grid world count(l) >= 10
+// @expect grid world count(ocean) >= 100
+// @expect grid world count(land) >= 10
 
 tag terrain { ocean, coast, land, highland, peak }
 layers { world: grid of terrain }

@@ -4,7 +4,7 @@
 // straight borders on the perpendicular bisectors, at any angle - not the
 // 45-degree diamonds of a step metric.
 //
-// @seed 3
+// @seed=3
 // @expect run-ok
 
 tag mark { site }

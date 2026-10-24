@@ -2,9 +2,11 @@
 """Golden-output example runner — the determinism gate.
 
 Runs every .lvs under tests/golden/ through the levelscript CLI with
-its pinned seed (a `// @seed N` comment, default 42) and compares stdout against
-the .expected file next to it. Any change to shuffle order or draw sequence fails
-loudly here. Every tests/errors/*.lvs must fail to compile.
+its pinned seed (a `// @seed=N` directive, default 42) and its `// @param name=N`
+values, and compares stdout against the .expected file next to it. Any change to
+shuffle order or draw sequence fails loudly here. Every tests/errors/*.lvs must
+fail to compile. Every file's `// @expect ...` directives must hold
+(`levelscript --check`).
 
     python tools/run_goldens.py             # verify all
     python tools/run_goldens.py --update    # regenerate goldens (intended changes)
@@ -30,6 +32,14 @@ def find_cli() -> Path:
     sys.exit("levelscript not found — build first (cmake --build build)")
 
 
+def check(cli: Path, ex: Path, name: str) -> bool:
+    """The file's @expect directives hold (levelscript --check)."""
+    run = subprocess.run([str(cli), "--check", str(ex)], capture_output=True, text=True)
+    if run.returncode != 0:
+        print(f"FAIL {name}: @expect\n{run.stdout}{run.stderr}", end="")
+    return run.returncode == 0
+
+
 def main() -> None:
     update = "--update" in sys.argv
     cli = find_cli()
@@ -53,17 +63,20 @@ def main() -> None:
         elif "error" not in run.stderr:
             print(f"FAIL errors/{ex.name}: failed without a diagnostic")
             failed += 1
+        elif not check(cli, ex, f"errors/{ex.name}"):
+            failed += 1
         else:
             print(f"ok   errors/{ex.name}")
 
     for ex in goldens:
         name = ex.relative_to(ROOT).as_posix()
         src = ex.read_text(encoding="utf-8")
-        m = re.search(r"@seed\s+(\d+)", src)
+        m = re.search(r"//\s*@seed=(\d+)", src)
         seed = m.group(1) if m else "42"
+        params = [a for p in re.findall(r"//\s*@param\s+(\w+=-?\d+)", src) for a in ("--param", p)]
 
         run = subprocess.run(
-            [str(cli), "--seed", seed, str(ex)],
+            [str(cli), "--seed", seed, *params, str(ex)],
             capture_output=True, text=True,
         )
         if run.returncode != 0:
@@ -80,6 +93,8 @@ def main() -> None:
             failed += 1
         elif run.stdout.replace("\r\n", "\n") != expected.read_text(encoding="utf-8"):
             print(f"FAIL {name}: output differs from {expected.name}")
+            failed += 1
+        elif not check(cli, ex, name):
             failed += 1
         else:
             print(f"ok   {name}")

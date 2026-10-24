@@ -36,16 +36,23 @@ static token_type keyword_or_ident(std::string_view text) {
 }
 
 std::vector<token> lex(std::string_view src, std::string_view file,
-                       diagnostics& diags) {
+                       diagnostics& diags, std::vector<directive_comment>* directives) {
     std::vector<token> out;
     int line = 1, col = 1;
     size_t i = 0;
     size_t n = src.size();
+    int last_code_line = 0;   // 0: no code yet
+    size_t pending = directives ? directives->size() : 0;   // own-line comments awaiting code
 
     // A string token's text drops its two quotes; every other text is as written.
     auto push = [&](token_type t, std::string text, int l, int c, long long v = 0) {
         int end = c + (int)text.size() + (t == token_type::string ? 2 : 0);
         out.push_back({t, std::move(text), v, l, c, end});
+        if (t == token_type::newline || t == token_type::end) return;
+        last_code_line = l;
+        if (directives) {
+            for (; pending < directives->size(); ++pending) (*directives)[pending].code_line = l;
+        }
     };
 
     while (i < n) {
@@ -60,7 +67,18 @@ std::vector<token> lex(std::string_view src, std::string_view file,
         }
 
         if (c == '/' && i + 1 < n && src[i + 1] == '/') {   // // comment
+            size_t s = i;
+            int    c0 = col;
             while (i < n && src[i] != '\n') { ++i; ++col; }
+            std::string_view text = src.substr(s + 2, i - s - 2);
+            if (!text.empty() && text.back() == '\r') text.remove_suffix(1);
+            size_t first = text.find_first_not_of(" \t");
+            if (directives && first != std::string_view::npos && text[first] == '@') {
+                bool trailing = last_code_line == line;
+                directives->push_back({line, c0, c0 + 2 + (int)text.size(), std::string(text),
+                                       trailing, last_code_line == 0, trailing ? line : 0, 0});
+                if (trailing) pending = directives->size();
+            }
             continue;
         }
 

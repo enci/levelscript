@@ -1,4 +1,4 @@
-// @seed 42
+// @seed=42
 // Showcase (v0.4): built-in functions — conditional writes with `if`.
 //
 // A `difficulty` param drives what fills the map. `if(cond, a, b)` is eager and
@@ -11,9 +11,9 @@
 //
 // Run it:  levelscript --param difficulty=5 tests/golden/params/if_difficulty.lvs
 //
-// @param difficulty 5
+// @param difficulty=5
 // @expect run-ok
-// @expect grid terrain count(l) == 9     // difficulty 5 > 3 → all lava
+// @expect grid terrain count(lava) == 9     // difficulty 5 > 3 → all lava
 // @expect grid loot count(5) == 9        // clamp(..., 0, 5) caps every cell at 5
 
 params { difficulty: number = 0 }

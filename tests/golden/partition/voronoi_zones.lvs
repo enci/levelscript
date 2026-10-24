@@ -5,7 +5,7 @@
 // route length through floor, so a wall with one gap makes it geodesic: a site
 // reaches the far side only through the gap, and pays for the detour.
 //
-// @seed 5
+// @seed=5
 // @expect run-ok
 
 tag geo  { floor, wall }

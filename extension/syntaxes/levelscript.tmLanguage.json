@@ -17,8 +17,38 @@
       "match": "\"[^\"\\n]*\"?"
     },
     "comment": {
-      "name": "comment.line.double-slash.levelscript",
-      "match": "//.*$"
+      "patterns": [
+        { "include": "#directive-comment" },
+        {
+          "name": "comment.line.double-slash.levelscript",
+          "match": "//.*$"
+        }
+      ]
+    },
+    "directive-comment": {
+      "name": "comment.line.double-slash.directive.levelscript",
+      "begin": "//(?=[ \\t]*@)",
+      "end": "$",
+      "patterns": [
+        {
+          "comment": "a text directive (@expect, @param): the text runs to a '//' note",
+          "match": "(@)([A-Za-z_][A-Za-z0-9_]*)[ \\t]+((?:(?!//).)*?)(?=[ \\t]*(?://|$))",
+          "captures": {
+            "1": { "name": "punctuation.definition.annotation.levelscript" },
+            "2": { "name": "storage.type.annotation.directive.levelscript" },
+            "3": { "name": "string.unquoted.directive-text.levelscript" }
+          }
+        },
+        {
+          "match": "(@)([A-Za-z_][A-Za-z0-9_]*)(=)([A-Za-z_][A-Za-z0-9_]*|[0-9]+)",
+          "captures": {
+            "1": { "name": "punctuation.definition.annotation.levelscript" },
+            "2": { "name": "storage.type.annotation.directive.levelscript" },
+            "3": { "name": "keyword.operator.assignment.levelscript" },
+            "4": { "name": "constant.other.directive-value.levelscript" }
+          }
+        }
+      ]
     },
     "keyword": {
       "name": "keyword.control.levelscript",

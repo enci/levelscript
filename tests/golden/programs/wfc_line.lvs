@@ -16,9 +16,9 @@
 //  it — the ordering was flavour, the correctness is the match side. Sequential
 //  re-checking is what enforces the constraint, and `grow` provides it.)
 //
-// @seed 1
+// @seed=1
 // @expect run-ok
-// @expect grid line count(o) == 0     // every cell collapsed to a colour
+// @expect grid line count(open) == 0     // every cell collapsed to a colour
 
 tag c { open, r, g, b }
 

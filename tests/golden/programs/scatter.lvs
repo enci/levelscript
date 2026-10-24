@@ -1,4 +1,4 @@
-// @seed 7
+// @seed=7
 // Seeded placement: exactly five points, positions vary by seed.
 tag algo { S }
 

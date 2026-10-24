@@ -1,4 +1,4 @@
-// @seed 44
+// @seed=44
 // Geometry composition: generate a quarter, mirror twice for 4-fold symmetry,
 // then frame it. Layers stay co-registered through every operation.
 tag geo { wall, floor }

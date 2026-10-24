@@ -79,7 +79,9 @@ export const hoverProvider: vscode.HoverProvider = {
                 const name = isUnion ? tag.unions[t.value - tag.values.length]?.name
                                      : tag.values[t.value]?.name;
                 const md = new vscode.MarkdownString();
-                md.appendMarkdown(`**${name}** — *${isUnion ? 'union in ' : ''}${tag.name}*\n\n`);
+                const display = isUnion ? undefined : cached.directives?.find(d =>
+                    d.key === 'name' && d.target.owner === tag.name && d.target.name === name)?.value;
+                md.appendMarkdown(`**${name}**${display ? ` (${display})` : ''} — *${isUnion ? 'union in ' : ''}${tag.name}*\n\n`);
 
                 const valueList = [...tag.values, ...tag.unions]
                     .map((v, i) => i === t.value ? `**${v.name}**` : v.name).join(', ');

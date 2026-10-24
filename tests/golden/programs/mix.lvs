@@ -1,4 +1,4 @@
-// @seed 5
+// @seed=5
 // Weighted alternatives: every cell becomes floor or wall, biased 3:1.
 tag geo { wall, floor }
 
