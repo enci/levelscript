@@ -144,6 +144,7 @@ project_config project_config::load(std::string const& ls_path,
             uint32_t bg;
             if (hex_to_color(jget(j, "grid_bg_color", std::string{}), bg))
                 cfg.grid_bg_color = bg;
+            bool migrate_tile_layers = false;
             if (j.contains("tilesets") && j["tilesets"].is_array()) {
                 for (auto const& jt : j["tilesets"]) {
                     if (!jt.is_object()) continue;
@@ -155,8 +156,9 @@ project_config project_config::load(std::string const& ls_path,
                     });
                 }
             } else if (j.contains("tileset") && j["tileset"].is_object()) {
-                // Pre-multi-tileset sidecar: one global tileset. Migrate it
-                // into a single named entry, for `@tileset=Tileset`.
+                // Pre-multi-tileset sidecar: one global tileset implicitly
+                // shared by every "tile" mode layer. Migrate it into a
+                // single named entry and point those layers at it below.
                 auto const& jt = j["tileset"];
                 cfg.tilesets.push_back({
                     "Tileset",
@@ -164,27 +166,25 @@ project_config project_config::load(std::string const& ls_path,
                     jget(jt, "tile_w", 16),
                     jget(jt, "tile_h", 16),
                 });
+                migrate_tile_layers = true;
             }
             if (j.contains("layers") && j["layers"].is_array()) {
                 for (auto const& jl : j["layers"]) {
                     if (!jl.is_object()) continue;
-                    std::optional<layer_mode> mode;
-                    if (jl.contains("mode") && jl["mode"].is_string())
-                        mode = mode_from_str(jl["mode"].get<std::string>());
-                    // Sidecars from before @tileset saved every layer's mode
-                    // and tileset: "text" was only the old default, and the
-                    // tiles now come from the script's @tileset.
-                    if (jl.contains("tileset") && mode &&
-                        (*mode == layer_mode::text || *mode == layer_mode::tile))
-                        mode.reset();
                     cfg.layers.push_back({
                         jget(jl, "name", std::string{}),
                         jget(jl, "visible", true),
                         jget(jl, "opacity", 1.0f),
-                        mode,
+                        mode_from_str(jget(jl, "mode", std::string{"text"})),
+                        jget(jl, "tileset", std::string{}),
                         corner_from_str(jget(jl, "corner", std::string{"normal"})),
                     });
                 }
+            }
+            if (migrate_tile_layers) {
+                for (auto& lc : cfg.layers)
+                    if (lc.mode == layer_mode::tile && lc.tileset.empty())
+                        lc.tileset = "Tileset";
             }
             if (j.contains("tag_colors") && j["tag_colors"].is_object()) {
                 for (auto const& [tname, jvc] : j["tag_colors"].items()) {
@@ -233,14 +233,14 @@ void project_config::save(std::string const& ls_path) const {
     }
     j["layers"] = json::array();
     for (auto const& lc : layers) {
-        json jl = {
+        j["layers"].push_back({
             {"name", lc.name},
             {"visible", lc.visible},
             {"opacity", lc.opacity},
+            {"mode", mode_str(lc.mode)},
+            {"tileset", lc.tileset},
             {"corner", corner_str(lc.corner)},
-        };
-        if (lc.mode) jl["mode"] = mode_str(*lc.mode);
-        j["layers"].push_back(jl);
+        });
     }
     if (!shown_graphs.empty()) j["graphs"] = shown_graphs;
     if (!tag_colors.empty()) {

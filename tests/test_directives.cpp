@@ -35,10 +35,10 @@ TEST_CASE("directives: the spec's examples attach") {
 // Fill-and-carve dungeon.
 tag algo {
     F   // @name=floor
-    W   // @name=wall @tile=37
+    W   // @name=wall
 }
 layers {
-    level:   grid of algo   // @tileset=dungeon
+    level:   grid of algo
     tiles:   grid of number
 }
 sequence main {
@@ -54,9 +54,7 @@ sequence main {
     CHECK(d.seed() == 42u);
     REQUIRE(d.find("name", directive_target::tag_value, "algo", "F"));
     CHECK(d.find("name", directive_target::tag_value, "algo", "F")->value == "floor");
-    CHECK(d.find("tile", directive_target::tag_value, "algo", "W")->number == 37);
-    CHECK(d.find("tileset", directive_target::layer, "", "level")->value == "dungeon");
-    CHECK(!d.find("tileset", directive_target::layer, "", "tiles"));
+    CHECK(d.find("name", directive_target::tag_value, "algo", "W")->value == "wall");
     CHECK(d.find("play", directive_target::statement, "main", "", 1)->number == 0);
     CHECK(d.find("play", directive_target::statement, "main", "", 2)->number == 100);   // stacked past a comment
 }
@@ -82,15 +80,18 @@ TEST_CASE("directives: @seed only before the first declaration") {
 TEST_CASE("directives: no target, or an ambiguous one") {
     CHECK(warns(read("tag t { a, b } // @name=x\n"), "ambiguous: 2 tag values"));
     CHECK(warns(read("// @name=x\ntag t {\n a\n}\n"), "none starts on line 2"));
-    CHECK(warns(read("tag t {\n a\n}\n// @tile=3\n"), "none starts after it"));
-    CHECK(warns(read("tag t { a }\nlayers {\n g: grid of t\n m: graph of g // @tileset=s\n}\n"),
-                "needs a grid entry"));
+    CHECK(warns(read("tag t {\n a\n}\n// @name=x\n"), "none starts after it"));
+    CHECK(warns(read("tag t { a }\nlayers {\n g: grid of t // @play=1\n}\n"), "needs a statement"));
+    // tiles are the tools' settings, not the script's
+    CHECK(warns(read("tag t { a }\nlayers {\n g: grid of t // @tileset=s\n}\n"),
+                "unknown directive '@tileset'"));
+    CHECK(warns(read("tag t {\n a // @tile=3\n}\n"), "unknown directive '@tile'"));
 }
 
 TEST_CASE("directives: the same key twice - the last one applies") {
-    auto d = read("tag t {\n // @tile=1\n a // @tile=2\n}\n");
-    CHECK(warns(d, "duplicate '@tile'"));
-    CHECK(d.find("tile", directive_target::tag_value, "t", "a")->number == 2);
+    auto d = read("tag t {\n // @name=x\n a // @name=y\n}\n");
+    CHECK(warns(d, "duplicate '@name'"));
+    CHECK(d.find("name", directive_target::tag_value, "t", "a")->value == "y");
     CHECK(d.all.size() == 1);
 }
 

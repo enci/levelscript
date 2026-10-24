@@ -7,12 +7,15 @@
       "mode": "color",
       "name": "algo",
       "opacity": 1.0,
+      "tileset": "",
       "visible": true
     },
     {
       "corner": "normal",
+      "mode": "tile",
       "name": "tiles",
       "opacity": 1.0,
+      "tileset": "Tiles",
       "visible": true
     }
   ],

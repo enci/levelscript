@@ -1651,7 +1651,7 @@ SPACE             ::= ' ' | '\t'
 
 There is no space around `=`. Prose does not mix with directives: a directive comment with any other text is malformed, gives a warning, and is ignored as a whole. Write prose in a separate comment. A comment that contains `@` later in its text (`// see @seed`) is an ordinary comment.
 
-A **text directive** is for the test keys (B.7), whose values are free text. Its `TEXT` is the rest of the comment, up to a `//` that starts a note, without trailing spaces. It is the comment's only directive. A key that takes `=` written as a text directive (`// @seed 42`) is a warning, and so is a test key written with `=`.
+A **text directive** is for the test keys (B.6), whose values are free text. Its `TEXT` is the rest of the comment, up to a `//` that starts a note, without trailing spaces. It is the comment's only directive. A key that takes `=` written as a text directive (`// @seed 42`) is a warning, and so is a test key written with `=`.
 
 ### B.2 Attachment
 
@@ -1673,13 +1673,11 @@ The same key twice on one target is a warning, and the last one applies. `@expec
 |---|---|---|---|
 | `@seed` | the file | `INTEGER`, 64-bit unsigned | default invocation seed (B.3) |
 | `@name` | a `tag_value` | `IDENT` | display name (B.4) |
-| `@tile` | a `tag_value` | `INTEGER` | tile index in a tiled layer (B.5) |
-| `@tileset` | a grid `layer_entry` | `IDENT` | sheet name; the layer renders as tiles (B.5) |
-| `@play` | a `statement` | `INTEGER` | steps per frame while playing (B.6) |
-| `@expect` | the file | `TEXT` | a test expectation; repeatable (B.7) |
-| `@param` | the file | `TEXT`: `IDENT '=' '-'? INTEGER` | a param value for test runs (B.7) |
+| `@play` | a `statement` | `INTEGER` | steps per frame while playing (B.5) |
+| `@expect` | the file | `TEXT` | a test expectation; repeatable (B.6) |
+| `@param` | the file | `TEXT`: `IDENT '=' '-'? INTEGER` | a param value for test runs (B.6) |
 
-A `tag_union`, a graph `layer_entry`, a rule, and a pattern cell are not targets.
+A `tag_union`, a `layer_entry`, a rule, and a pattern cell are not targets.
 
 ### B.3 `@seed`
 
@@ -1707,39 +1705,7 @@ tag algo {
 }
 ```
 
-### B.5 `@tileset` and `@tile`
-
-**Sheets.** A sheet name refers to a tool-defined set of sprite sheets. The web editor bundles a fixed set; the debugger reads its sheets from its project file. Each sheet defines its tile size. A tile index counts tiles row-major from the top-left tile, starting at 0. An unknown sheet name gives a warning, and the layer renders in colour.
-
-**Default rendering.** A grid layer with `@tileset` renders as tiles. A layer without it renders in colour. A tool may let the user switch a layer's rendering, for example for a session; the directive sets only the default.
-
-**Tile per cell.** In a tiled layer, each cell draws as follows:
-
-- **`grid of number`:** the cell's value is the tile index.
-- **tag grid, single-valued cell:** the value's `@tile` is the tile index.
-- **empty cell (section 4.1):** nothing is drawn; the grid background shows.
-- **anything else:** colour. This covers a multi-bit mask (section 5.5), a value without `@tile`, and an index that is negative or outside the sheet.
-
-`@tile` belongs to the tag value, not to a layer. Two layers of the same tagset with different sheets use the same index in each. A `@tile` on a value that no tiled layer shows is harmless and gives no warning.
-
-```ls
-tag geometry {
-    wall    // @tile=37
-    floor   // @tile=12
-}
-
-layers {
-    level:   grid of geometry   // @tileset=dungeon
-    tiles:   grid of number     // @tileset=dungeon
-    enemies: grid of enemies
-    items:   grid of items
-    algo:    grid of algo
-}
-```
-
-Here `level` draws `wall` as tile 37 and `floor` as tile 12 from the `dungeon` sheet. `tiles` draws each cell's number as a tile index from the same sheet. `enemies`, `items` and `algo` render in colour.
-
-### B.6 `@play`
+### B.5 `@play`
 
 `@play` sets how fast the debugger animates a statement while it **plays**. The value is a count of steps per frame, where a step is one `step()` in `step_mode::application` (Appendix A); operations and atomic batches advance whole.
 
@@ -1764,7 +1730,7 @@ sequence main {
 
 Here the fill appears at once, the walk is shown one application per frame, and `reduce` runs 100 steps per frame. The other statements use the tool's default pacing.
 
-### B.7 `@expect` and `@param`
+### B.6 `@expect` and `@param`
 
 The test keys state what a file is expected to do, for test tooling: `levelscript --check`, and the golden runner built on it. A test run uses the invocation seed, else `@seed`, else 42; and each `@param` as a param value, which an explicit `--param` overrides. Outside a test run, `@param` is not used.
 

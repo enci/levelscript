@@ -13,7 +13,7 @@ tag algo {
 // Everything in the algo grid 
 layers {
     algo : grid of algo
-    tiles : grid of number   // @tileset=Tiles
+    tiles : grid of number
 }
 
 // The very start of the level

@@ -47,14 +47,14 @@ export interface OutlineSymbol {
 
 // A tool directive (`// @key=value`, spec Appendix B), attached to its target.
 export interface Directive {
-    key: 'seed' | 'name' | 'tile' | 'tileset' | 'play' | string;
+    key: 'seed' | 'name' | 'play' | 'expect' | 'param' | string;
     value: string;   // as written
     loc: Location;
     target: {
-        kind: 'file' | 'tag_value' | 'layer' | 'statement';
+        kind: 'file' | 'tag_value' | 'statement';
         range?: SourceRange;
         owner?: string;   // tag_value: the tagset; statement: the sequence
-        name?: string;    // tag_value: the value; layer: the grid
+        name?: string;    // tag_value: the value; @param: the param
         index?: number;   // statement: its position in the sequence body
     };
 }

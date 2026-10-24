@@ -12,7 +12,7 @@
 #include "ls.hpp"           // execution: compile/run/step/snapshot/highlights
 #include "ast.hpp"          // metadata: statement + rule attribute display
 #include "sema.hpp"         // metadata: compiled patterns / tag + layer tables
-#include "directives.hpp"   // metadata: tool directives (@seed, @name, @tile, ...)
+#include "directives.hpp"   // metadata: tool directives (@seed, @name, @play, ...)
 #include "project_config.hpp"
 
 #include <imgui.h>
@@ -86,18 +86,11 @@ struct script {
     // Tool directives (spec Appendix B), and lookups of them by id
     directive_set                         dirs;
     std::vector<std::vector<std::string>> value_names;   // [tag][value]: @name, "" none
-    std::vector<std::vector<int>>         value_tiles;   // [tag][value]: @tile, -1 none
-    std::unordered_map<std::string, std::string> layer_tilesets;   // grid -> @tileset
 
     // A value's display name: its @name, else its declared name.
     std::string const& value_label(int tag_id, int value_id) const {
         auto const& n = value_names[(size_t)tag_id][(size_t)value_id];
         return n.empty() ? meta.tag_values[(size_t)tag_id][(size_t)value_id] : n;
-    }
-    // The sheet a grid renders with by default; "" none.
-    std::string tileset_of(std::string const& layer) const {
-        auto it = layer_tilesets.find(layer);
-        return it == layer_tilesets.end() ? std::string() : it->second;
     }
 
     std::vector<std::string> layer_names() const {

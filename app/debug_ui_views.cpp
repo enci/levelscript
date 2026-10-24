@@ -838,14 +838,10 @@ void draw_tags_window(script const& sc, project_config& cfg) {
                 shape_cell(vi, cur);
 
                 ImGui::TextUnformatted(vals[(size_t)vi].c_str());
-                // its directives: display name (@name) and tile (@tile)
+                // its display name (@name)
                 if (auto const& dn = sc.value_names[(size_t)ti][(size_t)vi]; !dn.empty()) {
                     ImGui::SameLine();
                     ImGui::TextDisabled("%s", dn.c_str());
-                }
-                if (int tile = sc.value_tiles[(size_t)ti][(size_t)vi]; tile >= 0) {
-                    ImGui::SameLine();
-                    ImGui::TextDisabled("tile %d", tile);
                 }
 
                 ImGui::PopID();
@@ -889,10 +885,8 @@ void draw_tags_window(script const& sc, project_config& cfg) {
 // ── layers window ─────────────────────────────────────────────────────────────
 
 static void set_sampler_nearest(ImDrawList const*, ImDrawCmd const*);   // composite grid
-static void draw_mode_combo(std::optional<layer_mode>& mode, layer_mode shown,   // layer controls
-                            bool numeric);
-static void draw_sheet_label(script const& sc, project_config const& cfg, std::string const& layer);
-static layer_mode shown_mode(script const& sc, layer_config const& lc);
+static void draw_mode_combo(layer_mode& mode, bool numeric);              // layer controls
+static void draw_tileset_combo(std::string& name, std::vector<tileset_config> const& tilesets);
 static void draw_corner_size_combo(corner_size& size);
 static void set_sampler_linear(ImDrawList const*, ImDrawCmd const*);
 
@@ -1027,12 +1021,12 @@ void draw_layers_window(script const& sc, debug_run const& run, project_config& 
             int lid = sc.meta.layer_id(name);
             bool numeric = lid < 0 || sc.meta.layers[(size_t)lid].tag_id < 0;
             ImGui::SameLine();
-            draw_mode_combo(lc->mode, shown_mode(sc, *lc), numeric);
-            if (shown_mode(sc, *lc) == layer_mode::tile) {
+            draw_mode_combo(lc->mode, numeric);
+            if (lc->mode == layer_mode::tile) {
                 ImGui::SameLine();
-                draw_sheet_label(sc, cfg, name);
+                draw_tileset_combo(lc->tileset, cfg.tilesets);
             }
-            if (shown_mode(sc, *lc) == layer_mode::corner) {
+            if (lc->mode == layer_mode::corner) {
                 ImGui::SameLine();
                 draw_corner_size_combo(lc->corner);
             }
@@ -1189,7 +1183,7 @@ void draw_grid_composite(script const& sc, debug_run const& run,
     std::vector<heat_range> heat(cfg.layers.size());
     for (size_t li = 0; li < cfg.layers.size(); ++li) {
         auto const& lc = cfg.layers[li];
-        if (!lc.visible || shown_mode(sc, lc) != layer_mode::heatmap) continue;
+        if (!lc.visible || lc.mode != layer_mode::heatmap) continue;
         grid g = lv[lc.name];
         for (int y = 0; y < rows; ++y)
             for (int x = 0; x < cols; ++x) {
@@ -1216,31 +1210,28 @@ void draw_grid_composite(script const& sc, debug_run const& run,
     // layer's visibility never moves the others.
     std::vector<int> corner_slot(cfg.layers.size(), 0);
     for (size_t li = 0, n = 0; li < cfg.layers.size(); ++li)
-        if (shown_mode(sc, cfg.layers[li]) == layer_mode::corner) corner_slot[li] = (int)(n++ % 4);
+        if (cfg.layers[li].mode == layer_mode::corner) corner_slot[li] = (int)(n++ % 4);
 
     // ── per layer: content -> highlights, stacked in composite order ─────────
     for (size_t li = 0; li < cfg.layers.size(); ++li) {
         auto const& lc = cfg.layers[li];
         if (!lc.visible || lc.opacity <= 0.f) continue;
 
-        grid       g    = lv[lc.name];
-        int        lid  = sc.meta.layer_id(lc.name);
-        palette    pal  = layer_palette(sc.meta, cfg, lid);
-        layer_mode mode = shown_mode(sc, lc);
+        grid    g   = lv[lc.name];
+        int     lid = sc.meta.layer_id(lc.name);
+        palette pal = layer_palette(sc.meta, cfg, lid);
 
-        // Resolve this layer's sheet, its @tileset (Tile mode only; other
-        // modes never touch these). Hoisted out of the inner loop so all
-        // AddImage calls for the layer use the same texture and can merge
-        // into one draw command.
-        tileset_config const* ts  = cfg.find_tileset(sc.tileset_of(lc.name));
+        // Resolve this layer's own tileset (Tile mode only; other modes
+        // never touch these). Hoisted out of the inner loop so all AddImage
+        // calls for the layer use the same texture and can merge into one
+        // draw command.
+        tileset_config const* ts  = cfg.find_tileset(lc.tileset);
         auto                   it = ts ? tile_textures.find(ts->name) : tile_textures.end();
         tile_texture const*   tex = (it != tile_textures.end()) ? &it->second : nullptr;
         ImTextureID tile_id = (tex && tex->sdl_tex)
                               ? (ImTextureID)(intptr_t)tex->sdl_tex : (ImTextureID)0;
         int   tiles_per_row = (tile_id && ts)
                               ? std::max(1, tex->width / ts->tile_w) : 1;
-        int   tile_count    = (tile_id && ts)
-                              ? tiles_per_row * std::max(1, tex->height / ts->tile_h) : 0;
         float tile_uv_w     = (tile_id && ts)
                               ? (float)ts->tile_w / tex->width  : 0.f;
         float tile_uv_h     = (tile_id && ts)
@@ -1248,12 +1239,12 @@ void draw_grid_composite(script const& sc, debug_run const& run,
 
         // Shape mode: this tag's per-value shapes (sparse; unset -> circle).
         std::unordered_map<int, tag_shape> const* shapes = nullptr;
-        if (mode == layer_mode::shape && pal.tag_id >= 0) {
+        if (lc.mode == layer_mode::shape && pal.tag_id >= 0) {
             auto sit = cfg.tag_shapes.find(sc.meta.tag_names[(size_t)pal.tag_id]);
             if (sit != cfg.tag_shapes.end()) shapes = &sit->second;
         }
 
-        bool tiling = (mode == layer_mode::tile) && tile_id && ts;
+        bool tiling = (lc.mode == layer_mode::tile) && tile_id && ts;
         if (tiling) dl->AddCallback(set_sampler_nearest, nullptr);
 
         for (int y = 0; y < rows; ++y) {
@@ -1269,28 +1260,16 @@ void draw_grid_composite(script const& sc, debug_run const& run,
                 ImVec2 p0 = { origin.x + x * cell_px, origin.y + y * cell_px };
                 ImVec2 p1 = { p0.x + cell_px,         p0.y + cell_px         };
 
-                switch (mode) {
+                switch (lc.mode) {
 
                     case layer_mode::tile: {
-                        // The tile index (spec B.5): a number cell's value, a
-                        // single-valued tag cell's @tile. Anything else -
-                        // a multi-bit mask, no @tile, an index outside the
-                        // sheet, no sheet - draws in colour.
-                        int tile = v;
-                        if (!g.is_number()) {
-                            int bit = mask_to_vid(v);
-                            bool single = v > 0 && (v & (v - 1)) == 0;
-                            tile = single && pal.tag_id >= 0 && bit >= 0 &&
-                                   bit < (int)sc.value_tiles[(size_t)pal.tag_id].size()
-                                 ? sc.value_tiles[(size_t)pal.tag_id][(size_t)bit] : -1;
-                        }
-                        if (!tile_id || tile < 0 || tile >= tile_count) {
+                        if (!tile_id || !ts) {
                             dl->AddRectFilled(p0, p1,
-                                with_alpha(tag_color(pal.tag_id, vid, pal.colors), lc.opacity));
+                                with_alpha(IM_COL32(120, 120, 120, 255), lc.opacity));
                             break;
                         }
-                        int tx = tile % tiles_per_row;
-                        int ty = tile / tiles_per_row;
+                        int tx = v % tiles_per_row;
+                        int ty = v / tiles_per_row;
                         ImVec2 uv0 = { tx * tile_uv_w,       ty * tile_uv_h       };
                         ImVec2 uv1 = { (tx + 1) * tile_uv_w, (ty + 1) * tile_uv_h };
                         dl->AddImage(tile_id, p0, p1, uv0, uv1,
@@ -1454,18 +1433,9 @@ void draw_grid_composite(script const& sc, debug_run const& run,
 
 // ── layer strip (a small container per layer, under the grid) ────────────────
 
-// A layer's view mode: the user's choice, else the default - tiles for a
-// grid with a @tileset directive, colour otherwise (spec B.5).
-static layer_mode shown_mode(script const& sc, layer_config const& lc) {
-    if (lc.mode) return *lc.mode;
-    return sc.tileset_of(lc.name).empty() ? layer_mode::color : layer_mode::tile;
-}
-
 // Viz-type combo -- mutually exclusive, so a dropdown rather than toggle
-// buttons. `mode` is the user's choice (unset: the default, `shown`);
-// "Default" clears it.
-static void draw_mode_combo(std::optional<layer_mode>& choice, layer_mode shown, bool numeric) {
-    layer_mode mode = shown;
+// buttons. Tile mode is only offered for numeric grids.
+static void draw_mode_combo(layer_mode& mode, bool numeric) {
     struct mode_item { layer_mode mode; char const* icon; char const* name; };
     static const mode_item k_items[] = {
         { layer_mode::text,    phosphor::PH_TEXT_AA,     "Text"    },
@@ -1475,7 +1445,8 @@ static void draw_mode_combo(std::optional<layer_mode>& choice, layer_mode shown,
         { layer_mode::shape,   phosphor::PH_SHAPES,      "Shape"   },
         { layer_mode::corner,  phosphor::PH_CORNERS_OUT, "Corner"  },
     };
-    if (numeric && (mode == layer_mode::shape || mode == layer_mode::corner))
+    if (!numeric && mode == layer_mode::tile)  mode = layer_mode::color;
+    if (numeric  && (mode == layer_mode::shape || mode == layer_mode::corner))
         mode = layer_mode::color;   // both need a tag layer
 
     mode_item const* current = &k_items[0];
@@ -1485,17 +1456,14 @@ static void draw_mode_combo(std::optional<layer_mode>& choice, layer_mode shown,
     ImGui::SameLine();
     ImGui::SetNextItemWidth(44.f);
     bool open = ImGui::BeginCombo("##mode", current->icon);
-    if (!open && ImGui::IsItemHovered())
-        ImGui::SetTooltip("%s%s", current->name, choice ? "" : " (default)");
+    if (!open && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", current->name);
     if (open) {
-        if (ImGui::Selectable(phosphor::PH_ARROW_COUNTER_CLOCKWISE, false)) choice.reset();
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Default - tiles with a @tileset directive, else colour");
         for (auto const& mi : k_items) {
-            if (numeric && (mi.mode == layer_mode::shape || mi.mode == layer_mode::corner))
+            if (!numeric && mi.mode == layer_mode::tile)  continue;
+            if (numeric  && (mi.mode == layer_mode::shape || mi.mode == layer_mode::corner))
                 continue;
-            bool selected = choice && (mi.mode == mode);
-            if (ImGui::Selectable(mi.icon, selected)) choice = mi.mode;
+            bool selected = (mi.mode == mode);
+            if (ImGui::Selectable(mi.icon, selected)) mode = mi.mode;
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", mi.name);
             if (selected) ImGui::SetItemDefaultFocus();
         }
@@ -1503,25 +1471,26 @@ static void draw_mode_combo(std::optional<layer_mode>& choice, layer_mode shown,
     }
 }
 
-// The sheet a Tile-mode layer draws from: its @tileset directive, looked up
-// in Settings > Tilesets by name. Without one, or with an unknown name, the
-// layer draws in colour.
-static void draw_sheet_label(script const& sc, project_config const& cfg,
-                             std::string const& layer) {
-    std::string sheet = sc.tileset_of(layer);
-    bool known = !sheet.empty() && cfg.find_tileset(sheet);
-    ImGui::AlignTextToFramePadding();
-    if (known) ImGui::TextDisabled("%s", sheet.c_str());
-    else       ImGui::TextColored({1.f, 0.6f, 0.3f, 1.f}, "%s", phosphor::PH_WARNING);
-    if (ImGui::IsItemHovered()) {
-        if (sheet.empty())
-            ImGui::SetTooltip("No sheet: add '// @tileset=<name>' to the grid's entry\n"
-                              "in the script; drawn in colour");
-        else if (!known)
-            ImGui::SetTooltip("Unknown sheet '%s': add it in Settings > Tilesets;\n"
-                              "drawn in colour", sheet.c_str());
-        else
-            ImGui::SetTooltip("@tileset=%s", sheet.c_str());
+// Which tileset (by name) a Tile-mode layer draws from. Only shown once a
+// layer is actually in Tile mode - other modes never read this field.
+static void draw_tileset_combo(std::string& name,
+                               std::vector<tileset_config> const& tilesets) {
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(46.f);
+    // Compact preview (first 3 chars) until opened; the list shows full names.
+    std::string preview = name.empty() ? "--" : name.substr(0, 3);
+    ImGui::SetNextWindowSizeConstraints({ 130.f, 0.f }, { FLT_MAX, FLT_MAX });
+    bool open = ImGui::BeginCombo("##tileset", preview.c_str());
+    if (!open && ImGui::IsItemHovered())
+        ImGui::SetTooltip("Tileset: %s", name.empty() ? "(none)" : name.c_str());
+    if (open) {
+        if (ImGui::Selectable("(none)", name.empty())) name.clear();
+        for (auto const& ts : tilesets) {
+            bool selected = (ts.name == name);
+            if (ImGui::Selectable(ts.name.c_str(), selected)) name = ts.name;
+            if (selected) ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
     }
 }
 
@@ -1574,17 +1543,20 @@ void draw_settings_window(project_config& cfg,
         ImGui::BeginChild("##ts_chip", { 0.f, 0.f },
                           ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY);
 
+        std::string old_name = ts.name;
         char name_buf[128];
         size_t nn = ts.name.size() < sizeof(name_buf) - 1 ? ts.name.size()
                                                            : sizeof(name_buf) - 1;
         ts.name.copy(name_buf, nn);
         name_buf[nn] = '\0';
         ImGui::SetNextItemWidth(-(ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x));
-        // the name a script's `@tileset=<name>` refers to
-        if (ImGui::InputText("##name", name_buf, sizeof(name_buf)))
+        if (ImGui::InputText("##name", name_buf, sizeof(name_buf))) {
             ts.name = name_buf;
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Name - a grid uses this sheet with // @tileset=%s", ts.name.c_str());
+            // Layers reference a tileset by name (see project_config.hpp) --
+            // keep their assignment pointing at the same tileset on rename.
+            for (auto& lc : cfg.layers)
+                if (lc.tileset == old_name) lc.tileset = ts.name;
+        }
         ImGui::SameLine();
         if (ImGui::Button(phosphor::PH_X)) remove_index = i;
 
@@ -1622,11 +1594,13 @@ void draw_settings_window(project_config& cfg,
         std::string removed = cfg.tilesets[(size_t)remove_index].name;
         cfg.tilesets.erase(cfg.tilesets.begin() + remove_index);
         tile_textures.erase(removed);
+        for (auto& lc : cfg.layers)
+            if (lc.tileset == removed) lc.tileset.clear();
     }
 
     if (ImGui::Button("Add Tileset")) {
         cfg.tilesets.push_back({
-            "tileset" + std::to_string(cfg.tilesets.size() + 1), "", 16, 16,
+            "Tileset " + std::to_string(cfg.tilesets.size() + 1), "", 16, 16,
         });
     }
 }

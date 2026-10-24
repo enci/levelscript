@@ -23,8 +23,6 @@ struct key_spec {
 key_spec const keys[] = {
     {"seed",    directive_target::file,      value_kind::integer, "the file", ""},
     {"name",    directive_target::tag_value, value_kind::ident,   "tag value", "tag values"},
-    {"tile",    directive_target::tag_value, value_kind::integer, "tag value", "tag values"},
-    {"tileset", directive_target::layer,     value_kind::ident,   "grid entry", "grid entries"},
     {"play",    directive_target::statement, value_kind::integer, "statement", "statements"},
     {"expect",  directive_target::file,      value_kind::text,    "the file", ""},
     {"param",   directive_target::file,      value_kind::text,    "the file", ""},
@@ -83,7 +81,7 @@ std::optional<std::vector<raw_directive>> split(directive_comment const& c) {
         else
             while (i < n && digit(t[i])) ++i;
         if (i == v) return std::nullopt;
-        if (i < n && !space(i)) return std::nullopt;   // `@tile=12x`
+        if (i < n && !space(i)) return std::nullopt;   // `@play=12x`
         out.push_back({std::move(key), std::string(t.substr(v, i - v)),
                        base + (int)s, base + (int)i});
     }
@@ -202,14 +200,12 @@ directive_set read_directives(module_closure const& mods) {
     ast_file const& ast = mods.merged;
 
     // Where each target kind's items start
-    std::map<line_key, std::vector<item>> starts[4];
+    std::map<line_key, std::vector<item>> starts[3];
     auto add = [&](directive_target k, item it) {
         starts[(int)k][{it.loc.mod, it.loc.line}].push_back(std::move(it));
     };
     for (auto const& t : ast.tags)
         for (auto const& v : t.values) add(directive_target::tag_value, {v.loc, t.name.text, v.text});
-    for (auto const& l : ast.layers.layers)
-        if (!l.is_graph) add(directive_target::layer, {l.name.loc, "", l.name.text});
     for (auto const& sq : ast.sequences)
         for (int i = 0; i < (int)sq.stmts.size(); ++i)
             add(directive_target::statement, {sq.stmts[(size_t)i].loc, sq.name.text, "", i});

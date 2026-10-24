@@ -14,15 +14,13 @@
 //
 //   @seed=N        the file        default invocation seed (root file only)
 //   @name=ID       a tag value     display name
-//   @tile=N        a tag value     tile index in a tiled layer
-//   @tileset=ID    a grid entry    sheet; the layer renders as tiles
 //   @play=N        a statement     steps per frame while the debugger plays
 //   @expect TEXT   the file        a test expectation (repeatable)
 //   @param P=N     the file        a param value for test runs (name = P, value = N)
 
 namespace ls {
 
-enum class directive_target { file, tag_value, layer, statement };
+enum class directive_target { file, tag_value, statement };
 
 struct directive {
     std::string      key;      // without the '@'
@@ -31,7 +29,7 @@ struct directive {
     directive_target target{directive_target::file};
     source_loc       loc;          // the `@key=value` text
     source_loc       target_loc;   // the target's range; the file: none
-    // tag_value: owner = tagset, name = value; layer: name = the grid;
+    // tag_value: owner = tagset, name = value;
     // statement: owner = sequence, index = position in its body (what
     // run::stmt_stack() reports)
     std::string      owner, name;

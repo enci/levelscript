@@ -89,23 +89,15 @@ bool load_script(script& sc) {
 
     sc.dirs = read_directives(mods);
     sc.value_names.assign(meta.tag_values.size(), {});
-    sc.value_tiles.assign(meta.tag_values.size(), {});
     for (size_t t = 0; t < meta.tag_values.size(); ++t) {
         sc.value_names[t].assign(meta.tag_values[t].size(), "");
-        sc.value_tiles[t].assign(meta.tag_values[t].size(), -1);
     }
-    sc.layer_tilesets.clear();
     for (auto const& d : sc.dirs.all) {
-        if (d.target == directive_target::layer) {
-            sc.layer_tilesets[d.name] = d.value;
-            continue;
-        }
         if (d.target != directive_target::tag_value) continue;
         int t = meta.tag_id(d.owner);
         int v = t < 0 ? -1 : meta.value_id(t, d.name);
         if (v < 0) continue;
         if (d.key == "name") sc.value_names[(size_t)t][(size_t)v] = d.value;
-        if (d.key == "tile") sc.value_tiles[(size_t)t][(size_t)v] = (int)d.number;
     }
     sc.full_error = sc.dirs.warnings.format_all();
 
@@ -211,7 +203,7 @@ static void set_dark_theme();
 
 // ── @play pacing ─────────────────────────────────────────────────────────────
 
-// The @play pace at the run's position (spec B.6): the innermost statement on
+// The @play pace at the run's position (spec B.5): the innermost statement on
 // the stack with one - a sequence application's covers its body. `depth` is
 // that statement's frame. -1: none; the fps timer paces.
 static int play_pace(script const& sc, std::vector<stmt_frame> const& st, size_t& depth) {

@@ -12,10 +12,10 @@
 //     "ok": bool,
 //     "diagnostics": [{"line","col","severity":"error"|"warning","message"}],
 //     "directives":  [{"key","value","loc":{"line","col","len","module"},
-//                      "target":{"kind":"file"|"tag_value"|"layer"|"statement",
+//                      "target":{"kind":"file"|"tag_value"|"statement",
 //                                "range","owner","name","index"}}],
 //                    // tool directives (Appendix B); value as written.
-//                    // tag_value: owner = tagset, name = value; layer: name;
+//                    // tag_value: owner = tagset, name = value;
 //                    // statement: owner = sequence, index = its stmt_stack() index;
 //                    // @param (the file): name = the param, value = its number
 //     "directive_warnings": [{"line","col","end_line","end_col","module","message"}],
