@@ -1,0 +1,55 @@
+// Spelunky level script that tries to mimic the procedural generation style of the game
+
+
+tag room_type {
+    start
+    exit
+    head
+    room
+}
+
+tag algo {
+    T  // @name=tile
+    H  // @name=head
+    W  // @name=wall
+    F  // @name=floor
+    R  // @name=reward
+    E  // @name=enemy
+    N  // @name=nothing
+    S  // @name=start
+
+    entrance
+    exit
+    active
+}
+
+// Everything in the algo grid 
+layers {
+    coarse : grid of room_type
+    path : grid of number
+    path_graph : graph of path
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Coarse carving
+///////////////////////////////////////////////////////////////////////////////
+rule pick_start {
+    coarse[.] where[(y == 0)] => { all coarse[head] path[0] }
+}
+
+rule coarse_carve (rotation={90, 180})  { any
+    coarse[head . ] path[?v .] => { all  coarse[room head] path[?v (?v + 1)] }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Room carving
+///////////////////////////////////////////////////////////////////////////////
+
+///////////////////////////////////////////////////////////////////////////////
+sequence main {
+    resize(4, 4)    
+    once pick_start
+    settle coarse_carve
+    upscale(5, 4)
+}
+

@@ -1,19 +1,27 @@
 // Nuclear throne level script that tries to mimic the procedural generation style of the game
+// It's a random walk style level generator, with 2:1 preference for straight paths and it
+// places either rewards or enemies whenever a paths terminates.
 
 tag algo {
     T  // @name=tail
     H  // @name=head
     W  // @name=wall
     F  // @name=floor
-    C  // @name=crate
+    R  // @name=reward
     E  // @name=enemy
     N  // @name=nothing
+    S  // @name=start
 }
 
 // Everything in the algo grid 
 layers {
     algo : grid of algo
     tiles : grid of number
+}
+
+params {
+    min_length : number = 4
+    max_length : number = 7
 }
 
 // The very start of the level
@@ -56,17 +64,17 @@ rule step(rotation=all, symmetry=all) { ordered
     algo[T H . ] => algo[F T H ]    
 }
 
-rule finish {
-    algo[T|H] => { any
-        algo[C]
-        algo[F]
-        algo[E]
-    }    
+rule finish { all
+    algo[H] => { any
+        (weight=1) algo[R]
+        (weight=2) algo[E]
+    }
+    algo[T] =>  algo[F]
 }
 
 sequence carve {
     once seed
-    grow(random(4, 7)) step
+    grow(random(min_length, max_length)) step
     everywhere finish
 }
 
@@ -89,81 +97,103 @@ rule walls(rotation=all) { any
 rule decorate { all
     // lone pillar
     algo[
-        *    !W|. *
-        !W|. W    !W|.
-        *    !W|. * ] => tiles[* * *, * 13 *, * * *]
+        *    !W *
+        !W W    !W
+        *    !W * ] => tiles[* * *, * 13 *, * * *]
     // dead end, vertical
     algo[
         *    W    *
-        !W|. W    !W|.
-        *    !W|. * ] => { any tiles[* * *, * 5 *, * * *] tiles[* * *, * 7 *, * * *] }
+        !W W    !W
+        *    !W * ] => { any tiles[* * *, * 5 *, * * *] tiles[* * *, * 7 *, * * *] }
     algo[
-        *    !W|. *
-        !W|. W    !W|.
+        *    !W *
+        !W W    !W
         *    W    * ] => { any tiles[* * *, * 5 *, * * *] tiles[* * *, * 7 *, * * *] }
     // dead end, horizontal
     algo[
-        *    !W|. *
-        !W|. W    W 
-        *    !W|. * ] => { any tiles[* * *, * 1 *, * * *] tiles[* * *, * 11 *, * * *] }
+        *    !W *
+        !W W    W 
+        *    !W * ] => { any tiles[* * *, * 1 *, * * *] tiles[* * *, * 11 *, * * *] }
     algo[
-        *    !W|. *
-        W    W    !W|.
-        *    !W|. * ] => { any tiles[* * *, * 1 *, * * *] tiles[* * *, * 11 *, * * *] }
+        *    !W *
+        W    W    !W
+        *    !W * ] => { any tiles[* * *, * 1 *, * * *] tiles[* * *, * 11 *, * * *] }
     // straight runs
     algo[
         *    W    *
-        !W|. W    !W|.
+        !W W    !W
         *    W    * ] => { any tiles[* * *, * 5 *, * * *] tiles[* * *, * 7 *, * * *] }
     algo[
-        *    !W|. *
+        *    !W *
         W    W    W 
-        *    !W|. * ] => { any tiles[* * *, * 1 *, * * *] tiles[* * *, * 11 *, * * *] }
+        *    !W * ] => { any tiles[* * *, * 1 *, * * *] tiles[* * *, * 11 *, * * *] }
     // corners
     algo[
-        *    !W|. *
-        !W|. W    W 
+        *    !W *
+        !W W    W 
         *    W    * ] => tiles[* * *, * 0 *, * * *]
     algo[
-        *    !W|. *
-        W    W    !W|.
+        *    !W *
+        W    W    !W
         *    W    * ] => tiles[* * *, * 2 *, * * *]
     algo[
         *    W    *
-        !W|. W    W 
-        *    !W|. * ] => tiles[* * *, * 10 *, * * *]
+        !W W    W 
+        *    !W * ] => tiles[* * *, * 10 *, * * *]
     algo[
         *    W    *
-        W    W    !W|.
-        *    !W|. * ] => tiles[* * *, * 12 *, * * *]
+        W    W    !W
+        *    !W * ] => tiles[* * *, * 12 *, * * *]
     // tees
     algo[
         *    W    *
-        !W|. W    W 
+        !W W    W 
         *    W    * ] => tiles[* * *, * 3 *, * * *]
     algo[
         *    W    *
-        W    W    !W|.
+        W    W    !W
         *    W    * ] => tiles[* * *, * 4 *, * * *]
     algo[
-        *    !W|. *
+        *    !W *
         W    W    W 
         *    W    * ] => tiles[* * *, * 8 *, * * *]
     algo[
         *    W    *
         W    W    W 
-        *    !W|. * ] => tiles[* * *, * 9 *, * * *]
+        *    !W * ] => tiles[* * *, * 9 *, * * *]
     // cross
     algo[
         *    W    *
         W    W    W 
         *    W    * ] => tiles[* * *, * 6 *, * * *]
 
+    // Start tile
+    algo[S] => tiles[25]
+
     // Floor is the sheet's blank tile, crates the yellow block,
     // enemies one of the four critters
     algo[F] => tiles[14]
-    algo[C] => tiles[15]
-    algo[E] => { any tiles[18] tiles[19] tiles[23] tiles[24] }
+
+    // Reward sprites
+    algo[R] => { any
+        (weight=3) tiles[33]
+        (weight=1) tiles[31]
+        (weight=1) tiles[35]
+        (weight=1) tiles[36]
+        (weight=1) tiles[38]
+        (weight=1) tiles[39]
+        (weight=1) tiles[40]
+    }
+
+    // Enemies
+    algo[E] => { any
+        tiles[27]
+        tiles[28]
+        tiles[29]
+        tiles[30]
+    }
+
+    // Empty floor tile
     algo[N] => tiles[14]
 }
 
@@ -177,6 +207,7 @@ sequence main {
     trim()
     pad(2)    
     everywhere walls // @play=5
+    once { algo[E] => algo[S] }
     everywhere { algo[.] => algo[N] } // @play=10
     everywhere decorate // @play=5
 }

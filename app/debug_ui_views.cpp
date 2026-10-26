@@ -339,11 +339,30 @@ static cell_view pattern_cell_view(compiled const& meta, compiled_pattern const&
         if (cc.val == num_empty) return { IM_COL32(80, 80, 80, 255), "." };
         return { tag_color(-1, (int)cc.val, nullptr), std::to_string(cc.val) };
     }
-    // Tag mask: empty-only reads as '.', otherwise show the lowest value bit
-    // (a union mask previews as its first member).
-    int vid = mask_to_slot(meta, pal.tag_id, (int)cc.val);
-    if (vid < 0) return { IM_COL32(80, 80, 80, 255), "." };
-    return { tag_color(pal.tag_id, vid, pal.colors), cell_glyph(meta, pal.tag_id, vid) };
+    // Tag mask: empty-only reads as '.'; a single value or an exact named
+    // union shows its glyph; all values but one reads as its complement
+    // ('!W'); any other multi-value mask reads as '|'. A trailing '.' marks
+    // a mask that also matches empty ('F.', '!W.').
+    int  mask       = (int)cc.val;
+    bool with_empty = (mask & tag_empty) != 0;
+    int  vals       = mask & ~(int)tag_empty;
+    std::string dot = with_empty ? "." : "";
+    ImU32 grey      = IM_COL32(80, 80, 80, 255);
+    if (vals == 0) return { grey, "." };
+    int slot = mask_to_slot(meta, pal.tag_id, vals);
+    if (slot < 0) return { grey, "?" };
+    bool known  = pal.tag_id >= 0 && pal.tag_id < (int)meta.tag_values.size();
+    int  n      = known ? (int)meta.tag_values[pal.tag_id].size() : 0;
+    bool single = (vals & (vals - 1)) == 0;
+    if (single || !known || slot >= n)
+        return { tag_color(pal.tag_id, slot, pal.colors),
+                 cell_glyph(meta, pal.tag_id, slot) + dot };
+    int all  = ((1 << n) - 1) << 1;
+    int rest = all & ~vals;
+    if (rest == 0) return { grey, with_empty ? "*" : "!." };
+    if ((rest & (rest - 1)) == 0)
+        return { grey, "!" + cell_glyph(meta, pal.tag_id, mask_to_vid(rest)) + dot };
+    return { grey, "|" + dot };
 }
 
 static void draw_pattern(compiled const& meta, compiled_pattern const& pat,

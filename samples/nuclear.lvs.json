@@ -26,7 +26,7 @@
   "tilesets": [
     {
       "name": "Tiles",
-      "path": "tiles/tilemap_packed_f.png",
+      "path": "tiles/tilemap_packed_a.png",
       "tile_h": 8,
       "tile_w": 8
     }
