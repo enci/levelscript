@@ -78,6 +78,18 @@ const cases = [
     ['rule r { g[F] => g[ (k ▮', { kind: 'none' }],
     ['rule r { g[.] where[ (x == ▮', { kind: 'expr', grids: true, pos: true }],
     ['rule r { g[.] where[ ▮', { kind: 'none' }],
+    // sized patterns `g(W, H)[c]`: the '(' is a size, not a weight
+    ['rule r { g(▮', { kind: 'none' }],
+    ['rule r { g(8, ▮', { kind: 'none' }],
+    ['rule r { g(8, 6) ▮', { kind: 'none' }],             // '[' expected
+    ['rule r { g(8, 6)[▮', { kind: 'cell', grid: 'g' }],
+    ['rule r { g(8, 6)[ (▮', { kind: 'expr', grids: true, pos: true, head: 'g' }],
+    ['rule r { g(8, 6)[.] where(8, 6)[ (x == ▮', { kind: 'expr', grids: true, pos: true }],
+    ['rule r { g(8, 6)[.] ▮', { kind: 'ruleBody', start: false }],
+    ['rule r { g(8, 6)[.] => g(8, 6)[▮', { kind: 'cell', grid: 'g' }],
+    ['rule r { g(2, 1)[.] => { any g(2, 1)[▮', { kind: 'cell', grid: 'g' }],
+    ['rule r { g(2, 1)[.] => { any (▮', { kind: 'weight' }],
+    ['rule r { { g(8, 6)[▮', { kind: 'cell', grid: 'g' }],
 
     // modules
     ['use "schema.lvs"\n▮', { kind: 'top' }],

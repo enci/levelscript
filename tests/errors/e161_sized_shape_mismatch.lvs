@@ -1,0 +1,8 @@
+// E161 (0.12, check 3): a sized pattern's shape is its declared size, and the
+// match and write sides must still agree.
+// @expect error
+// @expect stderr-contains dimension mismatch
+tag t { a }
+layers { g: grid of t }
+rule r { g(8, 6)[.] => g(8, 5)[a] }
+sequence main { }

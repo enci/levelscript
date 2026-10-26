@@ -1,0 +1,10 @@
+// A sized pattern `g(W, H)[c]` repeats its one cell over W x H, on either
+// side, for grids, `where`, and graphs alike.
+rule rooms {
+    room(8, 6)[?r]
+    where(8, 6)[ (path != . && path == 0) ]
+    map(8, 6)[ (degree() > 1) ]
+    =>
+    fine(8, 6)[W]
+}
+rule mixed { g(2, 1)[.] => { any g[a b] g(2, 1)[c] } }

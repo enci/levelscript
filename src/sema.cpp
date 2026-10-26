@@ -8,6 +8,10 @@ namespace ls {
 
 namespace {
 
+// The largest side of a sized pattern `g(W, H)[c]`; a written-out pattern has
+// no cap, but a size is one token and could otherwise ask for billions of cells.
+constexpr int max_pattern_side = 256;
+
 // ── pattern transforms ───────────────────────────────────────────────────────
 //
 // Applied at compile time to expand symmetry/rotation variants. The both-axis
@@ -855,13 +859,40 @@ struct analyzer {
             tag = out.layers[cp.grid_id].tag_id;
             cp.is_number = tag < 0;
         }
-        if (exp_rows > 0 && (p.rows != exp_rows || p.cols != exp_cols))
+        // A sized pattern's shape is its declared size, not its body's.
+        bool size_ok = !p.sized ||
+                       (p.size_cols >= 1 && p.size_cols <= max_pattern_side &&
+                        p.size_rows >= 1 && p.size_rows <= max_pattern_side);
+        if (!size_ok)
+            error(p.size_loc, "a pattern size must be between 1 and " +
+                  std::to_string(max_pattern_side) + " on each side");
+        int rows = p.sized ? (int)p.size_rows : p.rows;
+        int cols = p.sized ? (int)p.size_cols : p.cols;
+
+        if (size_ok && exp_rows > 0 && (rows != exp_rows || cols != exp_cols))
             error(p.loc, "pattern dimension mismatch: expected " +
                   std::to_string(exp_rows) + "x" + std::to_string(exp_cols) +
-                  ", got " + std::to_string(p.rows) + "x" + std::to_string(p.cols));
+                  ", got " + std::to_string(rows) + "x" + std::to_string(cols));
 
         if (p.rows == 0 || p.cols == 0) {
             error(p.loc, "empty pattern body");
+            return cp;
+        }
+        if (!size_ok) return cp;
+        if (p.sized) {   // one cell, compiled once and repeated over the shape
+            if (p.rows != 1 || p.cols != 1 || p.cells[0].size() != 1) {
+                error(p.loc, "a sized pattern repeats a single cell, but this body has " +
+                      std::to_string(p.rows) + " row(s) of " + std::to_string(p.cols) +
+                      " cell(s)");
+                return cp;
+            }
+            expr const& in = *p.cells[0][0];
+            compiled_cell cell = cp.graph_id >= 0
+                ? compile_graph_cell(in, cp.graph_id)
+                : compile_cell(in, tag, cp.is_number, p.is_where, is_rhs);
+            cp.rows = rows;
+            cp.cols = cols;
+            cp.cells.assign((size_t)rows * cols, cell);
             return cp;
         }
         for (int r = 0; r < p.rows; ++r)

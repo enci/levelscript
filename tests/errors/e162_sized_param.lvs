@@ -1,0 +1,9 @@
+// E162 (0.12, 5.3): a pattern size is an integer literal; shapes are known at
+// compile time, so a param cannot size a pattern.
+// @expect error
+// @expect stderr-contains expected the pattern width
+tag t { a }
+layers { g: grid of t }
+params { w: number = 8 }
+rule r { g(w, 6)[.] => g(8, 6)[a] }
+sequence main { }

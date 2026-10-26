@@ -432,6 +432,19 @@ struct parser {
             if (!expect(token_type::ident, "a grid name")) return false;
             p.grid = prev_ident();
         }
+        // pattern_size ::= '(' INTEGER ',' INTEGER ')' - width, then height
+        if (at(token_type::lparen)) {
+            p.sized = true;
+            p.size_loc = loc();
+            closing size_closer{*this, p.size_loc};
+            eat();   // '('
+            if (!expect(token_type::integer, "the pattern width")) return false;
+            p.size_cols = toks[pos - 1].int_val;
+            if (!expect(token_type::comma, "',' and the pattern height")) return false;
+            if (!expect(token_type::integer, "the pattern height")) return false;
+            p.size_rows = toks[pos - 1].int_val;
+            if (!expect(token_type::rparen, "')'")) return false;
+        }
         if (!expect(token_type::lbracket, "'['")) return false;
         in_grid = true;    // newlines separate rows until ']'
         skip_newlines();   // '[' may be followed by a newline before the first row
@@ -531,9 +544,12 @@ struct parser {
 
     // ── match side: pattern+ ─────────────────────────────────────────────────
 
+    // A head, then '[' or a size `(INTEGER` - nothing else in a rule body
+    // starts with a name followed by '('.
     bool at_pattern_head() const {
         return (at(token_type::ident) || at(token_type::kw_where)) &&
-               peek(1).is(token_type::lbracket);
+               (peek(1).is(token_type::lbracket) ||
+                (peek(1).is(token_type::lparen) && peek(2).is(token_type::integer)));
     }
 
     // Consecutive patterns before '=>' conjoin; there is no match-side

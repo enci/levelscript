@@ -916,3 +916,49 @@ TEST_CASE("sema: a derived param is a number") {
     CHECK(compile_result(decls + "params { p = 1 > 0 }").has_error("derived param 'p' must evaluate to a number"));
     CHECK(compile_result(decls + "params { p = 2 * 3 }").ok);
 }
+
+TEST_CASE("sema: a sized pattern repeats its one cell") {
+    // check 55; section 5.3
+    std::string decls = "tag t { a, b }\nlayers { g: grid of t\n n: grid of number }\n";
+    CHECK(compile_result(decls + "rule r { g(3, 2)[.] => g(3, 2)[a] }").ok);
+    CHECK(compile_result(decls + "rule r { g(3, 2)[.] where(3, 2)[(x > 0)] => g[a a a, b b b] }").ok);
+    CHECK(compile_result(decls + "rule r { n(2, 2)[?v] => n(2, 2)[(?v + 1)] }").ok);
+
+    // the declared size is the shape the mismatch check sees
+    CHECK(compile_result(decls + "rule r { g(3, 2)[.] => g(2, 3)[a] }").has_error("dimension mismatch"));
+    CHECK(compile_result(decls + "rule r { g(3, 2)[.] => g[a a a] }").has_error("dimension mismatch"));
+    CHECK(compile_result(decls + "rule r { g(1, 1)[.] => g[a] }").ok);
+
+    // the body is exactly one cell
+    CHECK(compile_result(decls + "rule r { g(2, 1)[. .] => g[a a] }").has_error("repeats a single cell"));
+    CHECK(compile_result(decls + "rule r { g(1, 2)[., .] => g[a, a] }").has_error("repeats a single cell"));
+
+    // sizes are 1..256 integer literals
+    CHECK(compile_result(decls + "rule r { g(0, 2)[.] => g(0, 2)[a] }").has_error("pattern size must be between"));
+    CHECK(compile_result(decls + "rule r { g(257, 1)[.] => g(257, 1)[a] }").has_error("pattern size must be between"));
+    CHECK(compile_result(decls + "rule r { g(256, 1)[.] => g(256, 1)[a] }").ok);
+    CHECK_FALSE(compile_result(decls + "params { w: number = 2 }\nrule r { g(w, 2)[.] => g(2, 2)[a] }").ok);
+    CHECK_FALSE(compile_result(decls + "rule r { g(2)[.] => g(2, 1)[a] }").ok);
+}
+
+TEST_CASE("sema: a sized pattern runs as its written-out form") {
+    // one id per 2x2 room; `?r` over the whole room lines the template up
+    std::string decls = "tag t { a, b }\nlayers { g: grid of t\n n: grid of number }\n";
+    auto run = [&](std::string const& rule) {
+        auto gen = ts::make(decls + rule + R"(
+sequence main {
+    resize(3, 2)
+    everywhere { n[.] => n[(y * width + x)] }
+    upscale(2, 2)
+    everywhere r
+}
+)");
+        REQUIRE(static_cast<bool>(gen));
+        return ts::show(gen.generate(gen.sequence("main"), 7), "g");
+    };
+    std::string sized   = run("rule r { n(2, 2)[?r] where(2, 2)[(?r > 1)] => g(2, 2)[a] }");
+    std::string written = run("rule r { n[?r ?r, ?r ?r] where[(?r > 1) (?r > 1), (?r > 1) (?r > 1)]"
+                              " => g[a a, a a] }");
+    CHECK(sized == written);
+    CHECK(sized == "....aa/....aa/aaaaaa/aaaaaa");
+}

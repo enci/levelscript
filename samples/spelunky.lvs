@@ -1,48 +1,28 @@
-// Spelunky level script that tries to mimic the procedural generation style of the game
+// Spelunky -- it tries to follow the procedural generation algorithm of the game
 
-tag coarse {
-    start
-    exit
-    head
-    visited
+
+tag coarse { start exit head visited }
+tag opening { none left right up down }
+
+tag fine {
+    S   // @name=solid
+    E   // @name=empty
+    C   // @name=connect
+    B   // @name=breakable    
 }
 
-tag opening {
-    none
-    left
-    right
-    up
-    down
-}
-
-tag algo {
-    T  // @name=tile
-    H  // @name=head
-    W  // @name=wall
-    F  // @name=floor
-    R  // @name=reward
-    E  // @name=enemy
-    N  // @name=nothing
-    S  // @name=start
-
-    entrance
-    exit
-    active
-}
-
-// Everything in the algo grid 
 layers {
     coarse : grid of coarse
     open : grid of opening
     path : grid of number
-    path_graph : graph of path
+    fine : grid of fine
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // Coarse carving
 ///////////////////////////////////////////////////////////////////////////////
-rule pick_start {
-    coarse[.] where[(y == 0)] => { all coarse[(head|start)] path[0] open[none] }
+rule coarse_start {
+    coarse[.] where[(y == 0)] => { all coarse[head] path[0] open[none] }
 }
 
 rule coarse_carve  { any
@@ -80,15 +60,124 @@ rule coarse_carve  { any
     }
 }
 
+rule coarse_start_end { any
+    coarse[head] => coarse[visited|exit]
+    path[0] => coarse[visited|start]
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // Room carving
 ///////////////////////////////////////////////////////////////////////////////
+rule fine_fill_rooms {
+    // This syntax will create (expand) a patten of 8x6 and with all the tiles
+    // with the same value (or variable in the case of ?r)
+    coarse(8, 6)[visited]
+    path(8, 6)[?r]  
+    => fine [
+        S S S S S S S S 
+        S B B B B B B S 
+        S B E E E E B S 
+        S B E E E E B S 
+        S B B B B B B S 
+        S S S S S S S S ]
+}
+
+rule fine_room_templates { ordered
+    path(8, 6)[?r] open(8,6)[left]
+     => fine[
+        * * * * * * * * 
+        * * * * * * * * 
+        C * * * * * * * 
+        C * * * * * * * 
+        * * * * * * * * 
+        * * * * * * * * ]
+
+    path(8, 6)[?r] open(8,6)[right]
+     => fine[
+        * * * * * * * * 
+        * * * * * * * * 
+        * * * * * * * C 
+        * * * * * * * C 
+        * * * * * * * * 
+        * * * * * * * * ]
+
+
+    path(8, 6)[?r] open(8,6)[up]
+     => fine[
+        * * * C C * * * 
+        * * * * * * * * 
+        * * * * * * * * 
+        * * * * * * * * 
+        * * * * * * * * 
+        * * * * * * * * ]
+
+
+    path(8, 6)[?r] open(8,6)[down]
+     => fine[
+        * * * * * * * * 
+        * * * * * * * * 
+        * * * * * * * * 
+        * * * * * * * * 
+        * * * * * * * * 
+        * * * C C * * * ]
+}
+
+rule fine_connect_rooms (rotation=all, symmetry=all) { any
+    fine[
+        B C C B
+        B C C B]
+    => { any
+        fine[
+            E E E E
+            E B B E]
+        fine[
+            E E E E
+            E E B E]        
+        fine[
+            E E E E
+            E E B B]
+        fine[
+            E E E E
+            E B B B]
+        fine[
+            E E E E
+            B B B B]
+    }
+}
+
+rule fine_erode(rotation=all) { ordered
+    fine[
+        E E E 
+        B B B ]
+    => fine[
+        E E E 
+        B E B ]
+    
+    fine[
+        E E 
+        B B ]
+    => fine[
+        E E 
+        B E ]
+
+}
 
 ///////////////////////////////////////////////////////////////////////////////
+// Main
+///////////////////////////////////////////////////////////////////////////////
 sequence main {
+
+    // Coarse grid - carve a path
     resize(4, 4)    
-    once pick_start
+    once coarse_start
     settle coarse_carve
+    everywhere coarse_start_end
+
+    // Fine grid - replace templates
     upscale(8, 6)
+    everywhere fine_fill_rooms
+    everywhere fine_room_templates
+    everywhere fine_connect_rooms
+    grow(30) fine_erode
 }
 

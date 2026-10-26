@@ -81,7 +81,7 @@ export const OPS: { name: string; params: OpParam[]; snippet: string }[] = [
 interface Tok { t: string; owner?: string }   // t: text; owner set on synthetic closers
 interface Frame {
     open: '{' | '[' | '(' | '';
-    owner: string;       // what opened it: 'top' 'tag:t' 'layers' 'params' 'rule' 'statements' 'combinator' 'group' 'set' 'grid:g' 'where' 'attrs' 'count:grow' 'op:path' 'when' 'weight' 'expr'
+    owner: string;       // what opened it: 'top' 'tag:t' 'layers' 'params' 'rule' 'statements' 'combinator' 'group' 'set' 'grid:g' 'where' 'attrs' 'count:grow' 'op:path' 'when' 'weight' 'size:g' 'expr'
     scope: 'full' | 'restricted' | '';   // expression scope inherited by '(' frames
     head?: string;       // the pattern head of a cell's '(' frames
     toks: Tok[];
@@ -188,8 +188,10 @@ function openFrame(c: '{' | '[' | '(', stack: Frame[]): Frame {
         return frame('other');
     }
     if (c === '[') {
-        if (prev === 'where') return frame('where');
-        if (prev && isIdentStart(prev[0])) return frame('grid:' + prev);
+        // a sized pattern `g(W, H)[`: the head is the one before the size
+        const head = last?.t === ')' && last.owner?.startsWith('size:') ? last.owner.slice(5) : prev;
+        if (head === 'where') return frame('where');
+        if (head && isIdentStart(head[0])) return frame('grid:' + head);
         return frame('other');
     }
     // '('
@@ -201,6 +203,10 @@ function openFrame(c: '{' | '[' | '(', stack: Frame[]): Frame {
         if (prev && isIdentStart(prev[0])) return frame('op:' + prev, 'full');
         return frame('other');
     }
+    // a pattern head followed by '(' is a size, `g(W, H)[`; a bare '(' a weight
+    const inBody = parent.owner === 'rule' || parent.owner === 'combinator' || parent.owner === 'group';
+    if (inBody && prev && isIdentStart(prev[0]) && prev !== 'any' && prev !== 'all' && prev !== 'ordered')
+        return frame('size:' + prev);
     if (parent.owner === 'rule' || parent.owner === 'combinator') return frame('weight');
     if (parent.owner === 'params') return frame('expr', 'restricted');
     if (parent.owner === 'layers') return frame('graphArgs');
@@ -258,6 +264,7 @@ function classify(stack: Frame[]): CompletionContext {
     case 'rule':
     case 'combinator': {
         if (prev === undefined) return f.owner === 'rule' ? { kind: 'ruleBody', start: true } : { kind: 'combinator' };
+        if (prev === ')' && last.owner?.startsWith('size:')) return none;   // '[' expected
         if (prev === '=>' || prev === ']' || prev === '}' || prev === ')' || prev === ',' ||
             prev === 'any' || prev === 'all' || prev === 'ordered')
             return { kind: 'ruleBody', start: false };

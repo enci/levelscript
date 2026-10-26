@@ -112,6 +112,11 @@ struct pattern {
     bool                               is_where{false};
     int                                rows{0}, cols{0};
     std::vector<std::vector<expr_ptr>> cells;      // [row][col]; row widths checked in sema
+    // A sized pattern `g(W, H)[c]` repeats its one body cell over W x H.
+    // rows/cols above are the body as written; these are the declared shape.
+    bool                               sized{false};
+    source_loc                         size_loc;
+    long long                          size_cols{0}, size_rows{0};
 };
 
 // A recursive write-side term: a leaf pattern, an `{ all }` block

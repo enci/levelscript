@@ -1,0 +1,44 @@
+// @seed=5
+// Sized patterns (0.12): `g(W, H)[c]` repeats one cell over W x H. A room id
+// written before `upscale` is the same over each 4x3 room and differs from
+// every neighbour, so `room(4, 3)[?r]` matches exactly once per room, lined
+// up with it. `ordered` gives each room the first template that applies.
+// @expect grid fine count(D) == 1
+// @expect grid fine count(.) > 0
+
+tag geo { W, D }
+tag kind { start }
+
+layers {
+    room: grid of number
+    mark: grid of kind
+    fine: grid of geo
+}
+
+rule ids { room[.] => room[(y * width + x)] }
+rule pick { mark[.] where[(x == 0 && y == 0)] => mark[start] }
+
+rule rooms { ordered
+    room(4, 3)[?r] mark(4, 3)[start]
+    => fine[
+        W W W W
+        W D . .
+        W W W W ]
+
+    room(4, 3)[?r] where(4, 3)[ (?r == 4) ]
+    => fine(4, 3)[W]
+
+    room(4, 3)[?r]
+    => fine[
+        W W W W
+        . . . .
+        W W W W ]
+}
+
+sequence main {
+    resize(3, 2)
+    everywhere ids
+    once pick
+    upscale(4, 3)
+    everywhere rooms
+}

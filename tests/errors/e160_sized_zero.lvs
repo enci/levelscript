@@ -1,0 +1,7 @@
+// E160 (0.12, check 55): a pattern size is at least 1 on each side.
+// @expect error
+// @expect stderr-contains pattern size must be between
+tag t { a }
+layers { g: grid of t }
+rule r { g(0, 2)[.] => g(0, 2)[a] }
+sequence main { }

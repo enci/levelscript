@@ -1,0 +1,8 @@
+// E159 (0.12, check 55): a sized pattern repeats a single cell; a larger body
+// is written out without a size.
+// @expect error
+// @expect stderr-contains repeats a single cell
+tag t { a }
+layers { g: grid of t }
+rule r { g(2, 2)[. .] => g(2, 2)[a] }
+sequence main { }

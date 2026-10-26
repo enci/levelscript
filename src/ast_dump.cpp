@@ -70,6 +70,9 @@ struct printer {
 
     void pattern(ls::pattern const& p) {
         open(p.is_where ? std::string("where") : "pattern " + p.grid.text, &p.loc);
+        if (p.sized)
+            line("(size " + std::to_string(p.size_cols) + " " + std::to_string(p.size_rows) +
+                 at(p.size_loc) + ")");
         for (auto const& row : p.cells) {
             std::string s = "(row";
             for (auto const& c : row) s += " " + expr_str(*c);
