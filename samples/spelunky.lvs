@@ -1,11 +1,18 @@
 // Spelunky level script that tries to mimic the procedural generation style of the game
 
-
-tag room_type {
+tag coarse {
     start
     exit
     head
-    room
+    visited
+}
+
+tag opening {
+    none
+    left
+    right
+    up
+    down
 }
 
 tag algo {
@@ -25,7 +32,8 @@ tag algo {
 
 // Everything in the algo grid 
 layers {
-    coarse : grid of room_type
+    coarse : grid of coarse
+    open : grid of opening
     path : grid of number
     path_graph : graph of path
 }
@@ -34,11 +42,42 @@ layers {
 // Coarse carving
 ///////////////////////////////////////////////////////////////////////////////
 rule pick_start {
-    coarse[.] where[(y == 0)] => { all coarse[head] path[0] }
+    coarse[.] where[(y == 0)] => { all coarse[(head|start)] path[0] open[none] }
 }
 
-rule coarse_carve (rotation={90, 180})  { any
-    coarse[head . ] path[?v .] => { all  coarse[room head] path[?v (?v + 1)] }
+rule coarse_carve  { any
+    // Expand to the right
+    {
+        coarse[head . ]
+        open[?o * ]
+        path[?v .]               // Capture the current path value
+    } => { all
+        coarse[visited head]     // Move the algorithm forward
+        open[(?o|right) left]    // Mark the exits for the rooms
+        path[?v (?v + 1)]        // Increment the path value for the next tile
+    }
+
+    // Expand to the left
+    {
+        coarse[. head]
+        open[* ?o]
+        path[. ?v]               // Capture the current path value
+    } => { all
+        coarse[head visited]     // 
+        open[right (?o|left)]    // Mark the exits for the rooms
+        path[(?v + 1) ?v]        // Increment the path value for the next tile
+    }
+
+    // Expand downward (, means we are looking at the row below, new lines work too)
+    {
+        coarse[head, . ]
+        open[?o, *]
+        path[?v, .]
+    } => { all
+        coarse[visited, head]   // Mark the current tile as visited and move the head down
+        open[(?o|down), up]     // Mark the exits for the rooms
+        path[?v, (?v + 1)]      // Increment the path value for the next tile
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -50,6 +89,6 @@ sequence main {
     resize(4, 4)    
     once pick_start
     settle coarse_carve
-    upscale(5, 4)
+    upscale(8, 6)
 }
 

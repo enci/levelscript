@@ -1,14 +1,19 @@
 {
   "cell_zoom": 1.5,
-  "graphs": [
-    "path_graph"
-  ],
   "grid_bg_color": "282828",
   "layers": [
     {
       "corner": "normal",
       "mode": "color",
       "name": "coarse",
+      "opacity": 1.0,
+      "tileset": "",
+      "visible": true
+    },
+    {
+      "corner": "normal",
+      "mode": "text",
+      "name": "open",
       "opacity": 1.0,
       "tileset": "",
       "visible": true
@@ -25,7 +30,8 @@
   "mini_px": 24.0,
   "tag_colors": {
     "algo": null,
-    "room_type": null
+    "coarse": null,
+    "opening": null
   },
   "tilesets": []
 }
