@@ -164,6 +164,8 @@ TEST_CASE("coverage: arithmetic wraps and truncates at run time") {
         "min(3, -4)", "max(3, -4)",
         "clamp(12, 0, 9)", "clamp(-5, 0, 9)", "clamp(4, 0, 9)",
         "2147483647 * 2",
+        "mod(7, 3)", "mod(-7, 3)", "mod(7, -3)", "mod(-7, -3)",   // floored: the divisor's sign
+        "mod(5, 0)", "mod(-2147483647 - 1, -1)",                 // total
     };
     std::string body;
     int i = 0;
@@ -171,7 +173,8 @@ TEST_CASE("coverage: arithmetic wraps and truncates at run time") {
         body += "\n    once { where[ (x == " + std::to_string(i++) + ") ] => n[ (" + c + ") ] }";
     auto lv = generate("layers { n: grid of number }\nsequence main {\n    resize(" +
                        std::to_string(i) + ", 1)" + body + "\n}\n");
-    CHECK(row(lv, "n") == std::vector<long long>{-2147483648LL, -2147483648LL, -3, -3, 3, -4, 3, 9, 0, 4, -2});
+    CHECK(row(lv, "n") == std::vector<long long>{-2147483648LL, -2147483648LL, -3, -3, 3, -4, 3, 9, 0, 4, -2,
+                                                 1, 2, -2, -1, 0, 0});
 }
 
 // ── geometric operations ─────────────────────────────────────────────────────

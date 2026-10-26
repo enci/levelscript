@@ -642,6 +642,7 @@ LevelScript has a closed set of **built-in** functions; there are no user-define
 | `max(a, b)` | `(number, number) -> number` | larger of `a`, `b` |
 | `abs(a)` | `(number) -> number` | absolute value (wraps at INT_MIN) |
 | `clamp(v, lo, hi)` | `(number, number, number) -> number` | `max(lo, min(v, hi))` |
+| `mod(a, b)` | `(number, number) -> number` | `a` modulo `b`, **floored**: the result is `0` or has the sign of `b`, so `mod(-1, 8)` is `7`. `mod(a, 0)` is `0`, as `a / 0` is (section 5.8) |
 | `random(lo, hi)` | `(number, number) -> number` | a value in `[lo, hi]` inclusive (`lo` when `hi < lo`); **advances the PRNG** (section 10.6). One draw per call. The one non-pure built-in. |
 | `degree()` | `() -> number`, graph-pattern cells only | number of nodes adjacent to the cell's node (section 5.12) |
 | `size()` | `() -> number`, graph-pattern cells only | number of cells in the node's region |
@@ -650,7 +651,7 @@ LevelScript has a closed set of **built-in** functions; there are no user-define
 
 Arities are fixed. `min`/`max` are binary; nest for more operands (`min(a, min(b, c))`). `if` is the only function whose type is parametric in `T`; it is a single generic signature, not overloading. Because evaluation is eager and all operators are total (section 5.8), `if(c, a, b)` never faults on its unused branch - e.g. `if(n == 0, 0, 100 / n)` is safe at `n == 0`.
 
-**Built-in names are not reserved.** A call is recognised syntactically (an identifier followed by `(`, section 5.8), and tag values, grids, and params are never called, so `if`, `min`, `max`, `abs`, `clamp`, `random`, and the graph functions `degree`, `size`, `distance`, and `neighbors` may also be used as tag value, grid, graph, or param names. Followed by `(`, such a name always denotes the built-in; otherwise it resolves per section 5.8. Like operation names (section 2.4), built-in names are not keywords.
+**Built-in names are not reserved.** A call is recognised syntactically (an identifier followed by `(`, section 5.8), and tag values, grids, and params are never called, so `if`, `min`, `max`, `abs`, `clamp`, `mod`, `random`, and the graph functions `degree`, `size`, `distance`, and `neighbors` may also be used as tag value, grid, graph, or param names. Followed by `(`, such a name always denotes the built-in; otherwise it resolves per section 5.8. Like operation names (section 2.4), built-in names are not keywords.
 
 **`random` is impure; the others are pure.** Because `if` is eager, `if(c, random(0,9), random(0,9))` evaluates **both** branches and therefore draws **twice**, in left-to-right order, discarding the unused value. This is defined behaviour, not a fault; if exactly one draw is wanted, place the `random` outside the `if`. (Eager `if` is deliberate: totality makes the dead branch safe, and the fixed two-draw cost keeps the draw sequence trivially pinned.) `random` may appear in any expression position (match cells, `where`, write cells, `when` guards, param expressions): it reads no grid, position, or dimension, so the statement- and param-scope restrictions (section 5.8) do not exclude it. It draws once each time its expression is evaluated.
 

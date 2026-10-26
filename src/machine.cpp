@@ -41,7 +41,7 @@ void machine::bind_params() {
     }
 }
 
-// The pure operators (neg .. clamp_) over already-evaluated operands; unused
+// The pure operators (neg .. mod_) over already-evaluated operands; unused
 // operands are 0.
 static long long ce_pure(ce_kind k, long long a, long long b, long long c) {
     auto w32 = [](long long v) { return (long long)(int32_t)v; };
@@ -66,6 +66,11 @@ static long long ce_pure(ce_kind k, long long a, long long b, long long c) {
     case ce_kind::max_:   return a > b ? a : b;
     case ce_kind::abs_:   return w32(a < 0 ? -a : a);
     case ce_kind::clamp_: return std::max(b, std::min(a, c));
+    case ce_kind::mod_: {  // floored: the result takes the divisor's sign; n mod 0 == 0
+        if (b == 0) return 0;
+        long long r = a % b;   // 32-bit operands, so INT_MIN % -1 is safe here
+        return r != 0 && (r < 0) != (b < 0) ? r + b : r;
+    }
     default:              return 0;   // leaves and random_: not pure operators
     }
 }

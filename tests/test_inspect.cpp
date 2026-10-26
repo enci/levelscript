@@ -42,6 +42,7 @@ TEST_CASE("inspect: healthy file emits ok, symbols, and no diagnostics") {
     CHECK(has(j, "\"rules\":[{\"name\":\"fill\",\"loc\":"));
     CHECK(has(j, "\"ops\":[\"resize\""));
     CHECK(has(j, "\"builtins\":[\"if\""));
+    CHECK(has(j, "\"mod\""));
 }
 
 TEST_CASE("inspect: token classification of pattern tag values") {

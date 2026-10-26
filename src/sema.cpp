@@ -363,6 +363,7 @@ struct analyzer {
         {"max",       ce_kind::max_,       2, false},
         {"abs",       ce_kind::abs_,       1, false},
         {"clamp",     ce_kind::clamp_,     3, false},
+        {"mod",       ce_kind::mod_,       2, false},
         {"random",    ce_kind::random_,    2, false},
         // graph functions: a selector argument, if any
         {"degree",    ce_kind::degree_,    0, true},

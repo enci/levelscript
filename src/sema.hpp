@@ -61,7 +61,7 @@ enum class ce_kind {
     lt, le, gt, ge, eq, ne,
     and_, or_, bit_or,
     // built-ins: if is eager — both branches always evaluate
-    if_, min_, max_, abs_, clamp_,
+    if_, min_, max_, abs_, clamp_, mod_,
     random_,       // the one impure built-in: one PRNG draw per evaluation
     // emptiness tests (read the cell raw, bypassing number→0 coercion)
     is_empty, is_not_empty,   // ref = grid id; val = 1 when a number grid

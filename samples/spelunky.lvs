@@ -1,8 +1,8 @@
 // Spelunky -- it tries to follow the procedural generation algorithm of the game
 
 
-tag coarse { start exit head visited }
-tag opening { none left right up down }
+tag coarse { start exit head normal }
+tag opening { start left right up down }
 
 tag fine {
     S   // @name=solid
@@ -14,15 +14,22 @@ tag fine {
 layers {
     coarse : grid of coarse
     open : grid of opening
-    path : grid of number
     fine : grid of fine
+    room_id : grid of number
+    back : grid of number   // background tiles (tranquil_tunnels_transparent.png)
+    tiles : grid of number  // foreground tiles, drawn over back
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // Coarse carving
 ///////////////////////////////////////////////////////////////////////////////
+rule coarse_assign_id {
+    // x and y are built-in varaibles, so this will assign unique id per room
+    room_id[.] => room_id[(x + y * 4)]
+}
+
 rule coarse_start {
-    coarse[.] where[(y == 0)] => { all coarse[head] path[0] open[none] }
+    coarse[.] where[(y == 0)] => { all coarse[head ] open[start] }
 }
 
 rule coarse_carve  { any
@@ -30,39 +37,39 @@ rule coarse_carve  { any
     {
         coarse[head . ]
         open[?o * ]
-        path[?v .]               // Capture the current path value
     } => { all
-        coarse[visited head]     // Move the algorithm forward
+        coarse[normal head]     // Move the algorithm forward
         open[(?o|right) left]    // Mark the exits for the rooms
-        path[?v (?v + 1)]        // Increment the path value for the next tile
     }
 
     // Expand to the left
     {
         coarse[. head]
         open[* ?o]
-        path[. ?v]               // Capture the current path value
     } => { all
-        coarse[head visited]     // 
+        coarse[head normal]     // 
         open[right (?o|left)]    // Mark the exits for the rooms
-        path[(?v + 1) ?v]        // Increment the path value for the next tile
     }
 
-    // Expand downward (, means we are looking at the row below, new lines work too)
+    // Expand downward (`,` is a row break without a new line)
     {
         coarse[head, . ]
         open[?o, *]
-        path[?v, .]
     } => { all
-        coarse[visited, head]   // Mark the current tile as visited and move the head down
+        coarse[normal, head]   // Mark the current tile as visited and move the head down
         open[(?o|down), up]     // Mark the exits for the rooms
-        path[?v, (?v + 1)]      // Increment the path value for the next tile
     }
 }
 
 rule coarse_start_end { any
-    coarse[head] => coarse[visited|exit]
-    path[0] => coarse[visited|start]
+    coarse[head] => coarse[exit]
+    open[start] => coarse[start]
+}
+
+sequence coarse_off_path {
+    once (rotation=all) { coarse[normal . ] =>  coarse[head . ] }
+    once coarse_carve
+    once { coarse[head] =>  coarse[normal] }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -71,8 +78,8 @@ rule coarse_start_end { any
 rule fine_fill_rooms {
     // This syntax will create (expand) a patten of 8x6 and with all the tiles
     // with the same value (or variable in the case of ?r)
-    coarse(8, 6)[visited]
-    path(8, 6)[?r]  
+    coarse(8, 6)[!.]
+    room_id(8, 6)[?r]  
     => fine [
         S S S S S S S S 
         S B B B B B B S 
@@ -83,7 +90,7 @@ rule fine_fill_rooms {
 }
 
 rule fine_room_templates { ordered
-    path(8, 6)[?r] open(8,6)[left]
+    room_id(8, 6)[?r] open(8,6)[left]
      => fine[
         * * * * * * * * 
         * * * * * * * * 
@@ -92,7 +99,7 @@ rule fine_room_templates { ordered
         * * * * * * * * 
         * * * * * * * * ]
 
-    path(8, 6)[?r] open(8,6)[right]
+    room_id(8, 6)[?r] open(8,6)[right]
      => fine[
         * * * * * * * * 
         * * * * * * * * 
@@ -102,7 +109,7 @@ rule fine_room_templates { ordered
         * * * * * * * * ]
 
 
-    path(8, 6)[?r] open(8,6)[up]
+    room_id(8, 6)[?r] open(8,6)[up]
      => fine[
         * * * C C * * * 
         * * * * * * * * 
@@ -112,7 +119,7 @@ rule fine_room_templates { ordered
         * * * * * * * * ]
 
 
-    path(8, 6)[?r] open(8,6)[down]
+    room_id(8, 6)[?r] open(8,6)[down]
      => fine[
         * * * * * * * * 
         * * * * * * * * 
@@ -163,21 +170,185 @@ rule fine_erode(rotation=all) { ordered
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// Purely decration!
+//
+// Paint the tiles from the fine layer (tranquil_tunnels_transparent.png,
+// 128x128 tiles of 8x8, index = row * 128 + column). Like in the nuclear
+// sample, a solid tile is picked by which of its four sides (N E S W) are open.
+///////////////////////////////////////////////////////////////////////////////
+rule paint_back {
+    fine[*] => { any back[308] back[309] back[436] back[437] }
+}
+
+rule paint_fill {
+    fine[S] => { any
+        tiles[267]
+        tiles[268]
+        tiles[395]
+        tiles[396]
+    }
+}
+
+rule paint_walls { all
+    // edges
+    fine[
+        *  !S *
+        S  S  S
+        *  S  * ] => { any tiles[* * *, * 259 *, * * *] tiles[* * *, * 260 *, * * *] tiles[* * *, * 261 *, * * *] }
+    fine[
+        *  S  *
+        S  S  S
+        *  !S * ] => { any tiles[* * *, * 771 *, * * *] tiles[* * *, * 772 *, * * *] tiles[* * *, * 773 *, * * *] }
+    fine[
+        *  S  *
+        !S S  S
+        *  S  * ] => { any tiles[* * *, * 386 *, * * *] tiles[* * *, * 514 *, * * *] }
+    fine[
+        *  S  *
+        S  S  !S
+        *  S  * ] => { any tiles[* * *, * 390 *, * * *] tiles[* * *, * 518 *, * * *] }
+    // corners
+    fine[
+        *  !S *
+        !S S  S
+        *  S  * ] => tiles[* * *, * 258 *, * * *]
+    fine[
+        *  !S *
+        S  S  !S
+        *  S  * ] => tiles[* * *, * 262 *, * * *]
+    fine[
+        *  S  *
+        !S S  S
+        *  !S * ] => tiles[* * *, * 770 *, * * *]
+    fine[
+        *  S  *
+        S  S  !S
+        *  !S * ] => tiles[* * *, * 774 *, * * *]
+    // one tile thick, horizontal
+    fine[
+        *  !S *
+        S  S  S
+        *  !S * ] => tiles[* * *, * 271 *, * * *]
+    fine[
+        *  !S *
+        !S S  S
+        *  !S * ] => tiles[* * *, * 270 *, * * *]
+    fine[
+        *  !S *
+        S  S  !S
+        *  !S * ] => tiles[* * *, * 272 *, * * *]
+    // one tile thick, vertical
+    fine[
+        *  S  *
+        !S S  !S
+        *  S  * ] => tiles[* * *, * 654 *, * * *]
+    fine[
+        *  !S *
+        !S S  !S
+        *  S  * ] => tiles[* * *, * 526 *, * * *]
+    fine[
+        *  S  *
+        !S S  !S
+        *  !S * ] => tiles[* * *, * 782 *, * * *]
+    // lone block
+    fine[
+        *  !S *
+        !S S  !S
+        *  !S * ] => tiles[* * *, * 528 *, * * *]
+}
+
+// A gem stuck in the rock, only deep inside solid areas
+rule paint_ore {
+    fine[
+        S S S S
+        S S S S
+        S S S S
+        S S S S ]
+    => tiles[
+        * *   *   *
+        * 648 649 *
+        * 776 777 *
+        * *   *   * ]
+}
+
+// Grass, flowers and gems on the floors, roots hanging from the ceilings
+rule paint_props { all
+    fine[!S, S] tiles[., *] => { any
+        (weight=16) tiles[*, *]
+        (weight=2) tiles[285, *]
+        (weight=2) tiles[287, *]
+        (weight=2) tiles[413, *]
+        (weight=2) tiles[415, *]
+        (weight=2) tiles[541, *]
+        (weight=2) tiles[543, *]
+        (weight=1) tiles[10730, *]
+        (weight=1) tiles[10986, *]
+        (weight=1) tiles[11242, *]
+        (weight=1) tiles[10735, *]
+        (weight=1) tiles[11119, *]
+        (weight=1) tiles[11247, *]
+    }
+    fine[S, !S] tiles[*, .] => { any
+        (weight=6) tiles[*, *]
+        (weight=1) tiles[*, 797]
+        (weight=1) tiles[*, 799]
+        (weight=1) tiles[*, 800]
+        (weight=1) tiles[*, 925]
+        (weight=1) tiles[*, 927]
+        (weight=1) tiles[*, 929]
+    }
+}
+
+// The cave mouth (3x2) marks the start and the exit rooms, ideally on a
+// flat floor, but a ledge (or thin air) will do
+rule paint_start { ordered
+    coarse(3, 3)[start] fine[!S !S !S, !S !S !S, S S S]
+    => tiles[11138 11139 11140, 11266 11267 11268, * * *]
+    coarse(3, 3)[start] fine[!S !S !S, !S !S !S, * S *]
+    => tiles[11138 11139 11140, 11266 11267 11268, * * *]
+    coarse(3, 2)[start] fine[!S !S !S, !S !S !S]
+    => tiles[11138 11139 11140, 11266 11267 11268]
+}
+
+rule paint_exit { ordered
+    coarse(3, 3)[exit] fine[!S !S !S, !S !S !S, S S S]
+    => tiles[11138 11139 11140, 11266 11267 11268, * * *]
+    coarse(3, 3)[exit] fine[!S !S !S, !S !S !S, * S *]
+    => tiles[11138 11139 11140, 11266 11267 11268, * * *]
+    coarse(3, 2)[exit] fine[!S !S !S, !S !S !S]
+    => tiles[11138 11139 11140, 11266 11267 11268]
+}
+
+///////////////////////////////////////////////////////////////////////////////
 // Main
 ///////////////////////////////////////////////////////////////////////////////
 sequence main {
 
     // Coarse grid - carve a path
-    resize(4, 4)    
+    resize(4, 4)
+    everywhere coarse_assign_id
     once coarse_start
     settle coarse_carve
     everywhere coarse_start_end
+    settle coarse_off_path
 
     // Fine grid - replace templates
     upscale(8, 6)
     everywhere fine_fill_rooms
     everywhere fine_room_templates
     everywhere fine_connect_rooms
-    grow(30) fine_erode
+    grow(40) fine_erode
+    everywhere { fine[B] => fine[S] } // @play=10
+
+    // Tiles
+    pad(1)
+    everywhere { fine[.] => fine[S] } // @play=100
+    everywhere paint_back   // @play=100
+    everywhere paint_fill   // @play=100
+    everywhere paint_walls  // @play=2
+    scatter(15) paint_ore
+    once paint_start
+    once paint_exit
+    everywhere paint_props
 }
 

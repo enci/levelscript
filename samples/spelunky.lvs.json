@@ -20,27 +20,49 @@
     },
     {
       "corner": "normal",
-      "mode": "text",
-      "name": "path",
-      "opacity": 1.0,
-      "tileset": "",
-      "visible": false
-    },
-    {
-      "corner": "normal",
       "mode": "color",
       "name": "fine",
       "opacity": 1.0,
       "tileset": "",
       "visible": true
+    },
+    {
+      "corner": "normal",
+      "mode": "text",
+      "name": "room_id",
+      "opacity": 1.0,
+      "tileset": "",
+      "visible": true
+    },
+    {
+      "corner": "normal",
+      "mode": "tile",
+      "name": "back",
+      "opacity": 1.0,
+      "tileset": "Tunnels",
+      "visible": true
+    },
+    {
+      "corner": "normal",
+      "mode": "tile",
+      "name": "tiles",
+      "opacity": 1.0,
+      "tileset": "Tunnels",
+      "visible": true
     }
   ],
   "mini_px": 24.0,
   "tag_colors": {
-    "algo": null,
     "coarse": null,
     "fine": null,
     "opening": null
   },
-  "tilesets": []
+  "tilesets": [
+    {
+      "name": "Tunnels",
+      "path": "tiles/tranquil_tunnels_transparent.png",
+      "tile_h": 8,
+      "tile_w": 8
+    }
+  ]
 }

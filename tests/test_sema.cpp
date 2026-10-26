@@ -342,6 +342,11 @@ TEST_CASE("sema: built-in calls") {
     CHECK(compile_result(prelude +
           "rule r { tiles[ (if(tiles > 0, 1, wall)) ] => tiles[1] }\n" + rprog)
           .has_error("branches must have the same type"));
+    CHECK(compile_result(prelude + "rule r { tiles[ (mod(7)) ] => tiles[1] }\n" + rprog)
+          .has_error("takes 2 argument(s)"));
+    CHECK(compile_result(prelude + "rule r { tiles[ (mod(wall, 2)) ] => tiles[1] }\n" + rprog)
+          .has_error("'mod' requires number arguments"));
+    CHECK(compile_result(prelude + "rule r { where[ (mod(x, 8) == 0) ] => tiles[1] }\n" + rprog).ok);
     compile_result ok(prelude +
         "rule r { tiles[ (clamp(random(0, 9), 1, abs(-5))) ] => tiles[ (max(tiles, 1)) ] }\n" + rprog);
     INFO(ok.diags.format_all());
