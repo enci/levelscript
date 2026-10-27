@@ -1282,6 +1282,7 @@ The compiler must reject:
 52. **Graph-pattern cell.** A graph-pattern cell other than `*` or a parenthesized boolean expression; or a grid read inside a graph-pattern cell (section 5.12).
 53. **Graph function placement.** A call to `degree`, `size`, `distance`, or `neighbors` outside a graph-pattern cell; a selector anywhere but as the argument of `distance` or `neighbors`, or a non-selector argument there; or a selector cell that does not fit its grid (a tag mask on a number grid other than `.` or `!.`, or an integer on a tag grid) (section 5.12).
 54. **Zero-weight `{ any }`.** An `{ any }` block whose items all have weight `0` (section 5.5).
+55. **Sized pattern.** A sized pattern `g(W, H)[c]` whose body is not exactly one cell, or whose `W` or `H` is not an integer literal from 1 to 256 (section 5.3).
 
 ### 7.4 Warnings
 
