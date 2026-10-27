@@ -697,14 +697,18 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
 
             // Icon button with a hover tooltip carrying the full label and
             // shortcut. When `active` is true it renders held-down (a "stays
-            // pressed" toggle) by borrowing the button's active color.
-            auto toolbtn = [&](char const* icon, char const* tip, bool active = false) {
+            // pressed" toggle) by borrowing the button's active color. An
+            // optional icon color tints the button only, not its tooltip.
+            auto toolbtn = [&](char const* icon, char const* tip, bool active = false,
+                               ImVec4 const* icon_col = nullptr) {
                 if (active) {
                     const ImVec4 held = ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive);
                     ImGui::PushStyleColor(ImGuiCol_Button, held);
                     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, held);
                 }
+                if (icon_col) ImGui::PushStyleColor(ImGuiCol_Text, *icon_col);
                 bool clicked = ImGui::Button(icon, { 28.f, 0.f });
+                if (icon_col) ImGui::PopStyleColor();
                 if (active) ImGui::PopStyleColor(2);
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", tip);
                 return clicked;
@@ -726,9 +730,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
             ImVec4 dbg_restart = brand_teal(dark_theme);
             auto dbgbtn = [&](char const* icon, char const* tip, ImVec4 col, bool enabled) {
                 ImGui::BeginDisabled(!enabled);
-                ImGui::PushStyleColor(ImGuiCol_Text, col);
-                bool clicked = toolbtn(icon, tip);
-                ImGui::PopStyleColor();
+                bool clicked = toolbtn(icon, tip, false, &col);
                 ImGui::EndDisabled();
                 ImGui::SameLine();
                 return clicked;
@@ -1034,10 +1036,11 @@ static void set_style_metrics() {
     style.GrabRounding  = 5.0f;
     style.DockingSeparatorSize = 6.0f;   // visible gap between docked panes
 
-    // No borders: panes are separated by the dock gap instead.
+    // No borders: panes are separated by the dock gap instead. Popups and
+    // tooltips keep a thin one so they read against any background.
     style.WindowBorderSize = 0.0f;
     style.ChildBorderSize  = 0.0f;
-    style.PopupBorderSize  = 0.0f;
+    style.PopupBorderSize  = 1.0f;
     style.FrameBorderSize  = 0.0f;
     style.TabBorderSize    = 0.0f;
     style.WindowMenuButtonPosition = ImGuiDir_None;   // no dropdown button on docked tab bars
@@ -1056,7 +1059,7 @@ static void set_light_theme() {
     colors[ImGuiCol_WindowBg]               = ImVec4(0.96f, 0.96f, 0.96f, 1.00f);
     colors[ImGuiCol_ChildBg]                = ImVec4(0.00f, 0.00f, 0.00f, 0.03f);
     colors[ImGuiCol_PopupBg]                = ImVec4(0.95f, 0.95f, 0.96f, 0.98f);
-    colors[ImGuiCol_Border]                 = ImVec4(0.90f, 0.90f, 0.90f, 1.00f);
+    colors[ImGuiCol_Border]                 = ImVec4(0.75f, 0.75f, 0.77f, 1.00f);
     colors[ImGuiCol_BorderShadow]           = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
     colors[ImGuiCol_FrameBg]                = ImVec4(0.87f, 0.87f, 0.88f, 1.00f);
     colors[ImGuiCol_FrameBgHovered]         = ImVec4(0.75f, 0.75f, 0.77f, 1.00f);
@@ -1126,7 +1129,7 @@ static void set_dark_theme() {
     c[ImGuiCol_PopupBg]              = ImVec4(0.12f, 0.12f, 0.13f, 0.96f);
     // Docking draws its splitters in Border: the gap color (as in light), so
     // splitters, the outer frame and the rounded corners show one backdrop.
-    c[ImGuiCol_Border]               = ImVec4(0.10f, 0.10f, 0.11f, 1.00f);
+    c[ImGuiCol_Border]               = ImVec4(0.30f, 0.30f, 0.33f, 1.00f);
     c[ImGuiCol_BorderShadow]         = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
     c[ImGuiCol_FrameBg]              = ImVec4(0.22f, 0.22f, 0.23f, 1.00f);
     c[ImGuiCol_FrameBgHovered]       = ImVec4(0.28f, 0.28f, 0.30f, 1.00f);

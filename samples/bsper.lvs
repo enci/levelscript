@@ -1,0 +1,68 @@
+// A level generator based on  BPS
+
+tag level { floor wall }
+tag expansion { e }
+
+
+layers {
+    level: grid of level
+    zones: grid of number
+    //expansion : grid of expansion
+    expand: grid of number
+}
+
+params {
+    merge : number = 0
+}
+
+rule border(rotation=all) {
+    zones[?a *]
+    where[* (zones != ?a)]
+    =>
+    level[* wall]
+}
+
+rule merge_init(rotation=all) {
+    zones[?a ?b]
+    where[* (zones != ?a)]
+    => { all 
+        zones[?a * ]
+        expand[* ?a]
+    }
+}
+
+rule merge_flood(rotation=all) {    
+    zones[?a ?a] expand[?b . ] => expand[?b ?b]
+}
+
+rule merge_fill {
+    expand[?b] => {all expand[.] zones[?b] }
+}
+
+sequence merge_rooms {
+    once merge_init
+    settle merge_flood
+    everywhere merge_fill
+}
+
+rule fix_corner(rotation=all) {
+    level[
+        wall floor
+        wall wall]
+    => level[
+        wall wall
+        wall wall]
+}
+
+sequence main {
+    resize(48, 32)
+    bsp(into=zones, min=8, max=14)
+
+    settle(3) merge_rooms
+
+    everywhere border    
+    everywhere { level[.] => level[floor] } // @play=10
+    pad(2)
+    everywhere { level[.] => level[wall] }  // @play=10
+    // everywhere fix_corner
+}

@@ -1,0 +1,36 @@
+{
+  "cell_zoom": 1.0,
+  "grid_bg_color": "282828",
+  "layers": [
+    {
+      "corner": "normal",
+      "mode": "color",
+      "name": "level",
+      "opacity": 1.0,
+      "tileset": "",
+      "visible": true
+    },
+    {
+      "corner": "normal",
+      "mode": "text",
+      "name": "zones",
+      "opacity": 1.0,
+      "tileset": "",
+      "visible": true
+    },
+    {
+      "corner": "normal",
+      "mode": "text",
+      "name": "expand",
+      "opacity": 1.0,
+      "tileset": "",
+      "visible": true
+    }
+  ],
+  "mini_px": 24.0,
+  "tag_colors": {
+    "expansion": null,
+    "level": null
+  },
+  "tilesets": []
+}
