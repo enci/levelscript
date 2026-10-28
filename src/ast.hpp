@@ -117,6 +117,9 @@ struct pattern {
     bool                               sized{false};
     source_loc                         size_loc;
     long long                          size_cols{0}, size_rows{0};
+    // A node extent `g(?n)[c]` writes its one body cell over node ?n's
+    // region; `extent` holds '?n' ("" when none), `size_loc` its span.
+    ident                              extent;
 };
 
 // A recursive write-side term: a leaf pattern, an `{ all }` block
@@ -131,19 +134,38 @@ struct write_term {
 };
 
 // A rule guard: `when (expr)` on the match side, evaluated once per
-// candidate. `after` is how many patterns precede it (at least one) - its
-// place in match-side order.
+// candidate. `after` is how many patterns precede it (at least one; 0 in a
+// graph pair, after its block) - its place in match-side order.
 struct rule_guard {
     source_loc loc;
     expr_ptr   expr;
     int        after{1};
 };
 
+// One line of a graph block: `?n` declares a node variable, `?a -- ?b` two
+// joined by an edge, `?n[m]` one whose node's value overlaps (or equals) `m`.
+struct graph_item {
+    enum class kind { node, edge, test } what{kind::node};
+    source_loc loc;
+    ident      a, b;   // b: edge only
+    expr_ptr   test;   // test only: an int_lit or a whitespace-free tag mask
+};
+
+// The match side of a graph pair: `plan { ... }`, structure only.
+struct graph_block {
+    ident                   graph;
+    std::vector<graph_item> items;
+};
+
 // One match-write sub-rule: LHS patterns (conjoined across grids at one
 // anchor; consecutive patterns before `=>`) and rule guards => a write tree.
+// A graph pair matches a graph block instead of patterns (`lhs` is empty and
+// every guard's `after` is 0), and writes node extents.
 struct rule_pair {
     source_loc              loc;
     std::vector<pattern>    lhs;
+    bool                    is_graph{false};
+    graph_block             block;    // is_graph only
     std::vector<rule_guard> guards;   // in match-side order
     write_term              rhs;
 };

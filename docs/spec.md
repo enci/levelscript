@@ -8,7 +8,7 @@
 
 LevelScript is a domain-specific language for procedural generation of grid-based content (roguelike dungeons, puzzle layouts, tile maps). A generator describes how to transform a stack of correlated grids through a sequence of pattern-rewrite rules, orchestrated by a small set of built-in operations.
 
-The reference implementation is a C++ library first and a CLI second, built around a single coroutine-backed execution core, a self-contained compiled artifact, and an embedding-first API (section 10, Appendix A). Graph layers (section 4.3) read structure out of grids; rewriting graphs directly is planned (section 9). This document has no changelog.
+The reference implementation is a C++ library first and a CLI second, built around a single coroutine-backed execution core, a self-contained compiled artifact, and an embedding-first API (section 10, Appendix A). Graph layers (section 4.3) read structure out of grids, and graph rules (section 5.13) write their nodes' regions; rewriting the topology is planned (section 9). This document has no changelog.
 
 ---
 
@@ -814,23 +814,22 @@ rule dead_end_chest {
 
 ### 5.13 Graph rules
 
-A **graph rule** matches a subgraph and writes the regions of its nodes. The match side of each of its pairs is a **graph block** naming a graph layer, followed by rule guards (section 5.9.1); the write side writes node extents (section 5.3). In the examples, `map` is `graph of rooms` and `decor` is another tag grid:
+A **graph rule** matches a subgraph and writes the regions of its nodes. The match side of each of its pairs is a **graph block** naming a graph layer, followed by rule guards (section 5.9.1); the write side writes node extents (section 5.3). In the examples, `plan` is `graph of rooms` and `decor` is another tag grid:
 
 ```ls
 // A dead end away from the start; under `once`, chosen uniformly among rooms.
 rule treasure_room {
-    map { ?n }
+    plan { ?n }
     when (degree(?n) == 1 && distance(?n, rooms[Start]) > 3)
     =>
     rooms(?n)[Treasure]
 }
 
-// A hall with an entrance and three further neighbours, one a shop.
+// A hall with four neighbours, one a shop.
 rule market_hub {
-    map {
+    plan {
         ?hub[Hall]
         ?a[Shop]
-        ?entry -- ?hub
         ?hub -- ?a
         ?hub -- ?b
         ?hub -- ?c
@@ -855,13 +854,13 @@ node_test   ::= INTEGER | tag_mask
 
 - `?n` declares a node variable.
 - `?a -- ?b` declares both variables and requires an edge between their nodes. `--` is a token only inside a graph block; inside `( ... )` two minus signs stay two operators.
-- `?n[m]` declares `?n` and tests its node's value (section 4.3) with cell semantics: overlap for a tag-grid source, equality for a number-grid source (section 4.1). A node is never empty, so `.` and `!.` are not tests, and a variable takes at most one test line (check 58).
+- `?n[m]` declares `?n` and tests its node's value (section 4.3) with cell semantics: overlap for a tag-grid source, equality for a number-grid source (section 4.1). A node is never empty, so a test mask has no `.` atom (`.`, `!.`, or a union such as `wall|.`), and a variable takes at most one test line (check 58).
 
 Every other condition, such as degrees, sizes, distances, and relations between values, is a rule guard.
 
-**Matching.** A candidate is an **assignment**: one node of the graph per block variable, such that distinct variables are assigned distinct nodes, every test line holds, every edge line joins adjacent nodes, and every rule guard is true. Matching is **non-induced**: assigned nodes may have edges the block does not list, and "no edge" is the guard `!adjacent(?a, ?b)`. A symmetric block yields several assignments per subgraph (`?a -- ?b` matches every edge twice, once in each direction), and each is a separate candidate, as the variants of a grid rule are (section 5.6). Test and edge lines are bare and draw nothing (phase 1, section 5.11); rule guards evaluate after them, in written order (phase 2). Block variables are nodes (section 5.12), usable in the pair's rule guards and write-side expression cells.
+**Matching.** A candidate is an **assignment**: one node of the graph per block variable, such that distinct variables are assigned distinct nodes, every test line holds, every edge line joins adjacent nodes, and every rule guard is true. Matching is **non-induced**: assigned nodes may have edges the block does not list, and "no edge" is the guard `!adjacent(?a, ?b)`. A symmetric block yields several assignments per subgraph (`?a -- ?b` matches every edge twice, once in each direction), and each is a separate candidate, as the variants of a grid rule are (section 5.6). In `market_hub`, `?b` and `?c` are interchangeable, so each hub and shop yields two assignments, and under `once` a hall next to two shops is twice as likely as one next to a single shop. Test and edge lines are bare and draw nothing (phase 1, section 5.11); rule guards evaluate after them, in written order (phase 2). Block variables are nodes (section 5.12), usable in the pair's rule guards and write-side expression cells.
 
-**Order.** Assignments are enumerated in lexicographic order of node ids (section 4.3) over the block's variables in order of first appearance, and sub-rules in declaration order; this is the collection order of section 10.6. The search is otherwise unobservable: any correct matcher yields the same assignments in this order, so rule guards draw in this order too.
+**Order.** Each sub-rule's assignments are collected in turn, in sub-rule declaration order; within a sub-rule, assignments are enumerated in lexicographic order of node ids (section 4.3) over the block's variables in order of first appearance. This is the collection order of section 10.6. The search is otherwise unobservable: any correct matcher yields the same assignments in this order, so rule guards draw in this order too.
 
 **Writes.** The write side is an ordinary write tree (section 5.2) whose leaves are node extents `g(?n)[c]` naming block variables (check 57). A leaf writes `c` into every cell of `?n`'s region in grid `g`, which may be any grid, the graph's source included. An expression in `c` evaluates once per cell, row-major over the region, with `x`/`y` that cell; each `{ any }` node draws once per application, as in any rule. Writing the source changes the graph later snapshots extract: a region rewritten to a neighbour's value merges with it at the next extraction.
 
@@ -1138,7 +1137,7 @@ The language does not verify reductivity in general - a fixpoint mode is a loop 
 **The reductivity warning.** The compiler does, however, flag the *guaranteed*-divergent case. For a `grow` statement without a count, consider each sub-rule's **unconditional** writes - the write leaves that occur on every resolution of the write tree; leaves under an `{ any }` do **not** count, since the pick may avoid them. If some sub-rule has no unconditional write that **invalidates its own LHS** - i.e. no write that overwrites an LHS-constrained cell of the same grid with a value that no longer matches that cell's requirement - then an applied anchor re-matches forever and the fixpoint is unreachable: the compiler emits the warning *"'grow' over rule '<name>' may never terminate: a sub-rule's write leaves its own match intact, so the fixpoint is unreachable."* For an inline rule, `<name>` is its source position.
 
 The analysis is conservative in both directions:
-- **Uncertainty suppresses the warning.** A computed (expression) match or write cell, and any `where` guard, make the invalidation question undecidable at compile time; such a sub-rule is assumed to invalidate and produces no warning. Only the statically certain case warns. Pattern variables (section 5.11) are decided only where the answer is certain: a binding cell requires a non-empty value, so a `.` written over it invalidates; a written variable is non-empty, so it invalidates a `.` cell. Any other case involving a variable is uncertain.
+- **Uncertainty suppresses the warning.** A computed (expression) match or write cell, and any `where` guard, make the invalidation question undecidable at compile time; such a sub-rule is assumed to invalidate and produces no warning. Only the statically certain case warns. Pattern variables (section 5.11) are decided only where the answer is certain: a binding cell requires a non-empty value, so a `.` written over it invalidates; a written variable is non-empty, so it invalidates a `.` cell. Any other case involving a variable is uncertain. A graph rule (section 5.13) is uncertain and never warns.
 - **Silence proves nothing.** Passing the check does not prove termination; a rule can still diverge through interactions the per-sub-rule check cannot see.
 
 `settle` is **exempt**: its loop exits on a no-change sweep, so an idempotent write (one that re-matches but rewrites the same value) still reaches the fixpoint - the guaranteed-loop argument does not apply.
@@ -1399,7 +1398,7 @@ The compiler must reject:
 55. **Sized pattern.** A sized pattern `g(W, H)[c]` whose body is not exactly one cell, or whose `W` or `H` is not an integer literal from 1 to 256 (section 5.3).
 56. **Rule-guard scope.** A rule guard that reads a grid or `x`/`y`; or whose expression is not boolean (section 5.9.1).
 57. **Node extent.** A node extent `g(?n)[c]` outside the write side of a graph pair, whose variable is not declared in that pair's graph block, or whose body is not exactly one cell; or, in a graph pair, a write-side leaf that is not a node extent (sections 5.3 and 5.13).
-58. **Graph rule form.** A graph block whose name is not a graph layer; a variable with two test lines, or a test that does not fit the source (an integer on a tag-grid source, a tag mask on a number-grid source, or `.`/`!.`); an edge line joining a variable to itself; a `symmetry` or `rotation` attribute on a rule with a graph pair; or a body mixing graph and grid pairs (section 5.13).
+58. **Graph rule form.** A graph block whose name is not a graph layer; a variable with two test lines, or a test that does not fit the source (an integer on a tag-grid source, a tag mask on a number-grid source, or a mask with a `.` atom); an edge line joining a variable to itself; a `symmetry` or `rotation` attribute on a rule with a graph pair; or a body mixing graph and grid pairs (section 5.13).
 
 ### 7.4 Warnings
 

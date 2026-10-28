@@ -432,8 +432,15 @@ struct parser {
             if (!expect(token_type::ident, "a grid name")) return false;
             p.grid = prev_ident();
         }
-        // pattern_size ::= '(' INTEGER ',' INTEGER ')' - width, then height
-        if (at(token_type::lparen)) {
+        // extent ::= '(' INTEGER ',' INTEGER ')' - width, then height
+        //          | '(' VARIABLE ')'          - a node extent
+        if (at(token_type::lparen) && peek(1).is(token_type::variable)) {
+            p.size_loc = loc();
+            closing size_closer{*this, p.size_loc};
+            eat();   // '('
+            p.extent = {eat().text, prev_loc()};
+            if (!expect(token_type::rparen, "')' after a node extent's variable")) return false;
+        } else if (at(token_type::lparen)) {
             p.sized = true;
             p.size_loc = loc();
             closing size_closer{*this, p.size_loc};
@@ -544,20 +551,33 @@ struct parser {
 
     // ── match side: pattern+ ─────────────────────────────────────────────────
 
-    // A head, then '[' or a size `(INTEGER` - nothing else in a rule body
-    // starts with a name followed by '('.
+    // A head, then '[' or an extent `(INTEGER` / `(?n` - nothing else in a
+    // rule body starts with a name followed by '('.
     bool at_pattern_head() const {
         return (at(token_type::ident) || at(token_type::kw_where)) &&
                (peek(1).is(token_type::lbracket) ||
-                (peek(1).is(token_type::lparen) && peek(2).is(token_type::integer)));
+                (peek(1).is(token_type::lparen) &&
+                 (peek(2).is(token_type::integer) || peek(2).is(token_type::variable))));
+    }
+
+    // A graph block `plan { ... }` - a name followed by '{'.
+    bool at_graph_block() const {
+        return at(token_type::ident) && peek(1).is(token_type::lbrace);
     }
 
     // Consecutive patterns before '=>' conjoin; there is no match-side
     // combinator and no comma between the patterns. Braces may group them for
-    // the reader: `{ p1 p2 } => ...` means `p1 p2 => ...`.
+    // the reader: `{ p1 p2 } => ...` means `p1 p2 => ...`. A graph block
+    // instead makes the pair a graph pair: `plan { ... } when (...) => ...`.
     bool parse_match_side(rule_pair& pr) {
+        if (at_graph_block()) return parse_graph_match(pr);
         if (!at(token_type::lbrace)) return parse_match_items(pr);
         eat();   // '{'
+        if (at_graph_block()) {
+            error_at(peek(), "a graph block is a whole match side; it is not grouped in braces");
+            recover_to(token_type::rbrace);
+            return false;
+        }
         if (at(token_type::kw_all) || at(token_type::kw_any) || at(token_type::kw_ordered)) {
             error_at(peek(), "match-side braces only group patterns; they take no '" +
                      peek().text + "'");
@@ -599,7 +619,84 @@ struct parser {
                 eat();
             }
         } while (at_pattern_head() || at(token_type::kw_when));
+        if (at_graph_block()) {
+            error_at(peek(), "a graph block is a whole match side; it does not conjoin "
+                     "with patterns");
+            return false;
+        }
         return true;
+    }
+
+    // graph_pair match side ::= graph_block guard*
+    bool parse_graph_match(rule_pair& pr) {
+        pr.is_graph = true;
+        if (!parse_graph_block(pr.block)) { recover_to(token_type::rbrace); return false; }
+        while (at(token_type::kw_when)) {
+            rule_guard g;
+            g.loc   = loc();
+            g.after = 0;
+            eat();   // 'when'
+            g.expr = parse_guard_expr();
+            if (!g.expr) return false;
+            close(g.loc);
+            pr.guards.push_back(std::move(g));
+        }
+        if (at_pattern_head() || at_graph_block()) {
+            error_at(peek(), "a graph block is a whole match side; it does not conjoin "
+                     "with patterns");
+            return false;
+        }
+        return true;
+    }
+
+    // graph_block ::= IDENT '{' graph_item (list_sep? graph_item)* list_sep? '}'
+    // graph_item  ::= VARIABLE '[' node_test ']' | VARIABLE ('--' VARIABLE)?
+    // node_test   ::= INTEGER | tag_mask
+    // `--` is two touching '-' tokens; it is a token only here.
+    bool parse_graph_block(graph_block& b) {
+        eat();
+        b.graph = prev_ident();
+        eat();   // '{'
+        if (at(token_type::rbrace)) {
+            error_at(peek(), "empty graph block; declare a node variable, e.g. '?n'");
+            eat();
+            return false;
+        }
+        while (!at(token_type::rbrace) && !at_end()) {
+            graph_item it;
+            it.loc = loc();
+            if (!expect(token_type::variable, "a node variable '?name'")) return false;
+            it.a = prev_ident();
+            if (accept(token_type::lbracket)) {
+                it.what = graph_item::kind::test;
+                if (at(token_type::integer)) {
+                    it.test = make_expr(expr_kind::int_lit);
+                    it.test->int_val = eat().int_val;
+                } else {
+                    it.test = parse_tag_mask();
+                    if (!it.test) return false;
+                }
+                if (!expect(token_type::rbracket, "']' after a node test's one cell")) return false;
+            } else if (at(token_type::minus)) {
+                token const& m1 = eat();
+                if (!at(token_type::minus) || !adjacent(m1, peek())) {
+                    error_at(m1, "expected '--' between two node variables");
+                    return false;
+                }
+                eat();
+                it.what = graph_item::kind::edge;
+                if (!expect(token_type::variable, "a node variable after '--'")) return false;
+                it.b = prev_ident();
+                if (at(token_type::minus)) {
+                    error_at(peek(), "edge lines do not chain; write each edge on its own line");
+                    return false;
+                }
+            }
+            close(it.loc);
+            b.items.push_back(std::move(it));
+            list_sep();
+        }
+        return expect(token_type::rbrace, "'}' closing the graph block");
     }
 
     // '(' expr ')' after a `when` - a statement or a rule guard.

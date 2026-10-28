@@ -1,0 +1,52 @@
+(rule treasure_room
+  (pair
+    (match
+      (graph plan
+        (node ?n))
+      (when (&& (== (call degree ?n) 1) (> (call distance ?n (selector rooms Start)) 3))))
+    (write
+      (pattern rooms
+        (extent ?n)
+        (row Treasure)))))
+(rule market_hub
+  (pair
+    (match
+      (graph plan
+        (test ?hub Hall)
+        (test ?a (| Shop Inn))
+        (edge ?hub ?a)
+        (edge ?hub ?b)
+        (edge ?hub ?c))
+      (when (== (call degree ?hub) 4))
+      (when (!= ?b ?c)))
+    (write
+      (all
+        (pattern rooms
+          (extent ?hub)
+          (row Market))
+        (any
+          (pattern decor
+            (extent ?a)
+            (row stall))
+          (pattern decor
+            (extent ?a)
+            (row (paren (call if (> (call size ?a) 4) stall .)))))))))
+(rule numbered
+  (body all)
+  (pair
+    (match
+      (graph zones_graph
+        (test ?z 3)))
+    (write
+      (pattern zones
+        (extent ?z)
+        (row (paren (+ (call value ?z) 1))))))
+  (pair
+    (match
+      (graph plan
+        (test ?n (! Hall)))
+      (when (< (call size ?n) 9)))
+    (write
+      (pattern rooms
+        (extent ?n)
+        (row Closet)))))

@@ -83,6 +83,36 @@ TEST_CASE("parser: rule guards follow a pattern on the match side") {
     CHECK(parse_fails("rule r { g[a] when k > 0 => g[c] }"));
 }
 
+TEST_CASE("parser: a graph block is a whole match side") {
+    auto a = parse_ok("rule r { plan {\n ?a -- ?b\n ?a[Hall]\n} when (?a != ?b) => g(?a)[c] }");
+    auto const& pa = a.rules[0].pairs[0];
+    CHECK(pa.is_graph);
+    CHECK(pa.lhs.empty());
+    CHECK(pa.block.graph == "plan");
+    REQUIRE(pa.block.items.size() == 2);
+    CHECK(pa.block.items[0].what == graph_item::kind::edge);
+    CHECK(pa.block.items[1].what == graph_item::kind::test);
+    REQUIRE(pa.guards.size() == 1);
+    CHECK(pa.guards[0].after == 0);
+    CHECK(pa.rhs.pat.extent == "?a");
+    // a grid named like a built-in still takes an extent
+    CHECK(parse_ok("rule r { plan { ?n } => size(?n)[c] }").rules[0].pairs[0].rhs.pat.extent == "?n");
+    // no grouping, no conjoining with patterns
+    CHECK(parse_fails("rule r { { plan { ?n } } => g(?n)[c] }"));
+    CHECK(parse_fails("rule r { plan { ?n } g[a] => g(?n)[c] }"));
+    CHECK(parse_fails("rule r { g[a] plan { ?n } => g[c] }"));
+    CHECK(parse_fails("rule r { plan { ?n } when (k > 0) g[a] => g(?n)[c] }"));
+    // block items
+    CHECK(parse_fails("rule r { plan { } => g[c] }"));
+    CHECK(parse_fails("rule r { plan { n } => g[c] }"));
+    CHECK(parse_fails("rule r { plan { ?a - ?b } => g(?a)[c] }"));
+    CHECK(parse_fails("rule r { plan { ?a - - ?b } => g(?a)[c] }"));
+    CHECK(parse_fails("rule r { plan { ?a -- ?b -- ?c } => g(?a)[c] }"));
+    CHECK(parse_fails("rule r { plan { ?a[Hall } => g(?a)[c] }"));
+    CHECK(parse_fails("rule r { plan { ?a[(1 + 2)] } => g(?a)[c] }"));
+    CHECK(parse_fails("rule r { plan { ?n } => g(?n[c] }"));
+}
+
 TEST_CASE("parser: expressions print back as source") {
     for (char const* src : {
              "?a != ?b && k > 0",

@@ -1,0 +1,27 @@
+// Graph rules (5.13): a graph block of node variables, edges, and value
+// tests, then rule guards; the write side writes node extents `g(?n)[c]`.
+rule treasure_room {
+    plan { ?n }
+    when (degree(?n) == 1 && distance(?n, rooms[Start]) > 3)
+    =>
+    rooms(?n)[Treasure]
+}
+rule market_hub {
+    plan {
+        ?hub[Hall]
+        ?a[Shop|Inn]
+        ?hub -- ?a
+        ?hub--?b, ?hub -- ?c
+    }
+    when (degree(?hub) == 4)
+    when (?b != ?c)
+    =>
+    { all
+        rooms(?hub)[Market]
+        { any decor(?a)[stall] decor(?a)[(if(size(?a) > 4, stall, .))] }
+    }
+}
+rule numbered { all
+    zones_graph { ?z[3] } => zones(?z)[(value(?z) + 1)]
+    plan { ?n[!Hall] } when (size(?n) < 9) => rooms(?n)[Closet]
+}

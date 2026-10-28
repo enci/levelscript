@@ -1232,6 +1232,10 @@ struct analyzer {
         // Expand each sub-rule into its variants; dedup by (match, write)
         // equality, scoped per sub-rule so same-LHS sub-rules both survive.
         for (int bi = 0; bi < (int)r.pairs.size(); ++bi) {
+            if (r.pairs[bi].is_graph) {
+                error(r.pairs[bi].block.graph.loc, "graph rules are not implemented yet");
+                continue;
+            }
             compiled_pair base = compile_base_pair(r.pairs[bi]);
             base.sub_rule_idx = bi;
             std::vector<compiled_pair> variants;

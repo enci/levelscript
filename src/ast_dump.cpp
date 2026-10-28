@@ -73,6 +73,7 @@ struct printer {
         if (p.sized)
             line("(size " + std::to_string(p.size_cols) + " " + std::to_string(p.size_rows) +
                  at(p.size_loc) + ")");
+        if (!p.extent.text.empty()) line("(extent " + p.extent.text + at(p.size_loc) + ")");
         for (auto const& row : p.cells) {
             std::string s = "(row";
             for (auto const& c : row) s += " " + expr_str(*c);
@@ -106,7 +107,24 @@ struct printer {
         for (auto const& pr : r.pairs) {
             open("pair", &pr.loc);
             open("match");
+            if (pr.is_graph) {
+                open("graph " + pr.block.graph.text, &pr.block.graph.loc);
+                for (auto const& it : pr.block.items) {
+                    switch (it.what) {
+                    case graph_item::kind::node: line("(node " + it.a.text + at(it.loc) + ")"); break;
+                    case graph_item::kind::edge:
+                        line("(edge " + it.a.text + " " + it.b.text + at(it.loc) + ")");
+                        break;
+                    case graph_item::kind::test:
+                        line("(test " + it.a.text + " " + expr_str(*it.test) + at(it.loc) + ")");
+                        break;
+                    }
+                }
+                close();
+            }
             size_t gi = 0;
+            for (; gi < pr.guards.size() && pr.guards[gi].after == 0; ++gi)
+                line("(when " + expr_str(*pr.guards[gi].expr) + at(pr.guards[gi].loc) + ")");
             for (size_t pi = 0; pi < pr.lhs.size(); ++pi) {
                 pattern(pr.lhs[pi]);
                 for (; gi < pr.guards.size() && pr.guards[gi].after == (int)pi + 1; ++gi)
