@@ -60,7 +60,17 @@ sequence remove_edge_room {
 
 sequence clear_walls {
     once (rotation=90) { level[F D F ] => level[* O *] }
-    settle (rotation=90) { level[F O F ] => level[F F F] }
+    settle (rotation=all) {
+        level[
+            F O F 
+            F W F 
+        ] =>
+        level[
+            F O F 
+            F O F 
+        ]
+    }
+    everywhere { level[O] => level[F] }
 }
 
 // Decorate

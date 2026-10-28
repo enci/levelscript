@@ -4,6 +4,7 @@
 #include "inspect.hpp"
 #include "ls.hpp"
 #include "modules.hpp"
+#include "render_png.hpp"
 #include "version.hpp"
 #include <chrono>
 #include <cstdio>
@@ -19,7 +20,8 @@
 
 static void usage(char const* argv0) {
     std::cerr << "Usage: " << argv0
-              << " [--seed N] [--entry name] [--param name=value ...] [--inspect | --profile] <file.lvs>\n"
+              << " [--seed N] [--entry name] [--param name=value ...] [--inspect | --profile]\n"
+              << "       [--png out.png [--scale N]] <file.lvs>\n"
               << "       " << argv0 << " --check [--seed N] [--param name=value ...] <file.lvs>\n"
               << "       " << argv0 << " --ast [--no-spans] <file.lvs>\n"
               << "       " << argv0 << " --version\n"
@@ -29,7 +31,10 @@ static void usage(char const* argv0) {
               << "           and @param values; prints each failure, exit 1 if any\n"
               << "  --ast    print the file's syntax tree; --no-spans leaves out source ranges\n"
               << "  --profile  run once and print time and rule applications per statement\n"
-              << "           instead of the level\n";
+              << "           instead of the level\n"
+              << "  --png    write the level as an image instead of printing it, drawn from\n"
+              << "           the debugger's <file.lvs>.json (Tile and Color layers); --scale\n"
+              << "           sizes each tile pixel (default 1)\n";
 }
 
 static void print_level(ls::level const& lv, std::ostream& out) {
@@ -209,6 +214,8 @@ int main(int argc, char* argv[]) {
     std::vector<std::pair<std::string, int>> params;
     bool inspect = false, check = false, profile = false;
     bool ast = false, spans = true;
+    std::string png_path;
+    int png_scale = 1;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -227,6 +234,10 @@ int main(int argc, char* argv[]) {
             spans = false;
         } else if (arg == "--seed" && i + 1 < argc) {
             seed = (uint64_t)std::stoull(argv[++i]);
+        } else if (arg == "--png" && i + 1 < argc) {
+            png_path = argv[++i];
+        } else if (arg == "--scale" && i + 1 < argc) {
+            png_scale = std::stoi(argv[++i]);
         } else if (arg == "--entry" && i + 1 < argc) {
             entry_name = argv[++i];
         } else if (arg == "--param" && i + 1 < argc) {
@@ -298,6 +309,15 @@ int main(int argc, char* argv[]) {
     uint64_t s = seed.value_or((uint64_t)
         std::chrono::high_resolution_clock::now().time_since_epoch().count());
     if (profile) return profile_run(source, name, gen, entry, s, params);
-    print_level(gen.generate(entry, s, params), std::cout);
+    ls::level lv = gen.generate(entry, s, params);
+    if (!png_path.empty()) {
+        std::string err = ls::render_png(lv, name, png_path, png_scale);
+        if (!err.empty()) {
+            std::cerr << name << ": error: " << err << '\n';
+            return 1;
+        }
+        return 0;
+    }
+    print_level(lv, std::cout);
     return 0;
 }

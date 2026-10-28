@@ -114,7 +114,8 @@ void project_config::sync_layers(std::vector<std::string> const& layer_names) {
     std::vector<layer_config> reordered;
     reordered.reserve(layer_names.size());
     for (auto const& name : layer_names) {
-        layer_config lc{name};
+        layer_config lc;
+        lc.name = name;
         for (auto const& old : layers)
             if (old.name == name) { lc = old; break; }
         reordered.push_back(lc);

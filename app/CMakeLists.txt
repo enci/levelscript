@@ -1,5 +1,6 @@
-add_executable(levelscript main.cpp)
-target_link_libraries(levelscript PRIVATE ls_lib)
+add_executable(levelscript main.cpp render_png.cpp project_config.cpp stb_image.cpp)
+target_link_libraries(levelscript PRIVATE ls_lib nlohmann_json::nlohmann_json)
+target_include_directories(levelscript SYSTEM PRIVATE ${stb_SOURCE_DIR})
 if(MSVC)
     target_compile_options(levelscript PRIVATE /W4)
 else()
