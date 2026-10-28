@@ -153,6 +153,7 @@ struct graph_item {
 
 // The match side of a graph pair: `plan { ... }`, structure only.
 struct graph_block {
+    source_loc              loc;   // the name through its '}'
     ident                   graph;
     std::vector<graph_item> items;
 };

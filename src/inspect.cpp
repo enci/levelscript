@@ -58,14 +58,11 @@ int union_slot(compiled const& prog, int tid, std::string const& name) {
 // One colorable occurrence in a pattern cell — what the colored-pattern
 // decorations paint. tag >= 0: a tag value or union (value = palette slot);
 // -1: '*'; -2: '.'; -3: a number-grid literal (value = the number).
-void emit_pattern_tokens(std::string& o, comma_list& cl,
-                         compiled const& prog, pattern const& p) {
-    if (p.is_where) return;
-    int gid = prog.layer_id(p.grid.text);
-    if (gid < 0) return;
-    int tid = prog.layers[gid].tag_id;   // -1: number grid
-    // Paints a bare cell; '!' and '|' are painted through to their atoms, and
-    // a parenthesized cell is not painted.
+// `tid` is the cell's tagset (-1: a number grid). Paints a bare cell; '!'
+// and '|' are painted through to their atoms, and a parenthesized cell is
+// not painted.
+void emit_cell_tokens(std::string& o, comma_list& cl, compiled const& prog, int tid,
+                      expr const& cell) {
     auto paint = [&](auto& self, expr const& e) -> void {
         auto token = [&](int tag, long long value) {
             cl.next();
@@ -91,8 +88,27 @@ void emit_pattern_tokens(std::string& o, comma_list& cl,
             return;
         }
     };
+    paint(paint, cell);
+}
+
+void emit_pattern_tokens(std::string& o, comma_list& cl,
+                         compiled const& prog, pattern const& p) {
+    if (p.is_where) return;
+    int gid = prog.layer_id(p.grid.text);
+    if (gid < 0) return;
+    int tid = prog.layers[gid].tag_id;   // -1: number grid
     for (auto const& row : p.cells)
-        for (auto const& c : row) paint(paint, *c);
+        for (auto const& c : row) emit_cell_tokens(o, cl, prog, tid, *c);
+}
+
+// A graph block's test cells, painted in the graph's source tagset.
+void emit_block_tokens(std::string& o, comma_list& cl, compiled const& prog,
+                       graph_block const& b) {
+    int graph = prog.graph_id(b.graph.text);
+    if (graph < 0) return;
+    int tid = prog.layers[(size_t)prog.graphs[(size_t)graph].source].tag_id;
+    for (auto const& it : b.items)
+        if (it.test) emit_cell_tokens(o, cl, prog, tid, *it.test);
 }
 
 // A pattern head as a hover/definition reference: a grid ("layer") or a graph.
@@ -115,12 +131,12 @@ void emit_loc(std::string& o, module_closure const& mods, ident const& name) {
     o += "}";
 }
 
-// Every pattern of the root module's rules: declared rules, then those written
-// inline in its sequences' statements.
+// Every sub-rule of the root module's rules: declared rules, then those
+// written inline in its sequences' statements.
 template <class F>
-void for_each_root_pattern(ast_file const& ast, int root, F&& f) {
+void for_each_root_pair(ast_file const& ast, int root, F&& f) {
     auto rule = [&](rule_decl const& r) {
-        for (auto const& pr : r.pairs) for_each_pattern(pr, f);
+        for (auto const& pr : r.pairs) f(pr);
     };
     for (auto const& r : ast.rules)
         if (r.loc.mod == root) rule(r);
@@ -129,6 +145,7 @@ void for_each_root_pattern(ast_file const& ast, int root, F&& f) {
             for (auto const& s : sq.stmts)
                 if (s.inline_rule) rule(*s.inline_rule);
 }
+
 
 // `{"line":L,"col":C,"end_line":EL,"end_col":EC}`
 std::string range_json(source_loc const& l) {
@@ -164,6 +181,7 @@ struct span_list {
         add(r.loc);
         for (auto const& pr : r.pairs) {
             add(pr.loc);
+            if (pr.is_graph) add(pr.block.loc);
             for (auto const& p : pr.lhs) pattern(p);
             for (auto const& g : pr.guards) {
                 add(g.loc);
@@ -276,8 +294,9 @@ std::string inspect_json(std::string const& source, std::string const& name,
     o += ",\"tokens\":[";
     {
         comma_list cl{o};
-        for_each_root_pattern(*ast, mods.root, [&](pattern const& p) {
-            emit_pattern_tokens(o, cl, prog, p);
+        for_each_root_pair(*ast, mods.root, [&](rule_pair const& pr) {
+            if (pr.is_graph) emit_block_tokens(o, cl, prog, pr.block);
+            for_each_pattern(pr, [&](pattern const& p) { emit_pattern_tokens(o, cl, prog, p); });
         });
     }
     o += "]";
@@ -300,9 +319,16 @@ std::string inspect_json(std::string const& source, std::string const& name,
         };
         for (auto const& sq : ast->sequences)
             if (in_root(sq.loc)) stmt_refs(sq.stmts);
-        // Grid references in rule patterns, named and inline
-        for_each_root_pattern(*ast, mods.root, [&](pattern const& p) {
-            emit_pattern_refs(o, cl, prog, p);
+        // Grid references in rule patterns, named and inline, and the graph
+        // a graph block names
+        for_each_root_pair(*ast, mods.root, [&](rule_pair const& pr) {
+            if (pr.is_graph) {
+                cl.next();
+                o += "{" + span_json(pr.block.graph.loc) + ",\"kind\":\"graph\",\"target\":";
+                js(o, pr.block.graph.text);
+                o += "}";
+            }
+            for_each_pattern(pr, [&](pattern const& p) { emit_pattern_refs(o, cl, prog, p); });
         });
     }
     o += "]";
@@ -491,7 +517,7 @@ std::string inspect_json(std::string const& source, std::string const& name,
     o += "],\"ops\":[\"resize\",\"upscale\",\"trim\",\"mirror\",\"pad\",\"path\",\"bsp\",\"voronoi\",\"noise\"]";
     o += ",\"builtins\":[\"if\",\"min\",\"max\",\"abs\",\"clamp\",\"mod\",\"random\"]";
     o += ",\"graph_functions\":[\"degree\",\"size\",\"distance\",\"neighbors\","
-         "\"adjacent\",\"reachable\"]";
+         "\"adjacent\",\"reachable\",\"value\"]";
     o += "}}";
     return o;
 }

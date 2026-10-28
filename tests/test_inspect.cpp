@@ -194,5 +194,29 @@ TEST_CASE("inspect: graph layers in symbols, outline, and refs") {
     CHECK(has(j, "{\"line\":6,\"col\":17,\"len\":3,\"kind\":\"graph\",\"target\":\"map\"}"));
     CHECK(has(j, "{\"line\":6,\"col\":51,\"len\":5,\"kind\":\"layer\",\"target\":\"level\"}"));
     CHECK(has(j, "\"graph_functions\":[\"degree\",\"size\",\"distance\",\"neighbors\","
-                 "\"adjacent\",\"reachable\"]"));
+                 "\"adjacent\",\"reachable\",\"value\"]"));
+}
+
+TEST_CASE("inspect: graph blocks in refs, tokens, and spans") {
+    std::string src =
+        "tag algo { R, H }\n"
+        "layers {\n"
+        "    level: grid of algo\n"
+        "    map: graph of level\n"
+        "}\n"
+        "rule hub {\n"
+        "    map { ?n[R|H] ?n -- ?m }\n"
+        "    => level(?n)[H]\n"
+        "}\n";
+    std::string j = ls::inspect_json(src, "test.lvs");
+    INFO(j);
+    CHECK(has(j, "\"ok\":true"));
+    // the block's graph and the extent's grid are references
+    CHECK(has(j, "{\"line\":7,\"col\":5,\"len\":3,\"kind\":\"graph\",\"target\":\"map\"}"));
+    CHECK(has(j, "{\"line\":8,\"col\":8,\"len\":5,\"kind\":\"layer\",\"target\":\"level\"}"));
+    // the test's atoms paint in the source's tagset (tag 0): R and H
+    CHECK(has(j, "{\"line\":7,\"col\":14,\"len\":1,\"tag\":0,\"value\":0}"));
+    CHECK(has(j, "{\"line\":7,\"col\":16,\"len\":1,\"tag\":0,\"value\":1}"));
+    // the block folds
+    CHECK(has(j, "{\"line\":7,\"col\":5,\"end_line\":7,\"end_col\":29}"));
 }

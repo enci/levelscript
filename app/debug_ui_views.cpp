@@ -387,14 +387,25 @@ static void draw_pattern(compiled const& meta, compiled_pattern const& pat,
 }
 
 // Total height (name label + mini-grid) that draw_pattern's group occupies.
+// The label over a mini-grid: its grid's name, or `rooms(?n)` for a node
+// extent, which writes its one cell over the node's region.
+static std::string pattern_label(compiled const& meta, compiled_pair const& pair,
+                                 compiled_pattern const& pat) {
+    std::string name = pattern_grid_name(meta, pat);
+    if (pat.extent >= 0 && pat.extent < (int)pair.var_names.size())
+        name += "(" + pair.var_names[(size_t)pat.extent] + ")";
+    return name;
+}
+
 static float pattern_group_height(compiled_pattern const& pat, float mini_px) {
     return ImGui::GetTextLineHeightWithSpacing() + pat.rows * (mini_px + 1.f) - 1.f;
 }
 
 static void draw_pattern_group(compiled const& meta, compiled_pattern const& pat,
-                               float mini_px, project_config const& cfg) {
+                               std::string const& label, float mini_px,
+                               project_config const& cfg) {
     ImGui::BeginGroup();
-    ImGui::TextDisabled("%s", pattern_grid_name(meta, pat).c_str());
+    ImGui::TextDisabled("%s", label.c_str());
     draw_pattern(meta, pat, mini_px, cfg);
     ImGui::EndGroup();
 }
@@ -409,38 +420,51 @@ static std::string variant_label(compiled_pair const& pr) {
     return r.empty() ? f : f.empty() ? r : r + " + " + f;
 }
 
-// Width of draw_pattern_group: the grid-name label or the mini-grid.
-static float pattern_group_width(compiled const& meta, compiled_pattern const& pat,
+// Width of draw_pattern_group: its label or the mini-grid.
+static float pattern_group_width(compiled_pattern const& pat, std::string const& label,
                                  float mini_px) {
     float grid_w = pat.cols * (mini_px + 1.f) - 1.f;
-    return std::max(grid_w, ImGui::CalcTextSize(pattern_grid_name(meta, pat).c_str()).x);
+    return std::max(grid_w, ImGui::CalcTextSize(label.c_str()).x);
 }
 
 // One variant as a flow of pieces - its match patterns and rule guards, the
 // arrow, each write alternative (separated by an alternatives mark) - packed
 // into lines that fit the panel, each line centred vertically. A small rule
 // reads as one row; a big one wraps instead of running off the right edge.
-// `guards` is the source text of each of the pair's rule guards, in order.
+// `guards` is the source text of each of the pair's rule guards, in order;
+// `block` a graph pair's graph block, which stands in for its patterns.
 static void draw_rule_variant(compiled const& meta, compiled_pair const& pair,
                               std::vector<std::string> const& guards,
+                              std::string const& block,
                               float mini_px, project_config const& cfg) {
     std::vector<compiled_pattern const*> rhs_leaves;
     collect_write_leaves(pair.rhs, rhs_leaves);
-    if (pair.lhs.empty() && rhs_leaves.empty()) return;
+    if (pair.lhs.empty() && block.empty() && rhs_leaves.empty()) return;
 
-    enum class piece_kind { pattern, guard, arrow, alt };
+    enum class piece_kind { pattern, block, guard, arrow, alt };
     struct piece {
         piece_kind kind; compiled_pattern const* pat; float w, h, gap;
-        std::string const* text{nullptr};   // guard
+        std::string const* text{nullptr};   // block, guard
+        std::string label{};                // pattern
     };
     std::vector<piece> pieces;
     float icon_w = ImGui::CalcTextSize(phosphor::PH_ARROW_RIGHT).x;
     float icon_h = ImGui::GetTextLineHeight();
     auto add_pat = [&](compiled_pattern const& p, float gap) {
-        pieces.push_back({piece_kind::pattern, &p, pattern_group_width(meta, p, mini_px),
-                          pattern_group_height(p, mini_px), gap});
+        std::string label = pattern_label(meta, pair, p);
+        pieces.push_back({piece_kind::pattern, &p, pattern_group_width(p, label, mini_px),
+                          pattern_group_height(p, mini_px), gap, nullptr, std::move(label)});
     };
     size_t gi = 0;
+    if (!block.empty()) {
+        pieces.push_back({piece_kind::block, nullptr, ImGui::CalcTextSize(block.c_str()).x,
+                          icon_h, 0.f, &block});
+        for (; gi < pair.guards.size() && pair.guards[gi].after == 0; ++gi)
+            if (gi < guards.size())
+                pieces.push_back({piece_kind::guard, nullptr,
+                                  ImGui::CalcTextSize(guards[gi].c_str()).x, icon_h, 8.f,
+                                  &guards[gi]});
+    }
     for (size_t k = 0; k < pair.lhs.size(); ++k) {
         add_pat(pair.lhs[k], k ? 8.f : 0.f);
         for (; gi < pair.guards.size() && pair.guards[gi].after == (int)k + 1; ++gi)
@@ -489,7 +513,9 @@ static void draw_rule_variant(compiled const& meta, compiled_pair const& pair,
             ImGui::BeginGroup();
             if (line_h > pc.h) ImGui::Dummy({0.f, (line_h - pc.h) * 0.5f});
             if (pc.kind == piece_kind::pattern) {
-                draw_pattern_group(meta, *pc.pat, mini_px, cfg);
+                draw_pattern_group(meta, *pc.pat, pc.label, mini_px, cfg);
+            } else if (pc.kind == piece_kind::block) {
+                ImGui::TextUnformatted(pc.text->c_str());
             } else if (pc.kind == piece_kind::guard) {
                 ImGui::PushStyleColor(ImGuiCol_Text, guard_col);
                 ImGui::TextUnformatted(pc.text->c_str());
@@ -596,10 +622,14 @@ void draw_rule_window(script const& sc, debug_run const& run, float mini_px,
                                 tag.empty() ? "" : "  ·  ", tag.c_str());
         // the rule guards' source text, from the declaring sub-rule
         std::vector<std::string> guards;
-        if (decl && pr.sub_rule_idx < (int)decl->pairs.size())
-            for (auto const& g : decl->pairs[(size_t)pr.sub_rule_idx].guards)
+        std::string block;
+        if (decl && pr.sub_rule_idx < (int)decl->pairs.size()) {
+            auto const& dp = decl->pairs[(size_t)pr.sub_rule_idx];
+            for (auto const& g : dp.guards)
                 guards.push_back("when (" + expr_source(*g.expr) + ")");
-        draw_rule_variant(sc.meta, pr, guards, mini_px, cfg);
+            if (dp.is_graph) block = graph_block_source(dp.block);
+        }
+        draw_rule_variant(sc.meta, pr, guards, block, mini_px, cfg);
         if (pi + 1 < n) {
             ImGui::Spacing();
             ImGui::Separator();

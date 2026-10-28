@@ -31,7 +31,7 @@
 //       "params": [{"name","derived"}],
 //       "rules":  [...], "sequences": [{"name","loc"}],
 //       "ops":    [...], "builtins": [...], // completion vocabulary
-//       "graph_functions": [...]           // built-ins of graph-pattern cells
+//       "graph_functions": [...]           // built-ins that take a node
 //     }
 //   }
 

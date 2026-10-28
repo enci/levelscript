@@ -108,7 +108,7 @@ struct printer {
             open("pair", &pr.loc);
             open("match");
             if (pr.is_graph) {
-                open("graph " + pr.block.graph.text, &pr.block.graph.loc);
+                open("graph " + pr.block.graph.text, &pr.block.loc);
                 for (auto const& it : pr.block.items) {
                     switch (it.what) {
                     case graph_item::kind::node: line("(node " + it.a.text + at(it.loc) + ")"); break;
@@ -259,6 +259,22 @@ std::string expr_source(expr const& e) {
                operand(*e.args[1], p + 1);
     }
     }
+}
+
+std::string graph_block_source(graph_block const& b) {
+    // a test is a whitespace-free mask: `Hall|Inn`, not the infix `Hall | Inn`
+    auto mask = [](auto& self, expr const& e) -> std::string {
+        if (e.kind == expr_kind::bit_or) return self(self, *e.args[0]) + "|" + self(self, *e.args[1]);
+        return expr_source(e);
+    };
+    std::string s = b.graph.text + " {";
+    for (size_t i = 0; i < b.items.size(); ++i) {
+        auto const& it = b.items[i];
+        s += (i ? ", " : " ") + it.a.text;
+        if (it.what == graph_item::kind::edge) s += " -- " + it.b.text;
+        if (it.what == graph_item::kind::test) s += "[" + mask(mask, *it.test) + "]";
+    }
+    return s + " }";
 }
 
 }  // namespace ls

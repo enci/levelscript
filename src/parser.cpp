@@ -654,6 +654,8 @@ struct parser {
     // node_test   ::= INTEGER | tag_mask
     // `--` is two touching '-' tokens; it is a token only here.
     bool parse_graph_block(graph_block& b) {
+        b.loc = loc();
+        closing closer{*this, b.loc};
         eat();
         b.graph = prev_ident();
         eat();   // '{'

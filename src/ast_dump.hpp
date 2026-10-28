@@ -21,4 +21,8 @@ std::string dump_ast(std::string_view source, std::string_view name, bool spans,
 // needs it: `?a != ?b && k > 0`.
 std::string expr_source(expr const& e);
 
+// A graph block as one line of source text, items separated by commas:
+// `plan { ?hub[Hall], ?hub -- ?a }`.
+std::string graph_block_source(graph_block const& b);
+
 }  // namespace ls
