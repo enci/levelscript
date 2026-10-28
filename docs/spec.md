@@ -1,6 +1,6 @@
 # LevelScript
 
-**Status**: Draft 0.14.0
+**Status**: Draft 0.15.0
 **File extension**: `.lvs`
 **CLI**: `levelscript [--seed N] [--entry name] [--param name=value ...] <file.lvs>` (`--entry` defaults to `main` and `--seed` to the root file's `@seed` directive, both tool conventions; section 6, Appendix B)
 **Embedding**: namespace `ls::` (see Appendix A)
@@ -305,7 +305,7 @@ layers {
 
 **Edges.** A **connector region** is a maximal 4-connected set of connector cells; unlike a node, it does not split by value. Two distinct nodes are **adjacent**, joined by one undirected edge, iff a cell of one is a 4-neighbour of a cell of the other, or one connector region has a 4-neighbour in each. A connector region touching k nodes therefore joins every pair of them. The graph is simple: at most one edge per pair, and no edge from a node to itself. A cell that is neither a node cell nor a connector cell, empty cells included, separates: contact across it joins nothing. The masks share no value (check 50), but a union write can store one that overlaps both: such a cell is a node cell.
 
-**Node order.** Nodes are numbered from 0 in row-major order of each region's first cell. The order fixes node ids in the embedding API (Appendix A) and is otherwise unobservable.
+**Node order.** Nodes are numbered from 0 in row-major order of each region's first cell. The order fixes node ids in the embedding API (Appendix A) and the candidate order of graph rules (section 5.13), and is otherwise unobservable.
 
 **Reading a graph.** Graph patterns (section 5.12) and the embedding API read graphs. Each read sees the graph of the source as the reader sees it: a rule reads the graph of its pass's snapshot (section 7.1), and the API reads the level's final grids. Extraction reads only the source and draws nothing.
 
@@ -381,6 +381,7 @@ There is no default combinator: in any context that contains more than one item,
 ```
 match_side      ::= pattern match_item*
                   | '{' pattern match_item* '}'
+                  | graph_block guard*         (* a graph pair, section 5.13 *)
 match_item      ::= pattern | guard            (* guard - section 6; a rule guard, section 5.9.1 *)
 write_side      ::= write_term
 write_term      ::= pattern
@@ -393,7 +394,7 @@ combinator      ::= 'any' | 'all' | 'ordered'
 weight          ::= '(' 'weight' '=' INTEGER ')'
 ```
 All item lists are one-or-more. A match side is one or more patterns, each optionally followed by rule guards (section 5.9.1), the whole optionally grouped in braces; a write side is a bare pattern or a braced combinator block:
-- A **match side** conjoins its patterns across grids: every pattern before `=>` must match at the anchor. There is no match-side combinator; disjunctive matching would change the candidate model, read footprints, and conflict semantics, and is out of scope. Line breaks between the patterns are ordinary whitespace (section 2). Braces around a match side group it for the reader and change nothing: `{ level[floor] loot[.] } => loot[chest]` is `level[floor] loot[.] => loot[chest]`. A group holds one or more patterns, takes no combinator keyword, and does not nest. A match side may also carry rule guards, `when (expr)` items that condition the candidate as a whole (section 5.9.1); it begins with a pattern, so a `when` directly after a write side is a parse error rather than a guard on the next sub-rule.
+- A **match side** conjoins its patterns across grids: every pattern before `=>` must match at the anchor. There is no match-side combinator; disjunctive matching would change the candidate model, read footprints, and conflict semantics, and is out of scope. Line breaks between the patterns are ordinary whitespace (section 2). Braces around a match side group it for the reader and change nothing: `{ level[floor] loot[.] } => loot[chest]` is `level[floor] loot[.] => loot[chest]`. A group holds one or more patterns, takes no combinator keyword, and does not nest. A match side may also carry rule guards, `when (expr)` items that condition the candidate as a whole (section 5.9.1); it begins with a pattern, so a `when` directly after a write side is a parse error rather than a guard on the next sub-rule. A match side may instead be a **graph block** followed by rule guards, which makes the pair a graph pair (section 5.13).
 - A **write side** is a recursive `write_term`: a `{ any ... }` (pick one alternative) or `{ all ... }` (write every item simultaneously), whose items may themselves be blocks to any depth.
 
 `weight` attaches only to the items of an `{ any ... }` write block. It is not part of the grammar for `{ all ... }` blocks or bare patterns, so `(weight=N)` inside `{ all ... }` is rejected at parse time. A weight on a nested block (an `{ all }` option inside an `{ any }`) weights the choice of that whole sub-tree.
@@ -450,8 +451,10 @@ Multi-row pattern grammar:
 
 **Grammar:**
 ```
-pattern      ::= pattern_head '[' cell_grid ']'
+pattern      ::= pattern_head extent? '[' cell_grid ']'
 pattern_head ::= IDENT | 'where'
+extent       ::= '(' INTEGER ',' INTEGER ')'      (* sized pattern *)
+               | '(' VARIABLE ')'                 (* node extent, section 5.13 *)
 cell_grid    ::= cell_row (row_sep cell_row)*
 row_sep      ::= ',' WS* NEWLINE? | NEWLINE
 cell_row     ::= WS* cell (WS+ cell)* WS*
@@ -460,6 +463,8 @@ tag_mask     ::= mask_atom ('|' mask_atom)*
 mask_atom    ::= '!'? (IDENT | '.')
 ```
 A `tag_mask` is whitespace-free (the cell ends at the next whitespace or comma). A comma inside `( ... )` belongs to the expression; only a comma outside parentheses separates rows. A newline separates rows everywhere in the grid, inside `( ... )` too, so a parenthesized cell is written on one line; one broken across lines is a parse error. `expr` inside `( ... )` follows section 5.8 and may contain whitespace. `tag_mask` (which includes bare `.` and `!.`) and the bare `*` are exactly the mask literals, and a bare `VARIABLE` is a pattern variable (section 5.11); every other expression must be parenthesized. A pattern head `IDENT` names a grid or, on the match side only, a graph layer (section 5.12).
+
+**Extents.** A pattern head may carry an **extent**: a parenthesized size after the head, over which a one-cell body is tested or written. A **sized pattern** `g(W, H)[c]` stands for the `W` x `H` pattern every cell of which is `c`, so `level(3, 3)[floor]` is `level[floor floor floor, floor floor floor, floor floor floor]`. `W` and `H` are integer literals from 1 to 256, and the body is exactly one cell (check 55). A sized pattern is its expansion in every respect - dimensions (section 5.4), footprints (section 5.7), variants (section 5.6), and evaluation - so an expression cell in it evaluates once per cell, and a binding cell `?a` occupies every cell and therefore matches only a uniform area. A **node extent** `g(?n)[c]` writes `c` over the region of a node and appears only on the write side of a graph rule (section 5.13, check 57). In a pattern head, `IDENT '('` is always an extent, never a function call (section 5.10), so a grid may share a built-in's name.
 
 The opening `[` may be followed immediately by content on the same line or by a newline starting the first row. The closing `]` may follow the last row or sit on its own line.
 
@@ -476,7 +481,7 @@ Conditional writes select among tags with `if` (section 5.10): `level[ (if(diffi
 
 ### 5.4 Match-write shape constraint
 
-For each match-write pair, the match pattern and every write pattern must have identical dimensions. This applies **recursively** through nested write blocks: every leaf `pattern` anywhere in the write tree - and hence every `{ any }` alternative and every `{ all }` item at any depth - must have the LHS pattern's dimensions. The compiler rejects mismatched shapes at any level.
+For each match-write pair, the match pattern and every write pattern must have identical dimensions. This applies **recursively** through nested write blocks: every leaf `pattern` anywhere in the write tree - and hence every `{ any }` alternative and every `{ all }` item at any depth - must have the LHS pattern's dimensions. The compiler rejects mismatched shapes at any level. A graph pair (section 5.13) has no match pattern and no shape: every leaf of its write tree is a node extent instead (check 57).
 
 ### 5.5 Weights and union writes
 
@@ -554,7 +559,7 @@ The bounding rectangle of a pattern is its W x H region, but the footprints may 
 
 **Expression cells.** An expression cell's read footprint is the set of grid cells its expression reads at the current position. Same-position cross-grid reads (a bare grid name, section 5.8) contribute the referenced grid's cell at this offset. Reads of `x`, `y`, `width`, `height`, params, and pattern variables read no grid cell and contribute nothing (a variable's binding cells are already in the read footprint). `where` cells contribute to the read footprint only (never the write footprint); a `*` `where` cell contributes nothing. A graph-pattern binding cell contributes its own offset in the graph's source grid; graph functions contribute nothing for their non-local reads (section 5.12). On the RHS, an expression cell's write footprint is its own grid cell. A rule guard (section 5.9.1) reads no grid cell and contributes nothing.
 
-Because there is no coordinate indexing (section 5.8), every read offset is statically known, so footprints are compile-time static. Pattern variables carry values, not positions, and preserve this.
+Because there is no coordinate indexing (section 5.8), every read offset is statically known, so footprints are compile-time static. Pattern variables carry values, not positions, and preserve this. The one exception is a graph rule, whose footprints are node regions known only when the candidate is evaluated (section 5.13).
 
 ### 5.8 Expressions
 
@@ -595,7 +600,7 @@ Precedence follows C conventions (lowest to highest): `||`, `&&`, `|`, equality,
 - Tag operators: `|` (union), `!` (complement, match-side only), `==`/`!=` between same-tagset operands -> bool.
 - Number operators: `+ - * /` -> number; `== != < <= > >=` -> bool. `number` is a signed 32-bit integer. `/` is integer division truncating toward zero; **`n / 0` is defined as `0`**. Arithmetic **saturates**: a result outside the 32-bit range is clamped to `-2^31` or `2^31 - 1`, so `-(-2^31)` and `-2^31 / -1` are `2^31 - 1`. Every expression is therefore **total**: it always evaluates to a value, never a fault.
 - Bool operators: `&& || !` -> bool.
-- Node operators: `==`/`!=` between nodes of one graph -> bool (identity). A node is otherwise valid only as a graph-function argument (section 5.12): it has no arithmetic and cannot be written to a grid.
+- Node operators: `==`/`!=` between nodes of one graph -> bool (identity). A node is otherwise valid only as a graph-function argument (section 5.12) or as the extent of a node-extent write (section 5.13): it has no arithmetic and cannot be written to a grid.
 - A grid read yields tag-mask (tag grid) or number (number grid). `x`/`y`/`width`/`height` and params yield number.
 - A pattern variable yields the type of its binding cells' layer: a tag-mask of that tagset, a number, or a node of that graph (sections 5.11 and 5.12).
 - Mixing kinds (e.g. `|` on numbers, `+` on tags, comparing tag to number) is a compile error.
@@ -672,10 +677,11 @@ LevelScript has a closed set of **built-in** functions; there are no user-define
 | `neighbors(n, t)` | `(node, target) -> number` | number of nodes of `t` adjacent to `n` |
 | `adjacent(n, t)` | `(node, target) -> bool` | `neighbors(n, t) > 0` |
 | `reachable(n, t)` | `(node, target) -> bool` | `distance(n, t) < 2^30` |
+| `value(n)` | `(node) -> T` | the value `n`'s region holds in the graph's source grid; `T` is a tag-mask of the source's tagset, or number |
 
 Arities are fixed. `min`/`max` are binary; nest for more operands (`min(a, min(b, c))`). `if` is the only function whose type is parametric in `T`; it is a single generic signature, not overloading. Because evaluation is eager and all operators are total (section 5.8), `if(c, a, b)` never faults on its unused branch - e.g. `if(n == 0, 0, 100 / n)` is safe at `n == 0`.
 
-**Built-in names are not reserved.** A call is recognised syntactically (an identifier followed by `(`, section 5.8), and tag values, grids, and params are never called, so `if`, `min`, `max`, `abs`, `clamp`, `mod`, `random`, and the graph functions `degree`, `size`, `distance`, `neighbors`, `adjacent`, and `reachable` may also be used as tag value, grid, graph, or param names. Followed by `(`, such a name always denotes the built-in; otherwise it resolves per section 5.8. Like operation names (section 2.4), built-in names are not keywords.
+**Built-in names are not reserved.** A call is recognised syntactically (an identifier followed by `(`, section 5.8), and tag values, grids, and params are never called, so `if`, `min`, `max`, `abs`, `clamp`, `mod`, `random`, and the graph functions `degree`, `size`, `distance`, `neighbors`, `adjacent`, `reachable`, and `value` may also be used as tag value, grid, graph, or param names. Followed by `(`, such a name always denotes the built-in; otherwise it resolves per section 5.8. Like operation names (section 2.4), built-in names are not keywords.
 
 **`random` is impure; the others are pure.** Because `if` is eager, `if(c, random(0,9), random(0,9))` evaluates **both** branches and therefore draws **twice**, in left-to-right order, discarding the unused value. This is defined behaviour, not a fault; if exactly one draw is wanted, place the `random` outside the `if`. (Eager `if` is deliberate: totality makes the dead branch safe, and the fixed two-draw cost keeps the draw sequence trivially pinned.) `random` may appear in any expression position (match cells, `where`, write cells, `when` guards, param expressions): it reads no grid, position, or dimension, so the statement- and param-scope restrictions (section 5.8) do not exclude it. It draws once each time its expression is evaluated.
 
@@ -703,7 +709,7 @@ rule fall {
 
 **Scope.** A variable belongs to one pattern pair: its match side and its write tree. The sub-rules of one body share no variables, and an inline rule's variables are its own. Variables are a namespace of their own - the `?` marks them - so they never collide with tag values, grids, params, or built-ins.
 
-**Binding.** Every bare `?a` cell on the match side is a **binding cell** of `a`. A candidate matches only if all binding cells of `a` hold **non-empty** values that are **equal**; `a` then denotes that value. Binding is order-free: no binding cell is privileged, and equality is symmetric and transitive, so the cell order a symmetry or rotation variant produces (section 5.6) cannot change the outcome.
+**Binding.** Every bare `?a` cell on the match side is a **binding cell** of `a`. In a graph pair, a variable is bound by its graph block instead (section 5.13). A candidate matches only if all binding cells of `a` hold **non-empty** values that are **equal**; `a` then denotes that value. Binding is order-free: no binding cell is privileged, and equality is symmetric and transitive, so the cell order a symmetry or rotation variant produces (section 5.6) cannot change the outcome.
 
 - **Equality** is exact: two tag masks are equal iff they are bitwise identical (a cell holding `wall|floor` equals only another `wall|floor`), two numbers iff they are the same integer, and two nodes iff they are the same node. This is the `==` of section 5.8, not the overlap test of a mask cell.
 - **Non-empty.** A binding cell never matches an empty cell (section 4.1); match empty with `.`, and match "any non-empty value" without binding one with `!.`. Capturing empty would add nothing a `.` write cannot do, and it would let a moving rule such as `fall` match empty over empty forever. In a number grid, a stored `0` is non-empty. In a graph pattern, a binding cell matches only where a node covers it (section 5.12).
@@ -711,7 +717,7 @@ rule fall {
 
 A parenthesized `(?a)` is an expression cell, not a binding cell: it binds nothing and matches by the rules of section 5.3 (the overlap test on a tag grid).
 
-**Use.** Inside `( ... )`, `?a` is an expression operand (section 5.8) in any cell of the same pair: match-side expression cells, `where` cells, rule guards (section 5.9.1), and write-side expression cells. A node variable is an operand of `==`/`!=` or a graph-function argument only (section 5.12). A bare `?a` on the write side writes the captured value, multi-bit masks included, into its cell; the target grid must have the variable's type (check 45). Every variable used in an expression or on the write side must have at least one binding cell on the match side of its pair (check 44). Like binding, this range restriction does not depend on cell order. Variables exist only in patterns and rule guards: a variable in a statement guard, a count, a param expression, or an operation argument is an error (check 46).
+**Use.** Inside `( ... )`, `?a` is an expression operand (section 5.8) in any cell of the same pair: match-side expression cells, `where` cells, rule guards (section 5.9.1), and write-side expression cells. A node variable is an operand of `==`/`!=`, a graph-function argument, or the extent of a node-extent write only (sections 5.12 and 5.13). A bare `?a` on the write side writes the captured value, multi-bit masks included, into its cell; the target grid must have the variable's type (check 45). Every variable used in an expression or on the write side must have at least one binding cell on the match side of its pair (check 44). Like binding, this range restriction does not depend on cell order. Variables exist only in patterns and rule guards: a variable in a statement guard, a count, a param expression, or an operation argument is an error (check 46).
 
 **Evaluation order.** Because an expression may read a variable, testing a candidate runs in two phases:
 
@@ -749,12 +755,13 @@ Under a batch mode every candidate of `open_if_unconnected` sees the same graph,
 
 **Cells.** A graph-pattern cell is `*`, which places no condition, or a binding variable (check 52). A binding cell matches only where a node covers its position; at a connector cell, any other non-node cell, or an empty cell, the candidate fails. All binding cells of one variable must lie in the same node (section 5.11), so `map[?n ?n]` matches two cells of one region, and `map[?a ?b]` with the rule guard `when (?a != ?b)` two cells of different regions. Binding cells are bare cells: they are tested in phase 1 (section 5.11) and draw nothing. Every cell of a region binds the same node, so `everywhere dead_end` writes every cell of every dead-end room. A graph pattern may have any rectangular shape.
 
-**Nodes as values.** A variable bound in a graph pattern is a **node** of that graph (section 5.8). Nodes compare by identity with `==` and `!=`, and are otherwise valid only as graph-function arguments: they have no arithmetic, are never empty, and cannot be written to a grid (check 45). Identity never exposes node order (section 4.3). A node variable may appear wherever its pair's variables may (section 5.11): in rule guards, `where` cells, and expression cells on either side, e.g. `rooms[ (if(size(?n) > 20, Hall, Room)) ]`.
+**Nodes as values.** A variable bound in a graph pattern is a **node** of that graph (section 5.8). Nodes compare by identity with `==` and `!=`, and are otherwise valid only as graph-function arguments and node extents (section 5.13): they have no arithmetic, are never empty, and cannot be written to a grid (check 45). Identity never exposes node order (section 4.3). A node variable may appear wherever its pair's variables may (section 5.11): in rule guards, `where` cells, and expression cells on either side, e.g. `rooms[ (if(size(?n) > 20, Hall, Room)) ]`.
 
-**Graph functions.** Six built-ins (section 5.10) describe nodes. Each takes a node `n` first; four also take a **target** `t`, which is a node or a selector (below) and denotes a set of nodes of `n`'s graph (a node target is the set holding just that node):
+**Graph functions.** Seven built-ins (section 5.10) describe nodes. Each takes a node `n` first; four also take a **target** `t`, which is a node or a selector (below) and denotes a set of nodes of `n`'s graph (a node target is the set holding just that node):
 
 - `degree(n)` - the number of nodes adjacent to `n`.
 - `size(n)` - the number of cells in `n`'s region.
+- `value(n)` - the one value every cell of `n`'s region holds in the graph's source: a tag mask of the source's tagset, or a number (section 4.3).
 - `distance(n, t)` - the fewest edges from `n` to a node of `t`: `0` if `n` is in `t`, and `2^30` if no node of `t` is reachable from `n`, including when `t` is empty.
 - `neighbors(n, t)` - the number of nodes of `t` adjacent to `n`; `n` is not its own neighbour.
 - `adjacent(n, t)` - `neighbors(n, t) > 0`.
@@ -804,6 +811,65 @@ rule dead_end_chest {
 **State and order.** A graph pattern reads the graph of the snapshot its pass matches against (sections 4.3 and 7.1). In a batch pass it sees statement-entry state, a `settle` sweep sees the previous sweep, and a step mode sees every prior application. Graph-function calls read the same graph wherever they evaluate: in rule guards and match-side expression cells during phase 2 (section 5.11), in write-side expression cells at application. A graph pattern on the write side is an error (check 51).
 
 **Footprint.** A graph-pattern binding cell adds its own offset in the graph's source grid to the read footprint (section 5.7), so its `cell_highlight` (Appendix A) names the source layer. Extraction, graph functions, and selectors read beyond that offset, but those reads are not part of the footprint, which stays compile-time static. As for every read footprint, this affects only the observe channel, never conflicts (section 6.8).
+
+### 5.13 Graph rules
+
+A **graph rule** matches a subgraph and writes the regions of its nodes. The match side of each of its pairs is a **graph block** naming a graph layer, followed by rule guards (section 5.9.1); the write side writes node extents (section 5.3). In the examples, `map` is `graph of rooms` and `decor` is another tag grid:
+
+```ls
+// A dead end away from the start; under `once`, chosen uniformly among rooms.
+rule treasure_room {
+    map { ?n }
+    when (degree(?n) == 1 && distance(?n, rooms[Start]) > 3)
+    =>
+    rooms(?n)[Treasure]
+}
+
+// A hall with an entrance and three further neighbours, one a shop.
+rule market_hub {
+    map {
+        ?hub[Hall]
+        ?a[Shop]
+        ?entry -- ?hub
+        ?hub -- ?a
+        ?hub -- ?b
+        ?hub -- ?c
+    }
+    when (degree(?hub) == 4)
+    =>
+    { all
+        rooms(?hub)[Market]
+        decor(?a)[stall]
+    }
+}
+```
+
+**Graph blocks.**
+```
+graph_block ::= IDENT '{' graph_item (list_sep? graph_item)* list_sep? '}'
+graph_item  ::= VARIABLE '[' node_test ']'
+              | VARIABLE ('--' VARIABLE)?
+node_test   ::= INTEGER | tag_mask
+```
+`IDENT` names a graph layer (check 58). A block declares structure only, one item per line by convention:
+
+- `?n` declares a node variable.
+- `?a -- ?b` declares both variables and requires an edge between their nodes. `--` is a token only inside a graph block; inside `( ... )` two minus signs stay two operators.
+- `?n[m]` declares `?n` and tests its node's value (section 4.3) with cell semantics: overlap for a tag-grid source, equality for a number-grid source (section 4.1). A node is never empty, so `.` and `!.` are not tests, and a variable takes at most one test line (check 58).
+
+Every other condition, such as degrees, sizes, distances, and relations between values, is a rule guard.
+
+**Matching.** A candidate is an **assignment**: one node of the graph per block variable, such that distinct variables are assigned distinct nodes, every test line holds, every edge line joins adjacent nodes, and every rule guard is true. Matching is **non-induced**: assigned nodes may have edges the block does not list, and "no edge" is the guard `!adjacent(?a, ?b)`. A symmetric block yields several assignments per subgraph (`?a -- ?b` matches every edge twice, once in each direction), and each is a separate candidate, as the variants of a grid rule are (section 5.6). Test and edge lines are bare and draw nothing (phase 1, section 5.11); rule guards evaluate after them, in written order (phase 2). Block variables are nodes (section 5.12), usable in the pair's rule guards and write-side expression cells.
+
+**Order.** Assignments are enumerated in lexicographic order of node ids (section 4.3) over the block's variables in order of first appearance, and sub-rules in declaration order; this is the collection order of section 10.6. The search is otherwise unobservable: any correct matcher yields the same assignments in this order, so rule guards draw in this order too.
+
+**Writes.** The write side is an ordinary write tree (section 5.2) whose leaves are node extents `g(?n)[c]` naming block variables (check 57). A leaf writes `c` into every cell of `?n`'s region in grid `g`, which may be any grid, the graph's source included. An expression in `c` evaluates once per cell, row-major over the region, with `x`/`y` that cell; each `{ any }` node draws once per application, as in any rule. Writing the source changes the graph later snapshots extract: a region rewritten to a neighbour's value merges with it at the next extraction.
+
+**Modes and conflicts.** Every mode applies (section 6.7), with assignments in place of anchors. `once` and `scatter(N)` choose uniformly among assignments, so a one-variable block chooses uniformly among nodes, whatever their size. Under a batch mode, the write mask (section 6.8) works on cells as always: two assignments conflict iff they write the same grid over a node they share. Regions are disjoint, so a one-variable rule never conflicts with itself.
+
+**Restrictions.** A graph pair has no anchor and no shape. A rule with a graph pair takes no `symmetry` or `rotation` attribute, and one body cannot mix graph and grid pairs (check 58); the sub-rules of a body may name different graphs. A graph block admits no grid patterns: a node relates to grid content through selectors (section 5.12) and `value`.
+
+**Footprints.** A graph rule's footprints are not compile-time static (section 5.7). Its read footprint is its assigned nodes' regions in the graph's source grid, and its write footprint the cells its leaves write, both fixed when the candidate is evaluated against its snapshot. They serve the write mask and the observe channel (Appendix A) as any footprints do.
 
 ---
 
@@ -1023,7 +1089,7 @@ Consequence, stated normatively: **the search algorithm is unobservable.** Any c
 
 An application over a rule pairs a **mode** (section 6) with the rule. The mode bounds how many applications occur and governs what each application sees and how conflicts are handled. (An application over a sequence takes `once` or `settle` only; see section 6.10.)
 
-All modes share **candidate collection**: for each anchor position in row-major `(y, x)` order, the rule's match side is tested - every sub-rule and every symmetry/rotation variant (section 5.6) - at that anchor. Testing one variant at one anchor runs the two phases of section 5.11: bare cells first, then expression cells. Each matching `(anchor, sub-rule, variant)` is a **candidate**. The anchor is the pattern's top-left origin (section 5.7); a candidate exists only where the (possibly reshaped) variant fits entirely within the grid - **matching is bounded, never wrapped**.
+All modes share **candidate collection**: for each anchor position in row-major `(y, x)` order, the rule's match side is tested - every sub-rule and every symmetry/rotation variant (section 5.6) - at that anchor. Testing one variant at one anchor runs the two phases of section 5.11: bare cells first, then expression cells. Each matching `(anchor, sub-rule, variant)` is a **candidate**. The anchor is the pattern's top-left origin (section 5.7); a candidate exists only where the (possibly reshaped) variant fits entirely within the grid - **matching is bounded, never wrapped**. A graph rule collects assignments instead of anchors (section 5.13).
 
 **Batch modes** (`scatter`, `everywhere`) - one frozen snapshot, one pass:
 1. Snapshot the grid stack (section 7.1); collect all candidates against it.
@@ -1056,6 +1122,7 @@ The mask exists only in **batch passes** (`scatter`, `everywhere`, and each swee
 - The mask is keyed by **(grid, cell)** - a per-layer set, not a single grid-sized mask. Marking `level` at (x, y) does not protect `items` at (x, y).
 - It tracks **write footprints only**. A candidate is skipped iff its **write** footprint intersects a cell already marked this pass. **Read footprints do not participate** - under snapshot semantics (section 7.1) a candidate reading a just-written cell already sees the pre-write snapshot value, so there is nothing to protect against, and skipping on reads would wrongly prevent a synchronous CA sweep (every cell that reads a neighbour's written value would be suppressed).
 - Skipped candidates do not consume the count budget.
+- A graph rule's write footprint is the set of cells its node extents write, fixed when the candidate is evaluated (section 5.13); the mask treats it like any other.
 - Footprint intersection is per (grid, cell), never per bounding rectangle: two candidates whose rectangles overlap both apply if the overlap is entirely `*`-preserved (not in either write footprint) in the same grid.
 
 The mask is the only conflict mechanism; the runtime special-cases no other "conflict." It is reset at the start of each batch pass (and each `settle` sweep).
@@ -1305,7 +1372,7 @@ The compiler must reject:
 28. **Zero count.** Retired in 0.9.4: a count is an expression, and an out-of-range one is clamped at run time with a warning (sections 6, 7.4).
 29. **`ordered` misplacement.** `ordered` used as a write-side combinator (it is body-level only).
 30. **Percentage over 100.** Retired in 0.9.4: clamped at run time with a warning, like check 28 (sections 6, 7.4).
-31. **Same-grid simultaneous write.** Within one `{ all }` write block, two items whose write footprints overlap on the **same grid** at the same cell (e.g. `{ all g[wall] g[floor] }`). Simultaneous writes to one cell are ambiguous; use a union `|` (section 5.5) to store multiple values. (Different grids at the same position are fine - the mask is (grid, cell)-keyed, section 6.8.)
+31. **Same-grid simultaneous write.** Within one `{ all }` write block, two items whose write footprints overlap on the **same grid** at the same cell (e.g. `{ all g[wall] g[floor] }`). Simultaneous writes to one cell are ambiguous; use a union `|` (section 5.5) to store multiple values. (Different grids at the same position are fine - the mask is (grid, cell)-keyed, section 6.8.) For node extents, two items on the same grid naming the same variable (section 5.13).
 32. **Unknown operation.** An `op_call` (section 6.0) whose name is not in the operation table.
 33. **Operation argument arity/binding.** More positional arguments than the operation's positional parameters; a named-only parameter supplied positionally; a named argument preceding a positional one; or a parameter supplied both positionally and by name.
 34. **Missing required operation argument.** A required parameter not supplied.
@@ -1318,7 +1385,7 @@ The compiler must reject:
 41. **Duplicate use.** A module with two `use` declarations that resolve to the same canonical name.
 42. **Duplicate tagset, layer, or param name.** Two tagsets, two layers (grids or graphs, in any combination), or two params with the same name anywhere in the closure, in one module or in different ones (section 2.6).
 43. **Duplicate layers block.** More than one `layers` block in a module.
-44. **Unbound variable.** A pattern variable used in an expression or on the write side with no binding cell (a bare occurrence) on the match side of its pattern pair (section 5.11).
+44. **Unbound variable.** A pattern variable used in an expression or on the write side with no binding cell (a bare occurrence) on the match side of its pattern pair (section 5.11), or, in a graph pair, not declared in its graph block (section 5.13).
 45. **Variable type.** Binding cells of one variable in grids of different types (distinct tagsets, a tag grid and a `number` grid, a grid and a graph, or two graphs); or a bare variable written into a grid whose type differs from the variable's, which includes every node variable.
 46. **Variable outside a pattern.** A pattern variable in a statement `when` guard, a count, a param expression, or an operation argument; or a bare variable cell in a `where` pattern (its cells are boolean expressions, section 5.9).
 47. **Misplaced empty mask.** A write-side `tag_mask` that unions `.` with any other atom (e.g. `.|wall`); or, in a number grid, a `tag_mask` other than `.` or `!.` (section 4.1).
@@ -1331,6 +1398,8 @@ The compiler must reject:
 54. **Zero-weight `{ any }`.** An `{ any }` block whose items all have weight `0` (section 5.5).
 55. **Sized pattern.** A sized pattern `g(W, H)[c]` whose body is not exactly one cell, or whose `W` or `H` is not an integer literal from 1 to 256 (section 5.3).
 56. **Rule-guard scope.** A rule guard that reads a grid or `x`/`y`; or whose expression is not boolean (section 5.9.1).
+57. **Node extent.** A node extent `g(?n)[c]` outside the write side of a graph pair, whose variable is not declared in that pair's graph block, or whose body is not exactly one cell; or, in a graph pair, a write-side leaf that is not a node extent (sections 5.3 and 5.13).
+58. **Graph rule form.** A graph block whose name is not a graph layer; a variable with two test lines, or a test that does not fit the source (an integer on a tag-grid source, a tag mask on a number-grid source, or `.`/`!.`); an edge line joining a variable to itself; a `symmetry` or `rotation` attribute on a rule with a graph pair; or a body mixing graph and grid pairs (section 5.13).
 
 ### 7.4 Warnings
 
@@ -1466,7 +1535,7 @@ carves the cheapest corridor; equal-cost routes vary by seed, reproducibly (sect
 
 Deferred, in rough priority order:
 
-**Graphs beyond views.** The reason for the language's forward-looking design (and its name making room for more than grids). Graph layers are read-only views extracted from grids (section 4.3), read by graph patterns (section 5.12). Deferred beyond that: rewrite semantics over nodes and edges (mission graphs generated first and laid out after); directed and labelled edges; routing over a graph through `path`'s `over=` (the prepared seam, section 6.6); and selection by extremes - "the dead end farthest from Start" needs either a rank written by a query or aggregate expressions, and neither exists yet.
+**Graphs beyond views.** The reason for the language's forward-looking design (and its name making room for more than grids). Graph layers are read-only views extracted from grids (section 4.3), read by graph patterns (section 5.12). Graph rules (section 5.13) write node state. Deferred beyond that: rewriting the topology itself, adding or removing nodes and edges (mission graphs generated first and laid out after); edge state, which a connector region shared by several edges makes ambiguous to write; chained edge lines (`?a -- ?b -- ?c`); a bound on graph-block size, whose matching cost grows with it; unordered matching of interchangeable variables, so that a symmetric block yields one candidate per subgraph instead of one per symmetry; directed and labelled edges; routing over a graph through `path`'s `over=` (the prepared seam, section 6.6); and selection by extremes - "the dead end farthest from Start" needs either a rank written by a query or aggregate expressions, and neither exists yet.
 
 **The structural-operation family.** `path` was the first of a family conforming to the section 6.0 envelope (predicate/grid arguments in, result written into a grid, seeded, table-resolved); `bsp`, `voronoi`, and `noise` (sections 6.11-6.13) followed. Still deferred: flood-fill regions, MST/room-linking, and a full distance field. The graph-generalizable members - `path`, MST, distance - share the `over` seam; `bsp`, `voronoi`, and `noise` are grid-native. `noise` may gain a `kind` (simplex) once that algorithm is pinned as exactly as its gradient noise. Each is a table row plus an executor; none needs a grammar change.
 
@@ -1506,7 +1575,7 @@ The per-pass snapshot (section 7.1) is implementable several ways; a pass is the
 
 ### 10.4 Candidate collection and selection
 
-All modes build from one structure: a vector of **candidate slots**, each a small record of indices - `(anchor_x, anchor_y, sub_rule_idx, variant_idx)`. The chosen `{ any }` alternative is **not** stored; it is drawn at application (section 10.6). Slots reference compile-time tables (sub-rules, expanded variants), so a candidate is a few small integers.
+All modes build from one structure: a vector of **candidate slots**, each a small record of indices - `(anchor_x, anchor_y, sub_rule_idx, variant_idx)`, or, for a graph rule, `(sub_rule_idx, node ids)` (section 5.13). The chosen `{ any }` alternative is **not** stored; it is drawn at application (section 10.6). Slots reference compile-time tables (sub-rules, expanded variants), so a candidate is a few small integers.
 
 **Eager collection.** The reference implementation collects and matches the whole candidate vector per pass (row-major anchors; per candidate, bare cells and then expression cells, with short-circuit (section 5.11); `where`/expression cells and rule guards - including `random` draws - evaluate during this scan). A semi-lazy split (enumerate slots cheaply, match only when pulled, so `once`/`scatter`/`grow` never match the whole grid) is an available optimization - note that it would move match-side `random` draw sites, which the per-implementation-version determinism claim (section 7.2) permits but a golden-output corpus will notice.
 
@@ -1529,9 +1598,9 @@ A single PRNG stream (`mt19937_64` in the reference implementation), seeded from
 
 1. **Param expressions** (section 4.2) evaluate once at startup, in canonical declaration order (section 2.6), an input's default only when the param was not supplied - their draws come first.
 2. A statement **`when` guard** (section 6) evaluates once when its statement is reached, in statement order; if it passes, the statement's **count** (section 6), if any, evaluates next, or, for an operation call, its `int` arguments (section 6.0), in written order. All of these evaluate before the statement runs.
-3. **Match-cell, `where`-cell, and rule-guard** expressions evaluate during the collection scan, in row-major anchor order and, within an anchor, in sub-rule/variant declaration order. For each candidate, bare cells are tested first and draw nothing; only if all of them match do expression cells and rule guards evaluate, item by item in match-side order and row-major within each pattern as the variant lays it out, short-circuiting on the first that fails (section 5.11) - a `random` in a cell not reached does not draw.
+3. **Match-cell, `where`-cell, and rule-guard** expressions evaluate during the collection scan, in row-major anchor order and, within an anchor, in sub-rule/variant declaration order (for a graph rule, in assignment order, section 5.13). For each candidate, bare cells are tested first and draw nothing; only if all of them match do expression cells and rule guards evaluate, item by item in match-side order and row-major within each pattern as the variant lays it out, short-circuiting on the first that fails (section 5.11) - a `random` in a cell not reached does not draw.
 4. **Candidate ordering** draws next: the pass's seeded shuffle (batch modes and `settle` sweeps) or the single uniform pick (step modes), per section 10.4.
-5. **At application**: one draw per `{ any }` node on the resolved write path, outer before inner, earlier sibling first (a single-item `{ any }` still draws, section 5.2); then write-cell expressions, row-major per resolved leaf.
+5. **At application**: one draw per `{ any }` node on the resolved write path, outer before inner, earlier sibling first (a single-item `{ any }` still draws, section 5.2); then write-cell expressions, row-major per resolved leaf (over the region, for a node extent).
 6. **`path` statements** follow the section 6.6 draw contract: predicate passes (`from`, `to`, `passable`), per-cell `cost`, exactly one tie-key draw, then the start-to-goal `write` stamps.
 7. **`bsp`, `voronoi`, and `noise` statements** follow their draw contracts (sections 6.11-6.13): `bsp`'s per-node draws in pre-order; `voronoi`'s predicate passes (`sites`, `within`), per-cell `cost` under a step metric, then one tie-key draw; `noise`'s one raw draw.
 
@@ -1547,7 +1616,7 @@ A sequence application (section 6.10) adds no draw sites: its body statements dr
 - **Weighted `{ any }`** over items with integer weights `w1..wm` and total `W > 0`: `r = uniform(W)`; the chosen item is the first whose running weight sum exceeds `r`.
 - **`random(lo, hi)`**: `lo + uniform(hi - lo + 1)`. An empty range (`hi < lo`) still draws once, as `uniform(1)`, and yields `lo`.
 
-**Collection order.** The candidate vector that a shuffle or pick works on is built in the order of item 3: anchors in row-major order, and at each anchor every variant whose pattern fits there, in sub-rule and variant declaration order (section 5.6.2). Its order is part of the contract because the shuffle permutes positions.
+**Collection order.** The candidate vector that a shuffle or pick works on is built in the order of item 3: anchors in row-major order, and at each anchor every variant whose pattern fits there, in sub-rule and variant declaration order (section 5.6.2). A graph rule's vector holds its assignments in the order of section 5.13. Its order is part of the contract because the shuffle permutes positions.
 
 Determinism is per (entry, seed, params, implementation version), on every platform - section 7.2.
 
@@ -1675,7 +1744,7 @@ Supporting types:
 - `enum class step_mode { statement, application }` - the pull granularity: one **leaf** statement per `step()`, or one rule application per `step()` (operations and atomic batches still advance whole). A leaf statement is a rule application or an operation, in the entry's body or inside a nested sequence. Applying a sequence is not itself a step, and neither is its stability check.
 - `enum class observe { off, on }` - whether the run records highlights; off costs nothing.
 - `struct stmt_frame { int index; int iteration; int iterations; }` - one level of the statement stack. `index` is the statement's position in its enclosing list (the entry's body, or a nested sequence body). `iteration` is the 0-based iteration of the enclosing sequence application (always 0 for frame 0, since the entry runs once); `iterations` is that application's evaluated count, `-1` when it runs until stable.
-- `struct cell_highlight { enum class kind { match, write }; int layer; int x, y; kind what; }` - one highlighted cell: which layer/cell the last application matched or wrote. A graph-pattern binding cell highlights its graph's source layer (section 5.12).
+- `struct cell_highlight { enum class kind { match, write }; int layer; int x, y; kind what; }` - one highlighted cell: which layer/cell the last application matched or wrote. A graph-pattern binding cell highlights its graph's source layer (section 5.12); a graph rule highlights its assigned nodes' regions in the source layer and every cell its node extents write (section 5.13).
 
 `run` is move-only (it owns the in-flight coroutine state). Dropping it mid-run is safe; `finish()` is the explicit skip-to-end.
 
