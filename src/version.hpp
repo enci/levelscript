@@ -5,8 +5,8 @@
 // These three defines are the single source of truth; the installer script parses them.
 
 #define LS_VERSION_MAJOR 0
-#define LS_VERSION_MINOR 12
-#define LS_VERSION_PATCH 2
+#define LS_VERSION_MINOR 13
+#define LS_VERSION_PATCH 0
 
 #define LS_STR_(x) #x
 #define LS_STR(x)  LS_STR_(x)

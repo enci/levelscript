@@ -729,6 +729,53 @@ TEST_CASE("sema: pattern variables outside a pattern") {
           .has_error("cannot be a bare pattern variable"));
 }
 
+TEST_CASE("sema: rule guards read params, dimensions, and variables") {
+    std::string pre = prelude + "params { k: number = 1 }\n";
+    for (char const* rule : {
+             "rule r { tiles[?a ?b] when (?a != ?b) => level[* wall] }",
+             "rule r { level[?t] when (?t == wall) => level[floor] }",
+             "rule r { tiles[?a] when (k > 0 && width > ?a) when (random(0, 1) == 0) "
+             "=> tiles[.] }",
+             "rule r { tiles[?a] when (height > 1) where[(?a > x)] => tiles[.] }",
+         }) {
+        INFO(rule);
+        compile_result ok(pre + rule + "\n" + rprog);
+        INFO(ok.diags.format_all());
+        CHECK(ok.ok);
+    }
+}
+
+TEST_CASE("sema: rule guard scope") {
+    // check 56
+    std::string pre = prelude + "params { k: number = 1 }\n";
+    auto err = [&](std::string const& rule) { return compile_result(pre + rule + "\n" + rprog); };
+    CHECK(err("rule r { tiles[?a] when (x > 0) => tiles[.] }").has_error("cannot be read here"));
+    CHECK(err("rule r { tiles[?a] when (y > 0) => tiles[.] }").has_error("cannot be read here"));
+    CHECK(err("rule r { tiles[?a] when (tiles > 0) => tiles[.] }").has_error("cannot be read here"));
+    CHECK(err("rule r { tiles[?a] when (?a + k) => tiles[.] }")
+          .has_error("a rule guard must be a boolean expression"));
+    CHECK(err("rule r { tiles[?a] when (degree() > 0) => tiles[.] }")
+          .has_error("is a graph function"));
+    // check 44: a guard binds nothing
+    CHECK(err("rule r { tiles[.] when (?v > 0) => tiles[.] }").has_error("'?v' is never bound"));
+}
+
+TEST_CASE("sema: rule guards are part of the variant dedup key") {
+    std::string pre = prelude + "params { k: number = 1 }\n";
+    // a one-cell rule's rotations collapse, guard and all
+    compile_result one(pre + "rule r(rotation=all) { tiles[?a] when (?a > k) => tiles[.] }\n" + rprog);
+    REQUIRE(one.ok);
+    REQUIRE(one.prog.rules[0].pairs.size() == 1);
+    REQUIRE(one.prog.rules[0].pairs[0].guards.size() == 1);
+    // variants keep their guard, unchanged
+    compile_result two(pre + "rule r(symmetry=horizontal) { tiles[?a ?b] when (?a < ?b) "
+                       "=> tiles[. *] }\n" + rprog);
+    REQUIRE(two.ok);
+    auto const& pairs = two.prog.rules[0].pairs;
+    REQUIRE(pairs.size() == 2);
+    CHECK(pairs[0].guards[0].expr == pairs[1].guards[0].expr);
+}
+
 TEST_CASE("sema: 'where' cells are '*' or parenthesized booleans") {
     // check 13
     compile_result star(prelude + "rule r { level[floor floor] where[* (x > 1)] => level[* wall] }\n" + rprog);

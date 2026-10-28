@@ -22,7 +22,8 @@ export type CompletionContext =
                                                         // pattern whose cell this is, if any
     | { kind: 'ruleAttr' }                              // rule r(_)
     | { kind: 'attrValue'; attr: string }               // rule r(symmetry=_)
-    | { kind: 'ruleBody'; start: boolean }              // a pattern may start here
+    | { kind: 'ruleBody'; start: boolean; guard: boolean }   // a pattern may start here;
+                                                        // guard: so may a rule guard `when (...)`
     | { kind: 'combinator' }                            // => { _   (all / any)
     | { kind: 'weight' }                                // { any (_ ) g[...] }
     | { kind: 'cell'; grid: string }                    // g[ _ ]
@@ -203,8 +204,10 @@ function openFrame(c: '{' | '[' | '(', stack: Frame[]): Frame {
         if (prev && isIdentStart(prev[0])) return frame('op:' + prev, 'full');
         return frame('other');
     }
-    // a pattern head followed by '(' is a size, `g(W, H)[`; a bare '(' a weight
+    // a rule guard's expression; a pattern head followed by '(' is a size,
+    // `g(W, H)[`; a bare '(' a weight
     const inBody = parent.owner === 'rule' || parent.owner === 'combinator' || parent.owner === 'group';
+    if (inBody && prev === 'when') return frame('when', 'restricted');   // candidate scope
     if (inBody && prev && isIdentStart(prev[0]) && prev !== 'any' && prev !== 'all' && prev !== 'ordered')
         return frame('size:' + prev);
     if (parent.owner === 'rule' || parent.owner === 'combinator') return frame('weight');
@@ -220,6 +223,24 @@ function openFrame(c: '{' | '[' | '(', stack: Frame[]): Frame {
 // word that takes no count yet, or the ')' closing a count.
 function endsMode(t: Tok) {
     return (MODES.has(t.t) && t.t !== 'scatter') || (t.t === ')' && !!t.owner?.startsWith('count:'));
+}
+
+// Is the cursor on a match side, after one of its patterns, where a rule
+// guard may follow? In a 'rule' frame a match side is everything before the
+// first '=>', or, after the last '=>', the items past its one write term.
+function guardMayFollow(f: Frame): boolean {
+    const last = f.toks[f.toks.length - 1];
+    if (!last || !(last.t === ']' || (last.t === ')' && last.owner === 'when') ||
+                   (last.t === '}' && last.owner === 'group'))) return false;
+    if (f.owner === 'group') return true;
+    if (f.owner !== 'rule') return false;
+    let arrow = -1;
+    f.toks.forEach((t, k) => { if (t.t === '=>') arrow = k; });
+    if (arrow < 0) return true;
+    let items = 0;
+    for (const t of f.toks.slice(arrow + 1))
+        if (t.t === ']' || (t.t === '}' && t.owner !== undefined)) items++;
+    return items >= 2;
 }
 
 // Tokens after which an expression operand may start.
@@ -260,14 +281,16 @@ function classify(stack: Frame[]): CompletionContext {
         if (prev === '=' && prev2) return { kind: 'attrValue', attr: prev2 };
         return none;
     case 'group':
-        return prev === undefined || prev === ']' ? { kind: 'ruleBody', start: false } : none;
+        return prev === undefined || prev === ']' || (prev === ')' && last.owner === 'when')
+            ? { kind: 'ruleBody', start: false, guard: guardMayFollow(f) } : none;
     case 'rule':
     case 'combinator': {
-        if (prev === undefined) return f.owner === 'rule' ? { kind: 'ruleBody', start: true } : { kind: 'combinator' };
+        if (prev === undefined)
+            return f.owner === 'rule' ? { kind: 'ruleBody', start: true, guard: false } : { kind: 'combinator' };
         if (prev === ')' && last.owner?.startsWith('size:')) return none;   // '[' expected
         if (prev === '=>' || prev === ']' || prev === '}' || prev === ')' || prev === ',' ||
             prev === 'any' || prev === 'all' || prev === 'ordered')
-            return { kind: 'ruleBody', start: false };
+            return { kind: 'ruleBody', start: false, guard: guardMayFollow(f) };
         return none;
     }
     case 'weight':

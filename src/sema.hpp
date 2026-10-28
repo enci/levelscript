@@ -149,6 +149,11 @@ inline void collect_write_leaves(compiled_write_term const& t,
 // key, step 3).
 struct compiled_pair {
     std::vector<compiled_pattern> lhs;
+    // Rule guards: boolean expressions evaluated once per candidate, in phase 2
+    // after the expression cells of the first `after` patterns. Variant
+    // transforms leave them unchanged and share their arena indices.
+    struct guard { int expr{-1}; int after{1}; };
+    std::vector<guard>            guards;
     compiled_write_term           rhs;
     int                           sub_rule_idx{0};
     std::vector<std::string>      var_names;   // by slot, '?' included

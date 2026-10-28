@@ -1091,8 +1091,8 @@ std::vector<machine::match> machine::collect(compiled_rule const& rule) {
 }
 
 // Two phases: every bare cell of every pattern first - pure, so
-// their order is unobservable - then expression and `where` cells in pattern
-// order, row-major. Only phase 2 can draw, so a candidate its bare cells
+// their order is unobservable - then expression and `where` cells and rule
+// guards in match-side order, cells row-major. Only phase 2 can draw, so a candidate its bare cells
 // reject consumes no draws.
 bool machine::match_at(compiled_pair const& pair, int row, int col) {
     cur_pair_ = &pair;
@@ -1123,26 +1123,36 @@ bool machine::match_at(compiled_pair const& pair, int row, int col) {
     for (auto const& k : pair.var_checks)
         if (grids_[(size_t)k.at.grid].get(row + k.at.r, col + k.at.c) !=
             var_value(pair, k.slot, row, col)) return false;
-    for (auto const& pat : pair.lhs) {
-        if (pat.computed.empty()) continue;
-        if (pat.graph_id >= 0) {   // each cell tests the node covering it
-            for (auto const& p : pat.computed) {
-                if (graph(pat.graph_id).node_at(col + p.c, row + p.r) < 0) return false;
-                if (eval(p.expr, col + p.c, row + p.r) == 0) return false;
-            }
-            continue;
-        }
-        if (pat.is_where) {   // every cell's boolean must hold
-            for (auto const& p : pat.computed)
-                if (eval(p.expr, col + p.c, row + p.r) == 0) return false;
-            continue;
-        }
-        grid_state const& g = grids_[pat.grid_id];
+    // Item by item in match-side order: each pattern's expression cells, then
+    // the rule guards written after it.
+    size_t gi = 0;
+    for (size_t pi = 0; pi < pair.lhs.size(); ++pi) {
+        if (!match_computed(pair.lhs[pi], row, col)) return false;
+        for (; gi < pair.guards.size() && pair.guards[gi].after == (int)pi + 1; ++gi)
+            if (eval(pair.guards[gi].expr, col, row) == 0) return false;   // reads no x/y
+    }
+    return true;
+}
+
+bool machine::match_computed(compiled_pattern const& pat, int row, int col) {
+    if (pat.graph_id >= 0) {   // each cell tests the node covering it
         for (auto const& p : pat.computed) {
-            int64_t stored = g.get(row + p.r, col + p.c);
-            long long want = eval(p.expr, col + p.c, row + p.r);
-            if (pat.is_number ? stored != want : (stored & want) == 0) return false;
+            if (graph(pat.graph_id).node_at(col + p.c, row + p.r) < 0) return false;
+            if (eval(p.expr, col + p.c, row + p.r) == 0) return false;
         }
+        return true;
+    }
+    if (pat.is_where) {   // every cell's boolean must hold
+        for (auto const& p : pat.computed)
+            if (eval(p.expr, col + p.c, row + p.r) == 0) return false;
+        return true;
+    }
+    if (pat.computed.empty()) return true;
+    grid_state const& g = grids_[pat.grid_id];
+    for (auto const& p : pat.computed) {
+        int64_t stored = g.get(row + p.r, col + p.c);
+        long long want = eval(p.expr, col + p.c, row + p.r);
+        if (pat.is_number ? stored != want : (stored & want) == 0) return false;
     }
     return true;
 }

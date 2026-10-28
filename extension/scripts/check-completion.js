@@ -55,17 +55,17 @@ const cases = [
     ['rule r(symmetry=▮', { kind: 'attrValue', attr: 'symmetry' }],
     ['rule r(rotation=▮', { kind: 'attrValue', attr: 'rotation' }],
     ['rule r(rotation={▮', { kind: 'none' }],
-    ['rule r {\n    ▮', { kind: 'ruleBody', start: true }],
-    ['rule r { g[F] => ▮', { kind: 'ruleBody', start: false }],
-    ['rule r { any\n    g[F] => g[W]\n    ▮', { kind: 'ruleBody', start: false }],
-    ['rule r { g▮', { kind: 'ruleBody', start: true }],   // typing the grid name
+    ['rule r {\n    ▮', { kind: 'ruleBody', start: true, guard: false }],
+    ['rule r { g[F] => ▮', { kind: 'ruleBody', start: false, guard: false }],
+    ['rule r { any\n    g[F] => g[W]\n    ▮', { kind: 'ruleBody', start: false, guard: false }],
+    ['rule r { g▮', { kind: 'ruleBody', start: true, guard: false }],   // typing the grid name
     ['rule r { g ▮', { kind: 'none' }],                   // '[' expected
     ['rule r { g[F] => {▮', { kind: 'combinator' }],
-    ['rule r { g[F] => { all ▮', { kind: 'ruleBody', start: false }],
+    ['rule r { g[F] => { all ▮', { kind: 'ruleBody', start: false, guard: false }],
     ['rule r { g[F] => { all g[W] {▮', { kind: 'combinator' }],   // a nested write block
-    ['rule r { {▮', { kind: 'ruleBody', start: false }],           // a match-side group
-    ['rule r { { g[F] ▮', { kind: 'ruleBody', start: false }],
-    ['rule r { all\n    { g[F] } => g[W]\n    {▮', { kind: 'ruleBody', start: false }],
+    ['rule r { {▮', { kind: 'ruleBody', start: false, guard: false }],           // a match-side group
+    ['rule r { { g[F] ▮', { kind: 'ruleBody', start: false, guard: true }],
+    ['rule r { all\n    { g[F] } => g[W]\n    {▮', { kind: 'ruleBody', start: false, guard: false }],
     ['rule r { g[F] => { any (▮', { kind: 'weight' }],
     ['rule r { g[▮', { kind: 'cell', grid: 'g' }],
     ['rule r { g[F ▮', { kind: 'cell', grid: 'g' }],
@@ -85,7 +85,15 @@ const cases = [
     ['rule r { g(8, 6)[▮', { kind: 'cell', grid: 'g' }],
     ['rule r { g(8, 6)[ (▮', { kind: 'expr', grids: true, pos: true, head: 'g' }],
     ['rule r { g(8, 6)[.] where(8, 6)[ (x == ▮', { kind: 'expr', grids: true, pos: true }],
-    ['rule r { g(8, 6)[.] ▮', { kind: 'ruleBody', start: false }],
+    ['rule r { g(8, 6)[.] ▮', { kind: 'ruleBody', start: false, guard: true }],
+    // rule guards: after a match-side pattern, before '=>'
+    ['rule r { g[F] when (▮', { kind: 'expr', grids: false, pos: false }],
+    ['rule r { g[F] when (k > 1) ▮', { kind: 'ruleBody', start: false, guard: true }],
+    ['rule r { { g[F] when (k > 1) ▮', { kind: 'ruleBody', start: false, guard: true }],
+    ['rule r { g[F] => g[W] ▮', { kind: 'ruleBody', start: false, guard: false }],
+    ['rule r { all\n    g[F] => g[W]\n    g[W] ▮', { kind: 'ruleBody', start: false, guard: true }],
+    ['rule r { all\n    g[F] => { any g[W] g[D] }\n    ▮', { kind: 'ruleBody', start: false, guard: false }],
+    ['sequence main {\n    everywhere { g[F] ▮', { kind: 'ruleBody', start: false, guard: true }],
     ['rule r { g(8, 6)[.] => g(8, 6)[▮', { kind: 'cell', grid: 'g' }],
     ['rule r { g(2, 1)[.] => { any g(2, 1)[▮', { kind: 'cell', grid: 'g' }],
     ['rule r { g(2, 1)[.] => { any (▮', { kind: 'weight' }],
@@ -121,11 +129,11 @@ const cases = [
     ['sequence main {\n    scatter(50%) ▮', { kind: 'ruleName' }],
     ['sequence main {\n    scatter(▮', { kind: 'expr', grids: false, pos: false }],   // params only
     // inline rules
-    ['sequence main {\n    everywhere {▮', { kind: 'ruleBody', start: true }],
-    ['sequence main {\n    everywhere { g[F] => ▮', { kind: 'ruleBody', start: false }],
+    ['sequence main {\n    everywhere {▮', { kind: 'ruleBody', start: true, guard: false }],
+    ['sequence main {\n    everywhere { g[F] => ▮', { kind: 'ruleBody', start: false, guard: false }],
     ['sequence main {\n    once (▮', { kind: 'ruleAttr' }],
     ['sequence main {\n    once (symmetry=▮', { kind: 'attrValue', attr: 'symmetry' }],
-    ['sequence main {\n    scatter(3) (rotation=all) {▮', { kind: 'ruleBody', start: true }],
+    ['sequence main {\n    scatter(3) (rotation=all) {▮', { kind: 'ruleBody', start: true, guard: false }],
     ['sequence main {\n    settle { g[F] => g[W] }\n    ▮', { kind: 'statement', guard: true }],
     ['sequence main {\n    settle(k - ▮', { kind: 'expr', grids: false, pos: false }],
     ['sequence main {\n    mirror(▮', { kind: 'opArg', op: 'mirror', index: 0, used: [] }],

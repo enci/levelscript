@@ -106,7 +106,12 @@ struct printer {
         for (auto const& pr : r.pairs) {
             open("pair", &pr.loc);
             open("match");
-            for (auto const& p : pr.lhs) pattern(p);
+            size_t gi = 0;
+            for (size_t pi = 0; pi < pr.lhs.size(); ++pi) {
+                pattern(pr.lhs[pi]);
+                for (; gi < pr.guards.size() && pr.guards[gi].after == (int)pi + 1; ++gi)
+                    line("(when " + expr_str(*pr.guards[gi].expr) + at(pr.guards[gi].loc) + ")");
+            }
             close();
             open("write");
             write(pr.rhs);

@@ -165,6 +165,10 @@ struct span_list {
         for (auto const& pr : r.pairs) {
             add(pr.loc);
             for (auto const& p : pr.lhs) pattern(p);
+            for (auto const& g : pr.guards) {
+                add(g.loc);
+                expr(*g.expr);
+            }
             write(pr.rhs);
         }
     }

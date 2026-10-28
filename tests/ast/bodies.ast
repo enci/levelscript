@@ -119,3 +119,33 @@
     (write
       (pattern g
         (row x)))))
+(rule guarded
+  (rotation 90 180 270)
+  (pair
+    (match
+      (pattern regions
+        (row ?a ?b))
+      (when (!= ?a ?b)))
+    (write
+      (pattern level
+        (row * wall)))))
+(rule guarded_group
+  (body all)
+  (pair
+    (match
+      (pattern g
+        (row ?a))
+      (when (> ?a k))
+      (pattern h
+        (row .))
+      (when (== (call random 0 1) 0)))
+    (write
+      (pattern h
+        (row x))))
+  (pair
+    (match
+      (pattern g
+        (row .)))
+    (write
+      (pattern g
+        (row x)))))

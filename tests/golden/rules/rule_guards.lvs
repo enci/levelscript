@@ -1,0 +1,36 @@
+// @seed=7
+// 0.13.0: rule guards - `when (expr)` on the match side, once per candidate.
+// Two vertical bands of regions (1 | 2); `wall_between` relates the two
+// pattern variables, so a wall goes on both sides of the band edge and
+// nowhere else. `limit` reads a param and the width; `coin` draws in its
+// guard, after the bare cells match, so only floor cells draw.
+// @expect grid level count(wall) == 10
+// @expect grid level count(gem) == 0
+tag geo { wall, floor, gem }
+layers {
+    regions: grid of number
+    level: grid of geo
+    loot: grid of geo
+}
+params { band: number = 3 }
+rule split { all
+    regions[.] where[(x < band)] => regions[1]
+    regions[.] where[(x >= band)] => regions[2]
+}
+rule wall_between(symmetry=horizontal) {
+    regions[?a ?b]
+    when (?a != ?b)
+    =>
+    level[wall *]
+}
+rule floor { level[.] => level[floor] }
+rule limit { level[floor] when (width > 100) => level[gem] }
+rule coin { level[floor] loot[.] when (random(0, 3) == 0) => loot[gem] }
+sequence main {
+    resize(6, 5)
+    everywhere split
+    everywhere wall_between
+    everywhere floor
+    everywhere limit
+    everywhere coin
+}

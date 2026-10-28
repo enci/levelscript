@@ -555,8 +555,8 @@ struct parser {
     // Consecutive patterns before '=>' conjoin; there is no match-side
     // combinator and no comma between the patterns. Braces may group them for
     // the reader: `{ p1 p2 } => ...` means `p1 p2 => ...`.
-    bool parse_match_side(std::vector<pattern>& lhs) {
-        if (!at(token_type::lbrace)) return parse_match_patterns(lhs);
+    bool parse_match_side(rule_pair& pr) {
+        if (!at(token_type::lbrace)) return parse_match_items(pr);
         eat();   // '{'
         if (at(token_type::kw_all) || at(token_type::kw_any) || at(token_type::kw_ordered)) {
             error_at(peek(), "match-side braces only group patterns; they take no '" +
@@ -568,21 +568,46 @@ struct parser {
             eat();
             return false;
         }
-        if (!parse_match_patterns(lhs)) { recover_to(token_type::rbrace); return false; }
+        if (!parse_match_items(pr)) { recover_to(token_type::rbrace); return false; }
         return expect(token_type::rbrace, "'}'");
     }
 
-    bool parse_match_patterns(std::vector<pattern>& lhs) {
+    // A match side begins with a pattern; rule guards may follow any pattern.
+    bool parse_match_items(rule_pair& pr) {
+        if (at(token_type::kw_when)) {
+            error_at(peek(), "a match side begins with a pattern; a rule guard "
+                     "'when (...)' follows one, before '=>'");
+            return false;
+        }
         do {
-            pattern p;
-            if (!parse_pattern(p)) return false;
-            lhs.push_back(std::move(p));
+            if (at(token_type::kw_when)) {
+                rule_guard g;
+                g.loc   = loc();
+                g.after = (int)pr.lhs.size();
+                eat();   // 'when'
+                g.expr = parse_guard_expr();
+                if (!g.expr) return false;
+                close(g.loc);
+                pr.guards.push_back(std::move(g));
+            } else {
+                pattern p;
+                if (!parse_pattern(p)) return false;
+                pr.lhs.push_back(std::move(p));
+            }
             if (at(token_type::comma)) {
                 error_at(peek(), "patterns on the match side are not separated by commas");
                 eat();
             }
-        } while (at_pattern_head());
+        } while (at_pattern_head() || at(token_type::kw_when));
         return true;
+    }
+
+    // '(' expr ')' after a `when` - a statement or a rule guard.
+    expr_ptr parse_guard_expr() {
+        if (!expect(token_type::lparen, "'('")) return nullptr;
+        expr_ptr e = parse_expr();
+        expect(token_type::rparen, "')'");
+        return e;
     }
 
     // ── write side: a recursive write term ───────────────────────────────────
@@ -643,9 +668,16 @@ struct parser {
     bool parse_pair(rule_pair& pr) {
         pr.loc = loc();
         closing closer{*this, pr.loc};
-        if (!parse_match_side(pr.lhs)) return false;
+        if (!parse_match_side(pr)) return false;
         if (!expect(token_type::arrow, "'=>'")) return false;
-        return parse_write_term(pr.rhs, /*weight_allowed=*/false);
+        if (!parse_write_term(pr.rhs, /*weight_allowed=*/false)) return false;
+        if (at(token_type::kw_when)) {
+            error_at(peek(), "a rule guard goes on the match side, before '=>'; "
+                     "'when' after a write side guards nothing");
+            eat();   // 'when'
+            parse_guard_expr();
+        }
+        return true;
     }
 
     void parse_rule(ast_file& out) {
@@ -826,12 +858,7 @@ struct parser {
                 continue;
             }
             // optional `when (expr)` guard
-            if (accept(token_type::kw_when)) {
-                if (expect(token_type::lparen, "'('")) {
-                    s.guard = parse_expr();
-                    expect(token_type::rparen, "')'");
-                }
-            }
+            if (accept(token_type::kw_when)) s.guard = parse_guard_expr();
             close(s.loc);
             out.push_back(std::move(s));
         }

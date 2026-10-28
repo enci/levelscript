@@ -1,6 +1,6 @@
 # LevelScript
 
-**Status**: Draft 0.12.2
+**Status**: Draft 0.13.0
 **File extension**: `.lvs`
 **CLI**: `levelscript [--seed N] [--entry name] [--param name=value ...] <file.lvs>` (`--entry` defaults to `main` and `--seed` to the root file's `@seed` directive, both tool conventions; section 6, Appendix B)
 **Embedding**: namespace `ls::` (see Appendix A)
@@ -379,8 +379,9 @@ There is no default combinator: in any context that contains more than one item,
 
 **Grammar** - match and write sides:
 ```
-match_side      ::= pattern+
-                  | '{' pattern+ '}'
+match_side      ::= pattern match_item*
+                  | '{' pattern match_item* '}'
+match_item      ::= pattern | guard            (* guard - section 6; a rule guard, section 5.9.1 *)
 write_side      ::= write_term
 write_term      ::= pattern
                   | '{' 'all' all_item_list '}'
@@ -392,7 +393,7 @@ combinator      ::= 'any' | 'all' | 'ordered'
 weight          ::= '(' 'weight' '=' INTEGER ')'
 ```
 All item lists are one-or-more. A match side is one or more patterns, optionally grouped in braces; a write side is a bare pattern or a braced combinator block:
-- A **match side** conjoins its patterns across grids: every pattern before `=>` must match at the anchor. There is no match-side combinator; disjunctive matching would change the candidate model, read footprints, and conflict semantics, and is out of scope. Line breaks between the patterns are ordinary whitespace (section 2). Braces around a match side group it for the reader and change nothing: `{ level[floor] loot[.] } => loot[chest]` is `level[floor] loot[.] => loot[chest]`. A group holds one or more patterns, takes no combinator keyword, and does not nest.
+- A **match side** conjoins its patterns across grids: every pattern before `=>` must match at the anchor. There is no match-side combinator; disjunctive matching would change the candidate model, read footprints, and conflict semantics, and is out of scope. Line breaks between the patterns are ordinary whitespace (section 2). Braces around a match side group it for the reader and change nothing: `{ level[floor] loot[.] } => loot[chest]` is `level[floor] loot[.] => loot[chest]`. A group holds one or more patterns, takes no combinator keyword, and does not nest. A match side may also carry rule guards, `when (expr)` items that condition the candidate as a whole (section 5.9.1); it begins with a pattern, so a `when` directly after a write side is a parse error rather than a guard on the next sub-rule.
 - A **write side** is a recursive `write_term`: a `{ any ... }` (pick one alternative) or `{ all ... }` (write every item simultaneously), whose items may themselves be blocks to any depth.
 
 `weight` attaches only to the items of an `{ any ... }` write block. It is not part of the grammar for `{ all ... }` blocks or bare patterns, so `(weight=N)` inside `{ all ... }` is rejected at parse time. A weight on a nested block (an `{ all }` option inside an `{ any }`) weights the choice of that whole sub-tree.
@@ -551,16 +552,17 @@ Footprints are defined relative to the pattern's origin (top-left corner). When 
 
 The bounding rectangle of a pattern is its W x H region, but the footprints may be sparse subsets (a 3x3 pattern with `*` corners has plus-shaped footprints). The write footprint drives the write-protection mask (section 6.8). The read footprint does not participate in conflict handling; it defines which cells a match inspects, and which cells the observe channel reports as matched (Appendix A).
 
-**Expression cells.** An expression cell's read footprint is the set of grid cells its expression reads at the current position. Same-position cross-grid reads (a bare grid name, section 5.8) contribute the referenced grid's cell at this offset. Reads of `x`, `y`, `width`, `height`, params, and pattern variables read no grid cell and contribute nothing (a variable's binding cells are already in the read footprint). `where` cells contribute to the read footprint only (never the write footprint); a `*` `where` cell contributes nothing. A non-`*` graph-pattern cell contributes its own offset in the graph's source grid, and nothing for the graph's non-local reads (section 5.12). On the RHS, an expression cell's write footprint is its own grid cell.
+**Expression cells.** An expression cell's read footprint is the set of grid cells its expression reads at the current position. Same-position cross-grid reads (a bare grid name, section 5.8) contribute the referenced grid's cell at this offset. Reads of `x`, `y`, `width`, `height`, params, and pattern variables read no grid cell and contribute nothing (a variable's binding cells are already in the read footprint). `where` cells contribute to the read footprint only (never the write footprint); a `*` `where` cell contributes nothing. A non-`*` graph-pattern cell contributes its own offset in the graph's source grid, and nothing for the graph's non-local reads (section 5.12). On the RHS, an expression cell's write footprint is its own grid cell. A rule guard (section 5.9.1) reads no grid cell and contributes nothing.
 
 Because there is no coordinate indexing (section 5.8), every read offset is statically known, so footprints are compile-time static. Pattern variables carry values, not positions, and preserve this.
 
 ### 5.8 Expressions
 
-Expressions are **deterministic for a given seed**. Every built-in is pure except `random` (section 5.10), which advances the shared PRNG (section 10.6); `random` is the one expression form whose repeated evaluation may yield different values within a run. All other functions and operators are pure and side-effect-free. Expressions appear in three **scopes**, which differ in what they may read:
+Expressions are **deterministic for a given seed**. Every built-in is pure except `random` (section 5.10), which advances the shared PRNG (section 10.6); `random` is the one expression form whose repeated evaluation may yield different values within a run. All other functions and operators are pure and side-effect-free. Expressions appear in four **scopes**, which differ in what they may read:
 
 - **Cell scope** - pattern cells (sections 2.5/5.3), `where` cells (section 5.9), graph-pattern cells (section 5.12), and the per-cell arguments of an operation (the `pred`, `value`, and `expr` kinds, section 6.0). May read grids at the current position (below), `x`/`y`, `width`/`height`, and params; pattern, `where`, and graph-pattern cells may also read pattern variables (section 5.11). Graph-pattern cells read no grid; they call the graph functions instead (section 5.12). Evaluated per cell.
-- **Statement scope** - `when` guards, counts (section 6), and `int` operation arguments (section 6.0). May read params and `width`/`height`; no grid reads and no `x`/`y`, since there is no candidate position. Evaluated each time its statement is reached, before the statement runs, so `width`/`height` are the dimensions the statement starts from (`0` x `0` before the first `resize`, section 6).
+- **Candidate scope** - rule guards (section 5.9.1). May read params, `width`/`height`, and pattern variables bound on the same match side; no grid reads and no `x`/`y`. Evaluated once per candidate.
+- **Statement scope** - statement `when` guards, counts (section 6), and `int` operation arguments (section 6.0). May read params and `width`/`height`; no grid reads and no `x`/`y`, since there is no candidate position. Evaluated each time its statement is reached, before the statement runs, so `width`/`height` are the dimensions the statement starts from (`0` x `0` before the first `resize`, section 6).
 - **Param scope** - param expressions (section 4.2). May read earlier params only. Evaluated once, at startup.
 
 `random` (section 5.10) is allowed in every scope.
@@ -631,6 +633,25 @@ rule deep_water {
 
 A `where` pattern on the RHS is a compile error. Numeric range/comparison matching is expressed through `where`; there is no numeric-cell comparison syntax. A `where` cell may reference pattern variables bound on the same match side, e.g. `where[ (?depth > 3) ]` (section 5.11).
 
+#### 5.9.1 Rule guards
+
+A match side may carry **rule guards**: `when (expr)` items (the `guard` production of section 6) placed after its first pattern. A rule guard holds one **boolean** expression, evaluated **once per candidate** - per anchor and variant - rather than per cell:
+
+```ls
+rule wall_between(rotation=all) {
+    regions[?a ?b]
+    when (?a != ?b)
+    =>
+    level[* wall]
+}
+```
+
+A rule guard is a candidate-scope expression (section 5.8): it reads params, `width`/`height`, and pattern variables bound on the same match side, and may call any built-in except the graph functions (check 53). It reads no grid and no `x`/`y` (check 56): it has no cell, and the anchor is the transformed pattern's top-left cell, a different pattern cell in each variant (section 5.6). A condition on a particular cell is a `where` cell. A rule guard contributes nothing to the read footprint (section 5.7).
+
+A candidate matches only if every rule guard on its match side is true. Rule guards evaluate in phase 2 (section 5.11), in match-side order with the expression cells of the surrounding patterns, so a guard written before a pattern with costly or drawing cells short-circuits them. A rule guard is unchanged by every variant transform and is compared as an expression tree in de-duplication (section 10.2).
+
+A rule guard and a statement guard (section 6) share the keyword and differ in scope: a statement guard reads no variables and is evaluated once when its statement is reached, deciding *whether* the statement runs; a rule guard is evaluated per candidate, deciding *which candidates* match.
+
 ### 5.10 Built-in functions
 
 LevelScript has a closed set of **built-in** functions; there are no user-defined functions. A function call is recognised by the section 5.8 rule (an identifier followed by `(`), then resolved against the table below. A call to a name not in the table is a compile error (section 7.3). Built-ins are resolved by name against a schema table, exactly like operations (section 6.0) one layer up - adding one is a table row plus an evaluator, with no grammar change.
@@ -687,12 +708,12 @@ rule fall {
 
 A parenthesized `(?a)` is an expression cell, not a binding cell: it binds nothing and matches by the rules of section 5.3 (the overlap test on a tag grid).
 
-**Use.** Inside `( ... )`, `?a` is an expression operand (section 5.8) in any cell of the same pair: match-side expression cells, `where` cells, graph-pattern cells (section 5.12), and write-side expression cells. A bare `?a` on the write side writes the captured value, multi-bit masks included, into its cell; the target grid must have the variable's type (check 45). Every variable used in an expression or on the write side must have at least one binding cell on the match side of its pair (check 44). Like binding, this range restriction does not depend on cell order. Variables exist only in patterns: a variable in a guard, a count, a param expression, or an operation argument is an error (check 46).
+**Use.** Inside `( ... )`, `?a` is an expression operand (section 5.8) in any cell of the same pair: match-side expression cells, `where` cells, graph-pattern cells (section 5.12), rule guards (section 5.9.1), and write-side expression cells. A bare `?a` on the write side writes the captured value, multi-bit masks included, into its cell; the target grid must have the variable's type (check 45). Every variable used in an expression or on the write side must have at least one binding cell on the match side of its pair (check 44). Like binding, this range restriction does not depend on cell order. Variables exist only in patterns and rule guards: a variable in a statement guard, a count, a param expression, or an operation argument is an error (check 46).
 
 **Evaluation order.** Because an expression may read a variable, testing a candidate runs in two phases:
 
 1. **Bare cells.** Every match-side cell that is not an expression - `*`, `.`, integers, tag masks, and binding cells - in every match-side pattern. These cells are pure, so their order is unobservable. Any mismatch, including binding cells that disagree, rejects the candidate.
-2. **Expression cells.** The parenthesized cells of real-grid patterns and the non-`*` cells of `where` and graph patterns (section 5.12), with every variable bound. They evaluate pattern by pattern in match-side order and, within a pattern, in row-major order of the variant being tested, stopping at the first that fails.
+2. **Expression cells and rule guards.** The parenthesized cells of real-grid patterns, the non-`*` cells of `where` and graph patterns (section 5.12), and rule guards (section 5.9.1), with every variable bound. They evaluate item by item in match-side order and, within a pattern, in row-major order of the variant being tested, stopping at the first that fails.
 
 The two phases apply to every rule, with or without variables. Only phase 2 can draw (`random`), so a candidate rejected by its bare cells consumes no draws (section 10.6).
 
@@ -837,7 +858,7 @@ everywhere { algo[F|S] => level[floor] }  // inline rule
 path(from=door, to=exit, into=site, write=road)  // structural op: carve a route
 ```
 
-A `guard` may follow any statement. Its expression (section 5.8) is **boolean** and reads **params** (input or derived) and `width`/`height`, the dimensions when the statement is reached; a grid read or `x`/`y` in a `when` guard is a compile error (there is no candidate position at statement scope). The guard is evaluated **once**, when the statement is reached. If it is false, the statement is skipped in full - no operation, no rule application, no collection pass. If true, the statement runs exactly as it would unguarded; the guard gates *whether* the statement runs, never *which cells* within it (that is `where`, section 5.9). A guard on an operation call gates that operation the same way.
+A `guard` may follow any statement. Its expression (section 5.8) is **boolean** and reads **params** (input or derived) and `width`/`height`, the dimensions when the statement is reached; a grid read or `x`/`y` in a `when` guard is a compile error (there is no candidate position at statement scope). The guard is evaluated **once**, when the statement is reached. If it is false, the statement is skipped in full - no operation, no rule application, no collection pass. If true, the statement runs exactly as it would unguarded; the guard gates *whether* the statement runs, never *which cells* within it (that is `where` and rule guards, sections 5.9 and 5.9.1). A guard on an operation call gates that operation the same way.
 
 ```ls
 sequence main {
@@ -1219,7 +1240,7 @@ A LevelScript run's output is a pure function of **(entry, seed, params, impleme
 The mechanism is a **single sequential PRNG stream** - `mt19937_64` as specified by the C++ standard, seeded with the 64-bit invocation seed - with **pinned draw primitives** (section 10.6: every mapping from the stream to a decision is integer arithmetic defined in this document, never a standard-library distribution or shuffle, whose algorithms differ between libraries) and a **pinned draw order**: every stochastic decision - candidate shuffling, weighted `{ any }` selection, `random(...)` calls, `path` and `voronoi` tie keys, `bsp` splits, `noise` gradients - consumes draws from that one stream at points fixed by the execution model (section 10.6). There is **no position-keyed PRNG**: one stream is deliberately kept for simplicity, accepting the relaxed cross-version claim below (a position-keyed PRNG would decouple draws from evaluation order and permit parallel matching; it remains a possible future change).
 
 Consequences:
-- Param expressions are evaluated **once**, at startup, so each param is constant for the run. A `when` guard or a count is evaluated each time its statement is reached, so it is constant unless it calls `random`, which draws on every evaluation, reproducibly, or reads `width`/`height`, which follow the stack's dimensions.
+- Param expressions are evaluated **once**, at startup, so each param is constant for the run. A statement `when` guard or a count is evaluated each time its statement is reached, so it is constant unless it calls `random`, which draws on every evaluation, reproducibly, or reads `width`/`height`, which follow the stack's dimensions.
 - The source of a generator is its whole closure (section 2.6). Reordering `use` declarations can change canonical order, and with it the layer order and the param evaluation order; when a param expression calls `random`, that shifts the draw sequence.
 - Changing an input param may shift the draw sequence and cascade through the rest of the run - expected in PCG, not a determinism defect (a small input change is not expected to produce a small output change).
 - Determinism is **per implementation version**, not per build: every build of a version agrees, on every platform. A future version may change evaluation/scan/shuffle order and remain deterministic; cross-version (and cross-implementation) reproducibility of specific outputs is not promised. What *is* promised across versions is the semantics of this document, not the byte-identical artifact of a given seed.
@@ -1249,7 +1270,7 @@ The compiler must reject:
 19. **Function arity.** A built-in call with the wrong number of arguments.
 20. **Function argument type.** A built-in argument of the wrong kind (e.g. `abs` of a tag); or `if` whose two branches differ in type; or `if` whose condition is not bool.
 21. **Statement-scope expression.** A count (section 6) or an `int` operation argument (section 6.0) that reads a grid or `x`/`y`; or whose expression is not a `number`.
-22. **Guard scope.** A `when` guard that reads a grid or `x`/`y`; or whose expression is not boolean.
+22. **Guard scope.** A statement `when` guard that reads a grid or `x`/`y`; or whose expression is not boolean.
 23. **Derived param scope.** A derived param expression that reads a grid, `x`/`y`, or `width`/`height`; or that forward-references a later param; or that participates in a cycle.
 24. **Derived param type.** A derived param whose expression is not a `number`.
 25. **Invalid union.** A `tag_union` whose member is not a `tag_value` or earlier `tag_union` of the same tagset; a member that forward-references a later union; or a union cycle. (A union name colliding with a `tag_value` name, a grid, a param, a reserved identifier, or a built-in is caught by the existing duplicate/collision checks - a union shares the tagset's value namespace.)
@@ -1273,7 +1294,7 @@ The compiler must reject:
 43. **Duplicate layers block.** More than one `layers` block in a module.
 44. **Unbound variable.** A pattern variable used in an expression or on the write side with no binding cell (a bare occurrence) on the match side of its pattern pair (section 5.11).
 45. **Variable type.** Binding cells of one variable in grids of different types (distinct tagsets, or a tag grid and a `number` grid); or a bare variable written into a grid whose type differs from the variable's.
-46. **Variable outside a pattern.** A pattern variable in a `when` guard, a count, a param expression, or an operation argument; or a bare variable cell in a `where` or graph pattern (their cells are boolean expressions, sections 5.9 and 5.12).
+46. **Variable outside a pattern.** A pattern variable in a statement `when` guard, a count, a param expression, or an operation argument; or a bare variable cell in a `where` or graph pattern (their cells are boolean expressions, sections 5.9 and 5.12).
 47. **Misplaced empty mask.** A write-side `tag_mask` that unions `.` with any other atom (e.g. `.|wall`); or, in a number grid, a `tag_mask` other than `.` or `!.` (section 4.1).
 48. **Graph source.** A graph layer whose `of` name does not resolve to a grid: a tagset, another graph, or an undeclared name (section 4.3).
 49. **Graph form.** A graph argument other than `nodes` or `edges`, or one given twice; `edges` without `nodes`; or `nodes`/`edges` on a graph whose source is a number grid (section 4.3).
@@ -1283,6 +1304,7 @@ The compiler must reject:
 53. **Graph function placement.** A call to `degree`, `size`, `distance`, or `neighbors` outside a graph-pattern cell; a selector anywhere but as the argument of `distance` or `neighbors`, or a non-selector argument there; or a selector cell that does not fit its grid (a tag mask on a number grid other than `.` or `!.`, or an integer on a tag grid) (section 5.12).
 54. **Zero-weight `{ any }`.** An `{ any }` block whose items all have weight `0` (section 5.5).
 55. **Sized pattern.** A sized pattern `g(W, H)[c]` whose body is not exactly one cell, or whose `W` or `H` is not an integer literal from 1 to 256 (section 5.3).
+56. **Rule-guard scope.** A rule guard that reads a grid or `x`/`y`; or whose expression is not boolean (section 5.9.1).
 
 ### 7.4 Warnings
 
@@ -1448,7 +1470,7 @@ This section is non-normative; it records how the reference implementation is bu
 
 ### 10.2 Symmetry expansion
 
-Symmetry and rotation are expanded at compile time. `symmetry` contributes up to four dimension-preserving flips (identity, H, V, both-axis); `rotation` contributes turns (identity, 90, 180, 270, or a set). The two are composed and the resulting variant set is **de-duplicated by structural equality of the transformed (match side, write tree) pair, scoped per sub-rule** (so two sub-rules with the same LHS both survive). Structural equality means the same pattern cells (expression cells compared as expression trees, pattern variables by name), the same `{ any }`/`{ all }` nesting in the same item order, and the same weights. The both-axis flip and the 180-degree rotation are the same transform, so `symmetry=all, rotation=all` collapses to the 8 variants of D4 (fewer when the rule is itself symmetric). The runtime treats each surviving variant as an independent pattern (section 6.7). Elimination happens at compile time, but its result is observable, because each variant is a separate candidate weighting its anchor in the shuffle and in the step-mode pick. That is why the key is normative (section 5.6.2).
+Symmetry and rotation are expanded at compile time. `symmetry` contributes up to four dimension-preserving flips (identity, H, V, both-axis); `rotation` contributes turns (identity, 90, 180, 270, or a set). The two are composed and the resulting variant set is **de-duplicated by structural equality of the transformed (match side, write tree) pair, scoped per sub-rule** (so two sub-rules with the same LHS both survive). Structural equality means the same pattern cells and rule guards in the same match-side order (expression cells and guards compared as expression trees, pattern variables by name), the same `{ any }`/`{ all }` nesting in the same item order, and the same weights. The both-axis flip and the 180-degree rotation are the same transform, so `symmetry=all, rotation=all` collapses to the 8 variants of D4 (fewer when the rule is itself symmetric). The runtime treats each surviving variant as an independent pattern (section 6.7). Elimination happens at compile time, but its result is observable, because each variant is a separate candidate weighting its anchor in the shuffle and in the step-mode pick. That is why the key is normative (section 5.6.2).
 
 ### 10.3 Snapshot implementation
 
@@ -1460,7 +1482,7 @@ The per-pass snapshot (section 7.1) is implementable several ways; a pass is the
 
 All modes build from one structure: a vector of **candidate slots**, each a small record of indices - `(anchor_x, anchor_y, sub_rule_idx, variant_idx)`. The chosen `{ any }` alternative is **not** stored; it is drawn at application (section 10.6). Slots reference compile-time tables (sub-rules, expanded variants), so a candidate is a few small integers.
 
-**Eager collection.** The reference implementation collects and matches the whole candidate vector per pass (row-major anchors; per candidate, bare cells and then expression cells, with short-circuit (section 5.11); `where`/expression cells - including `random` draws - evaluate during this scan). A semi-lazy split (enumerate slots cheaply, match only when pulled, so `once`/`scatter`/`grow` never match the whole grid) is an available optimization - note that it would move match-side `random` draw sites, which the per-implementation-version determinism claim (section 7.2) permits but a golden-output corpus will notice.
+**Eager collection.** The reference implementation collects and matches the whole candidate vector per pass (row-major anchors; per candidate, bare cells and then expression cells, with short-circuit (section 5.11); `where`/expression cells and rule guards - including `random` draws - evaluate during this scan). A semi-lazy split (enumerate slots cheaply, match only when pulled, so `once`/`scatter`/`grow` never match the whole grid) is an available optimization - note that it would move match-side `random` draw sites, which the per-implementation-version determinism claim (section 7.2) permits but a golden-output corpus will notice.
 
 **Selection per mode:**
 - Batch modes, and each `settle` sweep: collect, seeded-shuffle, pull in shuffle order under the (grid, cell) write mask, stop at count. Shuffling is what gives variants equal priority.
@@ -1473,15 +1495,15 @@ All modes build from one structure: a vector of **candidate slots**, each a smal
 
 For small patterns and small grids (the common case), a per-position brute-force match is adequate: test each pulled slot cell-by-cell against the snapshot - bare cells, then expression cells (section 5.11) - short-circuiting on first mismatch. Binding cells need no fixed order: compare each against its variable's **site**, its first binding cell in the variant's row-major order. The snapshot does not change between collection and application, so the site also supplies the variable's value to expressions and writes; nothing is stored per candidate. Optimization (indexing, bitmap-accelerated scans) is deferred until profiling justifies it.
 
-When a `where` or match cell contains `random`, the matcher's expression-cell order, variant-test order, and short-circuit behaviour become **observable** (they determine which draws fire and in what sequence, section 10.6); such a rule cannot have its slots matched in parallel or reordered without changing output. The order of bare cells is never observable, because phase 1 draws nothing (section 5.11). Rules with no `random` on the match side keep that freedom.
+When a `where` cell, match cell, or rule guard contains `random`, the matcher's expression-cell order, variant-test order, and short-circuit behaviour become **observable** (they determine which draws fire and in what sequence, section 10.6); such a rule cannot have its slots matched in parallel or reordered without changing output. The order of bare cells is never observable, because phase 1 draws nothing (section 5.11). Rules with no `random` on the match side keep that freedom.
 
 ### 10.6 Random seeding and draw order
 
 A single PRNG stream (`mt19937_64` in the reference implementation), seeded from the invocation seed, drives all stochastic decisions. Every draw site is ordered by the execution model, so the sequence is fixed per (entry, seed, params):
 
 1. **Param expressions** (section 4.2) evaluate once at startup, in canonical declaration order (section 2.6), an input's default only when the param was not supplied - their draws come first.
-2. A **`when` guard** (section 6) evaluates once when its statement is reached, in statement order; if it passes, the statement's **count** (section 6), if any, evaluates next, or, for an operation call, its `int` arguments (section 6.0), in written order. All of these evaluate before the statement runs.
-3. **Match-cell, `where`-cell, and graph-pattern-cell** expressions evaluate during the collection scan, in row-major anchor order and, within an anchor, in sub-rule/variant declaration order. For each candidate, bare cells are tested first and draw nothing; only if all of them match do expression cells evaluate, pattern by pattern in match-side order and row-major within each pattern as the variant lays it out, short-circuiting on the first that fails (section 5.11) - a `random` in a cell not reached does not draw.
+2. A statement **`when` guard** (section 6) evaluates once when its statement is reached, in statement order; if it passes, the statement's **count** (section 6), if any, evaluates next, or, for an operation call, its `int` arguments (section 6.0), in written order. All of these evaluate before the statement runs.
+3. **Match-cell, `where`-cell, graph-pattern-cell, and rule-guard** expressions evaluate during the collection scan, in row-major anchor order and, within an anchor, in sub-rule/variant declaration order. For each candidate, bare cells are tested first and draw nothing; only if all of them match do expression cells and rule guards evaluate, item by item in match-side order and row-major within each pattern as the variant lays it out, short-circuiting on the first that fails (section 5.11) - a `random` in a cell not reached does not draw.
 4. **Candidate ordering** draws next: the pass's seeded shuffle (batch modes and `settle` sweeps) or the single uniform pick (step modes), per section 10.4.
 5. **At application**: one draw per `{ any }` node on the resolved write path, outer before inner, earlier sibling first (a single-item `{ any }` still draws, section 5.2); then write-cell expressions, row-major per resolved leaf.
 6. **`path` statements** follow the section 6.6 draw contract: predicate passes (`from`, `to`, `passable`), per-cell `cost`, exactly one tie-key draw, then the start-to-goal `write` stamps.

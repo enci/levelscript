@@ -130,12 +130,22 @@ struct write_term {
     std::vector<write_term> items;       // all / any
 };
 
+// A rule guard: `when (expr)` on the match side, evaluated once per
+// candidate. `after` is how many patterns precede it (at least one) - its
+// place in match-side order.
+struct rule_guard {
+    source_loc loc;
+    expr_ptr   expr;
+    int        after{1};
+};
+
 // One match-write sub-rule: LHS patterns (conjoined across grids at one
-// anchor; consecutive patterns before `=>`) => a write tree.
+// anchor; consecutive patterns before `=>`) and rule guards => a write tree.
 struct rule_pair {
-    source_loc           loc;
-    std::vector<pattern> lhs;
-    write_term           rhs;
+    source_loc              loc;
+    std::vector<pattern>    lhs;
+    std::vector<rule_guard> guards;   // in match-side order
+    write_term              rhs;
 };
 
 // Every pattern of a write tree, in source order.
@@ -203,7 +213,7 @@ struct program_stmt {
     bool        count_percent{false}; // scatter(P%)
     ident       rule_name;            // a rule or a sequence; resolved in sema
     std::unique_ptr<rule_decl> inline_rule;   // target written in place; else null
-    // optional `when (expr)` guard: boolean, params only
+    // optional `when (expr)` guard: boolean, params and width/height
     expr_ptr    guard;
 };
 

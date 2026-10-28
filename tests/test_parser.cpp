@@ -62,6 +62,27 @@ TEST_CASE("parser: match-side braces hold patterns and do not nest") {
     CHECK(parse_fails("rule r { { { g[a] } } => g[c] }"));
 }
 
+TEST_CASE("parser: rule guards follow a pattern on the match side") {
+    auto a = parse_ok("rule r { g[?a] h[?b] when (?a != ?b) => g[c] }");
+    REQUIRE(a.rules[0].pairs[0].guards.size() == 1);
+    CHECK(a.rules[0].pairs[0].guards[0].after == 2);
+    auto b = parse_ok("rule r { { g[?a] when (?a > 1) h[.] when (k > 0) } => g[c] }");
+    auto const& pb = b.rules[0].pairs[0];
+    CHECK(pb.lhs.size() == 2);
+    REQUIRE(pb.guards.size() == 2);
+    CHECK(pb.guards[0].after == 1);
+    CHECK(pb.guards[1].after == 2);
+    auto c = parse_ok("rule r { all\n g[?a] when (?a > 1) => g[c]\n g[.] => g[d]\n}");
+    CHECK(c.rules[0].pairs.size() == 2);
+    // a match side begins with a pattern
+    CHECK(parse_fails("rule r { when (k > 0) g[a] => g[c] }"));
+    CHECK(parse_fails("rule r { { when (k > 0) g[a] } => g[c] }"));
+    // after a write side, `when` would otherwise guard the next sub-rule
+    CHECK(parse_fails("rule r { all\n g[a] => g[b] when (k > 0)\n g[.] => g[c]\n}"));
+    CHECK(parse_fails("rule r { g[a] => g[b] when (k > 0) }"));
+    CHECK(parse_fails("rule r { g[a] when k > 0 => g[c] }"));
+}
+
 TEST_CASE("parser: list commas are optional, newlines are whitespace") {
     // comma-only, on one line
     auto a = parse_ok("tag t { a, b, c }\nlayers { g: grid of t, h: grid of number }\n"

@@ -93,6 +93,7 @@ compiled_pair transform_pair(transform k, compiled_pair const& pair) {
     compiled_pair out;
     out.sub_rule_idx = pair.sub_rule_idx;
     out.var_names = pair.var_names;
+    out.guards = pair.guards;
     for (auto const& pat : pair.lhs)
         out.lhs.push_back(transform_pattern(k, pat));
     out.rhs = transform_write_term(k, pair.rhs);
@@ -124,12 +125,16 @@ bool write_terms_equal(compiled_write_term const& a, compiled_write_term const& 
 }
 
 // Variant dedup key: two variants are duplicates iff both the
-// match side and the write tree are structurally equal. A same-LHS variant
-// with different writes survives as its own candidate.
+// match side (rule guards included) and the write tree are structurally
+// equal. A same-LHS variant with different writes survives as its own
+// candidate.
 bool pairs_equal(compiled_pair const& a, compiled_pair const& b) {
-    if (a.lhs.size() != b.lhs.size()) return false;
+    if (a.lhs.size() != b.lhs.size() || a.guards.size() != b.guards.size()) return false;
     for (int i = 0; i < (int)a.lhs.size(); ++i)
         if (!patterns_equal(a.lhs[i], b.lhs[i])) return false;
+    for (int i = 0; i < (int)a.guards.size(); ++i)   // shared arena indices, as cells
+        if (a.guards[i].expr != b.guards[i].expr || a.guards[i].after != b.guards[i].after)
+            return false;
     return write_terms_equal(a.rhs, b.rhs);
 }
 
@@ -228,6 +233,10 @@ struct scope {
 // a statement has no cell to read grids or positions from, but the stack has
 // the dimensions it starts from.
 constexpr scope stmt_scope{false, false, -1, true};
+// Candidate scope (rule guards): the same reads plus the pair's pattern
+// variables, which resolve through the bound pair - no cell, and the anchor
+// is a different pattern cell in each variant, so still no x/y.
+constexpr scope cand_scope{false, false, -1, true};
 
 struct analyzer {
     ast_file const&       ast;   // the closure's merged declarations
@@ -283,7 +292,7 @@ struct analyzer {
     int use_variable(std::string const& name, source_loc loc) {
         if (!vars_) {
             error(loc, "pattern variable '" + name + "' outside a pattern; variables "
-                  "exist only in pattern and 'where' cells");
+                  "exist only in pattern and 'where' cells and rule guards");
             return -1;
         }
         int s = vars_->slot(name);
@@ -413,7 +422,7 @@ struct analyzer {
                               "' too, conjoin a '" + name + "[...]' pattern on the match side", t);
             if (!scope_.allow_grids)
                 return poison(e.loc, "grid '" + name + "' cannot be read here "
-                              "(only params are available at this scope)", t);
+                              "(no cell is available at this scope)", t);
             t = out.layers[gid].tag_id < 0 ? val_type::num : val_type::mask;
             return add_expr({ce_kind::grid_read, 0, gid, -1, -1, -1});
         }
@@ -1150,6 +1159,11 @@ struct analyzer {
             cp.lhs.push_back(compile_pattern(p, rows, cols, /*is_rhs=*/false));
             if (rows == 0) { rows = cp.lhs.back().rows; cols = cp.lhs.back().cols; }
         }
+        for (auto const& g : pr.guards)
+            cp.guards.push_back({compile_as(*g.expr, val_type::boolean, g.loc,
+                                            "a rule guard must be a boolean expression",
+                                            cand_scope),
+                                 g.after});
         cp.rhs = compile_write_term(pr.rhs, rows, cols);
         vars_ = outer;
         for (auto const& v : pv.vars) cp.var_names.push_back(v.name);

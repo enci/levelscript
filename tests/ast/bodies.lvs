@@ -26,3 +26,14 @@ rule a(symmetry=horizontal) { g[.] => g[x] }
 rule b(rotation=all) { g[.] => g[x] }
 rule c(symmetry=all, rotation=180) { g[.] => g[x] }
 rule d(rotation={90, 270}) { g[.] => g[x] }
+
+rule guarded(rotation=all) {
+    regions[?a ?b]
+    when (?a != ?b)
+    =>
+    level[* wall]
+}
+rule guarded_group { all
+    { g[?a] when (?a > k) h[.] when (random(0, 1) == 0) } => h[x]
+    g[.] => g[x]
+}

@@ -220,6 +220,7 @@ export const completionProvider: vscode.CompletionItemProvider = {
             grids();
             graphs();
             word('where', K.Keyword, 'position pseudo-layer');
+            if (ctx.guard) snippet('when', 'when (${1})', K.Keyword, 'rule guard: once per candidate');
             break;
         case 'combinator':
             word('all', K.Keyword);

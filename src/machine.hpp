@@ -193,6 +193,7 @@ private:
 
     std::vector<match> collect(compiled_rule const& rule);
     bool match_at(compiled_pair const& pair, int row, int col);
+    bool match_computed(compiled_pattern const& pat, int row, int col);   // phase 2
     // A pattern variable's value: its site in the snapshot, from the anchor.
     // The front buffer is frozen between collection and application, so it
     // is the value the candidate bound.
