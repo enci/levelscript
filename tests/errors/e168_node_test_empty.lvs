@@ -1,0 +1,10 @@
+// E168 (0.15, check 58): a node is never empty, so a node test has no '.' atom.
+// @expect error
+// @expect stderr-contains a node is never empty
+tag room { Hall, Inn }
+layers {
+    rooms: grid of room
+    plan:  graph of rooms
+}
+rule r { plan { ?n[Hall|.] } => rooms(?n)[Inn] }
+sequence main { resize(2, 2) everywhere r }

@@ -7,6 +7,7 @@ add_executable(ls_tests
     test_sequence.cpp
     test_modules.cpp
     test_graph.cpp
+    test_graph_rules.cpp
     test_coverage.cpp
     test_partition.cpp
     test_directives.cpp

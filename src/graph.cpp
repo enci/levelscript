@@ -49,6 +49,7 @@ graph_data extract_graph(compiled_graph const& g, bool is_number,
             });
         }
         d.sizes.push_back(count);
+        d.values.push_back(cells[i]);
     }
 
     d.adj.resize(d.sizes.size());

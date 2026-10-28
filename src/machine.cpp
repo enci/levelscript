@@ -127,6 +127,7 @@ long long machine::eval(int idx, int x, int y) {
     case ce_kind::neighbors_:
     case ce_kind::adjacent_:
     case ce_kind::reachable_:
+    case ce_kind::value_:
         return eval_graph(e, x, y);
     case ce_kind::and_: return eval(e.a, x, y) != 0 && eval(e.b, x, y) != 0;   // lazy
     case ce_kind::or_:  return eval(e.a, x, y) != 0 || eval(e.b, x, y) != 0;
@@ -239,6 +240,7 @@ long long machine::eval_graph(compiled_expr const& e, int x, int y) {
     switch (e.kind) {
     case ce_kind::degree_: return (long long)g.adj[n].size();
     case ce_kind::size_:   return g.sizes[n];
+    case ce_kind::value_:  return g.values[n];
     case ce_kind::neighbors_:
     case ce_kind::adjacent_: {
         long long k = 0;

@@ -10,6 +10,7 @@ struct graph_data {
     int width{0}, height{0};
     std::vector<int>              node_of;   // per cell, row-major; -1 = no node
     std::vector<int>              sizes;     // per node: its region's cell count
+    std::vector<int64_t>          values;    // per node: the value its cells hold
     std::vector<std::vector<int>> adj;       // per node: adjacent nodes, ascending
 
     int node_count() const { return (int)sizes.size(); }

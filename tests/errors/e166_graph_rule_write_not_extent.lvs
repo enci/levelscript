@@ -1,0 +1,10 @@
+// E166 (0.15, check 57): every write of a graph rule is a node extent; a graph pair has no shape.
+// @expect error
+// @expect stderr-contains every write of a graph rule is a node extent
+tag room { Hall, Inn }
+layers {
+    rooms: grid of room
+    plan:  graph of rooms
+}
+rule r { plan { ?n[Hall] } => rooms[Inn] }
+sequence main { resize(2, 2) everywhere r }

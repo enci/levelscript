@@ -1,0 +1,10 @@
+// E167 (0.15, check 58): a graph rule has no shape, so no symmetry or rotation variants.
+// @expect error
+// @expect stderr-contains a graph rule takes no 'symmetry' or 'rotation'
+tag room { Hall, Inn }
+layers {
+    rooms: grid of room
+    plan:  graph of rooms
+}
+rule r(rotation=all) { plan { ?a -- ?b } => rooms(?a)[Inn] }
+sequence main { resize(2, 2) everywhere r }

@@ -2,6 +2,7 @@
 #include "modules.hpp"
 #include <algorithm>
 #include <cassert>
+#include <optional>
 #include <unordered_set>
 
 namespace ls {
@@ -271,6 +272,9 @@ struct analyzer {
         }
     };
     pair_vars* vars_{nullptr};
+    // The pair being compiled is a graph pair: its variables are declared by
+    // its graph block, and its writes are node extents.
+    bool graph_pair_{false};
 
     static int  node_type(int graph) { return -2 - graph; }
     static bool is_node_type(int type) { return type <= -2; }
@@ -312,8 +316,11 @@ struct analyzer {
         auto& v = vars_->vars[(size_t)s];
         if (v.bound) return s;
         if (!v.reported)
-            error(loc, "pattern variable '" + name + "' is never bound; it needs a "
-                  "bare '" + name + "' cell on the match side");
+            error(loc, graph_pair_
+                  ? "node variable '" + name + "' is not declared in the graph block; "
+                    "declare it on a line of its own, e.g. '" + name + "'"
+                  : "pattern variable '" + name + "' is never bound; it needs a "
+                    "bare '" + name + "' cell on the match side");
         v.reported = true;
         return -1;
     }
@@ -397,6 +404,7 @@ struct analyzer {
         {"neighbors", ce_kind::neighbors_, 2, true},
         {"adjacent",  ce_kind::adjacent_,  2, true},
         {"reachable", ce_kind::reachable_, 2, true},
+        {"value",     ce_kind::value_,     1, true},
     };
 
     // Resolve a bare identifier, first match wins: x/y/width/height → param → tag
@@ -541,6 +549,9 @@ struct analyzer {
         }
         bool pred = spec.kind == ce_kind::adjacent_ || spec.kind == ce_kind::reachable_;
         t = pred ? val_type::boolean : val_type::num;
+        if (spec.kind == ce_kind::value_)   // the source's type: a tag mask or a number
+            t = out.layers[(size_t)out.graphs[(size_t)graph].source].tag_id < 0 ? val_type::num
+                                                                                : val_type::mask;
         return add_expr({spec.kind, sel, graph, node, target, -1});
     }
 
@@ -915,6 +926,33 @@ struct analyzer {
             tag = out.layers[cp.grid_id].tag_id;
             cp.is_number = tag < 0;
         }
+        // A node extent writes its one cell over a node's region: only on the
+        // write side of a graph pair, whose every write is one.
+        if (!p.extent.text.empty()) {
+            if (!is_rhs || !graph_pair_) {
+                error(p.size_loc, "a node extent writes a node's region; it appears only "
+                      "on the write side of a graph rule, e.g. plan { ?n } => " +
+                      (p.is_where ? std::string("rooms") : p.grid.text) + "(?n)[...]");
+                return cp;
+            }
+            if (cp.grid_id < 0 || cp.is_where) return cp;   // reported above
+            cp.extent = use_variable(p.extent.text, p.extent.loc);
+            if (p.rows != 1 || p.cells[0].size() != 1) {
+                error(p.loc, "a node extent writes a single cell over its node, but this "
+                      "body has " + std::to_string(p.rows) + " row(s) of " +
+                      std::to_string(p.cols) + " cell(s)");
+                return cp;
+            }
+            cp.rows = cp.cols = 1;
+            cp.cells.assign(1, compile_cell(*p.cells[0][0], tag, cp.is_number, false, true));
+            return cp;
+        }
+        if (is_rhs && graph_pair_) {
+            error(p.loc, "every write of a graph rule is a node extent naming a block "
+                  "variable, e.g. " + (p.is_where ? std::string("rooms") : p.grid.text) +
+                  "(?n)[...]");
+            return cp;
+        }
         // A sized pattern's shape is its declared size, not its body's.
         bool size_ok = !p.sized ||
                        (p.size_cols >= 1 && p.size_cols <= max_pattern_side &&
@@ -1138,6 +1176,21 @@ struct analyzer {
             std::vector<int64_t> mine;
             for (auto const* p : leaves) {
                 if (p->grid_id < 0) continue;
+                // A node extent covers its node's region, known only at run
+                // time; distinct variables are distinct nodes, whose regions
+                // are disjoint, so it is keyed by its variable. A body never
+                // mixes extents and grid patterns (check 58).
+                if (p->extent >= 0) {
+                    int64_t k = key(p->grid_id, p->extent, 0);
+                    if (seen.count(k)) {
+                        error(loc, "same-grid simultaneous write in '{ all }': grid '" +
+                              out.layers[p->grid_id].name + "' is written twice over node '" +
+                              vars_->vars[(size_t)p->extent].name + "'");
+                        return;
+                    }
+                    mine.push_back(k);
+                    continue;
+                }
                 for (int r = 0; r < p->rows; ++r)
                     for (int c = 0; c < p->cols; ++c) {
                         if (p->at(r, c).what == compiled_cell::kind::wildcard) continue;
@@ -1205,6 +1258,90 @@ struct analyzer {
         return cp;
     }
 
+    // A graph pair: its block declares node variables (slots in order of first
+    // appearance, the order assignments enumerate in), edge lines, and tests;
+    // rule guards and node-extent writes follow as in any pair.
+    compiled_pair compile_graph_pair(rule_pair const& pr) {
+        compiled_pair cp;
+        auto const& b = pr.block;
+        cp.graph = out.graph_id(b.graph.text);
+        if (cp.graph < 0) {
+            error(b.graph.loc, out.layer_id(b.graph.text) >= 0
+                  ? "'" + b.graph.text + "' is a grid; a graph block names a graph layer"
+                  : "undeclared graph '" + b.graph.text + "'");
+            return cp;   // its variables have no type to check anything against
+        }
+        require_visible(b.graph.loc, "graph", b.graph.text, graph_mod[(size_t)cp.graph]);
+        int src_tag = out.layers[(size_t)out.graphs[(size_t)cp.graph].source].tag_id;
+
+        pair_vars pv;
+        pair_vars* outer = vars_;
+        vars_ = &pv;
+        graph_pair_ = true;
+        auto declare = [&](ident const& v) {
+            int s = pv.slot(v.text);
+            pv.vars[(size_t)s].bound = true;
+            pv.vars[(size_t)s].type  = node_type(cp.graph);
+            return s;
+        };
+        for (auto const& it : b.items) {
+            int a = declare(it.a);
+            if (it.what == graph_item::kind::edge) {
+                if (it.a.text == it.b.text)
+                    error(it.loc, "an edge line joins two distinct nodes; '" + it.a.text +
+                          "' cannot be joined to itself");
+                else
+                    cp.node_edges.push_back({a, declare(it.b)});
+            } else if (it.what == graph_item::kind::test) {
+                if (std::any_of(cp.node_tests.begin(), cp.node_tests.end(),
+                                [&](auto const& t) { return t.slot == a; })) {
+                    error(it.loc, "'" + it.a.text + "' already has a test line; a variable "
+                          "takes at most one, so combine them in one mask");
+                    continue;
+                }
+                auto test = compile_node_test(*it.test, src_tag, b.graph.text);
+                if (test) cp.node_tests.push_back({a, *test});
+            }
+        }
+        for (auto const& g : pr.guards)
+            cp.guards.push_back({compile_as(*g.expr, val_type::boolean, g.loc,
+                                            "a rule guard must be a boolean expression",
+                                            cand_scope),
+                                 g.after});
+        cp.rhs = compile_write_term(pr.rhs, 0, 0);
+        graph_pair_ = false;
+        vars_ = outer;
+        for (auto const& v : pv.vars) cp.var_names.push_back(v.name);
+        return cp;
+    }
+
+    // A test line's cell `?n[m]`, against the graph's source: an integer for a
+    // number grid, a tag mask without '.' for a tag grid (a node is never
+    // empty). Empty after reporting an error.
+    std::optional<int64_t> compile_node_test(expr const& cell, int src_tag, std::string const& graph) {
+        bool is_int = cell.kind == expr_kind::int_lit;
+        if (src_tag < 0) {
+            if (is_int) return cell.int_val;
+            error(cell.loc, "graph '" + graph + "' has a number-grid source; a node test "
+                  "is an integer");
+            return std::nullopt;
+        }
+        if (is_int) {
+            error(cell.loc, "graph '" + graph + "' has a tag-grid source; a node test is a "
+                  "tag mask, not an integer");
+            return std::nullopt;
+        }
+        std::vector<mask_atom> atoms;
+        mask_atoms(cell, atoms);
+        for (auto const& at : atoms)
+            if (at.name == ".") {
+                error(at.loc, "a node is never empty; a node test has no '.' (test "
+                      "non-emptiness with no test at all)");
+                return std::nullopt;
+            }
+        return tag_mask(cell, src_tag, "for the source of graph '" + graph + "'");
+    }
+
     void compile_rules() {
         for (auto const& r : ast.rules) {
             if (index_of(out.rules, r.name, &compiled_rule::name) >= 0)
@@ -1229,11 +1366,30 @@ struct analyzer {
 
         compiled_rule cr;
         cr.body = r.body;
+        // A graph rule has no shape to transform, and its candidates are
+        // assignments, not anchors: its body is graph pairs only.
+        if (r.pairs.size() > 0 && r.pairs[0].is_graph) {
+            if (r.symmetry != "none" || !r.rotation_angles.empty())
+                error(r.name.loc, "a graph rule takes no 'symmetry' or 'rotation': a graph "
+                      "pair has no shape to transform");
+            for (int bi = 0; bi < (int)r.pairs.size(); ++bi) {
+                if (!r.pairs[bi].is_graph) {
+                    error(r.pairs[bi].loc, "a rule body cannot mix graph and grid sub-rules; "
+                          "this sub-rule matches patterns, the first matches a graph block");
+                    continue;
+                }
+                compiled_pair cp = compile_graph_pair(r.pairs[bi]);
+                cp.sub_rule_idx = bi;
+                cr.pairs.push_back(std::move(cp));
+            }
+            return cr;
+        }
         // Expand each sub-rule into its variants; dedup by (match, write)
         // equality, scoped per sub-rule so same-LHS sub-rules both survive.
         for (int bi = 0; bi < (int)r.pairs.size(); ++bi) {
             if (r.pairs[bi].is_graph) {
-                error(r.pairs[bi].block.graph.loc, "graph rules are not implemented yet");
+                error(r.pairs[bi].block.graph.loc, "a rule body cannot mix graph and grid "
+                      "sub-rules; this sub-rule matches a graph block, the first matches patterns");
                 continue;
             }
             compiled_pair base = compile_base_pair(r.pairs[bi]);
@@ -1265,6 +1421,7 @@ struct analyzer {
 
     void check_reductive(compiled_rule const& rule, source_loc loc) {
         for (auto const& pair : rule.pairs) {
+            if (pair.graph >= 0) continue;   // uncertain: a graph rule never warns
             std::vector<compiled_pattern const*> writes;
             collect_write_leaves(pair.rhs, writes, /*certain=*/true);
 

@@ -74,6 +74,7 @@ enum class ce_kind {
     neighbors_,
     adjacent_,     // neighbors > 0
     reachable_,    // distance < graph_unreachable
+    value_,        // the value every cell of the node's region holds in the source
 };
 
 // What `distance` gives when no target node is reachable: 2^30, larger than
@@ -117,6 +118,9 @@ struct compiled_pattern {
     bool is_where{false};
     int  rows{0}, cols{0};
     std::vector<compiled_cell> cells;   // flat, row-major
+    // A node extent `g(?n)[c]` (graph pairs' writes only): the slot of the
+    // node whose region its one cell covers; -1 = an ordinary pattern.
+    int  extent{-1};
 
     // Match side only, filled per variant: the cells of each matching phase
     // in row-major order, wildcards dropped.
@@ -177,6 +181,17 @@ struct compiled_pair {
     enum class mirror : uint8_t { none, h, v, both };
     int16_t                       rotation{0};   // 0, 90, 180, 270
     mirror                        flip{mirror::none};
+
+    // A graph pair (graph >= 0) has no patterns and no anchor: a candidate
+    // assigns one distinct node of `graph` to each variable slot, in
+    // lexicographic node-id order over the slots (declaration order), such
+    // that every test and edge line holds. Its write leaves are node extents.
+    int                           graph{-1};
+    // `?n[m]`: the node's value overlaps `val` (tag source) or equals it (number).
+    struct node_test { int slot{0}; int64_t val{0}; };
+    struct node_edge { int a{0}, b{0}; };   // `?a -- ?b`: slots of adjacent nodes
+    std::vector<node_test>        node_tests;
+    std::vector<node_edge>        node_edges;
 };
 
 struct compiled_rule {
