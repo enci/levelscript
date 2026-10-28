@@ -1,6 +1,6 @@
 # LevelScript
 
-**Status**: Draft 0.12.0
+**Status**: Draft 0.12.2
 **File extension**: `.lvs`
 **CLI**: `levelscript [--seed N] [--entry name] [--param name=value ...] <file.lvs>` (`--entry` defaults to `main` and `--seed` to the root file's `@seed` directive, both tool conventions; section 6, Appendix B)
 **Embedding**: namespace `ls::` (see Appendix A)
@@ -272,7 +272,7 @@ Two kinds of param, distinguished solely by the `: number` annotation:
 - An **input param** (`name: number = default`) may be supplied at runtime - via the embedding API's `generate(entry, seed, params)` / `begin(...)` or the CLI's `--param name=value` - alongside the seed. The `= expr` **default is required**: it is evaluated once at startup only when the runtime does not supply the param; a supplied value overrides it and the default expression is not evaluated. Because every input is defaulted, a run always has a complete configuration from the seed alone - **there is no "missing required param" runtime failure**.
 - A **derived param** (`name = expr`) is computed once, at startup, when the input params bind. It is never settable from outside.
 
-Both kinds carry an expression under the same scope discipline: literals, input params, and **earlier-declared** params only - no grid reads, no `x`/`y`, and no `width`/`height` (dimensions change during a run, so a startup-frozen dimension would be stale; read `width`/`height` directly in a cell expression instead). References resolve in declaration order; a forward reference or any cycle is a compile error. The expression may call `random` (section 5.10), drawing once at that single evaluation. Because both kinds are fixed once inputs bind, params are run-constant and determinism (section 7.2) holds.
+Both kinds carry an expression under the same scope discipline: literals, input params, and **earlier-declared** params only - no grid reads, no `x`/`y`, and no `width`/`height` (dimensions change during a run, so a startup-frozen dimension would be stale; read `width`/`height` directly in a cell or statement-scope expression instead). References resolve in declaration order; a forward reference or any cycle is a compile error. The expression may call `random` (section 5.10), drawing once at that single evaluation. Because both kinds are fixed once inputs bind, params are run-constant and determinism (section 7.2) holds.
 
 At most one `params` block per module. Declaration order spans modules: the closure's params are ordered canonically (section 2.6), so a param expression may reference only params that are declared earlier **and** that its module sees. (A param of a directly used module is always earlier.) A param name (input or derived) must not collide with a grid name or a reserved identifier (section 2.4). Param values and expressions are numbers; a derived param whose expression is not a number is a compile error.
 
@@ -560,7 +560,7 @@ Because there is no coordinate indexing (section 5.8), every read offset is stat
 Expressions are **deterministic for a given seed**. Every built-in is pure except `random` (section 5.10), which advances the shared PRNG (section 10.6); `random` is the one expression form whose repeated evaluation may yield different values within a run. All other functions and operators are pure and side-effect-free. Expressions appear in three **scopes**, which differ in what they may read:
 
 - **Cell scope** - pattern cells (sections 2.5/5.3), `where` cells (section 5.9), graph-pattern cells (section 5.12), and the per-cell arguments of an operation (the `pred`, `value`, and `expr` kinds, section 6.0). May read grids at the current position (below), `x`/`y`, `width`/`height`, and params; pattern, `where`, and graph-pattern cells may also read pattern variables (section 5.11). Graph-pattern cells read no grid; they call the graph functions instead (section 5.12). Evaluated per cell.
-- **Statement scope** - `when` guards, counts (section 6), and `int` operation arguments (section 6.0). May read params only. Evaluated each time its statement is reached.
+- **Statement scope** - `when` guards, counts (section 6), and `int` operation arguments (section 6.0). May read params and `width`/`height`; no grid reads and no `x`/`y`, since there is no candidate position. Evaluated each time its statement is reached, before the statement runs, so `width`/`height` are the dimensions the statement starts from (`0` x `0` before the first `resize`, section 6).
 - **Param scope** - param expressions (section 4.2). May read earlier params only. Evaluated once, at startup.
 
 `random` (section 5.10) is allowed in every scope.
@@ -822,7 +822,7 @@ A statement is either an **operation call** (`op_call` - a built-in operation ap
 
 A rule-only mode on a sequence is an error (check 37). Over a rule the modes fall into two kinds, plus `settle`: the **batch modes** (`scatter`, `everywhere`) apply from one snapshot in one shuffled pass under the write mask; the **step modes** (`once`, `grow`) re-snapshot after every application and use no mask; `settle` repeats batch sweeps until nothing changes.
 
-**Counts.** A count is a statement-scope expression (section 5.8). Like a guard, it reads params only: a grid read, `x`/`y`, or `width`/`height` in a count is a compile error, as is a count that is not a number (check 21). It is evaluated each time its statement is reached, after the guard and only if the guard passed; a `random` in it draws on every evaluation. A count of `0` applies nothing (over a sequence, it runs no iteration). A count below `0` is treated as `0`, and a percentage above `100` as `100`, each with a runtime warning (section 7.4). The checks happen at run time because counts are expressions: a literal and a computed count are treated alike. The `%` follows a literal, a param name, or a parenthesized expression (`50%`, `density%`, `(n * 2)%`), so it always applies to the whole count; `n * 2%` is a parse error. It is part of `scatter`'s count, not of the expression: it selects a percentage of the batch (section 6.7) and is not a value.
+**Counts.** A count is a statement-scope expression (section 5.8). Like a guard, it reads params and `width`/`height` (section 5.8): a grid read or `x`/`y` in a count is a compile error, as is a count that is not a number (check 21). It is evaluated each time its statement is reached, after the guard and only if the guard passed; a `random` in it draws on every evaluation. A count of `0` applies nothing (over a sequence, it runs no iteration). A count below `0` is treated as `0`, and a percentage above `100` as `100`, each with a runtime warning (section 7.4). The checks happen at run time because counts are expressions: a literal and a computed count are treated alike. The `%` follows a literal, a param name, or a parenthesized expression (`50%`, `density%`, `(n * 2)%`), so it always applies to the whole count; `n * 2%` is a parse error. It is part of `scatter`'s count, not of the expression: it selects a percentage of the batch (section 6.7) and is not a value.
 
 **Inline rules.** A target may be a rule written in place, with the grammar of a named rule minus `rule IDENT` (section 5.1): optional attributes, then a braced body. An inline rule behaves exactly as a named rule with the same attributes and body, declared in the enclosing sequence's module and applied by name; its names resolve in that module. To apply one rule from several places, declare it with `rule`. Diagnostics and the debugger locate an inline rule by its source position (section 10.8); the observe channel identifies statements by position, not by rule name (Appendix A).
 
@@ -837,7 +837,7 @@ everywhere { algo[F|S] => level[floor] }  // inline rule
 path(from=door, to=exit, into=site, write=road)  // structural op: carve a route
 ```
 
-A `guard` may follow any statement. Its expression (section 5.8) is **boolean** and reads **params only** (input or derived); a grid read, `x`/`y`, or `width`/`height` in a `when` guard is a compile error (there is no candidate position or committed size at statement scope). The guard is evaluated **once**, when the statement is reached. If it is false, the statement is skipped in full - no operation, no rule application, no collection pass. If true, the statement runs exactly as it would unguarded; the guard gates *whether* the statement runs, never *which cells* within it (that is `where`, section 5.9). A guard on an operation call gates that operation the same way.
+A `guard` may follow any statement. Its expression (section 5.8) is **boolean** and reads **params** (input or derived) and `width`/`height`, the dimensions when the statement is reached; a grid read or `x`/`y` in a `when` guard is a compile error (there is no candidate position at statement scope). The guard is evaluated **once**, when the statement is reached. If it is false, the statement is skipped in full - no operation, no rule application, no collection pass. If true, the statement runs exactly as it would unguarded; the guard gates *whether* the statement runs, never *which cells* within it (that is `where`, section 5.9). A guard on an operation call gates that operation the same way.
 
 ```ls
 sequence main {
@@ -858,7 +858,7 @@ Each parameter has a **kind**, a **binding** (positional or named-only), and req
 
 | kind | written as | resolves to |
 |------|-----------|-------------|
-| `int` | a number expression, statement scope (section 5.8) | an integer, evaluated once when the statement is reached |
+| `int` | a number expression, statement scope (section 5.8) | an integer, evaluated once when the statement is reached, before the operation runs |
 | `grid` | a name | a declared grid name (section 4) |
 | `pred` | a tag value or union, or a boolean expression, cell scope | a per-cell predicate (a tag or union means "cell overlaps this mask", section 6.6; an expression means its truth per cell) |
 | `value` | an expression typed by the target grid, cell scope | a cell value to write |
@@ -897,7 +897,7 @@ Sets the active grid size to W columns by H rows, across all layers. The grid **
 
 `resize` never clears surviving content. (To discover-and-crop by content, use `trim`, section 6.3; to add margins, use `pad`, section 6.5.)
 
-Dimensions are statement-scope expressions (section 6.0), so a generator can size its grid from its params: `resize(map_w, map_h)`, `resize(size * 2, size)`. A dimension below 1 makes the statement a no-op with a runtime warning (section 7.4); `resize` has no value that would leave the grid unchanged.
+Dimensions are statement-scope expressions (section 6.0), so a generator can size its grid from its params or its current size: `resize(map_w, map_h)`, `resize(size * 2, size)`, `resize(width + 4, height)`. Both arguments evaluate before the resize, so `resize(width * 2, width)` reads the old width twice. A dimension below 1 makes the statement a no-op with a runtime warning (section 7.4); `resize` has no value that would leave the grid unchanged.
 
 ### 6.2 `upscale(N, M)`
 
@@ -1071,7 +1071,7 @@ The body is a `statement_list` (section 6): rule applications, sequence applicat
 
 `settle` means the same over a sequence as over a rule (section 6.7): repeat until a repetition changes nothing, with `N` as an upper bound. `scatter`, `everywhere`, and `grow` are not valid on a sequence (check 37): they select among one rule's candidates, and a sequence has no candidates of its own. For a fraction of each inner batch, write `scatter(P%)` on the inner statements.
 
-**Guards.** A `when` on a sequence application gates the whole application. It is evaluated once, when the statement is reached (section 6). A `when` on a statement inside the body is evaluated each time that statement is reached, which is once per iteration. Guards read params only, so the value is constant unless the guard calls `random`, which draws on every evaluation. Counts (section 6) are evaluated the same way.
+**Guards.** A `when` on a sequence application gates the whole application. It is evaluated once, when the statement is reached (section 6). A `when` on a statement inside the body is evaluated each time that statement is reached, which is once per iteration. Guards read params and `width`/`height`, so the value is constant across iterations unless the guard calls `random`, which draws on every evaluation, or reads a dimension that the body changes. Counts (section 6) are evaluated the same way.
 
 **Draw order.** A sequence application has no draw sites of its own, and the stability check draws nothing. Body statements draw per section 10.6 as each one is reached, iteration after iteration.
 
@@ -1219,7 +1219,7 @@ A LevelScript run's output is a pure function of **(entry, seed, params, impleme
 The mechanism is a **single sequential PRNG stream** - `mt19937_64` as specified by the C++ standard, seeded with the 64-bit invocation seed - with **pinned draw primitives** (section 10.6: every mapping from the stream to a decision is integer arithmetic defined in this document, never a standard-library distribution or shuffle, whose algorithms differ between libraries) and a **pinned draw order**: every stochastic decision - candidate shuffling, weighted `{ any }` selection, `random(...)` calls, `path` and `voronoi` tie keys, `bsp` splits, `noise` gradients - consumes draws from that one stream at points fixed by the execution model (section 10.6). There is **no position-keyed PRNG**: one stream is deliberately kept for simplicity, accepting the relaxed cross-version claim below (a position-keyed PRNG would decouple draws from evaluation order and permit parallel matching; it remains a possible future change).
 
 Consequences:
-- Param expressions are evaluated **once**, at startup, so each param is constant for the run. A `when` guard or a count is evaluated each time its statement is reached, so it is constant unless it calls `random`, which draws on every evaluation, reproducibly.
+- Param expressions are evaluated **once**, at startup, so each param is constant for the run. A `when` guard or a count is evaluated each time its statement is reached, so it is constant unless it calls `random`, which draws on every evaluation, reproducibly, or reads `width`/`height`, which follow the stack's dimensions.
 - The source of a generator is its whole closure (section 2.6). Reordering `use` declarations can change canonical order, and with it the layer order and the param evaluation order; when a param expression calls `random`, that shifts the draw sequence.
 - Changing an input param may shift the draw sequence and cascade through the rest of the run - expected in PCG, not a determinism defect (a small input change is not expected to produce a small output change).
 - Determinism is **per implementation version**, not per build: every build of a version agrees, on every platform. A future version may change evaluation/scan/shuffle order and remain deterministic; cross-version (and cross-implementation) reproducibility of specific outputs is not promised. What *is* promised across versions is the semantics of this document, not the byte-identical artifact of a given seed.
@@ -1248,8 +1248,8 @@ The compiler must reject:
 18. **Invalid transform value.** A `rotation=` value that is not `none`/`all`, a bare `90`/`180`/`270`, or a set `{...}` of those angles; a `symmetry=` value other than `none`/`horizontal`/`vertical`/`all`; or an angle set containing a value other than 90/180/270. (An empty set `{}` and a `symmetry` set are also errors.)
 19. **Function arity.** A built-in call with the wrong number of arguments.
 20. **Function argument type.** A built-in argument of the wrong kind (e.g. `abs` of a tag); or `if` whose two branches differ in type; or `if` whose condition is not bool.
-21. **Statement-scope expression.** A count (section 6) or an `int` operation argument (section 6.0) that reads a grid, `x`/`y`, or `width`/`height`; or whose expression is not a `number`.
-22. **Guard scope.** A `when` guard that reads a grid, `x`/`y`, or `width`/`height`; or whose expression is not boolean.
+21. **Statement-scope expression.** A count (section 6) or an `int` operation argument (section 6.0) that reads a grid or `x`/`y`; or whose expression is not a `number`.
+22. **Guard scope.** A `when` guard that reads a grid or `x`/`y`; or whose expression is not boolean.
 23. **Derived param scope.** A derived param expression that reads a grid, `x`/`y`, or `width`/`height`; or that forward-references a later param; or that participates in a cycle.
 24. **Derived param type.** A derived param whose expression is not a `number`.
 25. **Invalid union.** A `tag_union` whose member is not a `tag_value` or earlier `tag_union` of the same tagset; a member that forward-references a later union; or a union cycle. (A union name colliding with a `tag_value` name, a grid, a param, a reserved identifier, or a built-in is caught by the existing duplicate/collision checks - a union shares the tagset's value namespace.)
@@ -1480,7 +1480,7 @@ When a `where` or match cell contains `random`, the matcher's expression-cell or
 A single PRNG stream (`mt19937_64` in the reference implementation), seeded from the invocation seed, drives all stochastic decisions. Every draw site is ordered by the execution model, so the sequence is fixed per (entry, seed, params):
 
 1. **Param expressions** (section 4.2) evaluate once at startup, in canonical declaration order (section 2.6), an input's default only when the param was not supplied - their draws come first.
-2. A **`when` guard** (section 6) evaluates once when its statement is reached, in statement order; if it passes, the statement's **count** (section 6), if any, evaluates next, or, for an operation call, its `int` arguments (section 6.0), in written order.
+2. A **`when` guard** (section 6) evaluates once when its statement is reached, in statement order; if it passes, the statement's **count** (section 6), if any, evaluates next, or, for an operation call, its `int` arguments (section 6.0), in written order. All of these evaluate before the statement runs.
 3. **Match-cell, `where`-cell, and graph-pattern-cell** expressions evaluate during the collection scan, in row-major anchor order and, within an anchor, in sub-rule/variant declaration order. For each candidate, bare cells are tested first and draw nothing; only if all of them match do expression cells evaluate, pattern by pattern in match-side order and row-major within each pattern as the variant lays it out, short-circuiting on the first that fails (section 5.11) - a `random` in a cell not reached does not draw.
 4. **Candidate ordering** draws next: the pass's seeded shuffle (batch modes and `settle` sweeps) or the single uniform pick (step modes), per section 10.4.
 5. **At application**: one draw per `{ any }` node on the resolved write path, outer before inner, earlier sibling first (a single-item `{ any }` still draws, section 5.2); then write-cell expressions, row-major per resolved leaf.

@@ -1,5 +1,5 @@
 // E112 (0.9.2, check 21): an `int` argument is a statement-scope expression;
-// it reads params only, never a grid.
+// it reads params and width/height, never a grid.
 // @expect error
 // @expect stderr-contains cannot be read here
 tag t { a }

@@ -220,12 +220,14 @@ static const axis_row noise_normalizations[] = {{"rank", 1}, {"range", 0}};
 // permissive; statement exprs and param exprs are restricted.
 struct scope {
     bool allow_grids{true};
-    bool allow_pos{true};      // x / y / width / height
+    bool allow_pos{true};      // x / y
     int  param_limit{-1};      // -1 = any param; else only ids < limit
+    bool allow_dims{true};     // width / height
 };
-// Statement scope (guards, counts, `int` arguments): params only - a statement
-// has no cell to read grids or positions from.
-constexpr scope stmt_scope{false, false, -1};
+// Statement scope (guards, counts, `int` arguments): params and width/height -
+// a statement has no cell to read grids or positions from, but the stack has
+// the dimensions it starts from.
+constexpr scope stmt_scope{false, false, -1, true};
 
 struct analyzer {
     ast_file const&       ast;   // the closure's merged declarations
@@ -378,7 +380,8 @@ struct analyzer {
     int compile_ident(expr const& e, int ctx_tag, val_type& t) {
         auto const& name = e.ident;
         if (is_reserved_ident(name)) {
-            if (!scope_.allow_pos)
+            bool dim = name == "width" || name == "height";
+            if (!(dim ? scope_.allow_dims : scope_.allow_pos))
                 return poison(e.loc, "'" + name + "' cannot be read here "
                       "(position/dimension is not available at this scope)", t);
             t = val_type::num;
@@ -821,7 +824,7 @@ struct analyzer {
             if (!p.value) continue;   // missing default already reported
             int e = compile_as(*p.value, val_type::num, p.name.loc,
                                std::string(p.is_derived ? "derived param '" : "default for param '")
-                               + p.name.text + "' must evaluate to a number", scope{false, false, i});
+                               + p.name.text + "' must evaluate to a number", scope{false, false, i, false});
             out.startup_exprs.push_back({i, e, !p.is_derived});
         }
     }
@@ -1582,8 +1585,8 @@ struct analyzer {
 
     // ── statements: the program body and every sequence body ─────────────────
 
-    // A count: a statement-scope expression like a guard - params only, and a
-    // number. Out-of-range values are clamped, with a warning, at run time.
+    // A count: a statement-scope expression like a guard - params and
+    // width/height, and a number. Out-of-range values are clamped, with a warning, at run time.
     void compile_count(program_stmt const& s, compiled_stmt& cs, std::string const& ctx) {
         cs.count = compile_as(*s.count, val_type::num, s.count->loc,
                               "a count must be a number" + ctx, stmt_scope, -1,
@@ -1696,9 +1699,8 @@ struct analyzer {
                     check_reductive(out.rules[cs.rule_id], s.loc);
                 }
             }
-            // `when (expr)` guard: boolean, params only — no grids, no
-            // position/dimensions (there is no candidate position or committed
-            // size at statement scope).
+            // `when (expr)` guard: boolean, params and width/height — no grids,
+            // no x/y (there is no candidate position at statement scope).
             if (s.guard)
                 cs.guard = compile_as(*s.guard, val_type::boolean, s.loc,
                                       "'when' guard must be a boolean expression" + ctx,

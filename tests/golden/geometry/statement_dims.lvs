@@ -1,0 +1,18 @@
+// @seed=42
+// 0.12.2: statement scope reads width/height, evaluated before the statement runs.
+// resize(width * 2, width) reads the old width twice: 2x1 → 4x2. The first guard
+// sees 4x2 and fills all 8 cells; resize(width + 1, height) adds an empty column
+// → 5x2; the second guard (width > 100) is false; scatter(height - 1) fills one
+// of the two empty cells.
+// @expect grid g count(W) == 9
+tag t { W }
+layers { g: grid of t }
+rule fill { g[.] => g[W] }
+sequence main {
+    resize(2, 1)
+    resize(width * 2, width)
+    everywhere fill when (width == 4 && height == 2)
+    resize(width + 1, height)
+    everywhere fill when (width > 100)
+    scatter(height - 1) fill
+}

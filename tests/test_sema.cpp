@@ -251,14 +251,20 @@ sequence main {
     CHECK(ok.ok);
 }
 
-TEST_CASE("sema: counts read params only and are numbers") {
+TEST_CASE("sema: counts read params and dimensions and are numbers") {
     // check 21
     std::string params = "params { n: number = 4 }\n";
-    for (char const* stmt : {"scatter(tiles) fill", "grow(x) fill", "settle(width - 1) fill",
-                             "scatter((height)%) fill"}) {
+    for (char const* stmt : {"scatter(tiles) fill", "grow(x) fill", "scatter((y)%) fill"}) {
         INFO(stmt);
         CHECK(compile_result(prelude + params + rfill + "sequence main { " + stmt + " }")
               .has_error("cannot be read here"));
+    }
+    for (char const* stmt : {"settle(width - 1) fill", "scatter((height)%) fill",
+                             "scatter(n + width) fill"}) {
+        INFO(stmt);
+        compile_result ok(prelude + params + rfill + "sequence main { " + stmt + " }");
+        INFO(ok.diags.format_all());
+        CHECK(ok.ok);
     }
     CHECK(compile_result(prelude + params + rfill + "sequence main { scatter(n > 2) fill }")
           .has_error("a count must be a number"));
@@ -409,6 +415,9 @@ TEST_CASE("sema: when guard discipline") {
     CHECK(compile_result(prelude + rfill +
           "sequence main { everywhere fill when (x > 0) }")
           .has_error("cannot be read here"));
+    compile_result ok(pre + "sequence main { everywhere fill when (width > d && height > 1) }");
+    INFO(ok.diags.format_all());
+    CHECK(ok.ok);
 }
 
 TEST_CASE("sema: named unions") {
@@ -814,9 +823,8 @@ TEST_CASE("sema: operation arguments are expressions resolved by kind") {
     CHECK(ok(params + "sequence main { resize(w, h) }"));
     CHECK(ok(params + "sequence main { resize(w * 2, h + 1)  upscale(f, 1)  pad(f - 1) }"));
     CHECK(ok(params + "sequence main { resize(random(2, 9), 4) }"));
-    // statement scope: params only, a number
-    CHECK(compile_result(params + "sequence main { resize(width, 5) }")
-          .has_error("cannot be read here"));
+    CHECK(ok(params + "sequence main { resize(w, h)  resize(width + 4, height) }"));
+    // statement scope: params and width/height, a number
     CHECK(compile_result(params + "sequence main { resize(x, 5) }")
           .has_error("cannot be read here"));
     CHECK(compile_result(params + "sequence main { resize(level, 5) }")
