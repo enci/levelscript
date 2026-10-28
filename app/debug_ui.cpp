@@ -957,48 +957,92 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
             ImGui::Begin("##StatusBar", nullptr, k_bar_flags);
             ImGui::PopStyleVar();
 
-            std::string status = path.empty() ? std::string("No script open")
-                : std::string(phosphor::PH_STEPS) + " stmt "
-                + std::to_string(run.current_stmt()) + "/"
-                + std::to_string(run.stmt_count);
-            if (run.started && run.apps_in_stmt > 0)
-                status += "   apps=" + std::to_string(run.apps_in_stmt);
-            ImGui::TextUnformatted(status.c_str());
-            if (run.done) { ImGui::SameLine(); ImGui::TextUnformatted("[done]"); }
-            if (!run.paused_at.empty()) {
-                ImGui::SameLine(0.f, 24.f);
-                ImGui::Text("%s Paused on %s", phosphor::PH_CIRCLE, run.paused_at.c_str());
-            }
+            // Each item gets a fixed-width slot sized from a worst-case sample,
+            // so changing numbers never shift their neighbours. A value wider
+            // than its sample widens its slot rather than overlapping.
+            const float slot_gap = 14.f;
+            auto slot = [&](char const* widest, std::string const& text) {
+                float x0 = ImGui::GetCursorPosX();
+                ImGui::TextUnformatted(text.c_str());
+                bool hovered = ImGui::IsItemHovered();
+                float w = std::max(ImGui::CalcTextSize(widest).x,
+                                   ImGui::CalcTextSize(text.c_str()).x);
+                ImGui::SameLine(x0 + w + slot_gap);
+                return hovered;
+            };
+            auto icon = [](char const* ic, std::string const& s) {
+                return std::string(ic) + " " + s;
+            };
 
-            ImGui::SameLine(0.f, 24.f);
-            ImGui::TextUnformatted(phosphor::PH_DICE_FIVE);
-            ImGui::SameLine();
+            // What runs: the seed, then the grid it fills.
             char seed_hex[24];
             std::snprintf(seed_hex, sizeof(seed_hex), "%08llX",
                           (unsigned long long)seed);
-            ImGui::TextUnformatted(seed_hex);
-            if (ImGui::IsItemHovered()) bar_tip = "Click to copy";
+            if (slot(icon(phosphor::PH_DICE_FIVE, "DDDDDDDD").c_str(),
+                     icon(phosphor::PH_DICE_FIVE, seed_hex)))
+                bar_tip = "Seed - click to copy";
             if (ImGui::IsItemClicked()) ImGui::SetClipboardText(seed_hex);
 
-            ImGui::SameLine(0.f, 24.f);
-            ImGui::Text("%s %d x %d", phosphor::PH_GRID_FOUR,
-                        run.snap.width(), run.snap.height());
-            if (ImGui::IsItemHovered()) bar_tip = "Grid size (columns x rows)";
+            char grid_size[32];
+            std::snprintf(grid_size, sizeof(grid_size), "%d x %d",
+                          run.snap.width(), run.snap.height());
+            if (slot(icon(phosphor::PH_GRID_FOUR, "00 x 00").c_str(),
+                     icon(phosphor::PH_GRID_FOUR, grid_size)))
+                bar_tip = "Grid size (columns x rows)";
 
-            ImGui::SameLine(0.f, 24.f);
-            ImGui::TextDisabled("LevelScript " LS_VERSION_STRING);
-            if (ImGui::IsItemHovered()) bar_tip = "LevelScript version";
+            // How far it got: the statement, then the cost so far.
+            if (path.empty()) {
+                slot("", "No script open");
+            } else {
+                std::string progress = "stmt " + std::to_string(run.current_stmt()) + "/"
+                                     + std::to_string(run.stmt_count);
+                if (run.started && run.apps_in_stmt > 0)
+                    progress += " (" + std::to_string(run.apps_in_stmt) + " apps)";
+                if (slot(icon(phosphor::PH_STEPS, "stmt 00/00 (0000 apps)").c_str(),
+                         icon(phosphor::PH_STEPS, progress)))
+                    bar_tip = "Entry statement in progress (applications in the\n"
+                              "statement being worked on)";
 
-            // Load-status chip, flush against the right edge.
-            if (!sc.status.empty()) {
-                std::string msg = std::string(sc.ok ? phosphor::PH_CHECK_CIRCLE
-                                                    : phosphor::PH_WARNING_CIRCLE)
-                                + "  " + sc.status;
-                const float chip_pad = 12.f;
-                ImVec2 wpos  = ImGui::GetWindowPos();
-                ImVec2 wsize = ImGui::GetWindowSize();
-                float  chip_w = std::min(ImGui::CalcTextSize(msg.c_str()).x + chip_pad * 2.f,
-                                         wsize.x * 0.6f);
+                char cost[48] = "";
+                if (run.started)
+                    std::snprintf(cost, sizeof(cost), "%.2f ms, %ld apps",
+                                  run.run_ms, run.total_apps);
+                if (slot(icon(phosphor::PH_TIMER, "00.00 ms, 00000 apps").c_str(),
+                         run.started ? icon(phosphor::PH_TIMER, cost) : std::string()))
+                    bar_tip = "Engine time and rule applications since the start.\n"
+                              "Excludes drawing and pauses; observing adds a little\n"
+                              "(levelscript --profile breaks it down per statement).";
+            }
+
+            // The run's state: last, as the one item that comes and goes.
+            if (!run.paused_at.empty()) {
+                ImGui::Text("%s Paused on %s", phosphor::PH_CIRCLE, run.paused_at.c_str());
+                ImGui::SameLine();
+            } else if (run.done) {
+                ImGui::Text("%s Done", phosphor::PH_CHECK);
+                ImGui::SameLine();
+            }
+
+            // Right side: the version, then the load-status chip flush
+            // against the edge.
+            const float chip_pad = 12.f;
+            ImVec2 wpos  = ImGui::GetWindowPos();
+            ImVec2 wsize = ImGui::GetWindowSize();
+            std::string msg = sc.status.empty() ? std::string()
+                : std::string(sc.ok ? phosphor::PH_CHECK_CIRCLE : phosphor::PH_WARNING_CIRCLE)
+                + "  " + sc.status;
+            float chip_w = msg.empty() ? 0.f
+                : std::min(ImGui::CalcTextSize(msg.c_str()).x + chip_pad * 2.f, wsize.x * 0.6f);
+            {
+                char const* ver = "LevelScript " LS_VERSION_STRING;
+                float x = wsize.x - chip_w - slot_gap - ImGui::CalcTextSize(ver).x;
+                if (x > ImGui::GetCursorPosX() + slot_gap) {   // only when there is room
+                    ImGui::SameLine(x);
+                    ImGui::TextDisabled("%s", ver);
+                    if (ImGui::IsItemHovered()) bar_tip = "LevelScript version";
+                }
+            }
+            if (!msg.empty()) {
                 ImVec2 c0 = { wpos.x + wsize.x - chip_w, wpos.y };
                 ImVec2 c1 = { wpos.x + wsize.x,          wpos.y + wsize.y };
                 ImDrawList* dl = ImGui::GetWindowDrawList();

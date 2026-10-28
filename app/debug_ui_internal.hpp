@@ -123,6 +123,8 @@ struct debug_run {
     int  apps_in_stmt{0};    // applications of the statement being worked on
     int  counted_stmt{-1};
     std::vector<stmt_frame> counted_stack;   // leaf position apps_in_stmt counts for
+    double run_ms{0};        // time spent inside the run's steps - engine only, no UI
+    long   total_apps{0};    // applications since the start
 
     void restart(generator const& g, int entry, uint64_t seed) {
         gen = g.run(entry, seed, step_mode::application, observe::on);
@@ -134,6 +136,8 @@ struct debug_run {
         paused_at.clear();
         apps_in_stmt = 0;
         counted_stmt = -1;
+        run_ms = 0;
+        total_apps = 0;
         refresh();
     }
 
@@ -148,7 +152,11 @@ struct debug_run {
     // Pull one event; false when the run is finished.
     bool advance() {
         if (done) return false;
-        if (!gen.step()) { done = true; return false; }
+        auto t0 = std::chrono::steady_clock::now();
+        bool stepped = gen.step();
+        run_ms += std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - t0).count();
+        if (!stepped) { done = true; return false; }
         started = true;
         // a new leaf statement - at top level or inside a sequence
         int s = gen.statement_index();
@@ -158,7 +166,10 @@ struct debug_run {
             same = st[k].index == counted_stack[k].index &&
                    st[k].iteration == counted_stack[k].iteration;
         if (!same) { counted_stmt = s; counted_stack = std::move(st); apps_in_stmt = 0; }
-        if (!gen.at_statement_boundary() && !gen.at_statement_begin()) apps_in_stmt++;
+        if (!gen.at_statement_boundary() && !gen.at_statement_begin()) {
+            apps_in_stmt++;
+            total_apps++;
+        }
         return true;
     }
 

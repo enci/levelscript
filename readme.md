@@ -62,7 +62,7 @@ To build them yourself:
 Compiles a `.lvs` file, runs one sequence and prints every layer as text.
 
 ```
-levelscript [--seed N] [--entry name] [--param name=value ...] [--inspect] <file.lvs>
+levelscript [--seed N] [--entry name] [--param name=value ...] [--inspect | --profile] <file.lvs>
 levelscript --ast [--no-spans] <file.lvs>
 ```
 
@@ -72,6 +72,7 @@ levelscript --ast [--no-spans] <file.lvs>
 | `--entry name` | Sequence to run (default `main`). If it doesn't exist, the available sequences are listed. |
 | `--param name=value` | Set an integer parameter; repeatable. |
 | `--inspect` | Don't run; print a JSON report (diagnostics, symbols) for editor tooling. |
+| `--profile` | Run once and print, instead of the level, the time and rule applications spent in each statement (sequences include their bodies). |
 | `--ast` | Don't run; print the file's syntax tree, each node with its source range. `--no-spans` leaves the ranges out. The file is parsed alone; its `use`s are not followed. |
 
 ```
@@ -121,3 +122,7 @@ cmake --build build --config Debug --parallel
 build/tests/Debug/ls_tests.exe
 python tools/run_goldens.py
 ```
+
+Single-config generators (Makefiles, Ninja) default to `RelWithDebInfo`; pass
+`-DCMAKE_BUILD_TYPE=Debug` for an unoptimized build. Generation runs about 10x
+slower at `-O0`.

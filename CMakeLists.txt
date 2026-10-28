@@ -11,6 +11,13 @@ if(EMSCRIPTEN)
     return()
 endif()
 
+# A single-config generator with no build type compiles at -O0, where a run is
+# ~10x slower and the debugger visibly animates what should be instant. Default
+# to optimized code that still debugs; pass -DCMAKE_BUILD_TYPE=Debug for -O0.
+if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
+endif()
+
 include(FetchContent)
 
 # ── levelscript-debugger dependencies: SDL3 + ImGui + JSON + stb + FreeType ─────────

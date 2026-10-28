@@ -59,7 +59,8 @@ sequence remove_edge_room {
 }
 
 sequence clear_walls {
-    everywhere (rotation=all) { level[. W .] => level[. . . ] }
+    once (rotation=90) { level[F D F ] => level[* O *] }
+    settle (rotation=90) { level[F O F ] => level[F F F] }
 }
 
 // Decorate
@@ -67,14 +68,18 @@ sequence main {
     resize(24, 16)
     bsp(into=zones, min=5, max=8)
 
-    everywhere border
-    settle connect_rooms    
+    everywhere border       // @play=2
+    settle connect_rooms    // @play=5
     
     pad(1)
     settle(2) remove_edge_room
-    scatter(2) create_door
-    everywhere { level[.] => level[W] }  // @play=10
-    everywhere { level[O] => level[.] }  // @play=100        
-    pad(5)
-    settle(2) clear_walls   // @play=100
+    settle(2) clear_walls
+    
+
+    // scatter(2) create_door
+
+    //everywhere { level[.] => level[W] }  // @play=10
+    //everywhere { level[O] => level[.] }  // @play=100        
+    //pad(5)
+    //settle (rotation=90) { level[. W|D .] => level[. . . ] } // @play=1The 
 }

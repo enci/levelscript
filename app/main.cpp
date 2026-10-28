@@ -3,10 +3,13 @@
 #include "fs_resolver.hpp"
 #include "inspect.hpp"
 #include "ls.hpp"
+#include "modules.hpp"
 #include "version.hpp"
 #include <chrono>
+#include <cstdio>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -16,7 +19,7 @@
 
 static void usage(char const* argv0) {
     std::cerr << "Usage: " << argv0
-              << " [--seed N] [--entry name] [--param name=value ...] [--inspect] <file.lvs>\n"
+              << " [--seed N] [--entry name] [--param name=value ...] [--inspect | --profile] <file.lvs>\n"
               << "       " << argv0 << " --check [--seed N] [--param name=value ...] <file.lvs>\n"
               << "       " << argv0 << " --ast [--no-spans] <file.lvs>\n"
               << "       " << argv0 << " --version\n"
@@ -24,7 +27,9 @@ static void usage(char const* argv0) {
               << "  --entry  the sequence to run (default: main)\n"
               << "  --check  verify the file's // @expect directives, run with its @seed (else 42)\n"
               << "           and @param values; prints each failure, exit 1 if any\n"
-              << "  --ast    print the file's syntax tree; --no-spans leaves out source ranges\n";
+              << "  --ast    print the file's syntax tree; --no-spans leaves out source ranges\n"
+              << "  --profile  run once and print time and rule applications per statement\n"
+              << "           instead of the level\n";
 }
 
 static void print_level(ls::level const& lv, std::ostream& out) {
@@ -120,12 +125,89 @@ static int check_expectations(std::string const& source, std::string const& name
     return failures.empty() ? 0 : 1;
 }
 
+// --profile: run `entry` observed, one rule application per step, and print
+// where the time went per statement - a sequence application inclusive of its
+// body, nested statements indented under it. Observing costs a little, so the
+// plain generate() time of the same run is printed alongside.
+static int profile_run(std::string const& source, std::string const& name,
+                       ls::generator const& gen, int entry, uint64_t seed,
+                       std::vector<std::pair<std::string, int>> const& params) {
+    using clock = std::chrono::steady_clock;
+    auto ms = [](clock::duration d) { return std::chrono::duration<double, std::milli>(d).count(); };
+
+    auto t0 = clock::now();
+    gen.generate(entry, seed, params);
+    double plain_ms = ms(clock::now() - t0);
+
+    // Per statement path (indices through nested sequences; iterations merged)
+    struct stat { double ms{0}; long apps{0}, runs{0}; };
+    std::map<std::vector<int>, stat> stats;
+    double total_ms = 0;
+    long   total_apps = 0;
+    auto r = gen.run(entry, seed, ls::step_mode::application, ls::observe::on, params);
+    r.stop_at_begin(true);
+    for (;;) {
+        // A step's work belongs to the statement it reports
+        auto t = clock::now();
+        if (!r.step()) break;
+        double d = ms(clock::now() - t);
+        total_ms += d;
+        bool begin = r.at_statement_begin();
+        bool app   = !begin && !r.at_statement_boundary();
+        total_apps += app;
+        std::vector<int> path;
+        for (auto const& f : r.stmt_stack()) {
+            path.push_back(f.index);
+            auto& s = stats[path];
+            s.ms += d;
+            s.apps += app;
+        }
+        if (begin && !path.empty()) stats[path].runs++;
+    }
+
+    // Labels from the source: "line  mode target" / "line  op(...)"
+    ls::diagnostics diags;
+    ls::module_closure mods = ls::load_closure(source, name, fs_resolver(), diags);
+    auto find_seq = [&](std::string const& n) -> ls::sequence_decl const* {
+        for (auto const& sq : mods.merged.sequences)
+            if (sq.name.text == n) return &sq;
+        return nullptr;
+    };
+    auto label = [&](std::vector<int> const& path) -> std::string {
+        auto const* sq = find_seq(gen.sequence_name(entry));
+        ls::program_stmt const* st = nullptr;
+        for (int i : path) {
+            if (!sq || i < 0 || i >= (int)sq->stmts.size()) return "?";
+            st = &sq->stmts[(size_t)i];
+            sq = st->inline_rule ? nullptr : find_seq(st->rule_name.text);
+        }
+        if (!st) return "?";
+        std::string where = st->loc.mod == mods.root ? std::to_string(st->loc.line)
+            : mods.names[(size_t)st->loc.mod] + ":" + std::to_string(st->loc.line);
+        if (st->what == ls::program_stmt::kind::op_call) return where + "  " + st->op_name + "(...)";
+        return where + "  " + ls::mode_name(st->mode)
+             + (st->inline_rule ? std::string(" { ... }") : " " + st->rule_name.text);
+    };
+
+    std::printf("%s: entry %s, seed %llu\n", name.c_str(), gen.sequence_name(entry).c_str(),
+                (unsigned long long)seed);
+    std::printf("generate(): %.2f ms; observed: %.2f ms, %ld applications\n\n",
+                plain_ms, total_ms, total_apps);
+    std::printf("%10s %7s %8s %6s  %s\n", "ms", "%", "apps", "runs", "line  statement");
+    for (auto const& [path, s] : stats) {
+        std::printf("%10.2f %6.1f%% %8ld %6ld  %s%s\n", s.ms,
+                    total_ms > 0 ? 100.0 * s.ms / total_ms : 0.0, s.apps, s.runs,
+                    std::string(2 * (path.size() - 1), ' ').c_str(), label(path).c_str());
+    }
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
     std::optional<uint64_t> seed;
     std::string path;
     std::string entry_name = "main";   // a tool convention, not the language's
     std::vector<std::pair<std::string, int>> params;
-    bool inspect = false, check = false;
+    bool inspect = false, check = false, profile = false;
     bool ast = false, spans = true;
 
     for (int i = 1; i < argc; ++i) {
@@ -135,6 +217,8 @@ int main(int argc, char* argv[]) {
             return 0;
         } else if (arg == "--inspect") {
             inspect = true;
+        } else if (arg == "--profile") {
+            profile = true;
         } else if (arg == "--check") {
             check = true;
         } else if (arg == "--ast") {
@@ -213,6 +297,7 @@ int main(int argc, char* argv[]) {
     if (!seed) seed = dirs.seed();
     uint64_t s = seed.value_or((uint64_t)
         std::chrono::high_resolution_clock::now().time_since_epoch().count());
+    if (profile) return profile_run(source, name, gen, entry, s, params);
     print_level(gen.generate(entry, s, params), std::cout);
     return 0;
 }

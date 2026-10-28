@@ -78,7 +78,7 @@ levelscript --seed 2 hello.lvs</code></pre>
     <p>The same seed always gives the same level. From here, look at <a href="samples.html#cave">cave</a> for cellular automata, <a href="samples.html#rooms">rooms</a> for placement with overlap checks, and <a href="samples.html#dungeon">dungeon</a> for several layers working together.</p>
 
     <h2>Command line</h2>
-<pre><code>levelscript [--seed N] [--entry name] [--param name=value ...] [--inspect] &lt;file.lvs&gt;
+<pre><code>levelscript [--seed N] [--entry name] [--param name=value ...] [--inspect | --profile] &lt;file.lvs&gt;
 levelscript --ast [--no-spans] &lt;file.lvs&gt;</code></pre>
     <table>
       <tr><th>Option</th><th>Meaning</th></tr>
@@ -86,6 +86,7 @@ levelscript --ast [--no-spans] &lt;file.lvs&gt;</code></pre>
       <tr><td><code>--entry name</code></td><td>Sequence to run (default <code>main</code>). If it doesn't exist, the available sequences are listed.</td></tr>
       <tr><td><code>--param name=value</code></td><td>Set an integer parameter; repeatable.</td></tr>
       <tr><td><code>--inspect</code></td><td>Don't run; print a JSON report (diagnostics, symbols) for editor tooling.</td></tr>
+      <tr><td><code>--profile</code></td><td>Run once and print, instead of the level, the time and rule applications spent in each statement.</td></tr>
       <tr><td><code>--ast</code></td><td>Don't run; print the syntax tree with source ranges. <code>--no-spans</code> leaves the ranges out.</td></tr>
     </table>
 <pre><code>levelscript --seed 7 --param difficulty=2 tests/golden/programs/arena.lvs</code></pre>
