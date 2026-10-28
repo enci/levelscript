@@ -1,0 +1,30 @@
+// Graph rules (v0.15.0, sections 5.13 and 10.6): guards draw in assignment order.
+//
+// `?a -- ?b` on a chain of four rooms has six assignments, every edge in
+// both directions, collected in lexicographic node order:
+// (0,1) (1,0) (1,2) (2,1) (2,3) (3,2). The guard draws once for each, in
+// that order, and the batch shuffle draws after them. Each application
+// writes its draw into both endpoints' rooms on separate grids.
+//
+// @seed=5
+// @expect run-ok
+
+tag algo { R, H }
+
+layers {
+    level: grid of algo
+    from:  grid of number
+    to:    grid of number
+    map:   graph of level(nodes=R, edges=H)
+}
+
+sequence main {
+    resize(7, 1)
+    once { level[* * * * * * *] => level[R H R H R H R] }
+    everywhere {
+        map { ?a -- ?b }
+        when (random(0, 2) > 0)
+        =>
+        { all from(?a)[ (random(1, 9)) ] to(?b)[ (random(1, 9)) ] }
+    }
+}

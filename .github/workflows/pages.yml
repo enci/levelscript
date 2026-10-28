@@ -12,6 +12,7 @@ on:
       - "src/**"
       - "samples/**"
       - "tests/golden/programs/**"
+      - "tests/golden/graphs/**"
       - "tools/build_site_data.py"
       - "tools/check_wasm_runs.js"
       - "CMakeLists.txt"

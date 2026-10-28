@@ -1,0 +1,31 @@
+// Graph rules (v0.15.0, sections 5.2, 5.13 and 10.6): draws in node-extent writes.
+//
+// Each application draws once per `{ any }` node on its resolved path; then
+// each write cell evaluates once per cell of its node's region, row-major,
+// so a `random` cell gives every cell of a room its own draw.
+//
+// @seed=2
+// @expect run-ok
+
+tag algo { R, H }
+tag loot { gold, ruby }
+
+layers {
+    level: grid of algo
+    items: grid of loot
+    noise: grid of number
+    map:   graph of level(nodes=R, edges=H)
+}
+
+sequence main {
+    resize(7, 2)
+    once { level[* * * * * * *, * * * * * * *] => level[R R H R R H R, R R . R R . .] }
+    everywhere {
+        map { ?n }
+        =>
+        { all
+            { any (weight=2) items(?n)[gold] items(?n)[ruby] }
+            noise(?n)[ (random(0, 9)) ]
+        }
+    }
+}

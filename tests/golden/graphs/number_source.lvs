@@ -1,0 +1,22 @@
+// Graphs (v0.15.0, sections 4.3 and 5.12): a number grid's graph.
+//
+// Every non-empty cell is a node cell, and a node is a patch of one number:
+// the two separate patches of 2 are two nodes. `size` counts a node's cells
+// and `value` reads its number; empty cells separate.
+//
+// @seed=1
+// @expect run-ok
+
+layers {
+    zones: grid of number
+    sizes: grid of number
+    vals:  grid of number
+    areas: graph of zones
+}
+
+sequence main {
+    resize(6, 2)
+    once { zones[* * * * * *, * * * * * *] => zones[1 1 2 . 2 3, 1 . 2 . 2 3] }
+    everywhere { areas[?z] => sizes[ (size(?z)) ] }
+    everywhere { areas[?z] => vals[ (value(?z) * 10 + degree(?z)) ] }
+}

@@ -1,0 +1,33 @@
+// Graph rules (v0.15.0, section 5.13): test lines, edge lines, non-induced matching.
+//
+// `layout` makes rooms, halls, and X cells all nodes. A test line filters a
+// variable's node by its value (a complement too); an edge line needs the
+// two nodes adjacent. Matching is non-induced: `?a -- ?b -- ?c` also matches
+// a triangle, so "the ends are not adjacent" is a rule guard. The X patch
+// under the first room and hall closes a triangle; only the middles of
+// paths that are not triangles get marked c. Each statement marks its own grid.
+//
+// @seed=1
+// @expect run-ok
+
+tag algo { R, H, X }
+tag mark { a, b, c }
+
+layers {
+    level:  grid of algo
+    m1:     grid of mark
+    m2:     grid of mark
+    m3:     grid of mark
+    layout: graph of level(nodes=R|H|X)
+}
+
+sequence main {
+    resize(7, 2)
+    once { level[* * * * * * *, * * * * * * *] => level[R H R X R H R, X X . . . . .] }
+    // rooms next to a hall
+    everywhere { layout { ?r[R] ?h[H] ?r -- ?h } => m1(?r)[a] }
+    // anything but a room, next to a room on both sides
+    everywhere { layout { ?n[!R] ?l -- ?n ?n -- ?r } when (?l != ?r) => m2(?n)[b] }
+    // the middle of a path whose ends are not adjacent
+    everywhere { layout { ?a -- ?b ?b -- ?c } when (?a != ?c && !adjacent(?a, ?c)) => m3(?b)[c] }
+}

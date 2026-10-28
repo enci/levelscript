@@ -1,0 +1,32 @@
+// Graphs (v0.15.0, section 5.12): targets - selectors and nodes.
+//
+// A chain of five rooms with a Boss mark in the middle room and an island
+// room off the chain. `distance` to a selector is the fewest edges to any
+// selected node (the island is unreachable, 2^30, shown capped at 9);
+// `neighbors` counts selected neighbours; a node target compares two
+// bound nodes: each room two edges from another, in either direction.
+//
+// @seed=1
+// @expect run-ok
+
+tag algo { R, H }
+tag mark { Boss }
+
+layers {
+    level: grid of algo
+    marks: grid of mark
+    dist:  grid of number
+    near:  grid of number
+    pairs: grid of number
+    map:   graph of level(nodes=R, edges=H)
+}
+
+sequence main {
+    resize(11, 1)
+    once { level[* * * * * * * * * * *] => level[R H R H R H R H R . R] }
+    once { marks[* * * * * * * * * * *] => marks[. . . . Boss . . . . . .] }
+    everywhere { map[?n] => dist[ (min(distance(?n, marks[Boss]), 9)) ] }
+    everywhere { map[?n] => near[ (neighbors(?n, marks[Boss])) ] }
+    // two rooms two edges apart, through a node target
+    everywhere (rotation=all) { map[?a * * * ?b] when (distance(?a, ?b) == 2) => pairs[* * * * 2] }
+}

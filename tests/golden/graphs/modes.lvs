@@ -1,0 +1,35 @@
+// Graph rules (v0.15.0, sections 5.13 and 6.7): every mode over assignments.
+//
+// One chain of seven rooms; each statement marks its own grid. `once` and
+// `scatter(N)` pick among nodes, not cells; `everywhere` marks every node;
+// `grow` and `settle` read the marks again between applications or sweeps,
+// so the marked rooms spread one room per step from a dead end: two steps
+// under `grow(2)`, to the whole chain under `settle`.
+//
+// @seed=3
+// @expect run-ok
+
+tag algo { R, H }
+tag mark { on }
+
+layers {
+    level: grid of algo
+    m_once:    grid of mark
+    m_scatter: grid of mark
+    m_every:   grid of mark
+    m_grow:    grid of mark
+    m_settle:  grid of mark
+    map:   graph of level(nodes=R, edges=H)
+}
+
+sequence main {
+    resize(13, 1)
+    once { level[* * * * * * * * * * * * *] => level[R H R H R R H R H R H R R] }
+    once { map { ?n } => m_once(?n)[on] }
+    scatter(2) { map { ?n } => m_scatter(?n)[on] }
+    everywhere { map { ?n } when (size(?n) == 1) => m_every(?n)[on] }
+    once { map[?n *] when (degree(?n) == 1) => m_grow[on *] }
+    grow(2) { map { ?n } when (distance(?n, m_grow[on]) == 1) => m_grow(?n)[on] }
+    once { map[?n *] when (degree(?n) == 1) => m_settle[on *] }
+    settle { map { ?n } when (distance(?n, m_settle[on]) == 1) => m_settle(?n)[on] }
+}

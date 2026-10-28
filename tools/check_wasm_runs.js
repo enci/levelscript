@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Runs every sample through the WASM build (the one the website uses) and compares
+// Runs every sample program (tests/golden/programs) and graph golden
+// (tests/golden/graphs) through the WASM build (the one the website uses) and compares
 // the result with its golden .expected, the same text `levelscript` prints.
 // Guards the "live" demos against drifting from the native implementation.
 //
@@ -30,8 +31,10 @@ function format(level) {
 
 (async () => {
   const m = await createLsModule();
-  const dir = path.join(ROOT, 'tests', 'golden', 'programs');
+  // the sample programs, and the graph goldens, which pin the newest draw rules
+  const dirs = ['programs', 'graphs'].map(d => path.join(ROOT, 'tests', 'golden', d));
   let failed = 0, checked = 0;
+  for (const dir of dirs)
   for (const f of fs.readdirSync(dir).filter(n => n.endsWith('.lvs')).sort()) {
     const exp = path.join(dir, f.replace(/\.lvs$/, '.expected'));
     if (!fs.existsSync(exp)) continue;
@@ -51,6 +54,6 @@ function format(level) {
     m.run_end(id);
     if (got !== fs.readFileSync(exp, 'utf8')) { console.log(`FAIL ${f}: output differs from ${path.basename(exp)}`); failed++; }
   }
-  console.log(`${checked - failed}/${checked} samples match their goldens`);
+  console.log(`${checked - failed}/${checked} programs match their goldens`);
   process.exit(failed ? 1 : 0);
 })();

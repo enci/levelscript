@@ -1,0 +1,29 @@
+// Graph rules (v0.15.0, sections 5.2 and 5.13): `ordered` across two graphs.
+//
+// Sub-rules may name different graphs. Under `grow`, the first sub-rule
+// fires while it has assignments (closing one-cell rooms, which `rooms`
+// sees); only then does the second (marking unmarked halls, which `layout`
+// sees). Four steps: two rooms closed, then two of the three halls marked.
+// Each sub-rule's assignments are collected in turn.
+//
+// @seed=4
+// @expect run-ok
+
+tag algo { R, H, W }
+tag mark { hall }
+
+layers {
+    level:  grid of algo
+    marks:  grid of mark
+    rooms:  graph of level(nodes=R, edges=H)
+    layout: graph of level(nodes=R|H)
+}
+
+sequence main {
+    resize(9, 1)
+    once { level[* * * * * * * * *] => level[R H R R H R H R R] }
+    grow(4) { ordered
+        rooms  { ?n } when (size(?n) == 1) => level(?n)[W]
+        layout { ?h[H] } when (distance(?h, marks[hall]) > 0) => marks(?h)[hall]
+    }
+}

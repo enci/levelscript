@@ -1,0 +1,31 @@
+// Graphs (v0.15.0, section 4.3): the three graph forms read one grid.
+//
+// `whole` sees every non-empty cell as a node cell, so each 4-connected
+// patch of one value is a node and touching patches are adjacent. `rooms`
+// keeps only R cells, so the halls separate. `halls` joins rooms through
+// connector regions; the H region in the middle touches four rooms and
+// joins every pair of them, and the lone H on the right joins two. Each cell shows its node's degree.
+//
+// @seed=1
+// @expect run-ok
+
+tag algo { R, H }
+
+layers {
+    level: grid of algo
+    whole: grid of number
+    rooms: grid of number
+    halls: grid of number
+    g_whole: graph of level
+    g_rooms: graph of level(nodes=R)
+    g_halls: graph of level(nodes=R, edges=H)
+}
+
+sequence main {
+    resize(7, 3)
+    once { level[* * * * * * *, * * * * * * *, * * * * * * *] =>
+           level[R R H R R . R, . . H . . . H, R H H H H H R] }
+    everywhere { g_whole[?n] => whole[ (degree(?n)) ] }
+    everywhere { g_rooms[?n] => rooms[ (degree(?n)) ] }
+    everywhere { g_halls[?n] => halls[ (degree(?n)) ] }
+}

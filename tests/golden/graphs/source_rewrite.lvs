@@ -1,0 +1,29 @@
+// Graph rules (v0.15.0, sections 4.3 and 5.13): writing a graph's source.
+//
+// A node extent may write the graph's own source. Rewriting a region to a
+// neighbour's value merges the two at the next extraction. A batch sees one
+// snapshot, so every small zone joins a larger neighbour at once - the
+// shuffle picks which, since two assignments writing one small zone
+// conflict - and `settle` sweeps until no zone has a larger neighbour.
+//
+// @seed=1
+// @expect run-ok
+
+layers {
+    zones: grid of number
+    areas: graph of zones
+}
+
+rule absorb {
+    areas { ?small ?big -- ?small }
+    when (size(?small) < 4 && size(?big) > size(?small))
+    =>
+    zones(?small)[ (value(?big)) ]
+}
+
+sequence main {
+    resize(6, 3)
+    once { zones[* * * * * *, * * * * * *, * * * * * *] =>
+           zones[1 1 2 3 3 3, 1 1 4 3 3 3, 5 6 6 6 7 3] }
+    settle absorb
+}
