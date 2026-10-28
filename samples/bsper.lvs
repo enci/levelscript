@@ -1,68 +1,80 @@
-// A level generator based on  BPS
+// A level generator based on  Binary Space Partitioning (BSP)
 
-tag level { floor wall }
-tag expansion { e }
+tag level {
+    F // @name=floor
+    W // @name=wall
+    D // @name=door
+    O // @name=open
+}
 
+tag entities {
+    S // @name=spawn
+    E // @name=exit
+    P // @name=player
+    N // @name=enemy
+    I // @name=item
+}
+
+tag room { start, exit, guard, hub }
 
 layers {
     level: grid of level
     zones: grid of number
-    //expansion : grid of expansion
-    expand: grid of number
+    map : graph of level(nodes=F, edges=D)
 }
 
-params {
-    merge : number = 0
+rule border(rotation=90) {
+    zones[?a ?b] when(?b != ?a) => level[* W ]
 }
 
-rule border(rotation=all) {
-    zones[?a *]
-    where[* (zones != ?a)]
-    =>
-    level[* wall]
-}
-
-rule merge_init(rotation=all) {
-    zones[?a ?b]
-    where[* (zones != ?a)]
-    => { all 
-        zones[?a * ]
-        expand[* ?a]
-    }
-}
-
-rule merge_flood(rotation=all) {    
-    zones[?a ?a] expand[?b . ] => expand[?b ?b]
-}
-
-rule merge_fill {
-    expand[?b] => {all expand[.] zones[?b] }
-}
-
-sequence merge_rooms {
-    once merge_init
-    settle merge_flood
-    everywhere merge_fill
-}
-
-rule fix_corner(rotation=all) {
+rule create_door(rotation=all) {
     level[
-        wall floor
-        wall wall]
-    => level[
-        wall wall
-        wall wall]
+        
+        F W . 
+        F W . 
+        F W . 
+    ] => level[
+        F W F 
+        F D F 
+        F W F 
+    ]
 }
 
+rule fill_room (rotation=all) { level[F . ] => level[F F] }
+
+sequence expand_room {
+    once create_door
+    settle fill_room
+}
+
+sequence connect_rooms {
+    once { level[.] => level[F] }
+    settle fill_room
+    settle expand_room
+}
+
+sequence remove_edge_room {
+    once (rotation=all) { map[* ?n] level[. F ] when (degree(?n) == 1) => level[. O] }
+    settle (rotation=all) { level[O F ] => level[O O] }
+}
+
+sequence clear_walls {
+    everywhere (rotation=all) { level[. W .] => level[. . . ] }
+}
+
+// Decorate
 sequence main {
-    resize(48, 32)
-    bsp(into=zones, min=8, max=14)
+    resize(24, 16)
+    bsp(into=zones, min=5, max=8)
 
-    settle(3) merge_rooms
-
-    everywhere border    
-    everywhere { level[.] => level[floor] } // @play=10
-    pad(2)
-    everywhere { level[.] => level[wall] }  // @play=10
-    // everywhere fix_corner
+    everywhere border
+    settle connect_rooms    
+    
+    pad(1)
+    settle(2) remove_edge_room
+    scatter(2) create_door
+    everywhere { level[.] => level[W] }  // @play=10
+    everywhere { level[O] => level[.] }  // @play=100        
+    pad(5)
+    settle(2) clear_walls   // @play=100
 }

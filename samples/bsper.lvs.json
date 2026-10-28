@@ -1,5 +1,9 @@
 {
   "cell_zoom": 1.0,
+  "graphs": [
+    "connect",
+    "map"
+  ],
   "grid_bg_color": "282828",
   "layers": [
     {
@@ -17,20 +21,13 @@
       "opacity": 1.0,
       "tileset": "",
       "visible": true
-    },
-    {
-      "corner": "normal",
-      "mode": "text",
-      "name": "expand",
-      "opacity": 1.0,
-      "tileset": "",
-      "visible": true
     }
   ],
   "mini_px": 24.0,
   "tag_colors": {
-    "expansion": null,
-    "level": null
+    "entities": null,
+    "level": null,
+    "room": null
   },
   "tilesets": []
 }
