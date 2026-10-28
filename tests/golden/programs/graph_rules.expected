@@ -1,0 +1,39 @@
+=== level ===
+r r r . r r r . r r r . r r r
+r r r h r r r h r r r h r r r
+r r r . r r r . r r r . r r r
+. h . . . . . . . h . . . . .
+r r r . r r r . r r r . r r r
+r r r h r r r . r r r h r r r
+r r r . r r r . r r r . r r r
+. h . . . . . . . h . . . h .
+r r r . r r r . r r r . r r r
+r r r . r r r . r r r h r r r
+r r r . r r r . r r r . r r r
+
+=== roles ===
+. . . . v v v . h h h . s s s
+. . . . v v v . h h h . s s s
+. . . . v v v . h h h . s s s
+. . . . . . . . . . . . . . .
+h h h . v v v . h h h . v v v
+h h h . v v v . h h h . v v v
+h h h . v v v . h h h . v v v
+. . . . . . . . . . . . . . .
+t t t . . . . . . . . . . . .
+t t t . . . . . . . . . . . .
+t t t . . . . . . . . . . . .
+
+=== depth ===
+3 3 3 . 2 2 2 . 1 1 1 . 0 0 0
+3 3 3 . 2 2 2 . 1 1 1 . 0 0 0
+3 3 3 . 2 2 2 . 1 1 1 . 0 0 0
+. . . . . . . . . . . . . . .
+4 4 4 . 5 5 5 . 2 2 2 . 3 3 3
+4 4 4 . 5 5 5 . 2 2 2 . 3 3 3
+4 4 4 . 5 5 5 . 2 2 2 . 3 3 3
+. . . . . . . . . . . . . . .
+5 5 5 . 9 9 9 . 3 3 3 . 4 4 4
+5 5 5 . 9 9 9 . 3 3 3 . 4 4 4
+5 5 5 . 9 9 9 . 3 3 3 . 4 4 4
+

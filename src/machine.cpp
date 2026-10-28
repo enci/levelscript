@@ -342,7 +342,7 @@ sequence<step_event> machine::run_leaf(compiled_stmt const& st, int top, int cou
             std::unordered_set<uint64_t> written;
             record_highlights(pair, m);
             apply(pair, m, written);
-            for (auto& g : grids_) std::swap(g.front, g.back);
+            commit_writes();
             ++applied;
             co_yield step_event{step_event::kind::application, top};
         }
@@ -375,7 +375,7 @@ sequence<step_event> machine::run_leaf(compiled_stmt const& st, int top, int cou
             }
             in_batch_ = false;
             bool changed = grids_differ();
-            for (auto& g : grids_) std::swap(g.front, g.back);
+            commit_writes();
             ++sweeps;
             if (!stab || !changed) break;
         }
@@ -459,7 +459,7 @@ machine::match machine::pick_candidate(compiled_rule const& rule,
 
 std::vector<machine::match> machine::applicable_prefix(
         compiled_rule const& rule, std::vector<match> const& ordered_ms,
-        int pct) const {
+        int pct) {
     std::vector<match> app;
     std::unordered_set<uint64_t> sim;
     for (auto const& m : ordered_ms) {
@@ -474,18 +474,18 @@ std::vector<machine::match> machine::applicable_prefix(
 }
 
 void machine::add_write_footprint(compiled_pair const& pair, match const& m,
-                                  std::unordered_set<uint64_t>& out) const {
-    std::vector<compiled_pattern const*> leaves;
-    collect_write_leaves(pair.rhs, leaves);
-    for (auto const* pp : leaves) {
-        auto const& pat = *pp;
-        if (pat.grid_id < 0) continue;
-        int cols = grids_[pat.grid_id].cols;
-        for (int r = 0; r < pat.rows; ++r)
-            for (int c = 0; c < pat.cols; ++c) {
-                if (pat.at(r, c).what == compiled_cell::kind::wildcard) continue;
-                out.insert(mask_key(pat.grid_id, (m.row + r) * cols + (m.col + c)));
-            }
+                                  std::unordered_set<uint64_t>& out) {
+    for_write_cells(pair, m, [&](int grid, int flat) {
+        out.insert(mask_key(grid, flat));
+        return false;
+    });
+}
+
+void machine::commit_writes() {
+    for (auto& g : grids_) {
+        std::swap(g.front, g.back);
+        if (g.written) ++g.version;
+        g.written = false;
     }
 }
 
@@ -499,6 +499,20 @@ bool machine::grids_differ() const {
 void machine::record_highlights(compiled_pair const& pair, match const& m) {
     if (!observe_) return;
     highlights_.clear();
+    if (pair.graph >= 0) {   // assigned regions in the source, and every cell the extents may write
+        graph_data const& g = graph(pair.graph);
+        int src = prog_->graphs[(size_t)pair.graph].source;
+        for (int s = 0; s < (int)pair.var_names.size(); ++s) {
+            int n = assigned_[(size_t)(m.nodes + s)];
+            for (int const* c = g.region_begin(n); c != g.region_end(n); ++c)
+                highlights_.push_back({src, *c / cols_, *c % cols_, false});
+        }
+        for_write_cells(pair, m, [&](int grid, int flat) {
+            highlights_.push_back({grid, flat / cols_, flat % cols_, true});
+            return false;
+        });
+        return;
+    }
     for (auto const& pat : pair.lhs) {
         if (pat.grid_id < 0) continue;
         for (int r = 0; r < pat.rows; ++r)
@@ -1126,7 +1140,12 @@ void machine::run_path(compiled_op const& op, int ndirs) {
 // Match-side `random` draws fire in exactly this order.
 std::vector<machine::match> machine::collect(compiled_rule const& rule) {
     std::vector<match> out;
+    assigned_.clear();
     if (rows_ <= 0 || cols_ <= 0) return out;
+    if (!rule.pairs.empty() && rule.pairs[0].graph >= 0) {   // a body is all one kind
+        collect_assignments(rule, out);
+        return out;
+    }
     for (int r = 0; r < rows_; ++r)
         for (int c = 0; c < cols_; ++c)
             for (int pi = 0; pi < (int)rule.pairs.size(); ++pi) {
@@ -1136,6 +1155,68 @@ std::vector<machine::match> machine::collect(compiled_rule const& rule) {
                 if (match_at(pair, r, c)) out.push_back({pi, r, c});
             }
     return out;
+}
+
+// Depth-first over the slots, each trying nodes in ascending id order, so
+// full assignments come out lexicographically - the pinned order in which
+// rule guards draw. Test and edge lines are phase 1: pure, checked as soon as
+// their slots are assigned. A slot joined to an earlier one ranges over that
+// node's adjacency set, ascending too, so the order is unchanged.
+void machine::collect_assignments(compiled_rule const& rule, std::vector<match>& out) {
+    for (int pi = 0; pi < (int)rule.pairs.size(); ++pi) {
+        auto const& pair = rule.pairs[pi];
+        if (pair.graph < 0) continue;
+        graph_data const& g = graph(pair.graph);
+        int k = (int)pair.var_names.size();
+        if (k == 0 || g.node_count() < k) continue;
+        bool number = grids_[(size_t)prog_->graphs[(size_t)pair.graph].source].is_number;
+        std::vector<int64_t> test(k);
+        std::vector<char> tested(k, 0);
+        for (auto const& t : pair.node_tests) { test[(size_t)t.slot] = t.val; tested[(size_t)t.slot] = 1; }
+        std::vector<std::vector<int>> joined(k);   // per slot: the earlier slots it is adjacent to
+        for (auto const& e : pair.node_edges) {
+            int lo = std::min(e.a, e.b), hi = std::max(e.a, e.b);
+            joined[(size_t)hi].push_back(lo);
+        }
+        std::vector<int> nodes(k, -1);
+        auto fits = [&](int s, int n) {
+            for (int i = 0; i < s; ++i)
+                if (nodes[(size_t)i] == n) return false;   // distinct variables, distinct nodes
+            if (tested[(size_t)s]) {
+                int64_t v = g.values[(size_t)n];
+                if (number ? v != test[(size_t)s] : (v & test[(size_t)s]) == 0) return false;
+            }
+            for (int j : joined[(size_t)s]) {
+                auto const& adj = g.adj[(size_t)n];
+                if (!std::binary_search(adj.begin(), adj.end(), nodes[(size_t)j])) return false;
+            }
+            return true;
+        };
+        // Phase 2 on a full assignment: rule guards, in written order.
+        auto accept = [&] {
+            int at = (int)assigned_.size();
+            assigned_.insert(assigned_.end(), nodes.begin(), nodes.end());
+            cur_pair_  = &pair;
+            cur_nodes_ = at;
+            for (auto const& gd : pair.guards)
+                if (eval(gd.expr, 0, 0) == 0) { assigned_.resize((size_t)at); return; }   // reads no x/y
+            out.push_back({pi, 0, 0, at});
+        };
+        auto assign = [&](auto& self, int s) -> void {
+            if (s == k) { accept(); return; }
+            auto take = [&](int n) {
+                if (!fits(s, n)) return;
+                nodes[(size_t)s] = n;
+                self(self, s + 1);
+            };
+            if (!joined[(size_t)s].empty())
+                for (int n : g.adj[(size_t)nodes[(size_t)joined[(size_t)s][0]]]) take(n);
+            else
+                for (int n = 0; n < g.node_count(); ++n) take(n);
+            nodes[(size_t)s] = -1;
+        };
+        assign(assign, 0);
+    }
 }
 
 // Two phases: every bare and binding cell of every pattern first - pure,
@@ -1206,19 +1287,33 @@ bool machine::match_computed(compiled_pattern const& pat, int row, int col) {
 // conservative across { any } branches; the mask is (grid, cell)-keyed and
 // write-only.
 bool machine::conflicts(compiled_pair const& pair, match const& m,
-                        std::unordered_set<uint64_t> const& written) const {
+                        std::unordered_set<uint64_t> const& written) {
     if (written.empty()) return false;
+    return for_write_cells(pair, m, [&](int grid, int flat) {
+        return written.count(mask_key(grid, flat)) != 0;
+    });
+}
+
+template <class F>
+bool machine::for_write_cells(compiled_pair const& pair, match const& m, F&& f) {
     std::vector<compiled_pattern const*> leaves;
     collect_write_leaves(pair.rhs, leaves);
     for (auto const* pp : leaves) {
         auto const& pat = *pp;
         if (pat.grid_id < 0) continue;
+        if (pat.extent >= 0) {   // a node extent: its node's region, whatever its cell
+            if (pat.cells.empty() || pat.cells[0].what == compiled_cell::kind::wildcard) continue;
+            graph_data const& g = graph(pair.graph);
+            int n = assigned_[(size_t)(m.nodes + pat.extent)];
+            for (int const* c = g.region_begin(n); c != g.region_end(n); ++c)
+                if (f(pat.grid_id, *c)) return true;
+            continue;
+        }
         int cols = grids_[pat.grid_id].cols;
         for (int r = 0; r < pat.rows; ++r)
             for (int c = 0; c < pat.cols; ++c) {
                 if (pat.at(r, c).what == compiled_cell::kind::wildcard) continue;
-                if (written.count(mask_key(pat.grid_id, (m.row + r) * cols + (m.col + c))))
-                    return true;
+                if (f(pat.grid_id, (m.row + r) * cols + (m.col + c))) return true;
             }
     }
     return false;
@@ -1257,13 +1352,28 @@ void machine::apply(compiled_pair const& pair, match const& m,
     cur_pair_ = &pair;
     anchor_row_ = m.row;
     anchor_col_ = m.col;
+    cur_nodes_ = m.nodes;
     std::vector<compiled_pattern const*> writes;
     resolve_write(pair.rhs, writes);
     for (auto const* pp : writes) {
         auto const& pat = *pp;
         if (pat.grid_id < 0) continue;
         grid_state& g = grids_[pat.grid_id];
-        ++g.version;
+        g.written = true;
+        if (pat.extent >= 0) {   // one cell over the node's region, row-major
+            if (pat.cells.empty()) continue;
+            auto const& cell = pat.cells[0];
+            if (cell.what == compiled_cell::kind::wildcard) continue;
+            graph_data const& gd = graph(pair.graph);
+            int n = assigned_[(size_t)(m.nodes + pat.extent)];
+            for (int const* c = gd.region_begin(n); c != gd.region_end(n); ++c) {
+                g.back[(size_t)*c] = cell.what == compiled_cell::kind::expr
+                                   ? eval(cell.expr, *c % g.cols, *c / g.cols)
+                                   : cell.val;
+                written.insert(mask_key(pat.grid_id, *c));
+            }
+            continue;
+        }
         for (int r = 0; r < pat.rows; ++r)
             for (int c = 0; c < pat.cols; ++c) {
                 auto const& cell = pat.at(r, c);

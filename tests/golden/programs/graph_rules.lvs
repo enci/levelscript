@@ -1,0 +1,59 @@
+// Showcase (v0.15.0): graph rules (section 5.13) on the graph_rooms lattice.
+//
+// A graph block chooses rooms as units: `once` picks the start uniformly
+// among dead-end rooms, whatever their size, and a node extent writes the
+// whole room at once, so no spreading pass is needed. Edge lines match two
+// rooms joined by a hall, a rule guard draws on each assignment in node-id
+// order, and an `{ any }` write draws once per application.
+//
+// @seed=2
+// @expect run-ok
+
+tag algo { room, hall }
+tag role { dead_end, start, guard, hub, treasure, vendor, inn }
+
+layers {
+    level: grid of algo
+    roles: grid of role
+    depth: grid of number
+    map:   graph of level(nodes=room, edges=hall)
+}
+
+rule lattice { level[.] where[ (x - x / 4 * 4 < 3 && y - y / 4 * 4 < 3) ] => level[room] }
+rule hall_across { level[.] where[ (x - x / 4 * 4 == 3 && y - y / 4 * 4 == 1) ] => level[hall] }
+rule hall_down   { level[.] where[ (y - y / 4 * 4 == 3 && x - x / 4 * 4 == 1) ] => level[hall] }
+
+rule pick_start { map { ?n } when (degree(?n) == 1) => roles(?n)[start] }
+rule guards { map { ?s ?g -- ?s } when (distance(?s, roles[start]) == 0) => roles(?g)[guard] }
+rule far_treasure {
+    map { ?n }
+    when (degree(?n) == 1 && distance(?n, roles[start]) > 2)
+    =>
+    roles(?n)[treasure]
+}
+// A hub and one of its neighbours, the pair chosen with a coin per assignment.
+rule hub_vendor {
+    map {
+        ?hub
+        ?hub -- ?a
+    }
+    when (degree(?hub) >= 3 && random(0, 1) == 1)
+    =>
+    { all
+        roles(?hub)[hub]
+        { any (weight=3) roles(?a)[vendor] roles(?a)[inn] }
+    }
+}
+rule depths { map { ?n } => depth(?n)[ (min(distance(?n, roles[start]), 9)) ] }
+
+sequence main {
+    resize(15, 11)
+    everywhere lattice
+    scatter(70%) hall_across
+    scatter(70%) hall_down
+    once pick_start
+    everywhere guards
+    scatter(2) far_treasure
+    everywhere hub_vendor
+    everywhere depths
+}

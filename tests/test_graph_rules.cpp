@@ -2,7 +2,10 @@
 // value tests matches a subgraph; node extents write whole regions. Also
 // `value(n)`, the graph function graph rules rely on.
 #include "test_support.hpp"
+#include "machine.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <random>
+#include <set>
 #include <string>
 
 using ts::compile_result;
@@ -192,4 +195,190 @@ TEST_CASE("graph rules: grow never warns") {
     INFO(r.diags.format_all());
     REQUIRE(r.ok);
     for (auto const& d : r.diags.all) CHECK(d.is_error);
+}
+
+// ── running graph rules ──────────────────────────────────────────────────────
+
+namespace {
+
+ls::level generate(std::string const& src, uint64_t seed = 1) {
+    auto gen = ts::make(src);
+    INFO(gen.error());
+    REQUIRE(static_cast<bool>(gen));
+    return gen.generate(gen.sequence("main"), seed);
+}
+
+// Rooms R joined through halls H; marks on `rooms`, `items`, and `ids`.
+const std::string dungeon = R"(
+tag algo { R, H, W }
+tag room { DeadEnd, Boss, Start }
+tag item { chest }
+layers {
+    level:  grid of algo
+    rooms:  grid of room
+    items:  grid of item
+    ids:    grid of number
+    map:    graph of level(nodes=R, edges=H)
+    layout: graph of level(nodes=R|H)
+    areas:  graph of ids
+}
+)";
+
+// Rooms A (2x2), B (2x2), C (1 cell): A-B and B-C through halls.
+const std::vector<std::string> abc = {"R R H R R H R", "R R . R R . ."};
+// Three one-cell rooms in a chain: nodes 0 - 1 - 2.
+const std::vector<std::string> chain = {"R H R H R"};
+
+}  // namespace
+
+TEST_CASE("graph rules: a node extent writes the whole region") {
+    auto lv = generate(ts::stamped(dungeon, "level", abc,
+        "everywhere { map { ?n } when (degree(?n) == 1) => rooms(?n)[DeadEnd] }"));
+    CHECK(ts::show(lv, "rooms") == "DD....D/DD.....");
+    // a write cell evaluates per cell of the region, with x/y that cell
+    auto ids = generate(ts::stamped(dungeon, "level", abc,
+        "everywhere { map { ?n } => ids(?n)[ (x + 10 * y) ] }"));
+    CHECK(ts::show(ids, "ids") == "01.34.6/1011.1314..");
+}
+
+TEST_CASE("graph rules: once chooses uniformly among nodes, whatever their size") {
+    // C is one cell of nine room cells, but one node of three
+    auto picks_c = [&](std::string const& rule) {
+        auto gen = ts::make(ts::stamped(dungeon, "level", abc, rule));
+        REQUIRE(static_cast<bool>(gen));
+        int n = 0;
+        for (uint64_t seed = 1; seed <= 300; ++seed)
+            n += !gen.generate(gen.sequence("main"), seed)["rooms"].is_empty(6, 0);
+        return n;
+    };
+    int by_node = picks_c("once { map { ?n } => rooms(?n)[Boss] }");
+    int by_cell = picks_c("once { map[?n] => rooms[Boss] }");
+    CHECK(by_node > 70);    // ~100 of 300
+    CHECK(by_node < 130);
+    CHECK(by_cell < 60);    // ~33 of 300
+}
+
+TEST_CASE("graph rules: assignments are collected in lexicographic node order") {
+    // `?a -- ?b` on the chain: (0,1) (1,0) (1,2) (2,1) - every edge twice. A
+    // step pick is the item at uniform(4), after the stamp's one uniform(1).
+    std::string rule = "once { map { ?a -- ?b } => { all rooms(?a)[Start] items(?b)[chest] } }";
+    int const want[4][2] = {{0, 1}, {1, 0}, {1, 2}, {2, 1}};
+    auto gen = ts::make(ts::stamped(dungeon, "level", chain, rule));
+    REQUIRE(static_cast<bool>(gen));
+    std::set<int> seen;
+    for (uint64_t seed = 1; seed <= 40; ++seed) {
+        std::mt19937_64 rng(seed);
+        ls::internal::uniform_draw(rng, 1);
+        int k = (int)ls::internal::uniform_draw(rng, 4);
+        seen.insert(k);
+        auto lv = gen.generate(gen.sequence("main"), seed);
+        auto lay = lv.graph("map");
+        INFO("seed " << seed);
+        int a = -1, b = -1;
+        for (int x = 0; x < 5; ++x) {
+            if (!lv["rooms"].is_empty(x, 0)) a = lay.node_at(x, 0);
+            if (!lv["items"].is_empty(x, 0)) b = lay.node_at(x, 0);
+        }
+        CHECK(a == want[k][0]);
+        CHECK(b == want[k][1]);
+    }
+    CHECK(seen.size() == 4);
+}
+
+TEST_CASE("graph rules: tests and edges filter assignments") {
+    // a test reads the node's value in the source; an edge line needs adjacency
+    auto chests = generate(ts::stamped(dungeon, "level", {"R H R H W"},
+        "everywhere { layout { ?n[R] ?m[H] ?n -- ?m } => items(?n)[chest] }"));
+    CHECK(ts::show(chests, "items") == "c.c..");
+    // non-induced: unlisted edges are fine; `!adjacent` excludes them
+    auto pairs = generate(ts::stamped(dungeon, "level", chain,
+        "everywhere { map { ?a ?b } when (!adjacent(?a, ?b) && ?a != ?b) => rooms(?a)[Boss] }"));
+    CHECK(ts::show(pairs, "rooms") == "B...B");
+    // more variables than nodes: no candidates
+    auto none = generate(ts::stamped(dungeon, "level", {"R H R"},
+        "everywhere { map { ?a ?b ?c } => rooms(?a)[Boss] }"));
+    CHECK(ts::show(none, "rooms") == "...");
+}
+
+TEST_CASE("graph rules: the write mask works on regions") {
+    // The applications of one statement: its run's steps beyond a run without it.
+    auto steps = [&](std::string const& stmt) {
+        auto gen = ts::make(ts::stamped(dungeon, "level", chain, stmt));
+        REQUIRE(static_cast<bool>(gen));
+        auto run = gen.run(gen.sequence("main"), 7, ls::step_mode::application);
+        int n = 0;
+        while (run.step()) ++n;
+        return n;
+    };
+    int base = steps("everywhere { map { ?n } when (size(?n) > 1) => rooms(?n)[Start] }");
+    // as ?a, nodes 0 and 2 have one assignment each and node 1 two, which
+    // conflict on rooms over node 1: three applications
+    CHECK(steps("everywhere { map { ?a -- ?b } => rooms(?a)[Start] }") - base == 3);
+    // with a second grid, (0,1) and (2,1) also share items over node 1:
+    // whatever the shuffle, two applications
+    CHECK(steps("everywhere { map { ?a -- ?b } => { all rooms(?a)[Start] items(?b)[chest] } }") - base == 2);
+    // a one-variable rule never conflicts with itself
+    CHECK(steps("everywhere { map { ?n } => rooms(?n)[Start] }") - base == 3);
+}
+
+TEST_CASE("graph rules: writing the source changes the next extraction") {
+    // the hall becomes room: A, the hall, and B merge into one region
+    auto lv = generate(ts::stamped(dungeon, "level", {"R R H R"},
+        "once { layout { ?n[H] } => level(?n)[R] }"));
+    CHECK(ts::show(lv, "level") == "RRRR");
+    CHECK(lv.graph("layout").node_count() == 1);
+    // a step mode re-extracts after every application: prune to one room
+    auto pruned = generate(ts::stamped(dungeon, "level", {"R H R H R H R H R"},
+        "grow { map { ?n } when (degree(?n) == 1) => level(?n)[W] }"));
+    CHECK(pruned.graph("map").node_count() == 1);
+    // a batch sees one snapshot: only the two ends
+    auto once = generate(ts::stamped(dungeon, "level", {"R H R H R H R H R"},
+        "everywhere { map { ?n } when (degree(?n) == 1) => level(?n)[W] }"));
+    CHECK(ts::show(once, "level") == "WHRHRHRHW");
+}
+
+TEST_CASE("graph rules: number-grid sources and value()") {
+    std::vector<std::string> zones = {"1 1 2 2 3", "1 1 2 2 3"};
+    auto lv = generate(ts::stamped(dungeon, "ids", zones,
+        "everywhere { areas { ?z } => ids(?z)[ (value(?z) * 10) ] }"));
+    CHECK(ts::show(lv, "ids") == "1010202030/1010202030");
+    auto tested = generate(ts::stamped(dungeon, "ids", zones,
+        "everywhere { areas { ?z[2] ?w -- ?z } when (value(?w) > 2) => items(?w)[chest] }"));
+    CHECK(ts::show(tested, "items") == "....c/....c");
+    // in a grid rule too, through a graph pattern
+    auto grid = generate(ts::stamped(dungeon, "ids", zones,
+        "everywhere { areas[?z] when (value(?z) == 2) => rooms[Boss] }"));
+    CHECK(ts::show(grid, "rooms") == "..BB./..BB.");
+}
+
+TEST_CASE("graph rules: ordered sub-rules on different graphs") {
+    // step modes take the highest-priority sub-rule while it has candidates
+    auto lv = generate(ts::stamped(dungeon, "level", {"R H R"},
+        "grow(3) { ordered\n"
+        "    map { ?n } when (size(?n) == 1) => level(?n)[W]\n"
+        "    layout { ?n[H] } => rooms(?n)[Boss]\n"
+        "}"));
+    CHECK(ts::show(lv, "level") == "WHW");
+    CHECK(ts::show(lv, "rooms") == ".B.");
+}
+
+TEST_CASE("graph rules: highlights name the assigned regions and their writes") {
+    auto gen = ts::make(ts::stamped(dungeon, "level", {"R R H R"},
+        "once { map { ?n } when (size(?n) == 2) => items(?n)[chest] }"));
+    REQUIRE(static_cast<bool>(gen));
+    auto run = gen.run(gen.sequence("main"), 1, ls::step_mode::application, ls::observe::on);
+    REQUIRE(run.step());   // resize
+    REQUIRE(run.step());   // the stamp
+    REQUIRE(run.step());   // its statement boundary
+    REQUIRE(run.step());   // the graph rule's one application
+    auto hl = run.highlights();
+    REQUIRE(hl.size() == 4);
+    for (int i = 0; i < 2; ++i) {
+        CHECK(hl[i].what == ls::cell_highlight::kind::match);
+        CHECK(hl[i].layer == 0);   // level, the graph's source
+        CHECK(hl[i].x == i);
+        CHECK(hl[i + 2].what == ls::cell_highlight::kind::write);
+        CHECK(hl[i + 2].layer == 2);   // items
+        CHECK(hl[i + 2].x == i);
+    }
 }

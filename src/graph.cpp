@@ -91,6 +91,13 @@ graph_data extract_graph(compiled_graph const& g, bool is_number,
         std::sort(a.begin(), a.end());
         a.erase(std::unique(a.begin(), a.end()), a.end());
     }
+    // Regions as one counting sort of the cells by node, row-major within each.
+    d.region_start.assign(d.sizes.size() + 1, 0);
+    for (size_t i = 0; i < d.sizes.size(); ++i) d.region_start[i + 1] = d.region_start[i] + d.sizes[i];
+    d.region_cells.resize((size_t)d.region_start.back());
+    std::vector<int> fill(d.region_start.begin(), d.region_start.end() - 1);
+    for (size_t i = 0; i < n; ++i)
+        if (d.node_of[i] >= 0) d.region_cells[(size_t)fill[(size_t)d.node_of[i]]++] = (int)i;
     return d;
 }
 

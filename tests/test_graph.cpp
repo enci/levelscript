@@ -597,6 +597,17 @@ TEST_CASE("graph: batch, step, and settle see the graph of their snapshot") {
     CHECK(show(both, "rooms") == "B.B.B");
 }
 
+TEST_CASE("graph: a batch's reads after writing the source cache no stale graph") {
+    // Two one-cell regions merge in one pass. The second application reads
+    // size() after the first wrote the source; that read must not cache the
+    // pre-pass graph for the statements after the pass.
+    auto lv = generate(stamped(dungeon, "level", {"R H"},
+        "everywhere { layout[?n] => level[ (if(size(?n) == 1, H, W)) ] }\n"
+        "    everywhere { layout[?n] when (size(?n) == 2) => items[chest] }"));
+    CHECK(show(lv, "level") == "HH");
+    CHECK(show(lv, "items") == "cc");
+}
+
 TEST_CASE("graph: selections follow writes to the selector's grid") {
     std::vector<std::string> chain = {"R H R H R"};
     // between statements: Start moves from the first room to the last, and

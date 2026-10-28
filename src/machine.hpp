@@ -89,9 +89,13 @@ struct grid_state {
     int rows{0}, cols{0};
     bool is_number{false};
     std::vector<int64_t> front, back;   // double-buffered
-    // Bumped by every write, so caches derived from the front buffer
-    // (graph extractions) know when they are stale.
+    // Bumped whenever the front buffer changes, so caches derived from it
+    // (graph extractions, selections) know when they are stale. A rule's
+    // writes go to the back buffer and mark it `written`; the swap that
+    // publishes them bumps the version - never earlier, or a read between
+    // the write and the swap would cache the old front under the new version.
     uint64_t version{0};
+    bool     written{false};
 
     int64_t empty_raw() const { return is_number ? num_empty : tag_empty; }
     int64_t get(int r, int c) const { return front[r * cols + c]; }
@@ -131,7 +135,9 @@ public:
     std::vector<frame> const& frames() const { return frames_; }
 
 private:
-    struct match { int pair; int row, col; };
+    // A candidate: its pair and anchor - or, for a graph pair, the offset of
+    // its assignment (one node per variable slot) in `assigned_`.
+    struct match { int pair; int row, col; int nodes{-1}; };
 
     // One rule application or operation - a leaf statement. Yields its
     // applications; the caller yields the statement boundary.
@@ -192,21 +198,30 @@ private:
     }
 
     std::vector<match> collect(compiled_rule const& rule);
+    // A graph rule's candidates: each sub-rule's assignments in turn,
+    // lexicographic in node ids over its slots (section 5.13).
+    void collect_assignments(compiled_rule const& rule, std::vector<match>& out);
     bool match_at(compiled_pair const& pair, int row, int col);
     bool match_computed(compiled_pattern const& pat, int row, int col);   // phase 2
     // A pattern variable's value: its site in the snapshot, from the anchor.
     // The front buffer is frozen between collection and application, so it
     // is the value the candidate bound.
-    // A node variable's value is the id of the node covering its site.
+    // A node variable's value is the id of the node covering its site, or,
+    // in a graph pair, the node the candidate assigns it.
     int64_t var_value(compiled_pair const& pair, int slot, int row, int col) {
+        if (pair.graph >= 0) return assigned_[(size_t)(cur_nodes_ + slot)];
         return site_value(pair.var_sites[(size_t)slot], row, col);
     }
     int64_t site_value(compiled_pair::var_site const& s, int row, int col) {
         if (s.graph >= 0) return graph(s.graph).node_at(col + s.c, row + s.r);
         return grids_[(size_t)s.grid].get(row + s.r, col + s.c);
     }
+    // Every (grid, flat cell) a candidate may write: each non-wildcard cell of
+    // every write leaf ({ any } branches included), or for a node extent its
+    // node's region. Stops when `f(grid, flat)` returns true; returns whether it did.
+    template <class F> bool for_write_cells(compiled_pair const& pair, match const& m, F&& f);
     bool conflicts(compiled_pair const& pair, match const& m,
-                   std::unordered_set<uint64_t> const& written) const;
+                   std::unordered_set<uint64_t> const& written);
     void apply(compiled_pair const& pair, match const& m,
                std::unordered_set<uint64_t>& written);
     // Resolve a write tree to its applied leaves: { all } every item, { any }
@@ -225,10 +240,12 @@ private:
     // — the `scatter(P%)` denominator is the applied set, not raw candidates.
     std::vector<match> applicable_prefix(compiled_rule const& rule,
                                          std::vector<match> const& ordered_ms,
-                                         int pct) const;
+                                         int pct);
     void add_write_footprint(compiled_pair const& pair, match const& m,
-                             std::unordered_set<uint64_t>& out) const;
+                             std::unordered_set<uint64_t>& out);
     bool grids_differ() const;   // back vs front (settle change detection)
+    // Publish the back buffers: swap, and bump the version of each written grid.
+    void commit_writes();
     void record_highlights(compiled_pair const& pair, match const& m);
 
     // Graph `id` as extracted from its source's front buffer, re-extracted
@@ -273,6 +290,10 @@ private:
     // resolves against.
     compiled_pair const*            cur_pair_{nullptr};
     int                             anchor_row_{0}, anchor_col_{0};
+    // The assignments of the last collection, flat: a graph candidate's
+    // `nodes` indexes its slots here, and `cur_nodes_` is the one evaluating.
+    std::vector<int>                assigned_;
+    int                             cur_nodes_{0};
     bool                            observe_{false};
     std::vector<highlight>          highlights_;
 };
