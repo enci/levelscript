@@ -21,6 +21,14 @@
       "opacity": 1.0,
       "tileset": "",
       "visible": true
+    },
+    {
+      "corner": "normal",
+      "mode": "tile",
+      "name": "tiles",
+      "opacity": 1.0,
+      "tileset": "Micro",
+      "visible": true
     }
   ],
   "mini_px": 24.0,
@@ -29,5 +37,12 @@
     "level": null,
     "room": null
   },
-  "tilesets": []
+  "tilesets": [
+    {
+      "name": "Micro",
+      "path": "tiles/kenney_micro_roguelike.png",
+      "tile_h": 8,
+      "tile_w": 8
+    }
+  ]
 }

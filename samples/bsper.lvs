@@ -5,6 +5,7 @@ tag level {
     W // @name=wall
     D // @name=door
     O // @name=open
+    solid = W | D
 }
 
 tag entities {
@@ -21,6 +22,7 @@ layers {
     level: grid of level
     zones: grid of number
     map : graph of level(nodes=F, edges=D)
+    tiles : grid of number  // kenney_micro_roguelike.png, 16x10 tiles of 8x8
 }
 
 rule border(rotation=90) {
@@ -73,6 +75,107 @@ sequence clear_walls {
     everywhere { level[O] => level[F] }
 }
 
+///////////////////////////////////////////////////////////////////////////////
+// Purely decoration!
+//
+// Paint the tiles layer from the level (kenney_micro_roguelike.png, index =
+// row * 16 + column). Walls use the sheet's bottom row set, whose vertical
+// wall is a band down the middle of the cell, so a one-cell wall reads right.
+// A horizontal run is a cap with a stone face under it, a vertical run just
+// the band; corners turn the cap into the band. The set has no tees, so a
+// wall through a horizontal run keeps the run, and a horizontal branch off a
+// vertical run takes the corner its side turns into.
+///////////////////////////////////////////////////////////////////////////////
+// A wall's neighbour is either solid (a wall or a door) or not: floor, or the
+// empty outside, which a bare complement would leave out - hence !solid|.
+rule paint_walls { all
+    // horizontal runs, tees and crosses
+    level[
+        *        *        *
+        solid    W        solid
+        *        *        *        ] => tiles[* * *, * 145 *, * * *]
+    // wall to the right only: corners, the left end of a run
+    level[
+        *        solid    *
+        !solid|. W        solid
+        *        *        *        ] => tiles[* * *, * 150 *, * * *]
+    level[
+        *        !solid|. *
+        !solid|. W        solid
+        *        solid    *        ] => tiles[* * *, * 144 *, * * *]
+    level[
+        *        !solid|. *
+        !solid|. W        solid
+        *        !solid|. *        ] => tiles[* * *, * 145 *, * * *]
+    // wall to the left only
+    level[
+        *        solid    *
+        solid    W        !solid|.
+        *        *        *        ] => tiles[* * *, * 153 *, * * *]
+    level[
+        *        !solid|. *
+        solid    W        !solid|.
+        *        solid    *        ] => tiles[* * *, * 147 *, * * *]
+    level[
+        *        !solid|. *
+        solid    W        !solid|.
+        *        !solid|. *        ] => tiles[* * *, * 145 *, * * *]
+    // vertical runs and their ends
+    level[
+        *        solid    *
+        !solid|. W        !solid|.
+        *        *        *        ] => tiles[* * *, * 148 *, * * *]
+    level[
+        *        !solid|. *
+        !solid|. W        !solid|.
+        *        solid    *        ] => tiles[* * *, * 148 *, * * *]
+    // lone block
+    level[
+        *        !solid|. *
+        !solid|. W        !solid|.
+        *        !solid|. *        ] => tiles[* * *, * 145 *, * * *]
+}
+
+// An arch in a horizontal wall, a gap in a vertical one
+rule paint_doors { all
+    level[
+        *        *        *
+        solid    D        solid
+        *        *        *        ] => tiles[* * *, * 146 *, * * *]
+    level[
+        *        solid    *
+        !solid|. D        !solid|.
+        *        solid    *        ] => tiles[* * *, * 149 *, * * *]
+}
+
+// Bare floor with now and then a prop or a critter, kept clear of doorways
+rule paint_floor {
+    level[
+        * !D *
+        !D F !D
+        * !D * ] => { any
+        (weight=120) tiles[* * *, * 17 *, * * *]
+        (weight=2) tiles[* * *, * 41 *, * * *]    // pot
+        (weight=2) tiles[* * *, * 40 *, * * *]    // barrel
+        (weight=1) tiles[* * *, * 122 *, * * *]   // chest
+        (weight=1) tiles[* * *, * 20 *, * * *]    // slime
+        (weight=1) tiles[* * *, * 23 *, * * *]    // spider
+        (weight=1) tiles[* * *, * 10 *, * * *]    // skeleton
+    }
+}
+
+// Grass, pebbles and trees outside
+rule paint_outside {
+    level[.] => { any
+        (weight=24) tiles[17]
+        (weight=3) tiles[69]    // grass
+        (weight=2) tiles[68]    // pebbles
+        (weight=2) tiles[84]    // pine
+        (weight=2) tiles[85]    // tree
+        (weight=1) tiles[86]    // saplings
+    }
+}
+
 // Decorate
 sequence main {
     resize(24, 16)
@@ -88,8 +191,15 @@ sequence main {
 
     // scatter(2) create_door
 
-    //everywhere { level[.] => level[W] }  // @play=10
-    //everywhere { level[O] => level[.] }  // @play=100        
-    //pad(5)
-    //settle (rotation=90) { level[. W|D .] => level[. . . ] } // @play=1The 
+    everywhere { level[.] => level[W] }  // @play=10
+    everywhere { level[O] => level[.] }  // @play=100        
+    pad(5)
+    settle (rotation=90) { level[. W|D .] => level[. . . ] } // @play=1
+
+    // Tiles
+    everywhere paint_outside
+    everywhere { level[F] => tiles[17] }   // under the props, doorway cells included
+    everywhere paint_floor
+    everywhere paint_walls
+    everywhere paint_doors
 }
