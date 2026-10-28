@@ -439,8 +439,9 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
 
     // ── actions ───────────────────────────────────────────────────────────────
     // VS Code's debug toolbar: Continue / Pause, Step Over, Step Into, Step
-    // Out, Restart. Multi-event commands run time-sliced in the main loop
-    // (debug_run::tick) and stop at the next breakpoint.
+    // Out, Restart - plus Reset, which restarts without running. Multi-event
+    // commands run time-sliced in the main loop (debug_run::tick) and stop at
+    // the next breakpoint.
     auto action_continue  = [&] { run.begin(debug_run::command::cont); };
     auto action_pause     = [&] { run.pause(); };
     auto action_step_over = [&] { run.begin(debug_run::command::step_over); };
@@ -454,6 +455,12 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
         if (load_script(sc)) cfg.sync_layers(sc.layer_names());
         if (!seed_locked) seed = make_seed();   // after the reload: an edited @seed
         run.restart(sc.gen, sc.entry, seed);
+    };
+    // Reset, then run to the first breakpoint (VS Code's Restart).
+    auto action_restart   = [&] {
+        if (path.empty()) return;
+        action_reset();
+        if (sc.gen && !run.done) action_continue();
     };
 
     // ── main loop ─────────────────────────────────────────────────────────────
@@ -525,7 +532,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
             bool cmd   = (ev.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) != 0;
             switch (ev.key.scancode) {   // VS Code's debug keys
                 case SDL_SCANCODE_F5:
-                    if (cmd && shift)      action_reset();
+                    if (cmd && shift)      action_restart();
                     else if (!run.busy())  action_continue();
                     break;
                 case SDL_SCANCODE_F6:  action_pause();     break;
@@ -534,7 +541,9 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
                     if (shift) action_step_out(); else action_step_into();
                     break;
                 case SDL_SCANCODE_O:   if (cmd) want_browse = true; break;
-                case SDL_SCANCODE_R:   action_reset();     break;
+                case SDL_SCANCODE_R:
+                    if (shift) action_restart(); else action_reset();
+                    break;
                 case SDL_SCANCODE_Q:   running = false;    break;
                 case SDL_SCANCODE_SPACE:
                     playing = !playing;
@@ -672,7 +681,11 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
                 ImGui::DockBuilderDockWindow("Settings", right_bottom);
                 ImGui::DockBuilderFinish(dock_id);
             }
+            // Docking draws its splitters in Border; paint them the gap color so they
+            // blend into the backdrop, while popups keep the theme's visible Border.
+            ImGui::PushStyleColor(ImGuiCol_Border, g_dock_gap);
             ImGui::DockSpace(dock_id, { 0.f, 0.f });
+            ImGui::PopStyleColor();
             if (tab_font) ImGui::PopFont();
             ImGui::End();
         }
@@ -725,7 +738,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
             ImGui::SameLine();
 
             // VS Code's debug toolbar: same order, names and keys; in brand
-            // colors - green stepping icons, a teal restart.
+            // colors - green stepping icons, teal reset/restart.
             ImVec4 dbg_step    = brand_green(dark_theme);
             ImVec4 dbg_restart = brand_teal(dark_theme);
             auto dbgbtn = [&](char const* icon, char const* tip, ImVec4 col, bool enabled) {
@@ -756,9 +769,14 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
                        "Step Out (Shift+F11) - finish the current sequence",
                        dbg_step, can_step))
                 action_step_out();
-            if (dbgbtn(phosphor::PH_ARROW_CLOCKWISE, "Restart (Ctrl+Shift+F5, R)",
+            if (dbgbtn(phosphor::PH_SKIP_BACK,
+                       "Reset (R) - reload and stop at the start",
                        dbg_restart, !path.empty()))
                 action_reset();
+            if (dbgbtn(phosphor::PH_ARROW_CLOCKWISE,
+                       "Restart (Ctrl+Shift+F5, Shift+R) - reload and run to the first breakpoint",
+                       dbg_restart, !path.empty()))
+                action_restart();
             ImGui::Text("|");
             ImGui::SameLine();
 
@@ -1127,9 +1145,9 @@ static void set_dark_theme() {
     c[ImGuiCol_WindowBg]             = ImVec4(0.16f, 0.16f, 0.17f, 1.00f);
     c[ImGuiCol_ChildBg]              = ImVec4(0.00f, 0.00f, 0.00f, 0.15f);
     c[ImGuiCol_PopupBg]              = ImVec4(0.12f, 0.12f, 0.13f, 0.96f);
-    // Docking draws its splitters in Border: the gap color (as in light), so
-    // splitters, the outer frame and the rounded corners show one backdrop.
-    c[ImGuiCol_Border]               = ImVec4(0.30f, 0.30f, 0.33f, 1.00f);
+    // Popup/tooltip outline. Dock splitters also use Border, but the dockspace
+    // overrides it with g_dock_gap so they blend into the backdrop.
+    c[ImGuiCol_Border]              = ImVec4(0.30f, 0.30f, 0.33f, 1.00f);
     c[ImGuiCol_BorderShadow]         = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
     c[ImGuiCol_FrameBg]              = ImVec4(0.22f, 0.22f, 0.23f, 1.00f);
     c[ImGuiCol_FrameBgHovered]       = ImVec4(0.28f, 0.28f, 0.30f, 1.00f);

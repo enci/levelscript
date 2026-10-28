@@ -1131,61 +1131,97 @@ void draw_layers_window(script const& sc, debug_run const& run, project_config& 
 
 // ── graph overlay ─────────────────────────────────────────────────────────────
 
-// One graph over the composite: each node's region outlined in its own color,
-// a dot at the region's centre (with the node id when cells are large enough),
-// and a line between the centres of adjacent nodes.
+// One graph over the composite: each node's region tinted and outlined in its
+// own color, a badge at the region's centre (with the node id when it fits),
+// and a straight line between the badges of adjacent nodes.
 static void draw_graph_overlay(ImDrawList* dl, graph const& g, ImVec2 origin, float cell_px,
                                int cols, int rows) {
     int n = g.node_count();
     if (n == 0) return;
-    std::vector<ImVec2> centre((size_t)n, {0.f, 0.f});
-    for (int y = 0; y < rows; ++y)
-        for (int x = 0; x < cols; ++x) {
-            int id = g.node_at(x, y);
-            if (id < 0) continue;
-            centre[(size_t)id].x += x + 0.5f;
-            centre[(size_t)id].y += y + 0.5f;
-        }
-    for (int id = 0; id < n; ++id) {
-        float k = cell_px / (float)g.node_size(id);
-        centre[(size_t)id] = { origin.x + centre[(size_t)id].x * k,
-                               origin.y + centre[(size_t)id].y * k };
-    }
     auto color = [](int id, int alpha) {
         ImU32 c = tag_color(-1, id * 7 + 3, nullptr);   // the number-layer hash colors
         return (c & 0x00FFFFFF) | ((ImU32)alpha << 24);
     };
+    auto cell_centre = [&](float x, float y) {
+        return ImVec2{ origin.x + (x + 0.5f) * cell_px, origin.y + (y + 0.5f) * cell_px };
+    };
 
-    // region outlines: each cell side where the node changes
-    float thick = std::max(1.f, cell_px * 0.1f);
+    // Per node: its centroid, in cells.
+    std::vector<ImVec2> mean((size_t)n, {0.f, 0.f});
     for (int y = 0; y < rows; ++y)
         for (int x = 0; x < cols; ++x) {
             int id = g.node_at(x, y);
             if (id < 0) continue;
-            ImU32 col = color(id, 220);
+            mean[(size_t)id].x += (float)x;
+            mean[(size_t)id].y += (float)y;
+        }
+    // The badge sits on the centroid unless that falls outside the region (an
+    // L or a ring); then on the region's cell nearest to it.
+    std::vector<ImVec2> centre((size_t)n);
+    for (int id = 0; id < n; ++id) {
+        float k  = 1.f / (float)std::max(1, g.node_size(id));
+        float mx = mean[(size_t)id].x * k, my = mean[(size_t)id].y * k;
+        if (g.node_at((int)std::lround(mx), (int)std::lround(my)) != id) {
+            float best = FLT_MAX;
+            for (int y = 0; y < rows; ++y)
+                for (int x = 0; x < cols; ++x) {
+                    if (g.node_at(x, y) != id) continue;
+                    float d = (x - mx) * (x - mx) + (y - my) * (y - my);
+                    if (d < best) { best = d; mean[(size_t)id] = {(float)x, (float)y}; }
+                }
+            mx = mean[(size_t)id].x;
+            my = mean[(size_t)id].y;
+        }
+        centre[(size_t)id] = cell_centre(mx, my);
+    }
+
+    // Regions: a light tint, and an outline inset within each region's own
+    // cells so neighbouring regions' outlines sit side by side, not on top of
+    // each other. Concave corners get the small square the two strips miss.
+    float t = std::clamp(cell_px * 0.12f, 1.f, 4.f);
+    for (int y = 0; y < rows; ++y)
+        for (int x = 0; x < cols; ++x) {
+            int id = g.node_at(x, y);
+            if (id < 0) continue;
             float x0 = origin.x + x * cell_px, y0 = origin.y + y * cell_px;
             float x1 = x0 + cell_px, y1 = y0 + cell_px;
-            if (g.node_at(x - 1, y) != id) dl->AddLine({x0, y0}, {x0, y1}, col, thick);
-            if (g.node_at(x + 1, y) != id) dl->AddLine({x1, y0}, {x1, y1}, col, thick);
-            if (g.node_at(x, y - 1) != id) dl->AddLine({x0, y0}, {x1, y0}, col, thick);
-            if (g.node_at(x, y + 1) != id) dl->AddLine({x0, y1}, {x1, y1}, col, thick);
+            dl->AddRectFilled({x0, y0}, {x1, y1}, color(id, 45));
+            ImU32 col = color(id, 230);
+            bool l = g.node_at(x - 1, y) == id, r = g.node_at(x + 1, y) == id;
+            bool u = g.node_at(x, y - 1) == id, d = g.node_at(x, y + 1) == id;
+            if (!l) dl->AddRectFilled({x0, y0}, {x0 + t, y1}, col);
+            if (!r) dl->AddRectFilled({x1 - t, y0}, {x1, y1}, col);
+            if (!u) dl->AddRectFilled({x0, y0}, {x1, y0 + t}, col);
+            if (!d) dl->AddRectFilled({x0, y1 - t}, {x1, y1}, col);
+            if (l && u && g.node_at(x - 1, y - 1) != id) dl->AddRectFilled({x0, y0}, {x0 + t, y0 + t}, col);
+            if (r && u && g.node_at(x + 1, y - 1) != id) dl->AddRectFilled({x1 - t, y0}, {x1, y0 + t}, col);
+            if (l && d && g.node_at(x - 1, y + 1) != id) dl->AddRectFilled({x0, y1 - t}, {x0 + t, y1}, col);
+            if (r && d && g.node_at(x + 1, y + 1) != id) dl->AddRectFilled({x1 - t, y1 - t}, {x1, y1}, col);
         }
 
-    // edges, then nodes on top
-    float line = std::max(1.5f, cell_px * 0.12f);
+    // Edges: light on a dark casing so they read over any tile.
+    float line = std::clamp(cell_px * 0.12f, 1.5f, 4.f);
     for (int a = 0; a < n; ++a)
         for (int b : g.neighbors(a))
-            if (a < b) dl->AddLine(centre[(size_t)a], centre[(size_t)b], IM_COL32(255, 255, 255, 200), line);
-    float r = std::max(3.f, cell_px * 0.3f);
+            if (a < b) dl->AddLine(centre[(size_t)a], centre[(size_t)b], IM_COL32(0, 0, 0, 150), line + 2.f);
+    for (int a = 0; a < n; ++a)
+        for (int b : g.neighbors(a))
+            if (a < b) dl->AddLine(centre[(size_t)a], centre[(size_t)b], IM_COL32(255, 255, 255, 230), line);
+
+    // Badges on top: a soft shadow, the node's color, a light ring, and the
+    // id when it fits inside.
+    float r = std::clamp(cell_px * 0.35f, 4.f, 14.f);
     for (int id = 0; id < n; ++id) {
-        dl->AddCircleFilled(centre[(size_t)id], r, color(id, 255));
-        dl->AddCircle(centre[(size_t)id], r, IM_COL32(0, 0, 0, 200), 0, 1.f);
-        if (cell_px >= 12.f) {
-            std::string label = std::to_string(id);
-            ImVec2 ts = ImGui::CalcTextSize(label.c_str());
-            dl->AddText({centre[(size_t)id].x - ts.x * 0.5f, centre[(size_t)id].y - ts.y * 0.5f},
-                        contrast_text_color(color(id, 255)), label.c_str());
-        }
+        ImVec2 c  = centre[(size_t)id];
+        ImU32 fill = color(id, 255);
+        dl->AddCircleFilled({c.x + 1.f, c.y + 1.5f}, r + 1.5f, IM_COL32(0, 0, 0, 90));
+        dl->AddCircleFilled(c, r, fill);
+        dl->AddCircle(c, r, IM_COL32(255, 255, 255, 230), 0, std::max(1.f, r * 0.15f));
+        std::string label = std::to_string(id);
+        ImVec2 ts = ImGui::CalcTextSize(label.c_str());
+        if (ts.x <= r * 1.8f && ts.y <= r * 2.6f)
+            dl->AddText({std::floor(c.x - ts.x * 0.5f), std::floor(c.y - ts.y * 0.5f)},
+                        contrast_text_color(fill), label.c_str());
     }
 }
 
