@@ -1,0 +1,12 @@
+// E153 (0.14, check 45): one variable binds a node here and a tag value there.
+// @expect error
+// @expect stderr-contains binds a tagset 'algo' cell here but a node of graph 'map' cell elsewhere
+tag algo { R, H }
+tag room { Start }
+layers {
+    level: grid of algo
+    rooms: grid of room
+    map:   graph of level(nodes=R, edges=H)
+}
+rule r { map[?v] level[?v] => level[H] }
+sequence main { resize(2, 2) everywhere r }

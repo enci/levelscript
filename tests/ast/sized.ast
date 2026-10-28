@@ -9,7 +9,8 @@
         (row (paren (&& (!= path .) (== path 0)))))
       (pattern map
         (size 8 6)
-        (row (paren (> (call degree) 1)))))
+        (row ?n))
+      (when (> (call degree ?n) 1)))
     (write
       (pattern fine
         (size 8 6)

@@ -66,14 +66,19 @@ enum class ce_kind {
     // emptiness tests (read the cell raw, bypassing number→0 coercion)
     is_empty, is_not_empty,   // ref = grid id; val = 1 when a number grid
     has,           // ref = tag grid id, val = mask: the cell overlaps it (a bare-tag pred)
-    var_read,      // ref = the pair's variable slot
-    // graph functions, in graph-pattern cells only: ref = graph id; they
-    // describe the node covering the current position
+    var_read,      // ref = the pair's variable slot; a node variable reads its node id
+    // graph functions: ref = graph id, a = the node; the targeted ones take
+    // a selector (val = selector id) or a node (b = its expr; val = -1)
     degree_, size_,
-    distance_,     // val = selector id; unreachable reads as 0
-    distance_raw,  // the same, unreachable as the empty sentinel (`!= .` tests)
-    neighbors_,    // val = selector id
+    distance_,     // unreachable is graph_unreachable
+    neighbors_,
+    adjacent_,     // neighbors > 0
+    reachable_,    // distance < graph_unreachable
 };
+
+// What `distance` gives when no target node is reachable: 2^30, larger than
+// every real distance (section 5.12).
+constexpr long long graph_unreachable = 1ll << 30;
 
 struct compiled_expr {
     ce_kind   kind{ce_kind::int_lit};
@@ -160,7 +165,9 @@ struct compiled_pair {
     // Filled per variant: each variable's first binding cell (its site, which
     // also supplies its value) and every other binding cell, which must
     // equal the site. Offsets are from the anchor.
-    struct var_site  { int grid{-1}; int r{0}, c{0}; };
+    // A site in a graph pattern (graph >= 0) binds the node covering it;
+    // `grid` is then the graph's source.
+    struct var_site  { int grid{-1}; int r{0}, c{0}; int graph{-1}; };
     struct var_check { int slot{0}; var_site at; };
     std::vector<var_site>         var_sites;    // by slot
     std::vector<var_check>        var_checks;

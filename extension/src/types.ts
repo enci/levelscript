@@ -78,6 +78,6 @@ export interface InspectionResult {
         sequences: { name: string, loc?: Location }[];
         ops: string[];
         builtins: string[];
-        graph_functions?: string[];   // built-ins of graph-pattern cells only
+        graph_functions?: string[];   // built-ins on node variables, in rules only
     };
 }

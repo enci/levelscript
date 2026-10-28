@@ -117,11 +117,13 @@
   (pair
     (match
       (pattern map
-        (row (paren (== (call degree) 1)) *))
+        (row ?a *))
       (pattern map
-        (row (paren (&& (!= (call distance (selector rooms Start)) .) (> (call neighbors (selector ids (! .))) 0))) (paren (> (call size) ?n))))
+        (row ?a ?b))
       (pattern n
-        (row ?n *)))
+        (row ?n *))
+      (when (&& (&& (== (call degree ?a) 1) (< (call distance ?a (selector rooms Start)) 3)) (> (call neighbors ?b (selector ids (! .))) 0)))
+      (when (&& (&& (> (call size ?b) ?n) (call adjacent ?a ?b)) (! (call reachable ?b (selector rooms Boss))))))
     (write
       (pattern rooms
         (row DeadEnd *)))))
@@ -129,7 +131,8 @@
   (pair
     (match
       (pattern map
-        (row (paren (> (+ (call neighbors (selector ids 3)) (call neighbors (selector rooms (| A (! B))))) 0)))))
+        (row ?n))
+      (when (> (+ (call neighbors ?n (selector ids 3)) (call neighbors ?n (selector rooms (| A (! B))))) 0)))
     (write
       (pattern g
         (row a)))))

@@ -1,6 +1,6 @@
-// E149 (0.10, check 53): graph functions are valid only in graph-pattern cells.
+// E163 (0.14, check 45): a node variable is never written to a grid.
 // @expect error
-// @expect stderr-contains is a graph function
+// @expect stderr-contains holds a node of graph 'map' value
 tag algo { R, H }
 tag room { Start }
 layers {
@@ -8,5 +8,5 @@ layers {
     rooms: grid of room
     map:   graph of level(nodes=R, edges=H)
 }
-rule r { level[R] where[ (degree() == 1) ] => level[H] }
+rule r { map[?n] => rooms[?n] }
 sequence main { resize(2, 2) everywhere r }

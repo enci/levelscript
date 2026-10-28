@@ -1,0 +1,11 @@
+// E164 (0.14, check 53): nodes compare only within one graph.
+// @expect error
+// @expect stderr-contains compares nodes of different graphs
+tag algo { R, H }
+layers {
+    level:  grid of algo
+    map:    graph of level(nodes=R, edges=H)
+    layout: graph of level(nodes=R|H)
+}
+rule r { map[?a] layout[?b] when (?a != ?b) => level[H] }
+sequence main { resize(2, 2) everywhere r }

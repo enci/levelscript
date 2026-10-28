@@ -1,4 +1,4 @@
-// E147 (0.10, check 52): graph-pattern cells are '*' or a parenthesized boolean.
+// E147 (0.10, check 52): graph-pattern cells are '*' or a binding variable.
 // @expect error
 // @expect stderr-contains graph-pattern cells must be
 tag algo { R, H }

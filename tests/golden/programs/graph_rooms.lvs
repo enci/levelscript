@@ -1,11 +1,12 @@
-// Showcase (v0.10.0): a graph layer reads the room structure out of a grid.
+// Showcase (v0.10.0, nodes as values since v0.14.0): a graph layer reads the
+// room structure out of a grid.
 //
 // A lattice of 3x3 rooms gets random halls between neighbours. `map` sees
 // each room as a node and each hall as an edge (section 4.3), so graph
-// patterns (section 5.12) label whole rooms by their place in the dungeon:
-// dead ends, one of them the start, the rooms next to it, and the hubs.
-// `distance` reads empty for a room the start cannot reach, so the spread
-// tests `!= .` first.
+// patterns (section 5.12) bind each cell's room as `?n`, and rule guards
+// label whole rooms by their place in the dungeon: dead ends, one of them
+// the start, the rooms next to it, and the hubs. A room the start cannot
+// reach is far (2^30), never at distance 0.
 //
 // @seed=2
 // @expect run-ok
@@ -23,13 +24,11 @@ rule lattice { level[.] where[ (x - x / 4 * 4 < 3 && y - y / 4 * 4 < 3) ] => lev
 rule hall_across { level[.] where[ (x - x / 4 * 4 == 3 && y - y / 4 * 4 == 1) ] => level[hall] }
 rule hall_down   { level[.] where[ (y - y / 4 * 4 == 3 && x - x / 4 * 4 == 1) ] => level[hall] }
 
-rule dead_ends { map[ (degree() == 1) ] => roles[dead_end] }
-rule pick_start { map[ (degree() == 1) ] => roles[start] }
-rule spread_start {
-    map[ (distance(roles[start]) != . && distance(roles[start]) == 0) ] => roles[start]
-}
-rule guards { map[ (neighbors(roles[start]) > 0) ] roles[.] => roles[guard] }
-rule hubs { map[ (degree() >= 3) ] roles[.] => roles[hub] }
+rule dead_ends { map[?n] when (degree(?n) == 1) => roles[dead_end] }
+rule pick_start { map[?n] when (degree(?n) == 1) => roles[start] }
+rule spread_start { map[?n] when (distance(?n, roles[start]) == 0) => roles[start] }
+rule guards { map[?n] roles[.] when (adjacent(?n, roles[start])) => roles[guard] }
+rule hubs { map[?n] roles[.] when (degree(?n) >= 3) => roles[hub] }
 
 sequence main {
     resize(15, 11)

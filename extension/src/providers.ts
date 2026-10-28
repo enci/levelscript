@@ -156,7 +156,6 @@ export const completionProvider: vscode.CompletionItemProvider = {
         const allTagValues = () => sym?.tags.forEach(t => tagValues(t));
         const grids = () => sym?.layers.forEach(l => word(l.name, K.Class, `grid of ${l.type}`));
         const graphs = () => sym?.graphs?.forEach(g => word(g.name, K.Interface, `graph of ${g.source}`));
-        const isGraph = (name: string | undefined) => !!sym?.graphs?.some(g => g.name === name);
 
         switch (ctx.kind) {
         case 'top':
@@ -192,15 +191,14 @@ export const completionProvider: vscode.CompletionItemProvider = {
             snippet('number', 'number = ${1:0}', K.Keyword);
             break;
         case 'expr': {
-            // a graph-pattern cell reads no grid; it calls the graph functions,
-            // whose selectors name grids
-            const graphCell = isGraph(ctx.head);
+            // in a rule, the graph functions take a node variable bound by a
+            // graph pattern, and a target: a node or a selector naming a grid
             sym?.builtins.forEach(b => snippet(b, `${b}(\${1})`, K.Function, 'built-in'));
-            if (graphCell) sym?.graph_functions?.forEach(b => snippet(b, `${b}(\${1})`, K.Function, 'graph function'));
+            if (ctx.nodes) sym?.graph_functions?.forEach(b => snippet(b, `${b}(\${1})`, K.Function, 'graph function'));
             sym?.params.forEach(p => word(p.name, K.Variable, p.derived ? 'derived param' : 'param'));
             if (ctx.grids) grids();
             if (ctx.pos) ['x', 'y', 'width', 'height'].forEach(n => word(n, K.Constant, 'position'));
-            if (!graphCell) allTagValues();
+            allTagValues();
             break;
         }
         case 'ruleAttr':

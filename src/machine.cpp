@@ -44,14 +44,17 @@ void machine::bind_params() {
 // The pure operators (neg .. mod_) over already-evaluated operands; unused
 // operands are 0.
 static long long ce_pure(ce_kind k, long long a, long long b, long long c) {
-    auto w32 = [](long long v) { return (long long)(int32_t)v; };
+    // Arithmetic saturates to 32 bits. Operands are 32-bit numbers or the
+    // empty sentinel, which counts as 0, so no 64-bit step can overflow.
+    auto sat = [](long long v) { return std::clamp<long long>(v, INT32_MIN, INT32_MAX); };
+    auto n   = [](long long v) { return v == num_empty ? 0 : v; };
     switch (k) {
-    case ce_kind::neg:    return w32(-a);
+    case ce_kind::neg:    return sat(-n(a));
     case ce_kind::not_:   return a == 0;
-    case ce_kind::add:    return w32(a + b);
-    case ce_kind::sub:    return w32(a - b);
-    case ce_kind::mul:    return w32(a * b);
-    case ce_kind::div_:   return b == 0 ? 0 : w32(a / b);   // n / 0 == 0
+    case ce_kind::add:    return sat(n(a) + n(b));
+    case ce_kind::sub:    return sat(n(a) - n(b));
+    case ce_kind::mul:    return sat(n(a) * n(b));
+    case ce_kind::div_:   return b == 0 ? 0 : sat(n(a) / n(b));   // n / 0 == 0
     case ce_kind::lt:     return a <  b;
     case ce_kind::le:     return a <= b;
     case ce_kind::gt:     return a >  b;
@@ -64,7 +67,7 @@ static long long ce_pure(ce_kind k, long long a, long long b, long long c) {
     case ce_kind::if_:    return a != 0 ? b : c;
     case ce_kind::min_:   return a < b ? a : b;
     case ce_kind::max_:   return a > b ? a : b;
-    case ce_kind::abs_:   return w32(a < 0 ? -a : a);
+    case ce_kind::abs_:   return sat(n(a) < 0 ? -n(a) : n(a));
     case ce_kind::clamp_: return std::max(b, std::min(a, c));
     case ce_kind::mod_: {  // floored: the result takes the divisor's sign; n mod 0 == 0
         if (b == 0) return 0;
@@ -121,8 +124,9 @@ long long machine::eval(int idx, int x, int y) {
     case ce_kind::degree_:
     case ce_kind::size_:
     case ce_kind::distance_:
-    case ce_kind::distance_raw:
     case ce_kind::neighbors_:
+    case ce_kind::adjacent_:
+    case ce_kind::reachable_:
         return eval_graph(e, x, y);
     case ce_kind::and_: return eval(e.a, x, y) != 0 && eval(e.b, x, y) != 0;   // lazy
     case ce_kind::or_:  return eval(e.a, x, y) != 0 || eval(e.b, x, y) != 0;
@@ -151,6 +155,7 @@ graph_data const& machine::graph(int id) {
     if (c.version != src.version) {
         c.data = extract_graph(g, src.is_number, src.front, src.cols, src.rows);
         c.version = src.version;
+        c.dist_to.clear();
     }
     return c.data;
 }
@@ -193,20 +198,61 @@ std::vector<int> const& machine::selection(int id, int sel, bool distance) {
     return c.per_node;
 }
 
-// A graph function at (x, y): about the node covering it (none reads as 0).
+// The distance from every node of graph `id` to node `from` (-1 =
+// unreachable): one breadth-first search, cached until the graph changes.
+// Adjacency is symmetric, so it is also the distance from `from`.
+std::vector<int> const& machine::distances_to(int id, int from) {
+    graph_data const& g = graph(id);
+    auto& c = graphs_[(size_t)id];
+    if (c.dist_to.size() != (size_t)g.node_count()) c.dist_to.assign((size_t)g.node_count(), {});
+    auto& d = c.dist_to[(size_t)from];
+    if (!d.empty()) return d;
+    d.assign((size_t)g.node_count(), -1);
+    std::queue<int> q;
+    d[(size_t)from] = 0;
+    q.push(from);
+    while (!q.empty()) {
+        int n = q.front();
+        q.pop();
+        for (int m : g.adj[(size_t)n])
+            if (d[(size_t)m] < 0) {
+                d[(size_t)m] = d[(size_t)n] + 1;
+                q.push(m);
+            }
+    }
+    return d;
+}
+
+// A graph function: about its node argument, and its target (a node or a
+// selector) where it takes one. Bound nodes always exist; an id out of range
+// (a failed compile's stand-in) reads as 0.
 long long machine::eval_graph(compiled_expr const& e, int x, int y) {
     graph_data const& g = graph(e.ref);
-    int node = g.node_at(x, y);
-    if (node < 0) return 0;
+    long long node = eval(e.a, x, y);
+    if (node < 0 || node >= g.node_count()) return 0;
+    auto n = (size_t)node;
+    long long target = -1;   // a node target
+    if (e.b >= 0) {
+        target = eval(e.b, x, y);
+        if (target < 0 || target >= g.node_count()) return 0;
+    }
     switch (e.kind) {
-    case ce_kind::degree_: return (long long)g.adj[(size_t)node].size();
-    case ce_kind::size_:   return g.sizes[(size_t)node];
+    case ce_kind::degree_: return (long long)g.adj[n].size();
+    case ce_kind::size_:   return g.sizes[n];
     case ce_kind::neighbors_:
-        return e.val < 0 ? 0 : selection(e.ref, (int)e.val, false)[(size_t)node];
-    default: {   // distance: unreachable is empty, and reads as 0 unless raw
-        int d = e.val < 0 ? -1 : selection(e.ref, (int)e.val, true)[(size_t)node];
-        if (d >= 0) return d;
-        return e.kind == ce_kind::distance_raw ? num_empty : 0;
+    case ce_kind::adjacent_: {
+        long long k = 0;
+        if (target >= 0)   // the adjacency sets are ascending
+            k = std::binary_search(g.adj[n].begin(), g.adj[n].end(), (int)target);
+        else if (e.val >= 0)
+            k = selection(e.ref, (int)e.val, false)[n];
+        return e.kind == ce_kind::adjacent_ ? k > 0 : k;
+    }
+    default: {   // distance, reachable: unreachable is graph_unreachable
+        int d = target >= 0 ? distances_to(e.ref, (int)target)[n]
+              : e.val >= 0  ? selection(e.ref, (int)e.val, true)[n] : -1;
+        long long dist = d >= 0 ? d : graph_unreachable;
+        return e.kind == ce_kind::reachable_ ? dist < graph_unreachable : dist;
     }
     }
 }
@@ -1090,10 +1136,10 @@ std::vector<machine::match> machine::collect(compiled_rule const& rule) {
     return out;
 }
 
-// Two phases: every bare cell of every pattern first - pure, so
-// their order is unobservable - then expression and `where` cells and rule
-// guards in match-side order, cells row-major. Only phase 2 can draw, so a candidate its bare cells
-// reject consumes no draws.
+// Two phases: every bare and binding cell of every pattern first - pure,
+// so their order is unobservable - then expression and `where` cells and
+// rule guards in match-side order, cells row-major. Only phase 2 can draw,
+// so a candidate its bare cells reject consumes no draws.
 bool machine::match_at(compiled_pair const& pair, int row, int col) {
     cur_pair_ = &pair;
     anchor_row_ = row;
@@ -1113,16 +1159,20 @@ bool machine::match_at(compiled_pair const& pair, int row, int col) {
                 if ((g.get(row + p.r, col + p.c) & p.val) == 0) return false;
         }
     }
-    // Binding cells: each site is non-empty, every other binding cell equals
-    // its site exactly. Their patterns' bounds were checked above.
+    // Binding cells: each site is non-empty (in a graph pattern: a node
+    // covers it), every other binding cell equals its site exactly. Their
+    // patterns' bounds were checked above.
     for (auto const& s : pair.var_sites) {
+        if (s.graph >= 0) {
+            if (site_value(s, row, col) < 0) return false;
+            continue;
+        }
         grid_state const& g = grids_[(size_t)s.grid];
         int64_t v = g.get(row + s.r, col + s.c);
         if (g.is_number ? v == num_empty : (v & tag_empty) != 0) return false;
     }
     for (auto const& k : pair.var_checks)
-        if (grids_[(size_t)k.at.grid].get(row + k.at.r, col + k.at.c) !=
-            var_value(pair, k.slot, row, col)) return false;
+        if (site_value(k.at, row, col) != var_value(pair, k.slot, row, col)) return false;
     // Item by item in match-side order: each pattern's expression cells, then
     // the rule guards written after it.
     size_t gi = 0;
@@ -1135,13 +1185,6 @@ bool machine::match_at(compiled_pair const& pair, int row, int col) {
 }
 
 bool machine::match_computed(compiled_pattern const& pat, int row, int col) {
-    if (pat.graph_id >= 0) {   // each cell tests the node covering it
-        for (auto const& p : pat.computed) {
-            if (graph(pat.graph_id).node_at(col + p.c, row + p.r) < 0) return false;
-            if (eval(p.expr, col + p.c, row + p.r) == 0) return false;
-        }
-        return true;
-    }
     if (pat.is_where) {   // every cell's boolean must hold
         for (auto const& p : pat.computed)
             if (eval(p.expr, col + p.c, row + p.r) == 0) return false;

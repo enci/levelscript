@@ -186,12 +186,13 @@ TEST_CASE("inspect: graph layers in symbols, outline, and refs") {
         "    level: grid of algo\n"
         "    map: graph of level(nodes=R, edges=H)\n"
         "}\n"
-        "rule dead_end { map[ (degree() == 1) ] => level[H] }\n";
+        "rule dead_end { map[?n] when (degree(?n) == 1) => level[H] }\n";
     std::string j = ls::inspect_json(src, "test.lvs");
     CHECK(has(j, "\"ok\":true"));
     CHECK(has(j, "\"graphs\":[{\"name\":\"map\",\"source\":\"level\",\"loc\":"));
     CHECK(has(j, "{\"kind\":\"graph\",\"name\":\"map\""));
     CHECK(has(j, "{\"line\":6,\"col\":17,\"len\":3,\"kind\":\"graph\",\"target\":\"map\"}"));
-    CHECK(has(j, "{\"line\":6,\"col\":43,\"len\":5,\"kind\":\"layer\",\"target\":\"level\"}"));
-    CHECK(has(j, "\"graph_functions\":[\"degree\",\"size\",\"distance\",\"neighbors\"]"));
+    CHECK(has(j, "{\"line\":6,\"col\":51,\"len\":5,\"kind\":\"layer\",\"target\":\"level\"}"));
+    CHECK(has(j, "\"graph_functions\":[\"degree\",\"size\",\"distance\",\"neighbors\","
+                 "\"adjacent\",\"reachable\"]"));
 }

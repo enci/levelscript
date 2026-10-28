@@ -129,15 +129,15 @@ TEST_CASE("graph: the selector grammar") {
     // a selector parses only as a call argument, with exactly one cell
     auto parse_errors = [](std::string const& cell) {
         ls::diagnostics d;
-        ls::parse("rule r { map[ (" + cell + " > 0) ] => g[a] }", "t", d);
+        ls::parse("rule r { map[?n] when (" + cell + " > 0) => g[a] }", "t", d);
         return d.has_errors();
     };
-    CHECK_FALSE(parse_errors("distance(rooms[Start])"));
-    CHECK_FALSE(parse_errors("neighbors(ids[3])"));
-    CHECK_FALSE(parse_errors("neighbors(ids[!.])"));
-    CHECK_FALSE(parse_errors("neighbors(rooms[A|!B])"));
-    CHECK(parse_errors("distance(rooms[Start Boss])"));
-    CHECK(parse_errors("distance(rooms[(x > 1)])"));
+    CHECK_FALSE(parse_errors("distance(?n, rooms[Start])"));
+    CHECK_FALSE(parse_errors("neighbors(?n, ids[3])"));
+    CHECK_FALSE(parse_errors("neighbors(?n, ids[!.])"));
+    CHECK_FALSE(parse_errors("neighbors(?n, rooms[A|!B])"));
+    CHECK(parse_errors("distance(?n, rooms[Start Boss])"));
+    CHECK(parse_errors("distance(?n, rooms[(x > 1)])"));
     CHECK(parse_errors("rooms[Start]"));
 }
 
@@ -418,13 +418,12 @@ const std::vector<std::string> abc = {"R R H R R H R", "R R . R R . ."};
 
 TEST_CASE("graph: a graph pattern paints whole regions") {
     auto lv = generate(stamped(dungeon, "level", abc,
-                               "everywhere { map[ (degree() == 1) ] => rooms[DeadEnd] }"));
+                               "everywhere { map[?n] when (degree(?n) == 1) => rooms[DeadEnd] }"));
     CHECK(show(lv, "rooms") == "DD....D/DD.....");
 }
 
-TEST_CASE("graph: off-node positions fail, '*' matches everywhere") {
-    auto lv = generate(stamped(dungeon, "level", abc,
-                               "everywhere { map[ (degree() >= 0) ] => items[chest] }"));
+TEST_CASE("graph: binding cells fail off nodes, '*' matches everywhere") {
+    auto lv = generate(stamped(dungeon, "level", abc, "everywhere { map[?n] => items[chest] }"));
     CHECK(show(lv, "items") == "cc.cc.c/cc.cc..");
     auto all = generate(stamped(dungeon, "level", abc, "everywhere { map[*] => items[chest] }"));
     CHECK(show(all, "items") == "ccccccc/ccccccc");
@@ -433,59 +432,110 @@ TEST_CASE("graph: off-node positions fail, '*' matches everywhere") {
 TEST_CASE("graph: size()") {
     auto lv = generate(stamped(dungeon, "ids",
                                {"1 1 2 2 2 3 3 3 3", "1 1 2 2 2 3 3 3 3", ". . 2 2 2 3 3 3 3"},
-                               "everywhere { areas[ (size() > 8) ] => items[chest] }"));
+                               "everywhere { areas[?n] when (size(?n) > 8) => items[chest] }"));
     CHECK(show(lv, "items") == "..ccccccc/..ccccccc/..ccccccc");
 }
 
 TEST_CASE("graph: a selector selects a node through any of its cells") {
     // one Boss cell in room B
-    auto lv = generate(stamped(dungeon, "level", abc,
-        stamp("rooms", {". . . . Boss . .", ". . . . . . ."}) +
-        "\n    everywhere { map[ (neighbors(rooms[Boss]) > 0) ] => items[chest] }"));
-    CHECK(show(lv, "items") == "cc....c/cc.....");
+    auto run = [&](std::string const& cond) {
+        return show(generate(stamped(dungeon, "level", abc,
+            stamp("rooms", {". . . . Boss . .", ". . . . . . ."}) +
+            "\n    everywhere { map[?n] when (" + cond + ") => items[chest] }")), "items");
+    };
+    CHECK(run("neighbors(?n, rooms[Boss]) > 0") == "cc....c/cc.....");
+    CHECK(run("adjacent(?n, rooms[Boss])")      == "cc....c/cc.....");
+    CHECK(run("!adjacent(?n, rooms[Boss])")     == "...cc../...cc..");   // not its own neighbour
 }
 
 TEST_CASE("graph: selectors on number grids") {
     std::string ids = stamp("ids", {". . . 3 . . .", ". . . . . . ."});
     auto run = [&](std::string const& cond) {
         return show(generate(stamped(dungeon, "level", abc, ids +
-            "\n    everywhere { map[ (" + cond + ") ] => items[chest] }")), "items");
+            "\n    everywhere { map[?n] when (" + cond + ") => items[chest] }")), "items");
     };
-    CHECK(run("neighbors(ids[3]) > 0")  == "cc....c/cc.....");
-    CHECK(run("neighbors(ids[!.]) > 0") == "cc....c/cc.....");
-    CHECK(run("neighbors(ids[.]) == 2") == "...cc../...cc..");   // every room has an empty cell
-    CHECK(run("neighbors(ids[4]) > 0")  == "......./.......");
+    CHECK(run("neighbors(?n, ids[3]) > 0")  == "cc....c/cc.....");
+    CHECK(run("neighbors(?n, ids[!.]) > 0") == "cc....c/cc.....");
+    CHECK(run("neighbors(?n, ids[.]) == 2") == "...cc../...cc..");   // every room has an empty cell
+    CHECK(run("neighbors(?n, ids[4]) > 0")  == "......./.......");
 }
 
-TEST_CASE("graph: distance()") {
+TEST_CASE("graph: distance() and reachable()") {
     // a chain of three rooms and an island; Start in the first room
     std::vector<std::string> chain = {"R H R H R . R"};
     auto run = [&](std::string const& start, std::string const& cond) {
         return show(generate(stamped(dungeon, "level", chain, stamp("rooms", {start}) +
-            "\n    everywhere { map[ (" + cond + ") ] => items[chest] }")), "items");
+            "\n    everywhere { map[?n] when (" + cond + ") => items[chest] }")), "items");
     };
     std::string s = "Start . . . . . .";
-    CHECK(run(s, "distance(rooms[Start]) == 0") == "c.....c");   // the island reads as 0
-    CHECK(run(s, "distance(rooms[Start]) == 1") == "..c....");
-    CHECK(run(s, "distance(rooms[Start]) == 2") == "....c..");
-    CHECK(run(s, "distance(rooms[Start]) != .") == "c.c.c..");
-    CHECK(run(s, "distance(rooms[Start]) == .") == "......c");
-    CHECK(run(s, ". != distance(rooms[Start])") == "c.c.c..");
-    CHECK(run(s, "distance(rooms[Start]) + 1 == 1") == "c.....c");
-    // with no Start, every node reads 0, and the guarded form matches none
+    CHECK(run(s, "distance(?n, rooms[Start]) == 0") == "c......");   // the island is far, not 0
+    CHECK(run(s, "distance(?n, rooms[Start]) == 1") == "..c....");
+    CHECK(run(s, "distance(?n, rooms[Start]) == 2") == "....c..");
+    CHECK(run(s, "distance(?n, rooms[Start]) > 2")  == "......c");
+    CHECK(run(s, "distance(?n, rooms[Start]) == 1073741824") == "......c");   // 2^30
+    CHECK(run(s, "reachable(?n, rooms[Start])")     == "c.c.c..");
+    CHECK(run(s, "!reachable(?n, rooms[Start])")    == "......c");
+    // arithmetic on the constant saturates instead of wrapping negative
+    CHECK(run(s, "distance(?n, rooms[Start]) * 4 == 2147483647") == "......c");
+    // with no Start, nothing is reachable
     std::string none = ". . . . . . .";
-    CHECK(run(none, "distance(rooms[Start]) == 0") == "c.c.c.c");
-    CHECK(run(none, "distance(rooms[Start]) != . && distance(rooms[Start]) == 0") == ".......");
+    CHECK(run(none, "distance(?n, rooms[Start]) == 0") == ".......");
+    CHECK(run(none, "reachable(?n, rooms[Start])")     == ".......");
+}
+
+TEST_CASE("graph: node targets") {
+    // A-B-C through halls, and an island D
+    std::vector<std::string> fix = {"R H R H R . R"};
+    auto run = [&](std::string const& pattern, std::string const& cond) {
+        return show(generate(stamped(dungeon, "level", fix,
+            "everywhere { " + pattern + " when (" + cond + ") => items[chest * *] }")), "items");
+    };
+    // two cells two apart: the pair's nodes, compared and measured
+    std::string pair = "map[?a * ?b]";
+    CHECK(run(pair, "?a != ?b")                == "c.c.c..");
+    CHECK(run(pair, "distance(?a, ?b) == 1")   == "c.c....");
+    CHECK(run(pair, "adjacent(?a, ?b)")        == "c.c....");
+    CHECK(run(pair, "neighbors(?a, ?b) == 1")  == "c.c....");
+    CHECK(run(pair, "distance(?b, ?a) == 1")   == "c.c....");   // symmetric
+    CHECK(run(pair, "!reachable(?a, ?b)")      == "....c..");   // C and the island
+    CHECK(run(pair, "distance(?a, ?a) == 0 && !adjacent(?a, ?a)") == "c.c.c..");
+    // one variable over two cells: both in one node
+    CHECK(show(generate(stamped(dungeon, "level", {"R R H R"},
+        "everywhere { map[?n ?n] => items[chest *] }")), "items") == "c...");
+}
+
+TEST_CASE("graph: the spec's open_if_unconnected") {
+    // rooms A, B, C in a row behind walls; A-B already joined by a hall below
+    std::string decls = R"(
+tag geo { floor, wall, door, hall }
+layers {
+    level: grid of geo
+    map:   graph of level(nodes=floor, edges=hall|door)
+}
+rule open_if_unconnected(rotation=all) {
+    level[floor wall floor]
+    map[?a * ?b]
+    when (distance(?a, ?b) > 1)
+    =>
+    level[* door *]
+}
+)";
+    auto run = [&](std::string const& mode) {
+        return show(generate(stamped(decls, "level",
+            {"floor wall floor wall floor", "hall hall hall . ."}, mode + " open_if_unconnected")),
+            "level");
+    };
+    // B-C only: the A-B wall stays, the B-C wall opens
+    CHECK(run("everywhere") == "fwfdf/hhh..");
 }
 
 TEST_CASE("graph: multi-cell graph patterns and variants") {
     std::vector<std::string> fix = {"R R R H R", "R R R . ."};
-    auto lv = generate(stamped(dungeon, "level", fix,
-        "everywhere { layout[ (size() > 4) (size() == 1) ] => items[chest *] }"));
-    CHECK(show(lv, "items") == "..c../.....");
+    std::string rule = " { layout[?a ?b] when (size(?a) > 4 && size(?b) == 1) => items[chest *] }";
+    CHECK(show(generate(stamped(dungeon, "level", fix, "everywhere" + rule)), "items") ==
+          "..c../.....");
 
     std::vector<std::string> up = {". H .", "R R R", "R R R"};
-    std::string rule = " { layout[ (size() > 4) (size() == 1) ] => items[chest *] }";
     CHECK(show(generate(stamped(dungeon, "level", up, "everywhere" + rule)), "items") ==
           ".../.../...");
     CHECK(show(generate(stamped(dungeon, "level", up, "everywhere (rotation=all)" + rule)),
@@ -496,7 +546,7 @@ TEST_CASE("graph: graph patterns conjoin with grid patterns") {
     // one chest already sits in a dead end; scatter adds two, never on it
     auto lv = generate(stamped(dungeon, "level", abc,
         stamp("items", {"chest . . . . . .", ". . . . . . ."}) +
-        "\n    scatter(2) { map[ (degree() == 1) ] items[.] => items[chest] }"));
+        "\n    scatter(2) { map[?n] items[.] when (degree(?n) == 1) => items[chest] }"));
     std::string items = show(lv, "items");
     CHECK(items[0] == 'c');
     int chests = 0;
@@ -508,19 +558,23 @@ TEST_CASE("graph: graph patterns conjoin with grid patterns") {
     CHECK(chests == 3);
 }
 
-TEST_CASE("graph: pattern variables in graph cells") {
+TEST_CASE("graph: node and grid variables together") {
     auto run = [&](std::string const& ids) {
         return show(generate(stamped(dungeon, "level", abc, stamp("ids", {ids, ". . . . . . ."}) +
-            "\n    everywhere { ids[?n] map[ (size() == ?n) ] => items[chest] }")), "items");
+            "\n    everywhere { ids[?v] map[?n] when (size(?n) == ?v) => items[chest] }")), "items");
     };
     CHECK(run("4 . . 4 . . 4") == "c..c.../.......");   // C has size 1, not 4
     CHECK(run(". . . . . . 1") == "......c/.......");
+    // a node variable in a write-side expression cell
+    auto lv = generate(stamped(dungeon, "level", abc,
+        "everywhere { map[?n] => ids[ (size(?n) * 10 + degree(?n)) ] }"));
+    CHECK(show(lv, "ids") == "4141.4242.11/4141.4242..");   // A 4 cells, degree 1; B 4, 2; C 1, 1
 }
 
 TEST_CASE("graph: batch, step, and settle see the graph of their snapshot") {
     // five one-cell rooms in a chain; prune walls a dead end
     std::vector<std::string> chain = {"R H R H R H R H R"};
-    std::string prune = "rule prune { map[ (degree() == 1) ] => level[W] }\n";
+    std::string prune = "rule prune { map[?n] when (degree(?n) == 1) => level[W] }\n";
     auto rooms = [&](std::string const& stmt) {
         auto lv = generate(stamped(dungeon + prune, "level", chain, stmt));
         return show(lv, "level");
@@ -536,9 +590,9 @@ TEST_CASE("graph: batch, step, and settle see the graph of their snapshot") {
     // a pass's other sub-rules don't change the degrees it sees; the next
     // statement sees the new graph
     auto both = generate(stamped(dungeon, "level", {"R H R H R"},
-        "everywhere { all map[ (degree() == 2) ] => items[chest]\n"
+        "everywhere { all map[?n] when (degree(?n) == 2) => items[chest]\n"
         "                 level[H] => level[W] }\n"
-        "    everywhere { map[ (degree() == 0) ] => rooms[Boss] }"));
+        "    everywhere { map[?n] when (degree(?n) == 0) => rooms[Boss] }"));
     CHECK(show(both, "items") == "..c..");
     CHECK(show(both, "rooms") == "B.B.B");
 }
@@ -547,7 +601,8 @@ TEST_CASE("graph: selections follow writes to the selector's grid") {
     std::vector<std::string> chain = {"R H R H R"};
     // between statements: Start moves from the first room to the last, and
     // one rule reads it before and after
-    std::string far = "rule far { map[ (distance(rooms[Start]) == 2) ] items[.] => items[chest] }\n";
+    std::string far = "rule far { map[?n] items[.] when (distance(?n, rooms[Start]) == 2) "
+                      "=> items[chest] }\n";
     auto lv = generate(stamped(dungeon + far, "level", chain, stamp("rooms", {"Start . . . ."}) + R"(
     everywhere far
     once { rooms[Start] => rooms[.] }
@@ -557,35 +612,37 @@ TEST_CASE("graph: selections follow writes to the selector's grid") {
 
     // between steps: Start spreads one room per step
     auto grown = generate(stamped(dungeon, "level", chain, stamp("rooms", {"Start . . . ."}) +
-        "\n    grow { map[ (distance(rooms[Start]) == 1) ] rooms[.] => rooms[Start] }"));
+        "\n    grow { map[?n] rooms[.] when (distance(?n, rooms[Start]) == 1) => rooms[Start] }"));
     CHECK(show(grown, "rooms") == "S.S.S");
 }
 
-TEST_CASE("graph: off-node graph cells draw nothing") {
+TEST_CASE("graph: off-node binding cells draw nothing") {
     std::string after = "\n    scatter(3) { level[R] items[.] => items[chest] }";
     auto items = [&](std::string const& first) {
         return show(generate(stamped(dungeon, "level", abc, first + after)), "items");
     };
-    // the cell sees no node on H and empty cells: no draws, so the scatter is unchanged
-    CHECK(items("everywhere { level[!R] map[ (random(0, 9) > 100) ] => items[.] }") == items(""));
+    // the binding cell sees no node on H and empty cells: the guard never
+    // evaluates there, so it draws nothing and the scatter is unchanged
+    CHECK(items("everywhere { level[!R] map[?n] when (random(0, 9) > 100) => items[.] }") ==
+          items(""));
 }
 
-TEST_CASE("graph: graph cells evaluate after bare cells") {
+TEST_CASE("graph: rule guards on nodes evaluate after bare cells") {
     std::string after = "\n    scatter(3) { level[R] items[.] => items[chest] }";
     auto items = [&](std::string const& first) {
         return show(generate(stamped(dungeon, "level", abc, first + after)), "items");
     };
     std::string base = items("");
-    // rejected by its bare cell everywhere: the graph cell never draws
-    CHECK(items("everywhere { items[chest] map[ (random(0, 9) > 100) ] => items[.] }") == base);
+    // rejected by its bare cell everywhere: the guard never draws
+    CHECK(items("everywhere { items[chest] map[?n] when (random(0, 9) > 100) => items[.] }") == base);
     // reached: it draws, and the scatter's draws move
-    std::string drawn = items("everywhere { items[.] map[ (random(0, 9) > 100) ] => items[.] }");
+    std::string drawn = items("everywhere { items[.] map[?n] when (random(0, 9) > 100) => items[.] }");
     CHECK(drawn != base);
 }
 
-TEST_CASE("graph: a graph cell highlights its source layer") {
+TEST_CASE("graph: a binding cell highlights its source layer") {
     auto gen = make(stamped(dungeon, "level", {"R H R"},
-                            "once { map[ (degree() == 1) ] => items[chest] }"));
+                            "once { map[?n] when (degree(?n) == 1) => items[chest] }"));
     REQUIRE(static_cast<bool>(gen));
     auto run = gen.run(gen.sequence("main"), 1, ls::step_mode::application, ls::observe::on);
     REQUIRE(run.step());   // resize
@@ -611,7 +668,7 @@ TEST_CASE("graph: graphs across modules") {
     // main sees the graph, but not its source
     f.src["main.lvs"] = "use \"graphs.lvs\"\nlayers { marks: grid of number }\n"
                         "sequence main {\n    once carve\n"
-                        "    everywhere { map[ (degree() == 1) ] => marks[1] }\n}\n";
+                        "    everywhere { map[?n] when (degree(?n) == 1) => marks[1] }\n}\n";
     auto gen = f.compile("main.lvs");
     INFO(gen.error());
     REQUIRE(static_cast<bool>(gen));
@@ -634,8 +691,9 @@ compile_result rule_with(std::string const& body) {
 TEST_CASE("graph: misusing a graph name") {
     // checks 35, 51
     CHECK(rule_with("level[R] where[ (map == 1) ] => level[H]").has_error("cannot be read in an expression"));
-    CHECK(rule_with("map[ (neighbors(map[R]) > 0) ] => level[H]").has_error("cannot be a selector's grid"));
-    CHECK(rule_with("level[R] => map[ (degree() == 0) ]").has_error("graph 'map' cannot be written"));
+    CHECK(rule_with("map[?n] when (neighbors(?n, map[R]) > 0) => level[H]")
+              .has_error("cannot be a selector's grid"));
+    CHECK(rule_with("level[R] => map[*]").has_error("graph 'map' cannot be written"));
     CHECK(compile_result(dungeon + "sequence s { path(from=R, to=R, into=map, write=R) }")
               .has_error("'map' is a graph layer"));
     CHECK(compile_result(dungeon + "sequence s { path(from=R, to=R, into=level, write=R, over=map) }")
@@ -643,40 +701,77 @@ TEST_CASE("graph: misusing a graph name") {
 }
 
 TEST_CASE("graph: graph-pattern cells") {
-    // checks 14, 46, 52
-    CHECK(rule_with("map[R] => level[H]").has_error("graph-pattern cells must be '*'"));
-    CHECK(rule_with("map[3] => level[H]").has_error("graph-pattern cells must be '*'"));
-    CHECK(rule_with("ids[?v] map[?v] => level[H]").has_error("cannot be a bare pattern variable"));
-    CHECK(rule_with("map[ (level == R) ] => level[H]").has_error("reads no grid"));
-    CHECK(rule_with("map[ (level != .) ] => level[H]").has_error("reads no grid"));
-    CHECK(rule_with("map[ (degree()) ] => level[H]").has_error("must evaluate to a boolean"));
-    CHECK(rule_with("map[ (degree() == 1 && x > 0 && width > ?v) ] ids[?v] => level[H]").ok);
+    // check 52
+    for (char const* cells : {"map[R]", "map[3]", "map[.]", "map[ (level == R) ]",
+                              "map[ (degree(?n) == 1) ] map[?n]"}) {
+        INFO(cells);
+        CHECK(rule_with(std::string(cells) + " => level[H]")
+                  .has_error("graph-pattern cells must be '*' or a binding variable"));
+    }
+    compile_result ok = rule_with("map[?n] ids[?v] when (degree(?n) == 1 && width > ?v) => level[H]");
+    INFO(ok.diags.format_all());
+    CHECK(ok.ok);
 }
 
-TEST_CASE("graph: graph functions only in graph-pattern cells") {
-    // checks 8, 53
-    CHECK(rule_with("level[R] where[ (degree() == 1) ] => level[H]").has_error("is a graph function"));
-    CHECK(rule_with("level[R] => ids[ (size()) ]").has_error("is a graph function"));
-    CHECK(rule_with("level[ (if(degree() > 0, R, H)) ] => level[H]").has_error("is a graph function"));
-    CHECK(compile_result(dungeon + "sequence s { once { level[R] => level[H] } when (degree() > 0) }")
-              .has_error("is a graph function"));
-    CHECK(compile_result(dungeon + "sequence s { scatter(size()) { level[R] => level[H] } }")
-              .has_error("is a graph function"));
-    CHECK(compile_result(dungeon + "params { p = degree() }").has_error("is a graph function"));
-    CHECK(rule_with("map[ (min(rooms[Boss], 1) > 0) ] => level[H]").has_error("a selector is valid only"));
-    CHECK(rule_with("map[ (distance(3) > 0) ] => level[H]").has_error("takes a selector"));
-    CHECK(rule_with("map[ (neighbors(ids[R]) > 0) ] => level[H]").has_error("is an integer, '.', or '!.'"));
-    CHECK(rule_with("map[ (neighbors(rooms[3]) > 0) ] => level[H]").has_error("needs a number grid"));
-    CHECK(rule_with("map[ (neighbors(rooms[Nope]) > 0) ] => level[H]").has_error("unknown tag value 'Nope'"));
-    CHECK(rule_with("map[ (neighbors(nope[R]) > 0) ] => level[H]").has_error("undeclared grid 'nope'"));
+TEST_CASE("graph: node variable types") {
+    // checks 45, 46, 44
+    CHECK(rule_with("ids[?v] map[?v] => level[H]")
+              .has_error("binds a node of graph 'map' cell here but a number cell elsewhere"));
+    CHECK(rule_with("map[?v] layout[?v] => level[H]")
+              .has_error("binds a node of graph 'layout' cell here but a node of graph 'map'"));
+    CHECK(rule_with("map[?n] => ids[?n]").has_error("holds a node of graph 'map' value"));
+    CHECK(rule_with("map[?n] => ids[ (?n) ]").has_error("must evaluate to a number"));
+    CHECK(rule_with("map[?n] where[?n] => level[H]").has_error("cannot be a bare pattern variable"));
+    CHECK(rule_with("level[R] where[ (degree(?x) == 1) ] => level[H]").has_error("'?x' is never bound"));
 }
 
-TEST_CASE("graph: graph function arity") {
-    // check 19
-    CHECK(rule_with("map[ (degree(1) > 0) ] => level[H]").has_error("takes 0 argument(s), got 1"));
-    CHECK(rule_with("map[ (distance() > 0) ] => level[H]").has_error("takes 1 argument(s), got 0"));
-    CHECK(rule_with("map[ (neighbors(rooms[Boss], ids[1]) > 0) ] => level[H]")
-              .has_error("takes 1 argument(s), got 2"));
+TEST_CASE("graph: nodes are compared, never computed") {
+    // check 53 and the node operators
+    CHECK(rule_with("map[?a] layout[?b] when (?a == ?b) => level[H]")
+              .has_error("'==' compares nodes of different graphs"));
+    CHECK(rule_with("map[?n] when (?n == 1) => level[H]").has_error("'==' / '!=' require"));
+    CHECK(rule_with("map[?n] when (?n + 1 > 0) => level[H]").has_error("arithmetic operator"));
+    CHECK(rule_with("map[?n] when (?n == .) => level[H]").has_error("a node is never empty"));
+    CHECK(rule_with("map[?a ?b] when (if(width > 1, ?a, ?b) == ?a) => level[H H]")
+              .has_error("a node cannot be an 'if' branch"));
+    CHECK(rule_with("map[?n] when (min(?n, 1) > 0) => level[H]").has_error("requires number arguments"));
+    compile_result ok = rule_with("map[?a ?b] when (?a != ?b) => level[H H]");
+    INFO(ok.diags.format_all());
+    CHECK(ok.ok);
+}
+
+TEST_CASE("graph: graph function arguments") {
+    // checks 8, 19, 46, 53
+    CHECK(rule_with("level[?t] where[ (degree(?t) == 1) ] => level[H]").has_error("takes a node first"));
+    CHECK(rule_with("map[?n] when (degree(rooms[Boss]) > 0) => level[H]").has_error("takes a node first"));
+    CHECK(rule_with("map[?n] when (degree() == 1) => level[H]").has_error("'degree' takes a node, e.g. degree(?n)"));
+    CHECK(rule_with("map[?n] when (size(?n, ?n) == 1) => level[H]").has_error("'size' takes a node, e.g."));
+    CHECK(rule_with("map[?n] when (distance(?n) > 0) => level[H]")
+              .has_error("'distance' takes a node and a target"));
+    CHECK(rule_with("map[?n] when (adjacent(?n, 3)) => level[H]").has_error("is a node or a selector"));
+    CHECK(rule_with("map[?a] layout[?b] when (distance(?a, ?b) > 0) => level[H]")
+              .has_error("a node of a different graph"));
+    CHECK(rule_with("map[?n] when (degree(?n)) => level[H]").has_error("a rule guard must be a boolean"));
+    CHECK(rule_with("map[?n] when (min(rooms[Boss], 1) > 0) => level[H]").has_error("a selector is valid only"));
+    CHECK(rule_with("map[?n] when (neighbors(?n, ids[R]) > 0) => level[H]").has_error("is an integer, '.', or '!.'"));
+    CHECK(rule_with("map[?n] when (neighbors(?n, rooms[3]) > 0) => level[H]").has_error("needs a number grid"));
+    CHECK(rule_with("map[?n] when (neighbors(?n, rooms[Nope]) > 0) => level[H]").has_error("unknown tag value 'Nope'"));
+    CHECK(rule_with("map[?n] when (neighbors(?n, nope[R]) > 0) => level[H]").has_error("undeclared grid 'nope'"));
+    // no node outside a pattern pair
+    CHECK(compile_result(dungeon + "sequence s { once { level[R] => level[H] } when (degree(?n) > 0) }")
+              .has_error("outside a pattern"));
+    CHECK(compile_result(dungeon + "params { p = size(?n) }").has_error("outside a pattern"));
+    // valid wherever the pair's variables are
+    for (char const* body : {
+             "map[?n] level[R] where[ (size(?n) > x) ] => level[H]",
+             "map[?n] => rooms[ (if(size(?n) > 20, Boss, Start)) ]",
+             "map[?n] when (reachable(?n, rooms[Start]) && distance(?n, ids[!.]) < 3) => level[H]",
+         }) {
+        INFO(body);
+        compile_result ok = rule_with(body);
+        INFO(ok.diags.format_all());
+        CHECK(ok.ok);
+    }
 }
 
 TEST_CASE("graph: graph names and visibility in rules") {
@@ -685,30 +780,35 @@ TEST_CASE("graph: graph names and visibility in rules") {
     f.src["a.lvs"] = "tag t { a }\nlayers { g: grid of t\n m: graph of g }\n";
     f.src["b.lvs"] = "use \"a.lvs\"\n";
     f.src["c.lvs"] = "use \"b.lvs\"\nlayers { n: grid of number }\n"
-                     "rule r { m[ (degree() > 0) ] => n[1] }\n";
+                     "rule r { m[?k] when (degree(?k) > 0) => n[1] }\n";
     CHECK(f.compile("c.lvs").error().find("graph 'm' is not visible here") != std::string::npos);
 
     f.src["d.lvs"] = "use \"a.lvs\"\nlayers { n: grid of number }\n"
-                     "rule r { m[ (degree() > 0) ] => n[1] }\n";
+                     "rule r { m[?k] when (degree(?k) > 0) => n[1] }\n";
     CHECK(static_cast<bool>(f.compile("d.lvs")));
     // a selector grid the module does not see
     f.src["x.lvs"] = "layers { n: grid of number }\n";
     f.src["y.lvs"] = "use \"x.lvs\"\n";
     f.src["f.lvs"] = "use \"a.lvs\"\nuse \"y.lvs\"\nlayers { h: grid of number }\n"
-                     "rule r { m[ (neighbors(n[1]) > 0) ] => h[1] }\n";
+                     "rule r { m[?k] when (neighbors(?k, n[1]) > 0) => h[1] }\n";
     CHECK(f.compile("f.lvs").error().find("grid 'n' is not visible here") != std::string::npos);
 }
 
 TEST_CASE("graph: graph function names are not reserved") {
     compile_result r(R"(
-tag t { degree, size }
+tag t { degree, size, adjacent }
 layers {
     distance:  grid of t
     neighbors: grid of number
+    reachable: grid of number
     g:         graph of distance(nodes=!.)
 }
 params { size2: number = 1 }
-rule r { distance[size] g[ (size() > size2 && neighbors(neighbors[!.]) >= 0) ] => neighbors[1] }
+rule r {
+    distance[size] g[?n] reachable[*]
+    when (size(?n) > size2 && neighbors(?n, neighbors[!.]) >= 0 && adjacent(?n, reachable[1]))
+    => neighbors[1]
+}
 )");
     INFO(r.diags.format_all());
     CHECK(r.ok);

@@ -70,9 +70,10 @@ void index_pair(compiled_pair& pair) {
             for (int c = 0; c < pat.cols; ++c) {
                 auto const& cell = pat.at(r, c);
                 if (cell.what != compiled_cell::kind::variable) continue;
+                compiled_pair::var_site at{pat.grid_id, r, c, pat.graph_id};
                 auto& site = pair.var_sites[(size_t)cell.var];
-                if (site.grid < 0) site = {pat.grid_id, r, c};
-                else pair.var_checks.push_back({cell.var, {pat.grid_id, r, c}});
+                if (site.grid < 0) site = at;
+                else pair.var_checks.push_back({cell.var, at});
             }
     }
 }
@@ -139,7 +140,7 @@ bool pairs_equal(compiled_pair const& a, compiled_pair const& b) {
 }
 
 // The kinds of value an expression can have.
-enum class val_type { num, mask, boolean };
+enum class val_type { num, mask, boolean, node };
 
 // ── name tables ───────────────────────────────────────────────────────────────
 //
@@ -193,7 +194,7 @@ struct operator_row {
 static constexpr char const* arith = "arithmetic operator requires numeric operands";
 static constexpr char const* rel   = "relational operator requires numeric operands";
 static constexpr char const* logic = "'&&' / '||' require boolean operands";
-static constexpr char const* equal = "'==' / '!=' require two numbers or two tag values";
+static constexpr char const* equal = "'==' / '!=' require two numbers, two tag values, or two nodes";
 static const operator_row operators[] = {
     {expr_kind::neg,    ce_kind::neg,    val_type::num,     false, val_type::num,     "unary '-' requires a number"},
     {expr_kind::not_,   ce_kind::not_,   val_type::boolean, false, val_type::boolean, "'!' requires a boolean"},
@@ -252,7 +253,8 @@ struct analyzer {
 
     // Pattern variables (`?name`) of the pair being compiled; null outside
     // a pattern pair, where using one is an error. A slot's type is the
-    // binding cells' grid type: a tag id, or -1 for number.
+    // binding cells' layer type: a tag id, -1 for number, or node_type(g)
+    // for a node of graph g.
     struct pair_vars {
         struct var {
             std::string name;          // '?name'
@@ -270,12 +272,23 @@ struct analyzer {
     };
     pair_vars* vars_{nullptr};
 
-    // The graph whose pattern cell is being compiled; -1 elsewhere, where
-    // calling a graph function is an error.
-    int graph_{-1};
+    static int  node_type(int graph) { return -2 - graph; }
+    static bool is_node_type(int type) { return type <= -2; }
 
     std::string type_name(int type) const {
+        if (is_node_type(type)) return "node of graph '" + out.graphs[(size_t)(-2 - type)].name + "'";
         return type < 0 ? "number" : "tagset '" + out.tag_names[(size_t)type] + "'";
+    }
+    static val_type value_type(int type) {
+        return is_node_type(type) ? val_type::node : type < 0 ? val_type::num : val_type::mask;
+    }
+
+    // The graph of a node-typed expression (only a node variable is one), or -1.
+    int node_graph(int expr) const {
+        auto const& e = out.exprs[(size_t)expr];
+        if (e.kind != ce_kind::var_read || !vars_) return -1;
+        int type = vars_->vars[(size_t)e.ref].type;
+        return is_node_type(type) ? -2 - type : -1;
     }
 
     // The tagsets this module sees that declare `name` as a value or union.
@@ -368,6 +381,7 @@ struct analyzer {
     }
 
     struct builtin_spec { char const* name; ce_kind kind; int arity; bool graph; };
+    // A graph function's arity is its node plus, for the targeted ones, a target.
     static constexpr builtin_spec builtins[] = {
         {"if",        ce_kind::if_,        3, false},
         {"min",       ce_kind::min_,       2, false},
@@ -376,11 +390,13 @@ struct analyzer {
         {"clamp",     ce_kind::clamp_,     3, false},
         {"mod",       ce_kind::mod_,       2, false},
         {"random",    ce_kind::random_,    2, false},
-        // graph functions: a selector argument, if any
-        {"degree",    ce_kind::degree_,    0, true},
-        {"size",      ce_kind::size_,      0, true},
-        {"distance",  ce_kind::distance_,  1, true},
-        {"neighbors", ce_kind::neighbors_, 1, true},
+        // graph functions: a node, then a target (a node or a selector), if any
+        {"degree",    ce_kind::degree_,    1, true},
+        {"size",      ce_kind::size_,      1, true},
+        {"distance",  ce_kind::distance_,  2, true},
+        {"neighbors", ce_kind::neighbors_, 2, true},
+        {"adjacent",  ce_kind::adjacent_,  2, true},
+        {"reachable", ce_kind::reachable_, 2, true},
     };
 
     // Resolve a bare identifier, first match wins: x/y/width/height → param → tag
@@ -417,9 +433,6 @@ struct analyzer {
         int gid = out.layer_id(name);
         if (gid >= 0) {
             require_visible(e.loc, "grid", name, layer_mod[(size_t)gid]);
-            if (graph_ >= 0)
-                return poison(e.loc, "a graph-pattern cell reads no grid: to test '" + name +
-                              "' too, conjoin a '" + name + "[...]' pattern on the match side", t);
             if (!scope_.allow_grids)
                 return poison(e.loc, "grid '" + name + "' cannot be read here "
                               "(no cell is available at this scope)", t);
@@ -429,7 +442,7 @@ struct analyzer {
         if (int grid = out.graph_id(name); grid >= 0) {
             require_visible(e.loc, "graph", name, graph_mod[(size_t)grid]);
             return poison(e.loc, "graph '" + name + "' cannot be read in an expression; "
-                          "a graph heads a match-side pattern, e.g. " + name + "[ (degree() > 1) ]", t);
+                          "a graph heads a match-side pattern that binds its nodes, e.g. " + name + "[?n]", t);
         }
         // a tag value or union of the one tagset this module sees that declares it
         auto tagsets = tagsets_declaring(name, e.loc.mod);
@@ -450,26 +463,16 @@ struct analyzer {
         auto spec = lookup(builtins, e.ident);
         auto fail = [&](std::string msg) { return poison(e.loc, std::move(msg), t); };
         if (!spec) return fail("unknown function '" + e.ident + "'");
+        if ((int)e.args.size() != spec->arity && spec->graph)
+            return fail("'" + e.ident + "' takes a node" +
+                        (spec->arity == 2 ? " and a target, e.g. " + e.ident + "(?n, rooms[Start])"
+                                          : ", e.g. " + e.ident + "(?n)"));
         if ((int)e.args.size() != spec->arity)
             return fail("built-in '" + e.ident + "' takes " +
                         std::to_string(spec->arity) + " argument(s), got " +
                         std::to_string(e.args.size()));
 
-        if (spec->graph) {
-            if (graph_ < 0)
-                return fail("'" + e.ident + "' is a graph function; it is valid only in a "
-                            "graph-pattern cell, e.g. map[ (" + e.ident + "(" +
-                            (spec->arity ? "rooms[Start]" : "") + ") > 0) ]");
-            int sel = -1;
-            if (spec->arity == 1) {
-                if (e.args[0]->kind != expr_kind::selector)
-                    return fail("'" + e.ident + "' takes a selector, a one-cell pattern "
-                                "such as " + e.ident + "(rooms[Start])");
-                sel = compile_selector(*e.args[0]);
-            }
-            t = val_type::num;
-            return add_expr({spec->kind, sel, graph_, -1, -1, -1});
-        }
+        if (spec->graph) return compile_graph_call(e, *spec, t, ctx_tag);
 
         if (spec->kind == ce_kind::if_) {
             // if(c, a, b) — eager; a bare '.' branch types from its sibling.
@@ -488,6 +491,9 @@ struct analyzer {
                 c2 = compile_expr(*e.args[2], ctx_tag, t2, e2 ? (int)t1 : hint);
             }
             if (t1 != t2) return fail("'if' branches must have the same type");
+            if (t1 == val_type::node)
+                return fail("a node cannot be an 'if' branch; it is valid only in '==' / '!=' "
+                            "and as a graph-function argument");
             t = t1;
             return add_expr({ce_kind::if_, 0, -1, cc, c1, c2});
         }
@@ -502,6 +508,40 @@ struct analyzer {
         }
         t = val_type::num;
         return add_expr({spec->kind, 0, -1, a[0], a[1], a[2]});
+    }
+
+    // A graph function: its node first, then, for the targeted ones, a target
+    // (a node of the same graph, or a selector). Valid wherever a node is.
+    int compile_graph_call(expr const& e, builtin_spec const& spec, val_type& t, int ctx_tag) {
+        auto fail = [&](std::string msg) { return poison(e.loc, std::move(msg), t); };
+        bool targeted = spec.arity == 2;
+        std::string usage = e.ident + (targeted ? "(?n, rooms[Start])" : "(?n)");
+        if (e.args[0]->kind == expr_kind::selector)
+            return fail("'" + e.ident + "' takes a node first, e.g. " + usage);
+        val_type tn;
+        int node = compile_expr(*e.args[0], ctx_tag, tn);
+        int graph = node_graph(node);
+        if (tn != val_type::node || graph < 0)
+            return fail("'" + e.ident + "' takes a node first, a variable bound by a graph "
+                        "pattern, e.g. " + usage);
+        int sel = -1, target = -1;
+        if (targeted) {
+            expr const& a = *e.args[1];
+            if (a.kind == expr_kind::selector) {
+                sel = compile_selector(a);
+            } else {
+                val_type tt;
+                target = compile_expr(a, ctx_tag, tt);
+                if (tt != val_type::node)
+                    return fail("the target of '" + e.ident + "' is a node or a selector, "
+                                "e.g. " + usage);
+                if (node_graph(target) != graph)
+                    return fail("the target of '" + e.ident + "' is a node of a different graph");
+            }
+        }
+        bool pred = spec.kind == ce_kind::adjacent_ || spec.kind == ce_kind::reachable_;
+        t = pred ? val_type::boolean : val_type::num;
+        return add_expr({spec.kind, sel, graph, node, target, -1});
     }
 
     // A selector `g[m]`: its grid, and the one cell, tested like a pattern
@@ -567,14 +607,14 @@ struct analyzer {
                 t = hint == (int)val_type::mask ? val_type::mask : val_type::num;
                 return typed_empty(t);
             }
-            t = vars_->vars[(size_t)s].type < 0 ? val_type::num : val_type::mask;
+            t = value_type(vars_->vars[(size_t)s].type);
             return add_expr({ce_kind::var_read, 0, s, -1, -1, -1});
         }
         case expr_kind::call:
             return compile_call(e, ctx_tag, t, hint);
         case expr_kind::selector:
-            return poison(e.loc, "a selector is valid only as the argument of 'distance' "
-                          "or 'neighbors'", t);
+            return poison(e.loc, "a selector is valid only as the target of 'distance', "
+                          "'neighbors', 'adjacent', or 'reachable'", t);
         default:
             break;
         }
@@ -593,8 +633,8 @@ struct analyzer {
                 val_type to;
                 int oc = compile_expr(a_empty ? *e.args[1] : *e.args[0], ctx_tag, to);
                 t = val_type::boolean;
-                if (out.exprs[oc].kind == ce_kind::distance_)   // unreachable stays empty
-                    out.exprs[oc].kind = ce_kind::distance_raw;
+                if (to == val_type::node)
+                    return poison(e.loc, "a node is never empty", t);
                 if (out.exprs[oc].kind == ce_kind::grid_read) {
                     // read the cell RAW and test emptiness (no number→0 coercion)
                     ce_kind k = e.kind == expr_kind::eq ? ce_kind::is_empty
@@ -619,6 +659,9 @@ struct analyzer {
             ok &= op->same_kind ? ts[i] == ts[0] && ts[0] != val_type::boolean
                                 : ts[i] == op->operand;
         if (!ok) error(e.loc, op->message);
+        else if (ts[0] == val_type::node && node_graph(c[0]) != node_graph(c[1]))
+            error(e.loc, "'" + std::string(e.kind == expr_kind::eq ? "==" : "!=") +
+                  "' compares nodes of different graphs");
         t = op->result;
         return add_expr({op->code, 0, -1, c[0], c[1], -1});
     }
@@ -901,7 +944,7 @@ struct analyzer {
             }
             expr const& in = *p.cells[0][0];
             compiled_cell cell = cp.graph_id >= 0
-                ? compile_graph_cell(in, cp.graph_id)
+                ? compile_graph_cell(in)
                 : compile_cell(in, tag, cp.is_number, p.is_where, is_rhs);
             cp.rows = rows;
             cp.cols = cols;
@@ -922,7 +965,7 @@ struct analyzer {
             int w = (int)p.cells[r].size() < p.cols ? (int)p.cells[r].size() : p.cols;
             for (int c = 0; c < w; ++c)
                 cp.cells[r * cp.cols + c] =
-                    cp.graph_id >= 0 ? compile_graph_cell(*p.cells[r][c], cp.graph_id)
+                    cp.graph_id >= 0 ? compile_graph_cell(*p.cells[r][c])
                                      : compile_cell(*p.cells[r][c], tag, cp.is_number,
                                                     p.is_where, is_rhs);
         }
@@ -1043,31 +1086,19 @@ struct analyzer {
         return cc;
     }
 
-    // A graph-pattern cell: '*', or a boolean expression about the node
-    // covering the cell, which reads no grid.
-    compiled_cell compile_graph_cell(expr const& in, int graph) {
+    // A graph-pattern cell: '*', or a binding variable, which binds the node
+    // covering the cell (typed by bind_variables).
+    compiled_cell compile_graph_cell(expr const& in) {
         compiled_cell cc;
-        if (in.kind == expr_kind::wildcard) {
-            cc.what = compiled_cell::kind::wildcard;
+        cc.what = compiled_cell::kind::wildcard;
+        if (in.kind == expr_kind::wildcard) return cc;
+        if (in.kind == expr_kind::variable) {
+            cc.what = compiled_cell::kind::variable;
+            cc.var  = vars_->slot(in.ident);
             return cc;
         }
-        cc.what = compiled_cell::kind::expr;
-        if (in.kind == expr_kind::variable) {
-            error(in.loc, "a graph-pattern cell cannot be a bare pattern variable; its cells "
-                  "are boolean expressions, e.g. (size() == " + in.ident + ")");
-            cc.expr = num_lit(1);
-        } else if (in.kind != expr_kind::paren) {
-            error(in.loc, "graph-pattern cells must be '*' or a parenthesized boolean "
-                  "expression about the node, e.g. (degree() == 1)");
-            cc.expr = num_lit();
-        } else {
-            int saved = graph_;
-            graph_ = graph;
-            cc.expr = compile_as(*in.args[0], val_type::boolean, in.loc,
-                                 "a graph-pattern cell must evaluate to a boolean",
-                                 scope{false, true, -1});
-            graph_ = saved;
-        }
+        error(in.loc, "graph-pattern cells must be '*' or a binding variable: bind the "
+              "node, e.g. map[?n], and test it in a rule guard, e.g. when (degree(?n) == 1)");
         return cc;
     }
 
@@ -1130,9 +1161,13 @@ struct analyzer {
     void bind_variables(rule_pair const& pr, pair_vars& pv) {
         for (auto const& p : pr.lhs) {
             if (p.is_where) continue;   // a bare variable there is an error, reported by its cell
-            int gid = out.layer_id(p.grid.text);
-            if (gid < 0) continue;      // reported by compile_pattern
-            int type = out.layers[gid].tag_id;
+            int type;
+            if (int gid = out.layer_id(p.grid.text); gid >= 0)
+                type = out.layers[gid].tag_id;
+            else if (int graph = out.graph_id(p.grid.text); graph >= 0)
+                type = node_type(graph);   // a graph pattern binds nodes
+            else
+                continue;               // reported by compile_pattern
             for (auto const& row : p.cells)
                 for (auto const& c : row) {
                     if (c->kind != expr_kind::variable) continue;

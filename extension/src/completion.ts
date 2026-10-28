@@ -18,8 +18,10 @@ export type CompletionContext =
     | { kind: 'graphSource' }                           // layers { m: graph of _ }
     | { kind: 'graphArg' }                              // layers { m: graph of g(_ }
     | { kind: 'paramType' }                             // params { p: _ }
-    | { kind: 'expr'; grids: boolean; pos: boolean; head?: string }   // expressions; head: the
-                                                        // pattern whose cell this is, if any
+    | { kind: 'expr'; grids: boolean; pos: boolean; nodes: boolean; head?: string }
+                                                        // expressions; nodes: in a rule, where
+                                                        // node variables and graph functions are;
+                                                        // head: the pattern whose cell this is
     | { kind: 'ruleAttr' }                              // rule r(_)
     | { kind: 'attrValue'; attr: string }               // rule r(symmetry=_)
     | { kind: 'ruleBody'; start: boolean; guard: boolean }   // a pattern may start here;
@@ -274,7 +276,7 @@ function classify(stack: Frame[]): CompletionContext {
         if (prev === ':') return { kind: 'paramType' };
         // `p: number = _` or `p = _`, and operands after operators - not a new entry's name
         if (prev === '=' || (prev !== undefined && OPERATORS.has(prev)))
-            return { kind: 'expr', grids: false, pos: false };
+            return { kind: 'expr', grids: false, pos: false, nodes: false };
         return none;
     case 'attrs':
         if (prev === undefined || prev === ',') return { kind: 'ruleAttr' };
@@ -335,8 +337,9 @@ function classify(stack: Frame[]): CompletionContext {
     if (f.owner === 'when' || f.owner === 'expr' || f.owner.startsWith('count:')) {
         if (!exprMayStart(prev)) return none;
         const full = f.scope === 'full';
-        return f.head === undefined ? { kind: 'expr', grids: full, pos: full }
-                                    : { kind: 'expr', grids: full, pos: full, head: f.head };
+        const nodes = stack.some(s => s.owner === 'rule' || s.owner === 'group' || s.owner === 'combinator');
+        return f.head === undefined ? { kind: 'expr', grids: full, pos: full, nodes }
+                                    : { kind: 'expr', grids: full, pos: full, nodes, head: f.head };
     }
     return none;
 }

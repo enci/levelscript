@@ -8,5 +8,5 @@ layers {
     rooms: grid of room
     map:   graph of level(nodes=R, edges=H)
 }
-rule r { map[ (neighbors(rooms[1]) > 0) ] => level[H] }
+rule r { map[?n] when (neighbors(?n, rooms[1]) > 0) => level[H] }
 sequence main { resize(2, 2) everywhere r }

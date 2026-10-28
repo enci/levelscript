@@ -1,6 +1,6 @@
-// E153 (0.10, check 46): a bare variable in a graph pattern; its cells are booleans.
+// E150 (0.14, check 53): a target is a node or a selector.
 // @expect error
-// @expect stderr-contains cannot be a bare pattern variable
+// @expect stderr-contains is a node or a selector
 tag algo { R, H }
 tag room { Start }
 layers {
@@ -8,5 +8,5 @@ layers {
     rooms: grid of room
     map:   graph of level(nodes=R, edges=H)
 }
-rule r { level[?v] map[?v] => level[H] }
+rule r { map[?n] when (distance(?n, Start) == 1) => level[H] }
 sequence main { resize(2, 2) everywhere r }

@@ -197,8 +197,12 @@ private:
     // A pattern variable's value: its site in the snapshot, from the anchor.
     // The front buffer is frozen between collection and application, so it
     // is the value the candidate bound.
-    int64_t var_value(compiled_pair const& pair, int slot, int row, int col) const {
-        auto const& s = pair.var_sites[(size_t)slot];
+    // A node variable's value is the id of the node covering its site.
+    int64_t var_value(compiled_pair const& pair, int slot, int row, int col) {
+        return site_value(pair.var_sites[(size_t)slot], row, col);
+    }
+    int64_t site_value(compiled_pair::var_site const& s, int row, int col) {
+        if (s.graph >= 0) return graph(s.graph).node_at(col + s.c, row + s.r);
         return grids_[(size_t)s.grid].get(row + s.r, col + s.c);
     }
     bool conflicts(compiled_pair const& pair, match const& m,
@@ -234,6 +238,7 @@ private:
     // nearest selected node (-1 = unreachable), or the number of selected
     // neighbours.
     std::vector<int> const& selection(int id, int sel, bool distance);
+    std::vector<int> const& distances_to(int id, int from);
     long long eval_graph(compiled_expr const& e, int x, int y);
 
     static uint64_t mask_key(int grid_id, int flat) {
@@ -249,6 +254,7 @@ private:
     struct graph_cache {
         uint64_t   version{~0ull};   // the source's, when extracted
         graph_data data;
+        std::vector<std::vector<int>> dist_to;   // per target node, filled on demand
     };
     std::vector<graph_cache>        graphs_;   // indexed by graph id
     struct selection_cache {

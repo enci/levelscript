@@ -3,7 +3,8 @@
 rule rooms {
     room(8, 6)[?r]
     where(8, 6)[ (path != . && path == 0) ]
-    map(8, 6)[ (degree() > 1) ]
+    map(8, 6)[?n]
+    when (degree(?n) > 1)
     =>
     fine(8, 6)[W]
 }

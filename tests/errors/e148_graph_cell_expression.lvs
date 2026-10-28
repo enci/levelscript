@@ -1,0 +1,12 @@
+// E148 (0.14, check 52): a graph-pattern cell binds a node; test it in a rule guard.
+// @expect error
+// @expect stderr-contains graph-pattern cells must be '*' or a binding variable
+tag algo { R, H }
+tag room { Start }
+layers {
+    level: grid of algo
+    rooms: grid of room
+    map:   graph of level(nodes=R, edges=H)
+}
+rule r { map[ (degree(?n) == 1) ] => level[H] }
+sequence main { resize(2, 2) everywhere r }

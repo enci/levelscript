@@ -326,7 +326,7 @@ TEST_CASE("sema: expression type errors") {
     CHECK(compile_result(prelude + "rule r { level[ (wall + 1) ] => level[floor] }\n" + rprog)
           .has_error("arithmetic operator requires numeric"));
     CHECK(compile_result(prelude + "rule r { level[ (wall == 1) ] => level[floor] }\n" + rprog)
-          .has_error("require two numbers or two tag values"));
+          .has_error("require two numbers, two tag values, or two nodes"));
     CHECK(compile_result(prelude + "rule r { tiles[ (wall) ] => tiles[1] }\n" + rprog)
           .has_error("must evaluate to a number"));
     CHECK(compile_result(prelude + "rule r { level[ (tiles > 5) ] => level[floor] }\n" + rprog)
@@ -754,8 +754,8 @@ TEST_CASE("sema: rule guard scope") {
     CHECK(err("rule r { tiles[?a] when (tiles > 0) => tiles[.] }").has_error("cannot be read here"));
     CHECK(err("rule r { tiles[?a] when (?a + k) => tiles[.] }")
           .has_error("a rule guard must be a boolean expression"));
-    CHECK(err("rule r { tiles[?a] when (degree() > 0) => tiles[.] }")
-          .has_error("is a graph function"));
+    CHECK(err("rule r { tiles[?a] when (degree(?a) > 0) => tiles[.] }")
+          .has_error("'degree' takes a node first"));
     // check 44: a guard binds nothing
     CHECK(err("rule r { tiles[.] when (?v > 0) => tiles[.] }").has_error("'?v' is never bound"));
 }

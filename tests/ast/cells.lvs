@@ -39,12 +39,15 @@ rule comma_newline {
  * *
  * *] }
 
-// graph patterns; a selector is one cell, an integer or a bare mask
+// graph patterns bind nodes; a target is a node or a selector, one cell,
+// an integer or a bare mask
 rule graph_cells {
-    map[ (degree() == 1) * ]
-    map[ (distance(rooms[Start]) != . && neighbors(ids[!.]) > 0) (size() > ?n) ]
+    map[?a *]
+    map[?a ?b]
     n[?n *]
+    when (degree(?a) == 1 && distance(?a, rooms[Start]) < 3 && neighbors(?b, ids[!.]) > 0)
+    when (size(?b) > ?n && adjacent(?a, ?b) && !reachable(?b, rooms[Boss]))
     =>
     rooms[DeadEnd *]
 }
-rule selectors { map[ (neighbors(ids[3]) + neighbors(rooms[A|!B]) > 0) ] => g[a] }
+rule selectors { map[?n] when (neighbors(?n, ids[3]) + neighbors(?n, rooms[A|!B]) > 0) => g[a] }

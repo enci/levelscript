@@ -156,16 +156,17 @@ TEST_CASE("coverage: path writes once per route cell, start to goal") {
 
 // ── expression totality ──────────────────────────────────────────────────────
 
-TEST_CASE("coverage: arithmetic wraps and truncates at run time") {
+TEST_CASE("coverage: arithmetic saturates and truncates at run time") {
     std::string cells[] = {
-        "2147483647 + 1",            // overflow wraps
-        "abs(-2147483647 - 1)",      // abs wraps at INT_MIN
+        "2147483647 + 1",            // overflow saturates
+        "abs(-2147483647 - 1)",      // abs saturates at INT_MIN
         "-7 / 2", "7 / -2", "-7 / -2",   // truncation toward zero
         "min(3, -4)", "max(3, -4)",
         "clamp(12, 0, 9)", "clamp(-5, 0, 9)", "clamp(4, 0, 9)",
         "2147483647 * 2",
         "mod(7, 3)", "mod(-7, 3)", "mod(7, -3)", "mod(-7, -3)",   // floored: the divisor's sign
         "mod(5, 0)", "mod(-2147483647 - 1, -1)",                 // total
+        "-(-2147483647 - 1)", "(-2147483647 - 1) / -1", "-2147483647 - 2",
     };
     std::string body;
     int i = 0;
@@ -173,8 +174,9 @@ TEST_CASE("coverage: arithmetic wraps and truncates at run time") {
         body += "\n    once { where[ (x == " + std::to_string(i++) + ") ] => n[ (" + c + ") ] }";
     auto lv = generate("layers { n: grid of number }\nsequence main {\n    resize(" +
                        std::to_string(i) + ", 1)" + body + "\n}\n");
-    CHECK(row(lv, "n") == std::vector<long long>{-2147483648LL, -2147483648LL, -3, -3, 3, -4, 3, 9, 0, 4, -2,
-                                                 1, 2, -2, -1, 0, 0});
+    CHECK(row(lv, "n") == std::vector<long long>{2147483647LL, 2147483647LL, -3, -3, 3, -4, 3, 9, 0, 4,
+                                                 2147483647LL, 1, 2, -2, -1, 0, 0,
+                                                 2147483647LL, 2147483647LL, -2147483648LL});
 }
 
 // ── geometric operations ─────────────────────────────────────────────────────

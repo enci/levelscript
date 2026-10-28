@@ -8,5 +8,5 @@ layers {
     rooms: grid of room
     map:   graph of level(nodes=R, edges=H)
 }
-rule r { level[R] => map[ (degree() == 0) ] }
+rule r { level[R] => map[*] }
 sequence main { resize(2, 2) everywhere r }
