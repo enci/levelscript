@@ -83,6 +83,21 @@ TEST_CASE("parser: rule guards follow a pattern on the match side") {
     CHECK(parse_fails("rule r { g[a] when k > 0 => g[c] }"));
 }
 
+TEST_CASE("parser: expressions print back as source") {
+    for (char const* src : {
+             "?a != ?b && k > 0",
+             "(a || b) && !c",
+             "a - (b - c) * 2",
+             "-(x + 1) / width",
+             "random(0, 3) == 0 || wall | door == level",
+             "distance(rooms[Start]) > 2",
+         }) {
+        INFO(src);
+        auto ast = parse_ok(std::string("rule r { g[*] when (") + src + ") => g[*] }");
+        CHECK(expr_source(*ast.rules[0].pairs[0].guards[0].expr) == src);
+    }
+}
+
 TEST_CASE("parser: list commas are optional, newlines are whitespace") {
     // comma-only, on one line
     auto a = parse_ok("tag t { a, b, c }\nlayers { g: grid of t, h: grid of number }\n"

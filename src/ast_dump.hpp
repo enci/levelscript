@@ -17,4 +17,8 @@ std::string dump_ast(ast_file const& ast, bool spans = true);
 std::string dump_ast(std::string_view source, std::string_view name, bool spans,
                      diagnostics& diags);
 
+// An expression as source text, infix, parenthesized only where precedence
+// needs it: `?a != ?b && k > 0`.
+std::string expr_source(expr const& e);
+
 }  // namespace ls

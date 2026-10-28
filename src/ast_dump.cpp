@@ -192,4 +192,55 @@ std::string dump_ast(std::string_view source, std::string_view name, bool spans,
     return ast ? dump_ast(*ast, spans) : "";
 }
 
+namespace {
+
+// Binding strength, as the parser's precedence table; 8 = unary, 9 = atom.
+int precedence(expr_kind k) {
+    switch (k) {
+    case expr_kind::or_:    return 1;
+    case expr_kind::and_:   return 2;
+    case expr_kind::bit_or: return 3;
+    case expr_kind::eq: case expr_kind::ne: return 4;
+    case expr_kind::lt: case expr_kind::le: case expr_kind::gt: case expr_kind::ge: return 5;
+    case expr_kind::add: case expr_kind::sub: return 6;
+    case expr_kind::mul: case expr_kind::div_: return 7;
+    case expr_kind::neg: case expr_kind::not_: return 8;
+    default: return 9;
+    }
+}
+
+// `e`, parenthesized when it binds looser than `min`.
+std::string operand(expr const& e, int min) {
+    std::string s = expr_source(e);
+    return precedence(e.kind) < min ? "(" + s + ")" : s;
+}
+
+}  // namespace
+
+std::string expr_source(expr const& e) {
+    switch (e.kind) {
+    case expr_kind::int_lit:   return std::to_string(e.int_val);
+    case expr_kind::empty_lit: return ".";
+    case expr_kind::wildcard:  return "*";
+    case expr_kind::ident:
+    case expr_kind::variable:  return e.ident;
+    case expr_kind::paren:     return "(" + expr_source(*e.args[0]) + ")";
+    case expr_kind::neg:       return "-" + operand(*e.args[0], 8);
+    case expr_kind::not_:      return "!" + operand(*e.args[0], 8);
+    case expr_kind::call:
+    case expr_kind::selector: {
+        bool call = e.kind == expr_kind::call;
+        std::string s = e.ident + (call ? "(" : "[");
+        for (size_t i = 0; i < e.args.size(); ++i)
+            s += (i ? ", " : "") + expr_source(*e.args[i]);
+        return s + (call ? ")" : "]");
+    }
+    default: {   // binary, left-associative: the right operand binds tighter
+        int p = precedence(e.kind);
+        return operand(*e.args[0], p) + " " + op_symbol(e.kind) + " " +
+               operand(*e.args[1], p + 1);
+    }
+    }
+}
+
 }  // namespace ls

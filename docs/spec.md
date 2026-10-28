@@ -392,7 +392,7 @@ any_item        ::= weight? write_term
 combinator      ::= 'any' | 'all' | 'ordered'
 weight          ::= '(' 'weight' '=' INTEGER ')'
 ```
-All item lists are one-or-more. A match side is one or more patterns, optionally grouped in braces; a write side is a bare pattern or a braced combinator block:
+All item lists are one-or-more. A match side is one or more patterns, each optionally followed by rule guards (section 5.9.1), the whole optionally grouped in braces; a write side is a bare pattern or a braced combinator block:
 - A **match side** conjoins its patterns across grids: every pattern before `=>` must match at the anchor. There is no match-side combinator; disjunctive matching would change the candidate model, read footprints, and conflict semantics, and is out of scope. Line breaks between the patterns are ordinary whitespace (section 2). Braces around a match side group it for the reader and change nothing: `{ level[floor] loot[.] } => loot[chest]` is `level[floor] loot[.] => loot[chest]`. A group holds one or more patterns, takes no combinator keyword, and does not nest. A match side may also carry rule guards, `when (expr)` items that condition the candidate as a whole (section 5.9.1); it begins with a pattern, so a `when` directly after a write side is a parse error rather than a guard on the next sub-rule.
 - A **write side** is a recursive `write_term`: a `{ any ... }` (pick one alternative) or `{ all ... }` (write every item simultaneously), whose items may themselves be blocks to any depth.
 

@@ -1,4 +1,5 @@
 #include "debug_ui_internal.hpp"
+#include "ast_dump.hpp"
 #include "phosphor_icons.hpp"
 
 #include <SDL3/SDL.h>
@@ -415,18 +416,23 @@ static float pattern_group_width(compiled const& meta, compiled_pattern const& p
     return std::max(grid_w, ImGui::CalcTextSize(pattern_grid_name(meta, pat).c_str()).x);
 }
 
-// One variant as a flow of pieces - its match patterns, the arrow, each write
-// alternative (separated by an alternatives mark) - packed into lines that
-// fit the panel, each line centred vertically. A small rule reads as one
-// row; a big one wraps instead of running off the right edge.
+// One variant as a flow of pieces - its match patterns and rule guards, the
+// arrow, each write alternative (separated by an alternatives mark) - packed
+// into lines that fit the panel, each line centred vertically. A small rule
+// reads as one row; a big one wraps instead of running off the right edge.
+// `guards` is the source text of each of the pair's rule guards, in order.
 static void draw_rule_variant(compiled const& meta, compiled_pair const& pair,
+                              std::vector<std::string> const& guards,
                               float mini_px, project_config const& cfg) {
     std::vector<compiled_pattern const*> rhs_leaves;
     collect_write_leaves(pair.rhs, rhs_leaves);
     if (pair.lhs.empty() && rhs_leaves.empty()) return;
 
-    enum class piece_kind { pattern, arrow, alt };
-    struct piece { piece_kind kind; compiled_pattern const* pat; float w, h, gap; };
+    enum class piece_kind { pattern, guard, arrow, alt };
+    struct piece {
+        piece_kind kind; compiled_pattern const* pat; float w, h, gap;
+        std::string const* text{nullptr};   // guard
+    };
     std::vector<piece> pieces;
     float icon_w = ImGui::CalcTextSize(phosphor::PH_ARROW_RIGHT).x;
     float icon_h = ImGui::GetTextLineHeight();
@@ -434,7 +440,15 @@ static void draw_rule_variant(compiled const& meta, compiled_pair const& pair,
         pieces.push_back({piece_kind::pattern, &p, pattern_group_width(meta, p, mini_px),
                           pattern_group_height(p, mini_px), gap});
     };
-    for (size_t k = 0; k < pair.lhs.size(); ++k) add_pat(pair.lhs[k], k ? 8.f : 0.f);
+    size_t gi = 0;
+    for (size_t k = 0; k < pair.lhs.size(); ++k) {
+        add_pat(pair.lhs[k], k ? 8.f : 0.f);
+        for (; gi < pair.guards.size() && pair.guards[gi].after == (int)k + 1; ++gi)
+            if (gi < guards.size())
+                pieces.push_back({piece_kind::guard, nullptr,
+                                  ImGui::CalcTextSize(guards[gi].c_str()).x, icon_h, 8.f,
+                                  &guards[gi]});
+    }
     pieces.push_back({piece_kind::arrow, nullptr, icon_w, icon_h, 20.f});
     for (size_t k = 0; k < rhs_leaves.size(); ++k) {
         if (k) pieces.push_back({piece_kind::alt, nullptr, icon_w, icon_h, 10.f});
@@ -450,7 +464,7 @@ static void draw_rule_variant(compiled const& meta, compiled_pair const& pair,
         float need = (k == begin ? 0.f : pieces[k].gap) + pieces[k].w;
         // a separator (arrow, alternatives mark) travels with the pattern
         // after it, so no line ends on one
-        bool sep = pieces[k].kind != piece_kind::pattern;
+        bool sep = pieces[k].kind == piece_kind::arrow || pieces[k].kind == piece_kind::alt;
         float with_next = need + (sep && k + 1 < pieces.size()
                                   ? pieces[k + 1].gap + pieces[k + 1].w : 0.f);
         if (k > begin && x + with_next > avail) {
@@ -465,6 +479,7 @@ static void draw_rule_variant(compiled const& meta, compiled_pair const& pair,
 
     // pass 2: draw, each line centred on its tallest piece
     ImVec4 arrow_col(0.40f, 0.68f, 0.98f, 1.f);
+    ImVec4 guard_col(0.86f, 0.70f, 0.40f, 1.f);
     for (auto [b, e] : lines) {
         float line_h = 0.f;
         for (size_t k = b; k < e; ++k) line_h = std::max(line_h, pieces[k].h);
@@ -475,6 +490,10 @@ static void draw_rule_variant(compiled const& meta, compiled_pair const& pair,
             if (line_h > pc.h) ImGui::Dummy({0.f, (line_h - pc.h) * 0.5f});
             if (pc.kind == piece_kind::pattern) {
                 draw_pattern_group(meta, *pc.pat, mini_px, cfg);
+            } else if (pc.kind == piece_kind::guard) {
+                ImGui::PushStyleColor(ImGuiCol_Text, guard_col);
+                ImGui::TextUnformatted(pc.text->c_str());
+                ImGui::PopStyleColor();
             } else if (pc.kind == piece_kind::arrow) {
                 ImGui::PushStyleColor(ImGuiCol_Text, arrow_col);
                 ImGui::TextUnformatted(phosphor::PH_ARROW_RIGHT);
@@ -575,7 +594,12 @@ void draw_rule_window(script const& sc, debug_run const& run, float mini_px,
         if (n > 1 || !tag.empty())
             ImGui::TextDisabled("%s %d / %d%s%s", phosphor::PH_STACK, pi + 1, n,
                                 tag.empty() ? "" : "  ·  ", tag.c_str());
-        draw_rule_variant(sc.meta, cr.pairs[(size_t)pi], mini_px, cfg);
+        // the rule guards' source text, from the declaring sub-rule
+        std::vector<std::string> guards;
+        if (decl && pr.sub_rule_idx < (int)decl->pairs.size())
+            for (auto const& g : decl->pairs[(size_t)pr.sub_rule_idx].guards)
+                guards.push_back("when (" + expr_source(*g.expr) + ")");
+        draw_rule_variant(sc.meta, pr, guards, mini_px, cfg);
         if (pi + 1 < n) {
             ImGui::Spacing();
             ImGui::Separator();
