@@ -1769,7 +1769,7 @@ SPACE             ::= ' ' | '\t'
 
 There is no space around `=`. Prose does not mix with directives: a directive comment with any other text is malformed, gives a warning, and is ignored as a whole. Write prose in a separate comment. A comment that contains `@` later in its text (`// see @seed`) is an ordinary comment.
 
-A **text directive** is for the test keys (B.6), whose values are free text. Its `TEXT` is the rest of the comment, up to a `//` that starts a note, without trailing spaces. It is the comment's only directive. A key that takes `=` written as a text directive (`// @seed 42`) is a warning, and so is a test key written with `=`.
+A **text directive** is for the test keys (B.7), whose values are free text. Its `TEXT` is the rest of the comment, up to a `//` that starts a note, without trailing spaces. It is the comment's only directive. A key that takes `=` written as a text directive (`// @seed 42`) is a warning, and so is a test key written with `=`.
 
 ### B.2 Attachment
 
@@ -1792,8 +1792,9 @@ The same key twice on one target is a warning, and the last one applies. `@expec
 | `@seed` | the file | `INTEGER`, 64-bit unsigned | default invocation seed (B.3) |
 | `@name` | a `tag_value` | `IDENT` | display name (B.4) |
 | `@play` | a `statement` | `INTEGER` | steps per frame while playing (B.5) |
-| `@expect` | the file | `TEXT` | a test expectation; repeatable (B.6) |
-| `@param` | the file | `TEXT`: `IDENT '=' '-'? INTEGER` | a param value for test runs (B.6) |
+| `@hold` | a `statement` | `INTEGER` | frames its result stays on screen while playing (B.6) |
+| `@expect` | the file | `TEXT` | a test expectation; repeatable (B.7) |
+| `@param` | the file | `TEXT`: `IDENT '=' '-'? INTEGER` | a param value for test runs (B.7) |
 
 A `tag_union`, a `layer_entry`, a rule, and a pattern cell are not targets.
 
@@ -1848,7 +1849,27 @@ sequence main {
 
 Here the fill appears at once, the walk is shown one application per frame, and `reduce` runs 100 steps per frame. The other statements use the tool's default pacing.
 
-### B.6 `@expect` and `@param`
+### B.6 `@hold`
+
+`@hold` keeps a statement's result on screen while the debugger **plays**. When the statement completes, playback stays on its result for the given number of frames before the next statement runs. A frame is one tick of the playback clock, so a hold scales with the playback speed.
+
+- **`@hold=N`, N ≥ 1:** the result stays for N frames.
+- **`@hold=0`, or no `@hold`:** playback goes straight on.
+
+A statement completes once, when the run leaves it: a sequence application after its last iteration, and a body statement of an applied sequence once in each iteration. Unlike `@play`, `@hold` on a sequence application does not apply to its body. When several statements complete together, the largest hold applies. A statement skipped by its `when` guard does not complete, so it does not hold. The final statement needs no hold, since its result stays on screen when the run ends. Stepping by hand ignores `@hold`, and stopping playback ends a hold.
+
+```ls
+sequence main {
+    resize(60, 40)
+    everywhere { algo[.] => algo[W] }   // @play=0 @hold=12
+    settle carve_rooms                  // @hold=8
+    everywhere decorate
+}
+```
+
+Here the fill appears at once and stays on screen for 12 frames. Then the rooms are carved at the default pace, and the result stays for 8 frames after the last iteration of `carve_rooms`.
+
+### B.7 `@expect` and `@param`
 
 The test keys state what a file is expected to do, for test tooling: `levelscript --check`, and the golden runner built on it. A test run uses the invocation seed, else `@seed`, else 42; and each `@param` as a param value, which an explicit `--param` overrides. Outside a test run, `@param` is not used.
 

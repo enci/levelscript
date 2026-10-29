@@ -47,7 +47,7 @@ export interface OutlineSymbol {
 
 // A tool directive (`// @key=value`, spec Appendix B), attached to its target.
 export interface Directive {
-    key: 'seed' | 'name' | 'play' | 'expect' | 'param' | string;
+    key: 'seed' | 'name' | 'play' | 'hold' | 'expect' | 'param' | string;
     value: string;   // as written
     loc: Location;
     target: {

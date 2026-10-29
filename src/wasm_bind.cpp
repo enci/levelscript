@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 using namespace emscripten;
 
@@ -47,6 +48,9 @@ struct session {
     // recomputed as we go since a step can land mid-statement.
     int           apps_in_stmt{0};
     int           counted_stmt{-1};
+    // The statement stack at the last statement begin, and the one before it:
+    // at a begin, the statements of `left` that `entered` is not in finished.
+    std::vector<ls::stmt_frame> entered, left;
     // Display metadata for the statement stack: the entry's name, and each
     // sequence's statements' target names (a sequence frame's body is the
     // one the frame before applied) - what the editor matches @play against.
@@ -54,14 +58,18 @@ struct session {
     std::unordered_map<std::string, std::vector<std::string>> targets;
 };
 
-// Pull one application/statement-boundary event, updating apps_in_stmt.
-// False once the run is finished — mirrors the debugger's debug_run::advance().
-bool advance(session& s) {
+// Pull one application/statement-boundary event, updating apps_in_stmt;
+// with `begins`, a statement's begin is an event too. False once the run is
+// finished — mirrors the debugger's debug_run::advance().
+bool advance(session& s, bool begins = false) {
     if (s.done) return false;
-    if (!s.r.step()) { s.done = true; return false; }
+    do {
+        if (!s.r.step()) { s.done = true; return false; }
+        if (s.r.at_statement_begin()) { s.left = std::move(s.entered); s.entered = s.r.stmt_stack(); }
+    } while (!begins && s.r.at_statement_begin());
     int idx = s.r.statement_index();
     if (idx != s.counted_stmt) { s.counted_stmt = idx; s.apps_in_stmt = 0; }
-    if (!s.r.at_statement_boundary()) s.apps_in_stmt++;
+    if (!s.r.at_statement_boundary() && !s.r.at_statement_begin()) s.apps_in_stmt++;
     return true;
 }
 
@@ -150,6 +158,32 @@ void emit_highlights(std::string& o, ls::run const& r) {
     o += "]";
 }
 
+// The frames of a statement stack as [{"sequence","index"}], each named by
+// its sequence; only those not in `but` (a frame is in it when the two
+// stacks agree up to it).
+void emit_frames(std::string& o, session const& s, std::vector<ls::stmt_frame> const& st,
+                 std::vector<ls::stmt_frame> const& but) {
+    o += "[";
+    std::string seq = s.entry_name;
+    bool first = true, same = true;
+    for (size_t k = 0; k < st.size(); ++k) {
+        auto const& f = st[k];
+        same = same && k < but.size() && f.index == but[k].index &&
+               f.iteration == but[k].iteration;
+        if (!same) {
+            if (!first) o += ",";
+            first = false;
+            o += "{\"sequence\":";
+            js(o, seq);
+            o += ",\"index\":" + std::to_string(f.index) + "}";
+        }
+        auto it = s.targets.find(seq);
+        seq = it != s.targets.end() && f.index >= 0 && f.index < (int)it->second.size()
+            ? it->second[(size_t)f.index] : "";
+    }
+    o += "]";
+}
+
 std::string state_json(session const& s, ls::level const& lvl) {
     std::string o = "{\"done\":";
     o += s.done ? "true" : "false";
@@ -159,21 +193,16 @@ std::string state_json(session const& s, ls::level const& lvl) {
     o += ",\"atStatementBoundary\":";
     o += s.r.at_statement_boundary() ? "true" : "false";
     o += ",\"appsInStatement\":" + std::to_string(s.apps_in_stmt);
+    bool begin = s.r.at_statement_begin();
+    o += ",\"atStatementBegin\":";
+    o += begin ? "true" : "false";
     // [{"sequence","index"}]: run::stmt_stack(), each frame named by its sequence
-    o += ",\"stack\":[";
-    std::string seq = s.entry_name;
-    bool first = true;
-    for (auto const& f : s.r.stmt_stack()) {
-        if (!first) o += ",";
-        first = false;
-        o += "{\"sequence\":";
-        js(o, seq);
-        o += ",\"index\":" + std::to_string(f.index) + "}";
-        auto it = s.targets.find(seq);
-        seq = it != s.targets.end() && f.index >= 0 && f.index < (int)it->second.size()
-            ? it->second[(size_t)f.index] : "";
-    }
-    o += "]";
+    o += ",\"stack\":";
+    emit_frames(o, s, s.r.stmt_stack(), {});
+    // At a begin, the statements that finished since the last one (what the
+    // editor matches @hold against); else none.
+    o += ",\"finished\":";
+    emit_frames(o, s, begin ? s.left : std::vector<ls::stmt_frame>{}, s.entered);
     o += ",\"highlights\":";
     emit_highlights(o, s.r);
     o += ",\"level\":";
@@ -217,6 +246,7 @@ int run_begin(std::string const& source, std::string const& name, unsigned int s
         }
     }
     ls::run r = gen.run(eid, seed, ls::step_mode::application, ls::observe::on, overrides);
+    r.stop_at_begin(true);   // for run_play_step; the other steppers pass over begins
     int id = g_next_id++;
     session& s = g_sessions.emplace(id, session{std::move(gen), std::move(r), seed, false, eid})
                      .first->second;
@@ -246,6 +276,17 @@ std::string run_step(int id) {
     if (it == g_sessions.end()) return "{}";
     session& s = it->second;
     advance(s);
+    return state_json(s, s.r.snapshot());
+}
+
+// Advance one event, a statement's begin included, for playback: at a begin
+// nothing of the statement has run yet, and the state's `finished` lists the
+// statements that completed since the last begin.
+std::string run_play_step(int id) {
+    auto it = g_sessions.find(id);
+    if (it == g_sessions.end()) return "{}";
+    session& s = it->second;
+    advance(s, true);
     return state_json(s, s.r.snapshot());
 }
 
@@ -280,6 +321,7 @@ EMSCRIPTEN_BINDINGS(ls_module) {
     function("run_last_error", &run_last_error);
     function("run_state", &run_state);
     function("run_step", &run_step);
+    function("run_play_step", &run_play_step);
     function("run_next_statement", &run_next_statement);
     function("run_finish", &run_finish);
     function("run_end", &run_end);

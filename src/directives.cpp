@@ -24,6 +24,7 @@ key_spec const keys[] = {
     {"seed",    directive_target::file,      value_kind::integer, "the file", ""},
     {"name",    directive_target::tag_value, value_kind::ident,   "tag value", "tag values"},
     {"play",    directive_target::statement, value_kind::integer, "statement", "statements"},
+    {"hold",    directive_target::statement, value_kind::integer, "statement", "statements"},
     {"expect",  directive_target::file,      value_kind::text,    "the file", ""},
     {"param",   directive_target::file,      value_kind::text,    "the file", ""},
 };

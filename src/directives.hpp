@@ -15,6 +15,7 @@
 //   @seed=N        the file        default invocation seed (root file only)
 //   @name=ID       a tag value     display name
 //   @play=N        a statement     steps per frame while the debugger plays
+//   @hold=N        a statement     play frames its result stays on screen
 //   @expect TEXT   the file        a test expectation (repeatable)
 //   @param P=N     the file        a param value for test runs (name = P, value = N)
 

@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <climits>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -228,6 +229,24 @@ static bool same_frames(std::vector<stmt_frame> const& a, std::vector<stmt_frame
     for (size_t k = 0; k < n; ++k)
         if (a[k].index != b[k].index || a[k].iteration != b[k].iteration) return false;
     return true;
+}
+
+// The @hold at a statement's begin (spec B.6): the largest of the statements
+// that finished since the last begin - those of `left` that `entered` is not
+// in. 0: none.
+static int play_hold(script const& sc, std::vector<stmt_frame> const& left,
+                     std::vector<stmt_frame> const& entered) {
+    std::string seq = sc.entry_name;   // the sequence frame k is in
+    uint64_t hold = 0;
+    for (size_t k = 0; k < left.size(); ++k) {
+        if (!same_frames(left, entered, k + 1))
+            if (auto d = sc.dirs.find("hold", directive_target::statement, seq, "", left[k].index))
+                hold = std::max(hold, d->number);
+        auto const* sq = lookup(sc.ast.sequences, seq);
+        if (!sq || left[k].index < 0 || left[k].index >= (int)sq->stmts.size()) break;
+        seq = sq->stmts[(size_t)left[k].index].rule_name.text;
+    }
+    return (int)std::min<uint64_t>(hold, INT_MAX);
 }
 
 // ── entry point ───────────────────────────────────────────────────────────────
@@ -470,6 +489,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
 #endif
     bool running = true;
     bool playing = false;
+    int  hold_ticks = 0;   // play ticks left showing a finished statement (@hold)
     using clock = std::chrono::steady_clock;
     auto last_advance = clock::now();
 
@@ -547,6 +567,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
                 case SDL_SCANCODE_Q:   running = false;    break;
                 case SDL_SCANCODE_SPACE:
                     playing = !playing;
+                    hold_ticks = 0;
                     last_advance = clock::now();
                     break;
                 default: break;
@@ -582,12 +603,26 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
 
         // Timed playback -- advance one application per tick at play_fps,
         // or at the statement's @play pace; a breakpoint stops it like any
-        // other command.
+        // other command. A finished statement's @hold keeps its result for
+        // that many ticks first.
         if (playing && run.done) playing = false;
+        if (!playing) hold_ticks = 0;
+        // After an advance: at a begin, the hold of the statements it ended.
+        auto held = [&] {
+            if (run.gen.at_statement_begin())
+                hold_ticks = play_hold(sc, run.left, run.entered);
+            return hold_ticks > 0;
+        };
         size_t pace_depth = 0;
         auto   pace_stack = run.gen.stmt_stack();
         int    pace = playing ? play_pace(sc, pace_stack, pace_depth) : -1;
-        if (playing && !run.busy() && pace >= 0) {
+        if (playing && !run.busy() && hold_ticks > 0) {
+            auto now = clock::now();
+            if (std::chrono::duration<float>(now - last_advance).count() >= 1.f / play_fps) {
+                hold_ticks--;
+                last_advance = now;
+            }
+        } else if (playing && !run.busy() && pace >= 0) {
             // @play=N: N steps this frame; @play=0: the whole statement (in
             // slices of a few frames' time, so the window stays live). Stops
             // early once the run leaves the statement that set the pace.
@@ -595,6 +630,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
             for (int i = 0; pace == 0 || i < pace; ++i) {
                 run.advance_cmd(sc.breakpoints);
                 if (run.done || !run.paused_at.empty()) break;
+                if (held()) break;
                 if (!same_frames(run.gen.stmt_stack(), pace_stack, pace_depth + 1)) break;
                 if (std::chrono::duration<float>(clock::now() - t0).count() > 0.05f) break;
             }
@@ -607,6 +643,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
                 float elapsed = std::chrono::duration<float>(now - last_advance).count();
                 if (elapsed >= 1.f / play_fps) {
                     run.advance_cmd(sc.breakpoints);
+                    held();
                     run.refresh();
                     if (!run.paused_at.empty()) playing = false;
                     last_advance = now;
@@ -819,6 +856,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
                         playing ? "Stop animating (Space)"
                                 : "Animate (Space) - one application per tick", playing)) {
                 playing = !playing;
+                hold_ticks = 0;
                 last_advance = clock::now();
             }
             ImGui::SameLine();

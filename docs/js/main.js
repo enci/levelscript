@@ -278,17 +278,19 @@
     // ---- inspection: decorations and diagnostics come from one inspect_json call per edit ----
     let insp = null, diag = null;
     // From the tool directives (spec Appendix B): value -> its @name, and
-    // "sequence#index" -> the statement's @play.
-    let displayNames = {}, plays = {};
+    // "sequence#index" -> the statement's @play and @hold.
+    let displayNames = {}, plays = {}, holds = {};
     function inspectNow() {
       insp = null;
       if (!mod || !ta) return;
       try { insp = JSON.parse(mod.inspect_json(ta.value, fileName, resolver(fileName))); } catch (e) { insp = null; }
       displayNames = {};
       plays = {};
+      holds = {};
       ((insp && insp.directives) || []).forEach(d => {
         if (d.key === 'name') displayNames[d.target.name] = d.value;
         if (d.key === 'play') plays[d.target.owner + '#' + d.target.index] = +d.value;
+        if (d.key === 'hold') holds[d.target.owner + '#' + d.target.index] = +d.value;
       });
     }
     // The @play pace at a run state: the innermost statement on its stack with one (a sequence
@@ -297,6 +299,11 @@
       let pace;
       (state.stack || []).forEach(f => { const p = plays[f.sequence + '#' + f.index]; if (p !== undefined) pace = p; });
       return pace;
+    }
+    // The @hold at a statement's begin: the largest of the statements that finished since the last
+    // begin. 0: none.
+    function holdOf(state) {
+      return (state.finished || []).reduce((h, f) => Math.max(h, holds[f.sequence + '#' + f.index] || 0), 0);
     }
     function hasErrors() { return !!insp && (insp.diagnostics || []).some(d => d.severity === 'error'); }
     // Compile errors are shown by the diagnostics list, so a program that does not compile is not run.
@@ -442,9 +449,12 @@
     });
 
     // Animate: steps per frame accelerate so long generations still finish in a few seconds.
+    // A finished statement's @hold keeps its result for that many frames first.
     function play() {
       const t0 = performance.now();
+      let hold = 0;
       const frame = () => {
+        if (hold > 0) { hold--; playTimer = requestAnimationFrame(frame); return; }
         // the statement's @play steps per frame (0: all of it), else a pace that speeds up
         const pace = last ? paceOf(last) : undefined;
         const perFrame = pace !== undefined ? (pace || Infinity)
@@ -452,7 +462,8 @@
         const at = JSON.stringify(last && last.stack), f0 = performance.now();
         let state;
         for (let i = 0; i < perFrame; i++) {
-          state = JSON.parse(mod.run_step(sessionId));
+          state = JSON.parse(mod.run_play_step(sessionId));
+          if (state.atStatementBegin && (hold = holdOf(state)) > 0) break;
           if (state.done || performance.now() - f0 > 50) break;   // keep the page live
           // a new statement may set its own pace
           if (pace !== undefined && JSON.stringify(state.stack) !== at) break;

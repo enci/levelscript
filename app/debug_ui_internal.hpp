@@ -12,7 +12,7 @@
 #include "ls.hpp"           // execution: compile/run/step/snapshot/highlights
 #include "ast.hpp"          // metadata: statement + rule attribute display
 #include "sema.hpp"         // metadata: compiled patterns / tag + layer tables
-#include "directives.hpp"   // metadata: tool directives (@seed, @name, @play, ...)
+#include "directives.hpp"   // metadata: tool directives (@seed, @name, @play, @hold, ...)
 #include "project_config.hpp"
 
 #include <imgui.h>
@@ -123,6 +123,9 @@ struct debug_run {
     int  apps_in_stmt{0};    // applications of the statement being worked on
     int  counted_stmt{-1};
     std::vector<stmt_frame> counted_stack;   // leaf position apps_in_stmt counts for
+    // The statement stack at the last statement begin, and the one before it:
+    // at a begin, the statements of `left` that `entered` is not in finished.
+    std::vector<stmt_frame> entered, left;
     double run_ms{0};        // time spent inside the run's steps - engine only, no UI
     long   total_apps{0};    // applications since the start
 
@@ -136,6 +139,8 @@ struct debug_run {
         paused_at.clear();
         apps_in_stmt = 0;
         counted_stmt = -1;
+        entered.clear();
+        left.clear();
         run_ms = 0;
         total_apps = 0;
         refresh();
@@ -165,6 +170,7 @@ struct debug_run {
         for (size_t k = 0; same && k < st.size(); ++k)
             same = st[k].index == counted_stack[k].index &&
                    st[k].iteration == counted_stack[k].iteration;
+        if (gen.at_statement_begin()) { left = std::move(entered); entered = st; }
         if (!same) { counted_stmt = s; counted_stack = std::move(st); apps_in_stmt = 0; }
         if (!gen.at_statement_boundary() && !gen.at_statement_begin()) {
             apps_in_stmt++;

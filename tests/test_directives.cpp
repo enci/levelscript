@@ -59,6 +59,20 @@ sequence main {
     CHECK(d.find("play", directive_target::statement, "main", "", 2)->number == 100);   // stacked past a comment
 }
 
+TEST_CASE("directives: @hold attaches to statements, beside @play") {
+    auto d = read("tag t { a }\nlayers {\n g: grid of t\n}\nsequence main {\n"
+                  "    resize(4, 4)   // @play=0 @hold=12\n"
+                  "    // @hold=3\n"
+                  "    everywhere { g[.] => g[a] }\n"
+                  "}\n");
+    CHECK(d.warnings.all.empty());
+    CHECK(d.find("play", directive_target::statement, "main", "", 0)->number == 0);
+    CHECK(d.find("hold", directive_target::statement, "main", "", 0)->number == 12);
+    CHECK(d.find("hold", directive_target::statement, "main", "", 1)->number == 3);
+    CHECK(warns(read("tag t { a }\nlayers {\n g: grid of t // @hold=1\n}\n"), "needs a statement"));
+    CHECK(warns(read("tag t {\n a // @hold=x\n}\n"), "'@hold' takes a number, got 'x'"));
+}
+
 TEST_CASE("directives: malformed comments, unknown keys and bad values warn") {
     auto d = read("// @seed 42\n// @seed=4 see notes\n// @frob=1 @seed=x\ntag t { a }\n");
     CHECK(d.all.empty());
