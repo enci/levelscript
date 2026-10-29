@@ -140,8 +140,8 @@
       for (let y = 0; y <= h; y++) { g.moveTo(ox, oy + y * cs + 0.5); g.lineTo(ox + w * cs, oy + y * cs + 0.5); }
       g.stroke();
     }
-    // the cells the last rule application matched / wrote
-    (state.highlights || []).forEach(hl => {
+    // the cells the last rule application matched / wrote; a finished run shows just the level
+    (state.done ? [] : state.highlights || []).forEach(hl => {
       const layer = lvl.layers[hl.layer];
       if (!layer || !visible.has(layer.name)) return;
       g.lineWidth = 2;

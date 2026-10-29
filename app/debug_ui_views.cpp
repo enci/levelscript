@@ -11,6 +11,8 @@
 #include <cstdio>
 #include <cmath>
 #include <climits>
+#include <cstdlib>
+#include <tuple>
 
 namespace ls {
 
@@ -534,10 +536,10 @@ static void draw_rule_variant(compiled const& meta, compiled_pair const& pair,
 
 // The leaf statement the last step worked on, followed down the statement
 // stack through nested sequences. `trail` collects "in <sequence>
-// (iteration k)" for each level. Null when there is no step yet.
+// (iteration k)" for each level - without the iteration for a frame that has
+// none (-1). Null when there is no step yet, or the stack names no statement.
 static std::pair<program_stmt const*, compiled_stmt const*>
-shown_leaf(script const& sc, debug_run const& run, std::string& trail) {
-    auto frames = run.gen.stmt_stack();
+leaf_at(script const& sc, std::vector<stmt_frame> const& frames, std::string& trail) {
     if (frames.empty()) return {nullptr, nullptr};
     if (sc.entry < 0 || sc.entry >= (int)sc.ast.sequences.size() ||
         sc.entry >= (int)sc.meta.sequences.size())
@@ -556,25 +558,51 @@ shown_leaf(script const& sc, debug_run const& run, std::string& trail) {
             sid >= (int)sc.ast.sequences.size())
             return {nullptr, nullptr};
         if (!trail.empty()) trail += " > ";
-        trail += sc.meta.sequences[(size_t)sid].name + " (iteration " +
-                 std::to_string(frames[k + 1].iteration + 1) + ")";
+        trail += sc.meta.sequences[(size_t)sid].name;
+        if (frames[k + 1].iteration >= 0)
+            trail += " (iteration " + std::to_string(frames[k + 1].iteration + 1) + ")";
         ast_list  = &sc.ast.sequences[(size_t)sid].stmts;
         meta_list = &sc.meta.sequences[(size_t)sid].stmts;
     }
     return {nullptr, nullptr};
 }
 
+// The frames a dotted statement path ("2.0.1") names, without iterations.
+static std::vector<stmt_frame> dotted_frames(std::string const& dotted) {
+    std::vector<stmt_frame> frames;
+    size_t i = 0;
+    while (i < dotted.size()) {
+        size_t e = dotted.find('.', i);
+        if (e == std::string::npos) e = dotted.size();
+        frames.push_back({std::atoi(dotted.c_str() + i), -1, -1});
+        i = e + 1;
+    }
+    return frames;
+}
+
 void draw_rule_window(script const& sc, debug_run const& run, float mini_px,
                       project_config const& cfg) {
+    // The statement picked in the Program window, else the run's.
     std::string trail;
-    auto [leaf, cleaf] = shown_leaf(sc, run, trail);
+    auto [leaf, cleaf] = leaf_at(sc, dotted_frames(sc.selected), trail);
+    bool picked = leaf != nullptr;
+    if (picked) {
+        ImGui::TextColored(ImGui::GetStyleColorVec4(ImGuiCol_CheckMark),
+                           "%s selected %s", phosphor::PH_CURSOR_CLICK, sc.selected.c_str());
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Picked in the Program window - the next step shows the "
+                              "running statement again");
+    } else {
+        trail.clear();
+        std::tie(leaf, cleaf) = leaf_at(sc, run.gen.stmt_stack(), trail);
+    }
     if (!leaf) {
         ImGui::TextDisabled("(none yet)");
         return;
     }
     if (!trail.empty()) ImGui::TextDisabled("in %s", trail.c_str());
     auto const& stmt = *leaf;
-    if (stmt.what != program_stmt::kind::apply) {
+    if (stmt.what != program_stmt::kind::apply || cleaf->seq_id >= 0) {   // an operation, a sequence
         ImGui::TextDisabled("%s", stmt_desc(stmt).c_str());
         return;
     }
@@ -715,13 +743,17 @@ struct program_tree {
             // shifting the index column too. Children nest under PushID(i).
             ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth |
                                        ImGuiTreeNodeFlags_NoTreePushOnOpen;
-            if (is_seq) flags |= ImGuiTreeNodeFlags_DefaultOpen;   // unfolded
+            if (is_seq) flags |= ImGuiTreeNodeFlags_DefaultOpen   // unfolded; the arrow folds,
+                               | ImGuiTreeNodeFlags_OpenOnArrow;  // the label picks
             else        flags |= ImGuiTreeNodeFlags_Leaf;
+            if (sc.selected == num) flags |= ImGuiTreeNodeFlags_Selected;
             float indent = depth * ImGui::GetStyle().IndentSpacing;
             if (indent > 0.f) ImGui::Indent(indent);
             if (is_seq && follow && inside) ImGui::SetNextItemOpen(true);
             bool open = ImGui::TreeNodeEx("##stmt", flags, "%s", label.c_str());
-            if (inside) {   // which iteration of this sequence is running
+            // a click picks the row for the Rule window; again, back to the run
+            if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen())
+                sc.selected = sc.selected == num ? std::string{} : num;            if (inside) {   // which iteration of this sequence is running
                 auto const& f = path[(size_t)depth + 1];
                 int it = f.iteration + 1;
                 ImGui::SameLine();
@@ -767,6 +799,7 @@ void draw_program_window(script& sc, debug_run const& run) {
         follow = path[k].index != last_path[k].index ||
                  path[k].iteration != last_path[k].iteration;
     last_path = path;
+    if (follow) sc.selected.clear();   // the run moved: the Rule window follows it again
 
     // Depth 0 keeps the run's own marker: a finished top-level statement
     // moves it to the next one; a step inside a sequence leaves it on the

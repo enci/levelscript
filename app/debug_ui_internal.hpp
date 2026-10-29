@@ -79,9 +79,13 @@ struct script {
     // Breakpoints, by dotted statement path within the entry ("2.0.1"). They
     // survive Reset and reloads; a path that no longer exists never hits.
     std::set<std::string> breakpoints;
+    // The statement picked in the Program window ("2.0.1"), which the Rule
+    // window shows until the run moves; empty: it follows the run.
+    std::string selected;
     std::string status;       // one-line load status for the status bar
     std::string full_error;   // full diagnostics of a failed load; directive warnings else
     bool        ok{false};
+    std::chrono::steady_clock::time_point loaded_at{};   // the last (re)load: the status chip blinks
 
     // Tool directives (spec Appendix B), and lookups of them by id
     directive_set                         dirs;
@@ -151,6 +155,7 @@ struct debug_run {
     void refresh() {
         snap = gen.snapshot();
         hls  = gen.highlights();
+        if (done) hls.clear();   // a finished run shows just the level
         ++version;
     }
 

@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <chrono>
 #include <climits>
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -52,6 +53,7 @@ static void begin_pane(char const* name, ImGuiWindowFlags flags = 0) {
 // ── script loading ────────────────────────────────────────────────────────────
 
 bool load_script(script& sc) {
+    sc.loaded_at = std::chrono::steady_clock::now();
     std::string name = canonical_module_name(sc.path);
     std::string src;
     if (!read_text_file(name, src)) {
@@ -192,11 +194,20 @@ static ImVec4 brand_green(bool dark, float alpha = 1.f) {
     return dark ? ImVec4(0.247f, 0.769f, 0.431f, alpha)     // #3FC46E
                 : ImVec4(0.137f, 0.620f, 0.329f, alpha);    // #239E54
 }
-// The brand's teal (the icon's last stop), for the one control that must
-// read apart from the green ones.
-static ImVec4 brand_teal(bool dark) {
-    return dark ? ImVec4(0.302f, 0.788f, 0.690f, 1.f)       // #4DC9B0
-                : ImVec4(0.059f, 0.549f, 0.447f, 1.f);      // #0F8C72
+// Toolbar icon colors, one per group of controls: blue stepping, dark red
+// reset/restart, purple animation (run/continue keep the brand green). Each
+// lighter on dark so the thin icons keep their contrast.
+static ImVec4 tool_blue(bool dark) {
+    return dark ? ImVec4(0.341f, 0.639f, 0.910f, 1.f)       // #57A3E8
+                : ImVec4(0.122f, 0.435f, 0.761f, 1.f);      // #1F6FC2
+}
+static ImVec4 tool_red(bool dark) {
+    return dark ? ImVec4(0.851f, 0.392f, 0.392f, 1.f)       // #D96464
+                : ImVec4(0.659f, 0.157f, 0.157f, 1.f);      // #A82828
+}
+static ImVec4 tool_purple(bool dark) {
+    return dark ? ImVec4(0.706f, 0.549f, 0.941f, 1.f)       // #B48CF0
+                : ImVec4(0.482f, 0.310f, 0.788f, 1.f);      // #7B4FC9
 }
 static void set_style_metrics();
 static void set_light_theme();
@@ -774,10 +785,11 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
             ImGui::Text("|");
             ImGui::SameLine();
 
-            // VS Code's debug toolbar: same order, names and keys; in brand
-            // colors - green stepping icons, teal reset/restart.
-            ImVec4 dbg_step    = brand_green(dark_theme);
-            ImVec4 dbg_restart = brand_teal(dark_theme);
+            // VS Code's debug toolbar: same order, names and keys; green
+            // run/continue, blue stepping, dark red reset/restart.
+            ImVec4 dbg_run     = brand_green(dark_theme);
+            ImVec4 dbg_step    = tool_blue(dark_theme);
+            ImVec4 dbg_restart = tool_red(dark_theme);
             auto dbgbtn = [&](char const* icon, char const* tip, ImVec4 col, bool enabled) {
                 ImGui::BeginDisabled(!enabled);
                 bool clicked = toolbtn(icon, tip, false, &col);
@@ -787,12 +799,12 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
             };
             bool can_step = loaded && !run.done && !run.busy();
             if (run.busy()) {
-                if (dbgbtn(phosphor::PH_PAUSE, "Pause (F6)", dbg_step, true)) action_pause();
+                if (dbgbtn(phosphor::PH_PAUSE, "Pause (F6)", dbg_run, true)) action_pause();
             } else {
                 if (dbgbtn(phosphor::PH_PLAY,
                            run.started ? "Continue (F5) - run to the next breakpoint"
                                        : "Run (F5) - run to the first breakpoint",
-                           dbg_step, loaded && !run.done))
+                           dbg_run, loaded && !run.done))
                     action_continue();
             }
             if (dbgbtn(phosphor::PH_ARROW_ARC_RIGHT,
@@ -852,9 +864,11 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
 
             ImGui::Text("|");
             ImGui::SameLine();
+            ImVec4 anim_col = tool_purple(dark_theme);
             if (toolbtn(playing ? phosphor::PH_PAUSE_CIRCLE : phosphor::PH_PLAY_CIRCLE,
                         playing ? "Stop animating (Space)"
-                                : "Animate (Space) - one application per tick", playing)) {
+                                : "Animate (Space) - one application per tick", playing,
+                        &anim_col)) {
                 playing = !playing;
                 hold_ticks = 0;
                 last_advance = clock::now();
@@ -979,8 +993,24 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
             const bool   bar_ok   = sc.ok || path.empty();   // nothing open is not an error
             const ImVec4 bar_col  = bar_ok ? brand_green(false)                    // #239E54
                                           : ImVec4(0.780f, 0.180f, 0.180f, 1.f);
-            const ImVec4 chip_col = sc.ok ? ImVec4(0.102f, 0.478f, 0.255f, 1.f)   // #1A7A41
-                                          : ImVec4(0.520f, 0.070f, 0.070f, 1.f);
+            ImVec4 chip_col = sc.ok ? ImVec4(0.102f, 0.478f, 0.255f, 1.f)   // #1A7A41
+                                    : ImVec4(0.520f, 0.070f, 0.070f, 1.f);
+            // A (re)load blinks the chip twice, fading, so it confirms the
+            // compile even when the status text reads the same as before.
+            {
+                constexpr float k_blink_s = 0.9f;
+                float t = std::chrono::duration<float>(clock::now() - sc.loaded_at).count();
+                if (t < k_blink_s) {
+                    float pulse = 0.5f * (1.f - std::cos(t / k_blink_s * 4.f * 3.14159265f))
+                                * (1.f - t / k_blink_s);
+                    ImVec4 lit = sc.ok ? ImVec4(0.361f, 0.855f, 0.541f, 1.f)   // #5CDA8A
+                                       : ImVec4(0.949f, 0.373f, 0.373f, 1.f);  // #F25F5F
+                    chip_col = { chip_col.x + (lit.x - chip_col.x) * pulse,
+                                 chip_col.y + (lit.y - chip_col.y) * pulse,
+                                 chip_col.z + (lit.z - chip_col.z) * pulse, 1.f };
+                    redraw_frames = k_cooldown_frames;   // keep drawing until it settles
+                }
+            }
             const ImVec4 text_col = { 1.f, 1.f, 1.f, 1.f };
             const ImVec4 dim_col  = { 1.f, 1.f, 1.f, 0.78f };
             ImGui::PushStyleColor(ImGuiCol_WindowBg, bar_col);
