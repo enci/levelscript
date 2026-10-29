@@ -517,7 +517,7 @@ std::string inspect_json(std::string const& source, std::string const& name,
     o += "],\"ops\":[\"resize\",\"upscale\",\"trim\",\"mirror\",\"pad\",\"path\",\"bsp\",\"voronoi\",\"noise\"]";
     o += ",\"builtins\":[\"if\",\"min\",\"max\",\"abs\",\"clamp\",\"mod\",\"random\"]";
     o += ",\"graph_functions\":[\"degree\",\"size\",\"distance\",\"neighbors\","
-         "\"adjacent\",\"reachable\",\"value\"]";
+         "\"adjacent\",\"reachable\",\"value\",\"some\",\"every\",\"count\"]";
     o += "}}";
     return o;
 }

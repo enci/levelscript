@@ -1,6 +1,6 @@
 # LevelScript
 
-**Status**: Draft 0.15.0
+**Status**: Draft 0.15.1
 **File extension**: `.lvs`
 **CLI**: `levelscript [--seed N] [--entry name] [--param name=value ...] <file.lvs>` (`--entry` defaults to `main` and `--seed` to the root file's `@seed` directive, both tool conventions; section 6, Appendix B)
 **Embedding**: namespace `ls::` (see Appendix A)
@@ -557,7 +557,7 @@ Footprints are defined relative to the pattern's origin (top-left corner). When 
 
 The bounding rectangle of a pattern is its W x H region, but the footprints may be sparse subsets (a 3x3 pattern with `*` corners has plus-shaped footprints). The write footprint drives the write-protection mask (section 6.8). The read footprint does not participate in conflict handling; it defines which cells a match inspects, and which cells the observe channel reports as matched (Appendix A).
 
-**Expression cells.** An expression cell's read footprint is the set of grid cells its expression reads at the current position. Same-position cross-grid reads (a bare grid name, section 5.8) contribute the referenced grid's cell at this offset. Reads of `x`, `y`, `width`, `height`, params, and pattern variables read no grid cell and contribute nothing (a variable's binding cells are already in the read footprint). `where` cells contribute to the read footprint only (never the write footprint); a `*` `where` cell contributes nothing. A graph-pattern binding cell contributes its own offset in the graph's source grid; graph functions contribute nothing for their non-local reads (section 5.12). On the RHS, an expression cell's write footprint is its own grid cell. A rule guard (section 5.9.1) reads no grid cell and contributes nothing.
+**Expression cells.** An expression cell's read footprint is the set of grid cells its expression reads at the current position. Same-position cross-grid reads (a bare grid name, section 5.8) contribute the referenced grid's cell at this offset. Reads of `x`, `y`, `width`, `height`, params, and pattern variables read no grid cell and contribute nothing (a variable's binding cells are already in the read footprint). `where` cells contribute to the read footprint only (never the write footprint); a `*` `where` cell contributes nothing. A graph-pattern binding cell contributes its own offset in the graph's source grid; graph functions contribute nothing for their non-local reads (section 5.12), including the cells of a whole region that `some`, `every`, and `count` test. On the RHS, an expression cell's write footprint is its own grid cell. A rule guard (section 5.9.1) reads no grid cell and contributes nothing.
 
 Because there is no coordinate indexing (section 5.8), every read offset is statically known, so footprints are compile-time static. Pattern variables carry values, not positions, and preserve this. The one exception is a graph rule, whose footprints are node regions known only when the candidate is evaluated (section 5.13).
 
@@ -678,10 +678,13 @@ LevelScript has a closed set of **built-in** functions; there are no user-define
 | `adjacent(n, t)` | `(node, target) -> bool` | `neighbors(n, t) > 0` |
 | `reachable(n, t)` | `(node, target) -> bool` | `distance(n, t) < 2^30` |
 | `value(n)` | `(node) -> T` | the value `n`'s region holds in the graph's source grid; `T` is a tag-mask of the source's tagset, or number |
+| `some(n, s)` | `(node, selector) -> bool` | `count(n, s) > 0` |
+| `every(n, s)` | `(node, selector) -> bool` | `count(n, s) == size(n)` |
+| `count(n, s)` | `(node, selector) -> number` | number of cells of `n`'s region that match `s` |
 
 Arities are fixed. `min`/`max` are binary; nest for more operands (`min(a, min(b, c))`). `if` is the only function whose type is parametric in `T`; it is a single generic signature, not overloading. Because evaluation is eager and all operators are total (section 5.8), `if(c, a, b)` never faults on its unused branch - e.g. `if(n == 0, 0, 100 / n)` is safe at `n == 0`.
 
-**Built-in names are not reserved.** A call is recognised syntactically (an identifier followed by `(`, section 5.8), and tag values, grids, and params are never called, so `if`, `min`, `max`, `abs`, `clamp`, `mod`, `random`, and the graph functions `degree`, `size`, `distance`, `neighbors`, `adjacent`, `reachable`, and `value` may also be used as tag value, grid, graph, or param names. Followed by `(`, such a name always denotes the built-in; otherwise it resolves per section 5.8. Like operation names (section 2.4), built-in names are not keywords.
+**Built-in names are not reserved.** A call is recognised syntactically (an identifier followed by `(`, section 5.8), and tag values, grids, and params are never called, so `if`, `min`, `max`, `abs`, `clamp`, `mod`, `random`, and the graph functions `degree`, `size`, `distance`, `neighbors`, `adjacent`, `reachable`, `value`, `some`, `every`, and `count` may also be used as tag value, grid, graph, or param names. Followed by `(`, such a name always denotes the built-in; otherwise it resolves per section 5.8. Like operation names (section 2.4), built-in names are not keywords.
 
 **`random` is impure; the others are pure.** Because `if` is eager, `if(c, random(0,9), random(0,9))` evaluates **both** branches and therefore draws **twice**, in left-to-right order, discarding the unused value. This is defined behaviour, not a fault; if exactly one draw is wanted, place the `random` outside the `if`. (Eager `if` is deliberate: totality makes the dead branch safe, and the fixed two-draw cost keeps the draw sequence trivially pinned.) `random` may appear in any expression position (match cells, `where`, write cells, `when` guards, param expressions): it reads no grid, position, or dimension, so the statement- and param-scope restrictions (section 5.8) do not exclude it. It draws once each time its expression is evaluated.
 
@@ -757,7 +760,7 @@ Under a batch mode every candidate of `open_if_unconnected` sees the same graph,
 
 **Nodes as values.** A variable bound in a graph pattern is a **node** of that graph (section 5.8). Nodes compare by identity with `==` and `!=`, and are otherwise valid only as graph-function arguments and node extents (section 5.13): they have no arithmetic, are never empty, and cannot be written to a grid (check 45). Identity never exposes node order (section 4.3). A node variable may appear wherever its pair's variables may (section 5.11): in rule guards, `where` cells, and expression cells on either side, e.g. `rooms[ (if(size(?n) > 20, Hall, Room)) ]`.
 
-**Graph functions.** Seven built-ins (section 5.10) describe nodes. Each takes a node `n` first; four also take a **target** `t`, which is a node or a selector (below) and denotes a set of nodes of `n`'s graph (a node target is the set holding just that node):
+**Graph functions.** Ten built-ins (section 5.10) describe nodes. Each takes a node `n` first. Four also take a **target** `t`, which is a node or a selector (below) and denotes a set of nodes of `n`'s graph (a node target is the set holding just that node); three take a selector `s` that they test against the cells of `n`'s region:
 
 - `degree(n)` - the number of nodes adjacent to `n`.
 - `size(n)` - the number of cells in `n`'s region.
@@ -766,12 +769,15 @@ Under a batch mode every candidate of `open_if_unconnected` sees the same graph,
 - `neighbors(n, t)` - the number of nodes of `t` adjacent to `n`; `n` is not its own neighbour.
 - `adjacent(n, t)` - `neighbors(n, t) > 0`.
 - `reachable(n, t)` - `distance(n, t) < 2^30`.
+- `count(n, s)` - the number of cells of `n`'s region that match `s`: a cell matches iff its value in `s`'s grid matches `s`'s cell under the usual cell semantics (section 4.1).
+- `some(n, s)` - `count(n, s) > 0`: at least one cell of the region matches.
+- `every(n, s)` - `count(n, s) == size(n)`: every cell of the region matches. A region is never empty, so `every` has no vacuous case.
 
 None of them returns empty. A node target must belong to `n`'s graph (check 53).
 
 **Unreachable is far.** Every real distance is smaller than the graph's node count, and so smaller than `2^30`. The value is part of the language, not an implementation detail: an unreachable node is farther than every reachable one, so `distance(n, t) > k` is true and `distance(n, t) <= k` false for it, and arithmetic on it saturates (section 5.8) instead of wrapping. Test reachability with `reachable`, not with the constant.
 
-**Selectors.** A target may be a **selector**: a one-cell pattern `g[m]` over a grid `g` the module sees, either the graph's source or any other grid. `m` is a tag mask for a tag grid, or an integer, `.`, or `!.` for a number grid. A node is selected iff at least one cell of its region matches `m` in `g` under the usual cell semantics (mask overlap or number equality, section 4.1). A selector is not an expression and appears nowhere but as a target (check 53).
+**Selectors.** A target may be a **selector**: a one-cell pattern `g[m]` over a grid `g` the module sees, either the graph's source or any other grid. `m` is a tag mask for a tag grid, or an integer, `.`, or `!.` for a number grid. A node is selected iff at least one cell of its region matches `m` in `g` under the usual cell semantics (mask overlap or number equality, section 4.1). A selector is not an expression and appears nowhere but as a target or the selector argument of `some`, `every`, and `count` (check 53).
 
 ```
 selector      ::= IDENT '[' selector_cell ']'
@@ -866,7 +872,7 @@ Every other condition, such as degrees, sizes, distances, and relations between 
 
 **Modes and conflicts.** Every mode applies (section 6.7), with assignments in place of anchors. `once` and `scatter(N)` choose uniformly among assignments, so a one-variable block chooses uniformly among nodes, whatever their size. Under a batch mode, the write mask (section 6.8) works on cells as always: two assignments conflict iff they write the same grid over a node they share. Regions are disjoint, so a one-variable rule never conflicts with itself.
 
-**Restrictions.** A graph pair has no anchor and no shape. A rule with a graph pair takes no `symmetry` or `rotation` attribute, and one body cannot mix graph and grid pairs (check 58); the sub-rules of a body may name different graphs. A graph block admits no grid patterns: a node relates to grid content through selectors (section 5.12) and `value`.
+**Restrictions.** A graph pair has no anchor and no shape. A rule with a graph pair takes no `symmetry` or `rotation` attribute, and one body cannot mix graph and grid pairs (check 58); the sub-rules of a body may name different graphs. A graph block admits no grid patterns: a node relates to grid content through selectors (section 5.12), above all the quantifiers `some`, `every`, and `count`, and through `value`. `when (every(?n, light[.]))` matches an unlit room, `when (count(?n, items[!.]) >= 5)` one holding at least five items.
 
 **Footprints.** A graph rule's footprints are not compile-time static (section 5.7). Its read footprint is its assigned nodes' regions in the graph's source grid, and its write footprint the cells its leaves write, both fixed when the candidate is evaluated against its snapshot. They serve the write mask and the observe channel (Appendix A) as any footprints do.
 
@@ -1393,7 +1399,7 @@ The compiler must reject:
 50. **Graph mask.** A `nodes` or `edges` mask naming a value outside the source grid's tagset; a mask that selects no value (e.g. `.`); or `nodes` and `edges` masks that share a value (section 4.3).
 51. **Graph misuse.** A graph name read in an expression, used as a selector's grid, passed to an operation's `grid` parameter (also check 35), or heading a write-side pattern (sections 4.3 and 5.12).
 52. **Graph-pattern cell.** A graph-pattern cell other than `*` or a binding variable (section 5.12).
-53. **Graph function arguments.** A call to `degree`, `size`, `distance`, `neighbors`, `adjacent`, or `reachable` whose first argument is not a node; a target that is neither a node nor a selector; a node target, or a `==`/`!=` operand, that is a node of a different graph; a selector anywhere but as a target; or a selector cell that does not fit its grid (a tag mask on a number grid other than `.` or `!.`, or an integer on a tag grid) (section 5.12).
+53. **Graph function arguments.** A call to `degree`, `size`, `value`, `distance`, `neighbors`, `adjacent`, `reachable`, `some`, `every`, or `count` whose first argument is not a node; a target that is neither a node nor a selector; a second argument to `some`, `every`, or `count` that is not a selector; a node target, or a `==`/`!=` operand, that is a node of a different graph; a selector anywhere but as a target or the selector argument of `some`, `every`, or `count`; or a selector cell that does not fit its grid (a tag mask on a number grid other than `.` or `!.`, or an integer on a tag grid) (section 5.12).
 54. **Zero-weight `{ any }`.** An `{ any }` block whose items all have weight `0` (section 5.5).
 55. **Sized pattern.** A sized pattern `g(W, H)[c]` whose body is not exactly one cell, or whose `W` or `H` is not an integer literal from 1 to 256 (section 5.3).
 56. **Rule-guard scope.** A rule guard that reads a grid or `x`/`y`; or whose expression is not boolean (section 5.9.1).
@@ -1635,7 +1641,7 @@ The compiled artifact stays self-contained (section 10.1). It holds the merged c
 
 A graph is a pure function of its source grid, so the reference runtime extracts it lazily and caches it. One flood fill over the source yields a node-id grid (each cell's node, or none), per-node cell counts, and the adjacency sets. Connector regions are filled in the same pass, and each adds an edge for every pair of nodes it touches. The cache is keyed by the source's write version, so every rule and graph pattern that reads the graph between two writes to its source shares one extraction.
 
-Selector targets are cached per (graph, selector): `distance` to a selector is one multi-source breadth-first search over the adjacency sets from the selected nodes, and `neighbors` one scan of them, each producing a per-node array. Their key also includes the selector grid's write version: `distance(?n, rooms[Start])` must be recomputed when `rooms` changes, even if the source did not. A node target is a single-source search, cached per (graph, node) the same way; `adjacent` with a node target is an adjacency-set lookup. A binding cell costs a node-id lookup, and a call on a cached target an array read.
+Selector targets are cached per (graph, selector): `distance` to a selector is one multi-source breadth-first search over the adjacency sets from the selected nodes, and `neighbors` one scan of them, each producing a per-node array. Their key also includes the selector grid's write version: `distance(?n, rooms[Start])` must be recomputed when `rooms` changes, even if the source did not. A node target is a single-source search, cached per (graph, node) the same way; `adjacent` with a node target is an adjacency-set lookup. A binding cell costs a node-id lookup, and a call on a cached target an array read. `count` with a selector is one scan of the selector's grid accumulating per-node counts, cached per (graph, selector) the same way; `some` and `every` compare that count with zero and with `size`.
 
 When extraction happens follows from snapshot semantics (section 7.1): once per batch pass or `settle` sweep, and under a step mode after any application that wrote the source or a selector grid. That is O(cells) per such application. Incremental maintenance is an optimisation the semantics leaves open, since extraction is unobservable.
 

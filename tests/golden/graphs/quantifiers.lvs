@@ -1,0 +1,45 @@
+// Graph rules (v0.15.1, section 5.12): `some`, `every`, and `count`.
+//
+// Four rooms in a row. Lamps light some cells and items lie on others.
+// `every(?n, light[.])` finds the fully dark rooms, `some` the rooms with
+// any lamp, and `count` sorts rooms by how many items they hold. The last
+// rule lights a whole dark room only if a lit neighbour holds at least
+// two items: quantifiers and graph functions in one guard.
+//
+// @seed=1
+// @expect run-ok
+
+tag algo { R, H }
+tag lamp { on }
+tag loot { coin }
+tag mark { dark, lit, rich }
+
+layers {
+    level: grid of algo
+    light: grid of lamp
+    items: grid of loot
+    marks: grid of mark
+    held:  grid of number
+    map:   graph of level(nodes=R, edges=H)
+}
+
+sequence main {
+    resize(11, 2)
+    once { level[* * * * * * * * * * *, * * * * * * * * * * *] =>
+           level[R R H R R H R R H R R, R R . R R . R R . R R] }
+    once { light[* * * * * * * * * * *, * * * * * * * * * * *] =>
+           light[on . . . . . on on . . ., . . . . . . on on . . .] }
+    once { items[* * * * * * * * * * *, * * * * * * * * * * *] =>
+           items[coin coin . . coin . . . . . ., coin . . . . . . . . . coin] }
+    everywhere { map { ?n } => held(?n)[ (count(?n, items[coin])) ] }
+    everywhere { map { ?n } when (every(?n, light[.])) => marks(?n)[dark] }
+    everywhere { map { ?n } when (every(?n, light[on])) => marks(?n)[lit] }
+    everywhere { map { ?n } when (some(?n, light[on]) && !every(?n, light[on]) && count(?n, items[coin]) >= 2) => marks(?n)[rich] }
+    // a dark room next to a room with a lamp and two coins gets lit
+    everywhere {
+        map { ?d ?r -- ?d }
+        when (every(?d, light[.]) && some(?r, light[on]) && count(?r, items[coin]) >= 2)
+        =>
+        light(?d)[on]
+    }
+}

@@ -1,0 +1,12 @@
+// E169 (0.15.1, check 53): a quantifier tests a region's cells against a selector, never a node.
+// @expect error
+// @expect stderr-contains is a selector, which it tests against the node's cells
+tag room { Hall, Inn }
+tag lit { on }
+layers {
+    rooms: grid of room
+    light: grid of lit
+    plan:  graph of rooms
+}
+rule r { plan { ?a ?b -- ?a } when (every(?a, ?b)) => light(?a)[on] }
+sequence main { resize(2, 2) everywhere r }

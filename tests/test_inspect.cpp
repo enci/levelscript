@@ -194,7 +194,7 @@ TEST_CASE("inspect: graph layers in symbols, outline, and refs") {
     CHECK(has(j, "{\"line\":6,\"col\":17,\"len\":3,\"kind\":\"graph\",\"target\":\"map\"}"));
     CHECK(has(j, "{\"line\":6,\"col\":51,\"len\":5,\"kind\":\"layer\",\"target\":\"level\"}"));
     CHECK(has(j, "\"graph_functions\":[\"degree\",\"size\",\"distance\",\"neighbors\","
-                 "\"adjacent\",\"reachable\",\"value\"]"));
+                 "\"adjacent\",\"reachable\",\"value\",\"some\",\"every\",\"count\"]"));
 }
 
 TEST_CASE("inspect: graph blocks in refs, tokens, and spans") {

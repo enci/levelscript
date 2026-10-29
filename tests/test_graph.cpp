@@ -785,6 +785,47 @@ TEST_CASE("graph: graph function arguments") {
     }
 }
 
+TEST_CASE("graph: quantifier arguments") {
+    // check 53: a node, then a selector - never a node
+    CHECK(rule_with("map[?n] when (some(?n, 3)) => level[H]").has_error("is a selector, which it tests"));
+    CHECK(rule_with("map[?a] map[?b] when (every(?a, ?b)) => level[H]").has_error("is a selector, which it tests"));
+    CHECK(rule_with("map[?n] when (count(?n) > 0) => level[H]").has_error("'count' takes a node and a selector"));
+    CHECK(rule_with("map[?n] when (some(rooms[Boss], ?n)) => level[H]").has_error("takes a node first"));
+    CHECK(rule_with("level[?t] when (every(?t, rooms[Boss])) => level[H]").has_error("takes a node first"));
+    CHECK(rule_with("map[?n] when (count(?n, ids[R]) > 0) => level[H]").has_error("is an integer, '.', or '!.'"));
+    // types: some and every are bool, count a number
+    CHECK(rule_with("map[?n] when (count(?n, items[chest])) => level[H]").has_error("a rule guard must be a boolean"));
+    CHECK(rule_with("map[?n] when (some(?n, items[chest]) > 0) => level[H]").has_error("relational operator"));
+    for (char const* body : {
+             "map[?n] when (some(?n, items[chest]) && every(?n, level[R])) => level[H]",
+             "map[?n] => ids[ (count(?n, items[!.])) ]",
+             "areas[?z] when (every(?z, ids[!.]) && count(?z, rooms[Boss]) < 2) => level[H]",
+         }) {
+        INFO(body);
+        compile_result ok = rule_with(body);
+        INFO(ok.diags.format_all());
+        CHECK(ok.ok);
+    }
+}
+
+TEST_CASE("graph: some(), every(), and count() test a region's cells") {
+    // Room A (2x2) holds two chests, B (2x2) four, C none.
+    std::string chests = stamp("items", {"chest chest . chest chest . .", ". . . chest chest . ."});
+    auto lv = generate(stamped(dungeon, "level", abc, chests +
+        "\n    everywhere { map[?n] => ids[ (count(?n, items[chest])) ] }"
+        "\n    everywhere { map[?n] when (every(?n, items[chest])) => rooms[Boss] }"
+        "\n    everywhere { map[?n] when (!some(?n, items[chest])) => rooms[Start] }"));
+    CHECK(show(lv, "ids") == "22.44.0/22.44..");
+    CHECK(show(lv, "rooms") == "...BB.S/...BB..");
+    // the selector's grid may be the graph's own source; a later write is seen
+    auto src = generate(stamped(dungeon, "level", {"R R H R"},
+        "everywhere { map[?n] => ids[ (count(?n, level[R])) ] }\n"
+        "    once { level[R *] => level[W *] }\n"
+        "    everywhere { layout[?n] when (some(?n, level[H])) => rooms[Boss] }"));
+    CHECK(show(src, "ids") == "22.1");
+    CHECK(show(src, "rooms") == "..B.");
+}
+
 TEST_CASE("graph: graph names and visibility in rules") {
     // check 8
     files f;

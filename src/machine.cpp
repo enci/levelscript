@@ -128,6 +128,9 @@ long long machine::eval(int idx, int x, int y) {
     case ce_kind::adjacent_:
     case ce_kind::reachable_:
     case ce_kind::value_:
+    case ce_kind::count_:
+    case ce_kind::some_:
+    case ce_kind::every_:
         return eval_graph(e, x, y);
     case ce_kind::and_: return eval(e.a, x, y) != 0 && eval(e.b, x, y) != 0;   // lazy
     case ce_kind::or_:  return eval(e.a, x, y) != 0 || eval(e.b, x, y) != 0;
@@ -161,7 +164,7 @@ graph_data const& machine::graph(int id) {
     return c.data;
 }
 
-std::vector<int> const& machine::selection(int id, int sel, bool distance) {
+std::vector<int> const& machine::selection(int id, int sel, per_node what) {
     auto& c = selections_[(size_t)sel];
     auto const& s = prog_->selectors[(size_t)sel];
     grid_state const& src = grids_[(size_t)prog_->graphs[(size_t)id].source];
@@ -171,18 +174,25 @@ std::vector<int> const& machine::selection(int id, int sel, bool distance) {
     c.grid_version   = sg.version;
 
     graph_data const& g = graph(id);
-    std::vector<char> picked((size_t)g.node_count(), 0);
+    // per node: how many of its cells the selector matches; selected iff any
+    std::vector<int> cells((size_t)g.node_count(), 0);
     for (size_t i = 0; i < g.node_of.size() && i < sg.front.size(); ++i) {
         int node = g.node_of[i];
-        if (node < 0 || picked[(size_t)node]) continue;
+        if (node < 0) continue;
         int64_t v = sg.front[i];
-        if (sg.is_number ? (v == s.val) != s.ne : (v & s.val) != 0) picked[(size_t)node] = 1;
+        if (sg.is_number ? (v == s.val) != s.ne : (v & s.val) != 0) ++cells[(size_t)node];
     }
+    if (what == per_node::cells) {
+        c.per_node = std::move(cells);
+        return c.per_node;
+    }
+    auto picked = [&](int n) { return cells[(size_t)n] > 0; };
+    bool distance = what == per_node::distance;
     c.per_node.assign((size_t)g.node_count(), distance ? -1 : 0);
     if (distance) {   // one breadth-first search from every selected node
         std::queue<int> q;
         for (int n = 0; n < g.node_count(); ++n)
-            if (picked[(size_t)n]) { c.per_node[(size_t)n] = 0; q.push(n); }
+            if (picked(n)) { c.per_node[(size_t)n] = 0; q.push(n); }
         while (!q.empty()) {
             int n = q.front();
             q.pop();
@@ -194,7 +204,7 @@ std::vector<int> const& machine::selection(int id, int sel, bool distance) {
         }
     } else {
         for (int n = 0; n < g.node_count(); ++n)
-            for (int m : g.adj[(size_t)n]) c.per_node[(size_t)n] += picked[(size_t)m];
+            for (int m : g.adj[(size_t)n]) c.per_node[(size_t)n] += picked(m);
     }
     return c.per_node;
 }
@@ -241,18 +251,26 @@ long long machine::eval_graph(compiled_expr const& e, int x, int y) {
     case ce_kind::degree_: return (long long)g.adj[n].size();
     case ce_kind::size_:   return g.sizes[n];
     case ce_kind::value_:  return g.values[n];
+    case ce_kind::count_:
+    case ce_kind::some_:
+    case ce_kind::every_: {
+        if (e.val < 0) return 0;   // a failed compile's stand-in
+        int k = selection(e.ref, (int)e.val, per_node::cells)[n];
+        return e.kind == ce_kind::count_ ? k
+             : e.kind == ce_kind::some_  ? k > 0 : k == g.sizes[n];
+    }
     case ce_kind::neighbors_:
     case ce_kind::adjacent_: {
         long long k = 0;
         if (target >= 0)   // the adjacency sets are ascending
             k = std::binary_search(g.adj[n].begin(), g.adj[n].end(), (int)target);
         else if (e.val >= 0)
-            k = selection(e.ref, (int)e.val, false)[n];
+            k = selection(e.ref, (int)e.val, per_node::neighbors)[n];
         return e.kind == ce_kind::adjacent_ ? k > 0 : k;
     }
     default: {   // distance, reachable: unreachable is graph_unreachable
         int d = target >= 0 ? distances_to(e.ref, (int)target)[n]
-              : e.val >= 0  ? selection(e.ref, (int)e.val, true)[n] : -1;
+              : e.val >= 0  ? selection(e.ref, (int)e.val, per_node::distance)[n] : -1;
         long long dist = d >= 0 ? d : graph_unreachable;
         return e.kind == ce_kind::reachable_ ? dist < graph_unreachable : dist;
     }

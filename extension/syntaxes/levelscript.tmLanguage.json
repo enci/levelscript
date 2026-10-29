@@ -80,7 +80,7 @@
     },
     "builtin": {
       "name": "support.function.builtin.levelscript",
-      "match": "\\b(if|min|max|abs|clamp|mod|random|degree|size|distance|neighbors|adjacent|reachable|value|resize|upscale|trim|mirror|pad|path|bsp|voronoi|noise)\\b(?=\\s*\\()"
+      "match": "\\b(if|min|max|abs|clamp|mod|random|degree|size|distance|neighbors|adjacent|reachable|value|some|every|count|resize|upscale|trim|mirror|pad|path|bsp|voronoi|noise)\\b(?=\\s*\\()"
     },
     "wildcard": {
       "patterns": [

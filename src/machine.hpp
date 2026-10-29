@@ -252,9 +252,10 @@ private:
     // only after the source has been written.
     graph_data const& graph(int id);
     // What selector `sel` of graph `id` gives each node: the distance to the
-    // nearest selected node (-1 = unreachable), or the number of selected
-    // neighbours.
-    std::vector<int> const& selection(int id, int sel, bool distance);
+    // nearest selected node (-1 = unreachable), the number of selected
+    // neighbours, or the number of its own cells the selector matches.
+    enum class per_node { distance, neighbors, cells };
+    std::vector<int> const& selection(int id, int sel, per_node what);
     std::vector<int> const& distances_to(int id, int from);
     long long eval_graph(compiled_expr const& e, int x, int y);
 

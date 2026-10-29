@@ -405,7 +405,14 @@ struct analyzer {
         {"adjacent",  ce_kind::adjacent_,  2, true},
         {"reachable", ce_kind::reachable_, 2, true},
         {"value",     ce_kind::value_,     1, true},
+        // quantifiers: a node, then a selector tested against its own cells
+        {"some",      ce_kind::some_,      2, true},
+        {"every",     ce_kind::every_,     2, true},
+        {"count",     ce_kind::count_,     2, true},
     };
+    static bool is_quantifier(ce_kind k) {
+        return k == ce_kind::some_ || k == ce_kind::every_ || k == ce_kind::count_;
+    }
 
     // Resolve a bare identifier, first match wins: x/y/width/height → param → tag
     // value or union of the enclosing cell's tagset → grid → a tag value or
@@ -473,8 +480,9 @@ struct analyzer {
         if (!spec) return fail("unknown function '" + e.ident + "'");
         if ((int)e.args.size() != spec->arity && spec->graph)
             return fail("'" + e.ident + "' takes a node" +
-                        (spec->arity == 2 ? " and a target, e.g. " + e.ident + "(?n, rooms[Start])"
-                                          : ", e.g. " + e.ident + "(?n)"));
+                        (is_quantifier(spec->kind) ? " and a selector, e.g. " + e.ident + "(?n, light[.])"
+                         : spec->arity == 2 ? " and a target, e.g. " + e.ident + "(?n, rooms[Start])"
+                                            : ", e.g. " + e.ident + "(?n)"));
         if ((int)e.args.size() != spec->arity)
             return fail("built-in '" + e.ident + "' takes " +
                         std::to_string(spec->arity) + " argument(s), got " +
@@ -523,7 +531,8 @@ struct analyzer {
     int compile_graph_call(expr const& e, builtin_spec const& spec, val_type& t, int ctx_tag) {
         auto fail = [&](std::string msg) { return poison(e.loc, std::move(msg), t); };
         bool targeted = spec.arity == 2;
-        std::string usage = e.ident + (targeted ? "(?n, rooms[Start])" : "(?n)");
+        bool quant = is_quantifier(spec.kind);
+        std::string usage = e.ident + (quant ? "(?n, light[.])" : targeted ? "(?n, rooms[Start])" : "(?n)");
         if (e.args[0]->kind == expr_kind::selector)
             return fail("'" + e.ident + "' takes a node first, e.g. " + usage);
         val_type tn;
@@ -537,6 +546,9 @@ struct analyzer {
             expr const& a = *e.args[1];
             if (a.kind == expr_kind::selector) {
                 sel = compile_selector(a);
+            } else if (quant) {   // cells are counted against a selector, never a node
+                return fail("the second argument of '" + e.ident + "' is a selector, which it "
+                            "tests against the node's cells, e.g. " + usage);
             } else {
                 val_type tt;
                 target = compile_expr(a, ctx_tag, tt);
@@ -547,7 +559,8 @@ struct analyzer {
                     return fail("the target of '" + e.ident + "' is a node of a different graph");
             }
         }
-        bool pred = spec.kind == ce_kind::adjacent_ || spec.kind == ce_kind::reachable_;
+        bool pred = spec.kind == ce_kind::adjacent_ || spec.kind == ce_kind::reachable_ ||
+                    spec.kind == ce_kind::some_ || spec.kind == ce_kind::every_;
         t = pred ? val_type::boolean : val_type::num;
         if (spec.kind == ce_kind::value_)   // the source's type: a tag mask or a number
             t = out.layers[(size_t)out.graphs[(size_t)graph].source].tag_id < 0 ? val_type::num
@@ -625,7 +638,8 @@ struct analyzer {
             return compile_call(e, ctx_tag, t, hint);
         case expr_kind::selector:
             return poison(e.loc, "a selector is valid only as the target of 'distance', "
-                          "'neighbors', 'adjacent', or 'reachable'", t);
+                          "'neighbors', 'adjacent', or 'reachable', or the second argument "
+                          "of 'some', 'every', or 'count'", t);
         default:
             break;
         }

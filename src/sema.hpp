@@ -75,6 +75,10 @@ enum class ce_kind {
     adjacent_,     // neighbors > 0
     reachable_,    // distance < graph_unreachable
     value_,        // the value every cell of the node's region holds in the source
+    // quantifiers: val = selector id, tested against the node's own cells
+    count_,        // cells of the region the selector matches
+    some_,         // count > 0
+    every_,        // count == size
 };
 
 // What `distance` gives when no target node is reachable: 2^30, larger than
