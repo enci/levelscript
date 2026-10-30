@@ -155,6 +155,27 @@
     return { ranges, points, rows };
   }
 
+  // The diagnostics of `next` that were already in `prev` (same severity, module and message,
+  // counted), with their ranges rebuilt. While typing, fixed errors disappear at once and new
+  // ones wait until the edit settles.
+  function keepDiagnostics(next, prev) {
+    const key = r => r.severity + '\u0000' + (r.module || '') + '\u0000' + r.message;
+    const left = new Map();
+    prev.rows.forEach(r => left.set(key(r), (left.get(key(r)) || 0) + 1));
+    const ranges = [], points = [], rows = [];
+    next.rows.forEach(r => {
+      const n = left.get(key(r)) || 0;
+      if (!n) return;
+      left.set(key(r), n - 1);
+      rows.push(r);
+      if (r.from === null) return;
+      const sev = SEVERITY[r.severity] || 1;
+      if (r.from === r.to) points.push({ at: r.from, sev });
+      else ranges.push({ from: r.from, to: r.to, sev });
+    });
+    return { ranges, points, rows };
+  }
+
   // ---------- rendering ----------
 
   function esc(s) {
@@ -207,6 +228,6 @@
     return renderHtml(src, lexRuns(src, vocab), [], null);
   }
 
-  root.LVS_model = { indexLines, offsetOf, lexRuns, cellRanges, diagnosticRanges, renderHtml, highlightHtml };
+  root.LVS_model = { indexLines, offsetOf, lexRuns, cellRanges, diagnosticRanges, keepDiagnostics, renderHtml, highlightHtml };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.LVS_model;
 })(typeof window !== 'undefined' ? window : globalThis);

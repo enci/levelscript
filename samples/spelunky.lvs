@@ -24,7 +24,7 @@ layers {
 // Coarse carving
 ///////////////////////////////////////////////////////////////////////////////
 rule coarse_assign_id {
-    // x and y are built-in varaibles, so this will assign unique id per room
+    // x and y are built-in variables, so this will assign unique id per room
     room_id[.] => room_id[(x + y * 4)]
 }
 
@@ -260,14 +260,14 @@ rule paint_walls { all
 // A gem stuck in the rock, only deep inside solid areas
 rule paint_ore {
     fine[
-        S S S S
-        S S S S
-        S S S S
+        S S S S 
+        S S S S 
+        S S S S 
         S S S S ]
     => tiles[
-        * *   *   *
-        * 648 649 *
-        * 776 777 *
+        * *   *   * 
+        * 648 649 * 
+        * 776 777 * 
         * *   *   * ]
 }
 

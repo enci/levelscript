@@ -118,7 +118,7 @@ rule paint_doors { ordered
 
 // What the generator put down. Enemies in the boss room are the big ones,
 // items in reward rooms the loot and the rest crates and pots by the walls.
-rule paint_entities { ordered
+rule paint_entities { ordered    
     entities[S] => tiles[53]    // ladder in
     entities[P] => tiles[4]     // hero
     entities[E] => tiles[52]    // stairs down
@@ -143,7 +143,8 @@ rule paint_entities { ordered
         (weight=3) tiles[41]    // pot
         (weight=1) tiles[92]    // crate
     }
-    entities[V] => { any
+
+    zones[.] entities[V] => { any
         (weight=3) tiles[84]    // pine
         (weight=3) tiles[85]    // tree
         (weight=2) tiles[86]    // saplings
@@ -169,17 +170,53 @@ rule paint_floor {
 
 // Grass and pebbles outside, the trees are vegetation entities
 rule paint_outside {
-    level[.] => { any
+    level[.]
+    tiles[.]
+    => { any
         (weight=24) tiles[17]
         (weight=3)  tiles[69]   // grass
         (weight=2)  tiles[68]   // pebbles
     }
 }
 
+sequence add_graves {
+    once (rotation=all) {    
+        level(7,5)[.]
+        tiles(7,5)[.]
+        zones(7,5)[!.]
+        => { any
+        tiles[
+            * *   * *   * *   * 
+            * 120 * 120 * 120 * 
+            * *   * *   * *   * 
+            * 120 * 120 * 120 * 
+            * *   * *   * *   * ]
+        }
+    }
+
+    once (rotation=all) {    
+        level(5,5)[.]
+        tiles(5,5)[.]
+        zones(5,5)[!.]
+        => { any
+        tiles[
+            * *   * *   * 
+            * 120 * 120 * 
+            * *   * *   * 
+            * 120 * 120 * 
+            * *   * *   * ]
+        }
+    }
+
+    scatter(30%) { tiles[120] => tiles[121] }
+
+}   
+
 sequence main_decorated {
     // main generation from the base BSP level
     once main
 
+    once add_graves
     everywhere paint_outside        // @play=20
     everywhere paint_floor          // @play=15
     everywhere paint_walls          // @play=10

@@ -300,11 +300,12 @@ button.diag-row:hover, .diag-row.active { border-color: var(--ls-green); backgro
   overflow: hidden;
 }
 
-.editor pre.hl, .editor textarea {
+.editor { --gw: 2; }
+.editor pre.hl, .editor textarea, .editor pre.gutter {
   position: absolute;
   inset: 0;
   margin: 0;
-  padding: 1rem 1.2rem;
+  padding: 1rem 1.2rem 1rem calc(var(--gw) * 1ch + 2rem);
   font: 0.86rem/1.55 var(--mono);
   tab-size: 4;
   white-space: pre;
@@ -315,6 +316,18 @@ button.diag-row:hover, .diag-row.active { border-color: var(--ls-green); backgro
 }
 
 .editor pre.hl { pointer-events: none; overflow: hidden; }
+/* line numbers: a dim column left of the code, the caret's line a little brighter */
+.editor pre.gutter {
+  right: auto;
+  width: calc(var(--gw) * 1ch + 1.2rem);
+  padding: 1rem 0.6rem 3rem;
+  text-align: right;
+  color: color-mix(in srgb, var(--muted) 45%, transparent);
+  pointer-events: none;
+  overflow: hidden;
+  user-select: none;
+}
+.editor pre.gutter .on { color: var(--muted); }
 .editor pre.hl code { font: inherit; background: none; padding: 0; color: var(--text); }
 
 .editor textarea {
@@ -349,6 +362,25 @@ button.diag-row:hover, .diag-row.active { border-color: var(--ls-green); backgro
   padding: 0.15rem 0.5rem;
   border-radius: 6px;
 }
+
+/* the cell inspector: the cell under the pointer, every layer (hidden layers dimmed) */
+.cell-tip {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+  font: 0.72rem/1.45 var(--mono);
+  color: var(--text);
+  background: rgba(8, 20, 17, 0.94);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.35rem 0.6rem;
+  white-space: nowrap;
+}
+.cell-tip[hidden] { display: none; }
+.cell-tip b { color: var(--ls-yellow); font-weight: 600; }
+.cell-tip span { display: inline-block; min-width: 5.5em; color: var(--muted); }
+.cell-tip i { color: var(--muted); font-style: normal; }
+.cell-tip .off { opacity: 0.5; }
 
 .controls { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-top: 0.7rem; font: 0.8rem var(--mono); color: var(--muted); }
 .controls .spacer { flex: 1; min-width: 0; }
@@ -567,6 +599,54 @@ footer {
 .open-sandbox { font: 0.78rem var(--mono); color: var(--muted); text-decoration: none; }
 .open-sandbox:hover { color: var(--ls-yellow); }
 
+/* ---------- Lab: the sandbox alone, filling the window ----------
+   The widget's editor and output join the .lab-main grid (display: contents), so the editor
+   spans the left column and the output sits above the framed reference on the right. */
+.lab .container { max-width: 1600px; height: 100vh; display: flex; flex-direction: column; gap: 0.7rem; padding: 0.7rem 1.5rem 1rem; }
+.lab-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.6rem; }
+.lab-head img { width: 26px; height: 26px; border-radius: 6px; }
+.lab-head h1 {
+  font-size: 1.15rem;
+  margin-right: auto;
+  background: var(--grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.lab-head .sandbox-bar { margin: 0; }
+.lab-main {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: auto minmax(14rem, 1fr);
+  gap: 0.9rem 1.2rem;
+}
+.lab .lvs-widget { display: contents; }
+.lab .edit-col { grid-column: 1; grid-row: 1 / span 2; min-height: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+.lab .editor { flex: 1; min-height: 12rem; height: auto; }
+.lab .edit-col .diag-list { flex: none; grid-auto-rows: max-content; margin-top: 0; max-height: 8rem; }
+.lab .output { grid-column: 2; grid-row: 1; }
+.lab .canvas-wrap canvas { max-height: 50vh; object-fit: contain; }
+.lab #reference {
+  grid-column: 2;
+  grid-row: 2;
+  margin: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.8rem 1rem;
+}
+.lab #reference h2 { font-size: 1.1rem; margin: 0 0 0.5rem; }
+.lab #ref-q { max-width: none; }
+.lab #ref-results { flex: 1; min-height: 0; overflow: auto; }
+.lab .ref-row { grid-template-columns: 1fr auto auto; }
+.lab .ref-row code { grid-column: 1 / -1; }
+.lab .ref-sum { grid-column: 1; }
+
 /* ---------- Responsive ---------- */
 @media (max-width: 860px) {
   .hero-inner, .lvs-widget { grid-template-columns: 1fr; }
@@ -578,6 +658,10 @@ footer {
   .ref-row { grid-template-columns: 1fr auto auto; }
   .ref-row code { grid-column: 1 / -1; }
   .ref-sum { grid-column: 1; }
+  .lab .container { height: auto; padding: 0.7rem 1rem 1rem; }
+  .lab-main { display: flex; flex-direction: column; }
+  .lab .editor { flex: none; height: 60vh; }
+  .lab #reference { height: 70vh; }
 }
 
 @media (max-width: 600px) {

@@ -108,8 +108,10 @@ rule add_start {
 
 rule add_end {
     map {?s ?e}
-    when (degree(?e) == 1 && every(?e, rooms[.]) && farthest(?s, ?e, level[F]))
-    => rooms(?e)[exit]
+    when (degree(?e) == 1 && every(?e, rooms[.]) && farthest(?s, ?e))
+    =>
+    rooms(?e)[exit]
+    e.rooms = exit
 }
 
 rule add_boss {

@@ -97,13 +97,13 @@
 
   const HIDDEN_BY_DEFAULT = new Set(['a', 'algo']);
 
-  // state: parsed run_* JSON. visible: Set of layer names.
+  // state: parsed run_* JSON. visible: Set of layer names. Returns where the cells were drawn.
   function drawState(canvas, state, visible) {
     const lvl = state.level;
     const w = lvl.width, h = lvl.height;
     const g = canvas.getContext('2d');
     g.clearRect(0, 0, canvas.width, canvas.height);
-    if (!w || !h) return;
+    if (!w || !h) return null;
     const cs = Math.max(2, Math.floor(Math.min(canvas.width / w, canvas.height / h)));
     const ox = Math.floor((canvas.width - w * cs) / 2);
     const oy = Math.floor((canvas.height - h * cs) / 2);
@@ -148,6 +148,7 @@
       g.strokeStyle = hl.what === 'write' ? '#3fe0a5' : '#f5dd7e';
       g.strokeRect(ox + hl.x * cs + 1, oy + hl.y * cs + 1, cs - 2, cs - 2);
     });
+    return { cs, ox, oy, w, h };
   }
 
   function defaultVisible(lvl) {
@@ -183,13 +184,17 @@
     let last = null;
 
     host.classList.add('lvs-widget');
+    const editorHtml = '<div class="editor"><pre class="gutter" aria-hidden="true"></pre>' +
+      '<pre class="hl" aria-hidden="true"><code></code></pre>' +
+      '<textarea spellcheck="false" aria-label="LevelScript source"></textarea></div>';
+    const diagHtml = '<div class="diag-list" hidden></div>';
+    // diagUnderEditor: the diagnostics list goes below the editor instead of below the output
     host.innerHTML =
       (opts.editor === false ? '' :
-        '<div class="editor"><pre class="hl" aria-hidden="true"><code></code></pre>' +
-        '<textarea spellcheck="false" aria-label="LevelScript source"></textarea></div>') +
+        opts.diagUnderEditor ? '<div class="edit-col">' + editorHtml + diagHtml + '</div>' : editorHtml) +
       '<div class="output">' +
         '<div class="canvas-wrap"><canvas width="960" height="' + (opts.height || 600) + '"></canvas>' +
-        '<div class="status"></div></div>' +
+        '<div class="status"></div><div class="cell-tip" hidden></div></div>' +
         '<div class="controls">' +
           '<label>seed <input class="seed" type="number" min="0" step="1"></label>' +
           '<button class="dice" title="Random seed"><i class="fas fa-dice"></i></button>' +
@@ -202,19 +207,22 @@
         '</div>' +
         '<div class="layer-chips"></div>' +
         '<div class="legend"></div>' +
-        '<div class="diag-list" hidden></div>' +
+        (opts.diagUnderEditor ? '' : diagHtml) +
         '<pre class="error" hidden></pre>' +
       '</div>';
 
     const $ = s => host.querySelector(s);
     const canvas = $('canvas'), status = $('.status'), errBox = $('.error');
-    const ta = $('textarea'), hl = $('.hl code'), diagBox = $('.diag-list');
+    const ta = $('textarea'), hl = $('.hl code'), diagBox = $('.diag-list'), gutter = $('.gutter');
     const seedInput = $('.seed');
     seedInput.value = seed;
 
     // params inputs; the sandbox rebuilds them from the source as it is edited, keeping the
     // values of names that survive and dropping the rest
     const paramBox = $('.params');
+    const paramInputs = {};
+    const unset = new Set();   // params neither saved nor typed into, so a file's @param applies
+    let fileDirs = null;       // the root file's @seed and @param values, from the last inspection
     let paramKey = null;
     function changed() { opts.onChange && opts.onChange({ source: source(), seed, params: Object.assign({}, params) }); }
     function buildParams(list, saved) {
@@ -223,14 +231,20 @@
       paramKey = key;
       const keep = Object.assign({}, saved || params);
       Object.keys(params).forEach(k => delete params[k]);
+      Object.keys(paramInputs).forEach(k => delete paramInputs[k]);
       paramBox.innerHTML = '';
       list.forEach(p => {
-        params[p.name] = Number.isInteger(keep[p.name]) ? keep[p.name] : p.default;
+        const fileValue = fileDirs && fileDirs.params[p.name];
+        if (saved) { if (Number.isInteger(saved[p.name])) unset.delete(p.name); else unset.add(p.name); }
+        else if (!(p.name in keep)) unset.add(p.name);   // new while editing; survivors keep their state
+        params[p.name] = Number.isInteger(keep[p.name]) ? keep[p.name] : fileValue ?? p.default;
         const lab = document.createElement('label');
         lab.innerHTML = esc(p.name) + ' <input type="number" step="1" value="' + params[p.name] + '">';
-        lab.querySelector('input').addEventListener('input', e => {
+        paramInputs[p.name] = lab.querySelector('input');
+        paramInputs[p.name].addEventListener('input', e => {
           const v = parseInt(e.target.value, 10);
           params[p.name] = Number.isNaN(v) ? p.default : v;
+          unset.delete(p.name);
           changed();
           scheduleRun();
         });
@@ -267,7 +281,8 @@
           chips.appendChild(c);
         });
       }
-      drawState(canvas, state, visible);
+      geom = drawState(canvas, state, visible);
+      showTip();
       $('.legend').innerHTML = legendFor(lvl, visible)
         .map(n => '<span><i style="background:' + NAMED[n] + '"></i>' + esc(n) +
           (displayNames[n] ? ' <em>' + esc(displayNames[n]) + '</em>' : '') + '</span>').join('');
@@ -275,8 +290,49 @@
         ' / ' + state.statementCount) + ' · ' + lvl.width + '×' + lvl.height;
     }
 
+    // ---- cell inspector: every layer's value at the cell under the pointer, with @name names ----
+    const tip = $('.cell-tip');
+    let geom = null, hoverAt = null;
+    function cellAt(e) {
+      if (!geom) return null;
+      const r = canvas.getBoundingClientRect();
+      const k = Math.min(r.width / canvas.width, r.height / canvas.height);   // object-fit: contain
+      const px = (e.clientX - r.left - (r.width - canvas.width * k) / 2) / k;
+      const py = (e.clientY - r.top - (r.height - canvas.height * k) / 2) / k;
+      const x = Math.floor((px - geom.ox) / geom.cs), y = Math.floor((py - geom.oy) / geom.cs);
+      return x >= 0 && y >= 0 && x < geom.w && y < geom.h ? { x, y } : null;
+    }
+    function valueText(layer, cell) {
+      if (layer.isNumber) return cell === null ? '·' : String(cell);
+      if (!cell.length) return '·';
+      return cell.map(n => displayNames[n] ? esc(displayNames[n]) + ' <i>' + esc(n) + '</i>' : esc(n)).join(' | ');
+    }
+    function showTip() {
+      const at = hoverAt && last && last.level && geom && hoverAt.x < geom.w && hoverAt.y < geom.h ? hoverAt : null;
+      tip.hidden = !at;
+      if (!at) return;
+      const lvl = last.level, i = at.y * lvl.width + at.x;
+      tip.innerHTML = '<b>' + at.x + ', ' + at.y + '</b>' + lvl.layers.map(l =>
+        '<div' + (visible.has(l.name) ? '' : ' class="off"') + '><span>' + esc(l.name) + '</span>' +
+        valueText(l, l.cells[i]) + '</div>').join('');
+    }
+    canvas.addEventListener('mousemove', e => {
+      hoverAt = cellAt(e);
+      showTip();
+      const w = canvas.parentNode.getBoundingClientRect(), x = e.clientX - w.left, y = e.clientY - w.top;
+      tip.style.left = x < w.width / 2 ? x + 14 + 'px' : '';
+      tip.style.right = x < w.width / 2 ? '' : w.width - x + 14 + 'px';
+      tip.style.top = y < w.height / 2 ? y + 14 + 'px' : '';
+      tip.style.bottom = y < w.height / 2 ? '' : w.height - y + 14 + 'px';
+    });
+    canvas.addEventListener('mouseleave', () => { hoverAt = null; tip.hidden = true; });
+
     // ---- inspection: decorations and diagnostics come from one inspect_json call per edit ----
     let insp = null, diag = null;
+    // shown: the diagnostics on screen. While typing it only loses entries; new ones appear
+    // once the edit has settled for SETTLE_MS, and the program reruns then too.
+    let shown = null, view = null, settleTimer = null;
+    const SETTLE_MS = 500;
     // From the tool directives (spec Appendix B): value -> its @name, and
     // "sequence#index" -> the statement's @play and @hold.
     let displayNames = {}, plays = {}, holds = {};
@@ -305,6 +361,33 @@
     function holdOf(state) {
       return (state.finished || []).reduce((h, f) => Math.max(h, holds[f.sequence + '#' + f.index] || 0), 0);
     }
+    // The file directives @seed and @param (spec Appendix B), as the debugger uses them: on the
+    // first inspection @param fills the params that have no saved value, and later an edited
+    // @seed or @param applies its new value. A seed or param the user set stays until then.
+    function applyFileDirectives() {
+      if (!insp) return;
+      const now = { seed: undefined, params: {} };
+      (insp.directives || []).forEach(d => {
+        if (d.target.kind !== 'file' || d.loc.module !== fileName) return;
+        if (d.key === 'seed') now.seed = Number(d.value);
+        if (d.key === 'param') now.params[d.target.name] = parseInt(d.value, 10);
+      });
+      const prev = fileDirs;
+      fileDirs = now;
+      let dirty = false;
+      if (prev && now.seed !== undefined && now.seed !== prev.seed) {
+        seed = now.seed;
+        seedInput.value = seed;
+        dirty = true;
+      }
+      Object.keys(now.params).forEach(n => {
+        if (!(n in params) || (prev ? now.params[n] === prev.params[n] : !unset.has(n))) return;
+        params[n] = now.params[n];
+        paramInputs[n].value = params[n];
+        dirty = true;
+      });
+      if (dirty) changed();
+    }
     function hasErrors() { return !!insp && (insp.diagnostics || []).some(d => d.severity === 'error'); }
     // Compile errors are shown by the diagnostics list, so a program that does not compile is not run.
     function blocked() {
@@ -317,19 +400,49 @@
       status.textContent = 'compile error';
       return true;
     }
-    function scrollSync() { hl.parentNode.scrollTop = ta.scrollTop; hl.parentNode.scrollLeft = ta.scrollLeft; }
-    function sync() {
+    function scrollSync() { hl.parentNode.scrollTop = gutter.scrollTop = ta.scrollTop; hl.parentNode.scrollLeft = ta.scrollLeft; }
+    // line numbers: rebuilt when the line count changes; --gw is the digit count, which sizes the gutter
+    let lineCount = 0, caretLine = -1;
+    function numberLines(src) {
+      let n = 1;
+      for (let i = src.indexOf('\n'); i >= 0; i = src.indexOf('\n', i + 1)) n++;
+      if (n === lineCount) return;
+      lineCount = n;
+      caretLine = -1;
+      ta.parentNode.style.setProperty('--gw', Math.max(2, String(n).length));
+      let html = '';
+      for (let i = 1; i <= n; i++) html += '<span>' + i + '</span>\n';
+      gutter.innerHTML = html;
+    }
+    function markLine() {
+      let line = 0;
+      for (let i = ta.value.lastIndexOf('\n', ta.selectionStart - 1); i >= 0; i = ta.value.lastIndexOf('\n', i - 1)) line++;
+      if (line === caretLine) return;
+      if (gutter.children[caretLine]) gutter.children[caretLine].classList.remove('on');
+      caretLine = line;
+      if (gutter.children[line]) gutter.children[line].classList.add('on');
+    }
+    function sync(typing) {
       const src = ta.value;
       inspectNow();
       const lex = model.lexRuns(src, window.LVS_EDITOR);
       const bgs = insp ? model.cellRanges(src, insp, window.LVS_EDITOR, fileName) : [];
       diag = insp ? model.diagnosticRanges(src, insp, fileName) : null;
-      hl.innerHTML = model.renderHtml(src, lex, bgs, diag) + '\n';
+      view = { src, lex, bgs };
+      applyFileDirectives();
+      numberLines(src);
+      paint(typing);
+    }
+    function paint(typing) {
+      clearTimeout(settleTimer);
+      shown = typing && diag && shown ? model.keepDiagnostics(diag, shown) : diag;
+      if (typing && shown !== diag) settleTimer = setTimeout(paint, SETTLE_MS);
+      hl.innerHTML = model.renderHtml(view.src, view.lex, view.bgs, shown) + '\n';
       renderDiagList();
       scrollSync();
     }
     function renderDiagList() {
-      const rows = diag ? diag.rows : [];
+      const rows = shown ? shown.rows : [];
       diagBox.hidden = !rows.length;
       diagBox.innerHTML = '';
       rows.forEach(r => {
@@ -352,10 +465,11 @@
     }
     // there is no hover (the textarea covers the overlay), so the row under the caret is marked
     function markActive() {
-      if (!diag) return;
+      markLine();
+      if (!shown) return;
       const p = ta.selectionStart;
       [...diagBox.children].forEach((el, i) => {
-        const r = diag.rows[i];
+        const r = shown.rows[i];
         el.classList.toggle('active', r.from !== null && p >= r.from && p <= r.to);
       });
     }
@@ -417,7 +531,7 @@
         files: window.LVS_FILES || {} });
     }
 
-    function scheduleRun() { clearTimeout(debounce); debounce = setTimeout(runAll, 250); }
+    function scheduleRun(ms) { clearTimeout(debounce); debounce = setTimeout(runAll, ms || 250); }
 
     function startStepping() {
       if (sessionId < 0 || (last && last.done)) { if (!begin()) return false; render(JSON.parse(mod.run_state(sessionId))); }
@@ -478,10 +592,10 @@
     if (ta) {
       ta.value = typeof init.source === 'string' ? init.source : sample.source;
       ta.addEventListener('input', () => {
-        sync();
+        sync(true);
         if (opts.dynamicParams) buildParams(parseParams(ta.value));
         changed();
-        scheduleRun();
+        scheduleRun(SETTLE_MS);
       });
       ta.addEventListener('scroll', scrollSync);
       ['keyup', 'click', 'select'].forEach(ev => ta.addEventListener(ev, markActive));
@@ -501,6 +615,7 @@
       // replace the whole program (sandbox): source, and optionally seed and param values
       setSource(src, newSeed, savedParams) {
         ta.value = src;
+        fileDirs = null;
         if (Number.isInteger(newSeed)) { seed = newSeed; seedInput.value = seed; }
         buildParams(parseParams(src), savedParams);
         ta.dispatchEvent(new Event('scroll'));
@@ -689,7 +804,8 @@
     createWidget(sandboxEl, {
       name: 'sandbox', source: start.source, seed: start.seed, params: parseParams(start.source)
     }, {
-      height: 420, worker: true, dynamicParams: true, fileName: 'sandbox.lvs',
+      height: Number(sandboxEl.dataset.height) || 420, worker: true, dynamicParams: true, fileName: 'sandbox.lvs',
+      diagUnderEditor: 'diagUnderEditor' in sandboxEl.dataset,
       initial: { source: start.source, seed: start.seed, params: start.params },
       onChange, onApi: api => { widget = api; window.LVS_sandbox = api; }
     });
