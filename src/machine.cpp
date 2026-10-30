@@ -240,7 +240,8 @@ int machine::farthest_from(int id, long long t_key, long long u_key) {
     graph_data const& g = graph(id);
     // a selector target goes stale with its grid as well as with the graph
     auto grid_version = [&](long long key) {
-        return key >= 0 ? 0 : grids_[(size_t)prog_->selectors[(size_t)~key].grid].version;
+        return key >= 0 || key == every_node_key
+                   ? 0 : grids_[(size_t)prog_->selectors[(size_t)~key].grid].version;
     };
     auto& entry = graphs_[(size_t)id].farthest[{t_key, u_key}];
     uint64_t tv = grid_version(t_key), uv = grid_version(u_key);
@@ -248,7 +249,8 @@ int machine::farthest_from(int id, long long t_key, long long u_key) {
     std::vector<int> dist = t_key >= 0 ? distances_to(id, (int)t_key)
                                        : selection(id, (int)~t_key, per_node::distance);
     std::vector<char> in_u((size_t)g.node_count(), 0);
-    if (u_key >= 0) in_u[(size_t)u_key] = 1;
+    if (u_key == every_node_key) std::fill(in_u.begin(), in_u.end(), 1);
+    else if (u_key >= 0) in_u[(size_t)u_key] = 1;
     else {
         auto const& cells = selection(id, (int)~u_key, per_node::cells);
         for (size_t m = 0; m < in_u.size(); ++m) in_u[m] = cells[m] > 0;
@@ -274,13 +276,17 @@ long long machine::eval_graph(compiled_expr const& e, int x, int y) {
         if (target < 0 || target >= g.node_count()) return 0;
     }
     if (e.kind == ce_kind::farthest_) {
-        long long set = e.c2 >= 0 ? ~(long long)e.c2 : e.c >= 0 ? eval(e.c, x, y) : -1;
-        if (set >= g.node_count() || (target < 0 && e.val < 0) || (set < 0 && e.c2 < 0))
+        bool every = e.c2 == farthest_every_node;
+        long long set = every ? every_node_key
+                      : e.c2 >= 0 ? ~(long long)e.c2 : e.c >= 0 ? eval(e.c, x, y) : -1;
+        if (set >= g.node_count() || (target < 0 && e.val < 0) ||
+            (set < 0 && e.c2 < 0 && !every))
             return 0;   // a failed compile's stand-in
         long long t_key = target >= 0 ? target : ~e.val;
         int max = farthest_from(e.ref, t_key, set);
         if (max < 0) return 0;   // t or u empty, or no node of u reachable
-        bool in_u = set >= 0 ? set == node : selection(e.ref, e.c2, per_node::cells)[n] > 0;
+        bool in_u = every || (set >= 0 ? set == node
+                                       : selection(e.ref, e.c2, per_node::cells)[n] > 0);
         int d = target >= 0 ? distances_to(e.ref, (int)target)[n]
                             : selection(e.ref, (int)e.val, per_node::distance)[n];
         return in_u && d == max;

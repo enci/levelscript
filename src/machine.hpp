@@ -2,6 +2,7 @@
 #include "graph.hpp"
 #include "sema.hpp"
 #include "sequence.hpp"
+#include <climits>
 #include <functional>
 #include <map>
 #include <memory>
@@ -259,7 +260,9 @@ private:
     std::vector<int> const& selection(int id, int sel, per_node what);
     std::vector<int> const& distances_to(int id, int from);
     // farthest: the greatest distance from target t to a reachable node of
-    // set u (-1 = none). A key is a node id, or ~selector id.
+    // set u (-1 = none). A key is a node id, ~selector id, or, for u,
+    // every_node_key.
+    static constexpr long long every_node_key = LLONG_MIN;
     int farthest_from(int id, long long t_key, long long u_key);
     long long eval_graph(compiled_expr const& e, int x, int y);
 

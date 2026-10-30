@@ -1,6 +1,6 @@
 # LevelScript
 
-**Status**: Draft 0.15.2
+**Status**: Draft 0.15.3
 **File extension**: `.lvs`
 **CLI**: `levelscript [--seed N] [--entry name] [--param name=value ...] <file.lvs>` (`--entry` defaults to `main` and `--seed` to the root file's `@seed` directive, both tool conventions; section 6, Appendix B)
 **Embedding**: namespace `ls::` (see Appendix A)
@@ -681,9 +681,9 @@ LevelScript has a closed set of **built-in** functions; there are no user-define
 | `some(n, s)` | `(node, selector) -> bool` | `count(n, s) > 0` |
 | `every(n, s)` | `(node, selector) -> bool` | `count(n, s) == size(n)` |
 | `count(n, s)` | `(node, selector) -> number` | number of cells of `n`'s region that match `s` |
-| `farthest(n, t, u)` | `(node, target, target) -> bool` | `n` is a node of `u` reachable from `t`, and no node of `u` reachable from `t` is farther from it |
+| `farthest(n, t, u?)` | `(node, target, target?) -> bool` | `n` is a node of `u` reachable from `t`, and no node of `u` reachable from `t` is farther from it; `u` defaults to every node of `n`'s graph |
 
-Arities are fixed. `min`/`max` are binary; nest for more operands (`min(a, min(b, c))`). `if` is the only function whose type is parametric in `T`; it is a single generic signature, not overloading. Because evaluation is eager and all operators are total (section 5.8), `if(c, a, b)` never faults on its unused branch - e.g. `if(n == 0, 0, 100 / n)` is safe at `n == 0`.
+Arities are fixed, except that the third argument of `farthest` is optional (section 5.12). `min`/`max` are binary; nest for more operands (`min(a, min(b, c))`). `if` is the only function whose type is parametric in `T`; it is a single generic signature, not overloading. Because evaluation is eager and all operators are total (section 5.8), `if(c, a, b)` never faults on its unused branch - e.g. `if(n == 0, 0, 100 / n)` is safe at `n == 0`.
 
 **Built-in names are not reserved.** A call is recognised syntactically (an identifier followed by `(`, section 5.8), and tag values, grids, and params are never called, so `if`, `min`, `max`, `abs`, `clamp`, `mod`, `random`, and the graph functions `degree`, `size`, `distance`, `neighbors`, `adjacent`, `reachable`, `value`, `some`, `every`, `count`, and `farthest` may also be used as tag value, grid, graph, or param names. Followed by `(`, such a name always denotes the built-in; otherwise it resolves per section 5.8. Like operation names (section 2.4), built-in names are not keywords.
 
@@ -761,7 +761,7 @@ Under a batch mode every candidate of `open_if_unconnected` sees the same graph,
 
 **Nodes as values.** A variable bound in a graph pattern is a **node** of that graph (section 5.8). Nodes compare by identity with `==` and `!=`, and are otherwise valid only as graph-function arguments and node extents (section 5.13): they have no arithmetic, are never empty, and cannot be written to a grid (check 45). Identity never exposes node order (section 4.3). A node variable may appear wherever its pair's variables may (section 5.11): in rule guards, `where` cells, and expression cells on either side, e.g. `rooms[ (if(size(?n) > 20, Hall, Room)) ]`.
 
-**Graph functions.** Eleven built-ins (section 5.10) describe nodes. Each takes a node `n` first. Five also take a **target** `t`, which is a node or a selector (below) and denotes a set of nodes of `n`'s graph (a node target is the set holding just that node), and `farthest` takes a second target `u`; three take a selector `s` that they test against the cells of `n`'s region:
+**Graph functions.** Eleven built-ins (section 5.10) describe nodes. Each takes a node `n` first. Five also take a **target** `t`, which is a node or a selector (below) and denotes a set of nodes of `n`'s graph (a node target is the set holding just that node), and `farthest` an optional second target `u`; three take a selector `s` that they test against the cells of `n`'s region:
 
 - `degree(n)` - the number of nodes adjacent to `n`.
 - `size(n)` - the number of cells in `n`'s region.
@@ -773,7 +773,7 @@ Under a batch mode every candidate of `open_if_unconnected` sees the same graph,
 - `count(n, s)` - the number of cells of `n`'s region that match `s`: a cell matches iff its value in `s`'s grid matches `s`'s cell under the usual cell semantics (section 4.1).
 - `some(n, s)` - `count(n, s) > 0`: at least one cell of the region matches.
 - `every(n, s)` - `count(n, s) == size(n)`: every cell of the region matches. A region is never empty, so `every` has no vacuous case.
-- `farthest(n, t, u)` - whether `n` is a node of `u` farthest from `t`: `n` is in `u`, `reachable(n, t)`, and `distance(m, t) <= distance(n, t)` for every node `m` of `u` with `reachable(m, t)`. Ties are not broken: every node of `u` at the greatest distance satisfies it, and the mode chooses among the candidates (section 5.13). The greatest distance is taken over the whole graph, not `n`'s component, and leaves out the unreachable nodes of `u`, so an unreachable node is never farthest; with `t` or `u` empty, `farthest` is false. `u` is a target, not a condition on nodes: a set defined by structure, such as the dead ends, is written to a grid first and selected from it (section 5.13).
+- `farthest(n, t, u)` - whether `n` is a node of `u` farthest from `t`. `u` is optional: `farthest(n, t)` compares against every node of `n`'s graph, so `farthest(?n, ?s)` holds for the rooms farthest from `?s`. In full, `n` is in `u`, `reachable(n, t)`, and `distance(m, t) <= distance(n, t)` for every node `m` of `u` with `reachable(m, t)`. Ties are not broken: every node of `u` at the greatest distance satisfies it, and the mode chooses among the candidates (section 5.13). The greatest distance is taken over the whole graph, not `n`'s component, and leaves out the unreachable nodes of `u`, so an unreachable node is never farthest; with `t` or `u` empty, `farthest` is false. `u` is a target, not a condition on nodes: a set defined by structure, such as the dead ends, is written to a grid first and selected from it (section 5.13).
 
 None of them returns empty. A node target must belong to `n`'s graph (check 53).
 
@@ -1380,7 +1380,7 @@ The compiler must reject:
 16. **Unknown function.** A call to a name that is not a section 5.10 built-in.
 17. **Duplicate params block.** More than one `params` block per module.
 18. **Invalid transform value.** A `rotation=` value that is not `none`/`all`, a bare `90`/`180`/`270`, or a set `{...}` of those angles; a `symmetry=` value other than `none`/`horizontal`/`vertical`/`all`; or an angle set containing a value other than 90/180/270. (An empty set `{}` and a `symmetry` set are also errors.)
-19. **Function arity.** A built-in call with the wrong number of arguments.
+19. **Function arity.** A built-in call with the wrong number of arguments (for `farthest`, other than two or three).
 20. **Function argument type.** A built-in argument of the wrong kind (e.g. `abs` of a tag); or `if` whose two branches differ in type; or `if` whose condition is not bool.
 21. **Statement-scope expression.** A count (section 6) or an `int` operation argument (section 6.0) that reads a grid or `x`/`y`; or whose expression is not a `number`.
 22. **Guard scope.** A statement `when` guard that reads a grid or `x`/`y`; or whose expression is not boolean.

@@ -386,11 +386,16 @@ TEST_CASE("graph rules: highlights name the assigned regions and their writes") 
 // ── farthest ─────────────────────────────────────────────────────────────────
 
 TEST_CASE("graph rules: farthest arguments") {
-    // check 53: a node, then two targets
+    // check 53: a node, then a target, then optionally a second target
     CHECK(rule_with("plan { ?n } when (farthest(rooms[Start], rooms[Start], rooms[Hall])) => decor(?n)[stall]")
               .has_error("takes a node first"));
-    CHECK(rule_with("plan { ?n } when (farthest(?n, rooms[Start])) => decor(?n)[stall]")
-              .has_error("'farthest' takes a node and two targets"));
+    CHECK(rule_with("plan { ?n } when (farthest(rooms[Start], rooms[Start])) => decor(?n)[stall]")
+              .has_error("takes a node first"));
+    // check 19: two or three arguments
+    CHECK(rule_with("plan { ?n } when (farthest(?n)) => decor(?n)[stall]")
+              .has_error("'farthest' takes a node, a target, and optionally a second target"));
+    CHECK(rule_with("plan { ?n } when (farthest(?n, rooms[Start], rooms[Hall], rooms[Hall])) => decor(?n)[stall]")
+              .has_error("'farthest' takes a node, a target, and optionally a second target"));
     CHECK(rule_with("plan { ?n } when (farthest(?n, rooms[Start], 3)) => decor(?n)[stall]")
               .has_error("is a node or a selector"));
     CHECK(rule_with("plan { ?n } when (farthest(?n, rooms[Start], zones[Hall])) => decor(?n)[stall]")
@@ -401,6 +406,8 @@ TEST_CASE("graph rules: farthest arguments") {
               .has_error("relational operator"));
     for (char const* body : {
              "plan { ?n } when (farthest(?n, rooms[Start], decor[stall])) => decor(?n)[stall]",
+             "plan { ?n } when (farthest(?n, rooms[Start])) => decor(?n)[stall]",
+             "plan { ?s ?n } when (farthest(?n, ?s)) => decor(?n)[stall]",
              "plan { ?s ?n } when (farthest(?n, ?s, zones[!.])) => decor(?n)[stall]",
              "plan { ?n ?u } when (farthest(?n, rooms[Start], ?u) || farthest(?u, ?n, ?n)) => decor(?n)[stall]",
          }) {
@@ -439,6 +446,28 @@ TEST_CASE("graph rules: farthest picks the nodes of u farthest from t") {
     CHECK(mark("", "", "farthest(?n, level[R], level[R])") == "1.1.1.1.1");
 }
 
+TEST_CASE("graph rules: farthest without u compares against every node") {
+    std::vector<std::string> const split = {"R H R H R . R H R"};
+    auto mark = [&](std::string const& rooms, std::string const& guard) {
+        return ts::show(generate(ts::stamped(dungeon, "level", split,
+            (rooms.empty() ? "" : ts::stamp("rooms", {rooms}) + "\n    ") +
+            "everywhere { map { ?n } when (" + guard + ") => ids(?n)[1] }")), "ids");
+    };
+    // the two-argument form is the three-argument form with u = the source's nodes
+    for (std::string const rooms : {"Start . . . . . . . .", ". . Start . . . . . .",
+                                    ". . . . . . Start . .", "Start . . . . . Start . .", ""}) {
+        INFO(rooms);
+        CHECK(mark(rooms, "farthest(?n, rooms[Start])") ==
+              mark(rooms, "farthest(?n, rooms[Start], level[!.])"));
+    }
+    // a unique maximum; unreachable nodes never win; ties all match; t empty
+    CHECK(mark("Start . . . . . . . .", "farthest(?n, rooms[Start])") == "....1....");
+    CHECK(mark(". . Start . . . . . .", "farthest(?n, rooms[Start])") == "1...1....");
+    CHECK(mark("", "farthest(?n, rooms[Start])") == ".........");
+    // n in t, with t every node
+    CHECK(mark("", "farthest(?n, level[R])") == "1.1.1.1.1");
+}
+
 TEST_CASE("graph rules: farthest with node targets") {
     std::vector<std::string> const split = {"R H R H R . R H R"};
     // t a node: the room farthest from the start room
@@ -452,6 +481,12 @@ TEST_CASE("graph rules: farthest with node targets") {
         ts::stamp("rooms", {"Start . . . . . . . ."}) +
         "\n    everywhere { map[?n] when (farthest(?n, rooms[Start], ?n)) => ids[1] }"));
     CHECK(ts::show(self, "ids") == "1.1.1....");
+    // t a node, u omitted
+    auto all = generate(ts::stamped(dungeon, "level", split,
+        ts::stamp("rooms", {". . . . . . . . Start"}) +
+        "\n    once { map { ?s[R] ?n } when (some(?s, rooms[Start]) && farthest(?n, ?s)) "
+        "=> ids(?n)[7] }"));
+    CHECK(ts::show(all, "ids") == "......7..");
 }
 
 TEST_CASE("graph rules: farthest ties are separate candidates under once") {

@@ -79,8 +79,8 @@ enum class ce_kind {
     count_,        // cells of the region the selector matches
     some_,         // count > 0
     every_,        // count == size
-    // farthest(n, t, u): t as for distance; u a selector (c2 = its id) or a
-    // node (c = its expr)
+    // farthest(n, t, u): t as for distance; u a selector (c2 = its id), a
+    // node (c = its expr), or omitted (c2 = farthest_every_node)
     farthest_,
 };
 
@@ -88,12 +88,15 @@ enum class ce_kind {
 // every real distance (section 5.12).
 constexpr long long graph_unreachable = 1ll << 30;
 
+// farthest's c2 when u is omitted: u is every node of the graph.
+constexpr int farthest_every_node = -2;
+
 struct compiled_expr {
     ce_kind   kind{ce_kind::int_lit};
     long long val{0};
     int       ref{-1};            // grid_read / param_read / is_empty / var_read
     int       a{-1}, b{-1}, c{-1};   // child indices into the arena
-    int       c2{-1};             // farthest_: u's selector id
+    int       c2{-1};             // farthest_: u's selector id, or farthest_every_node
 };
 
 // ── compiled program ──────────────────────────────────────────────────────────

@@ -409,7 +409,8 @@ struct analyzer {
         {"some",      ce_kind::some_,      2, true},
         {"every",     ce_kind::every_,     2, true},
         {"count",     ce_kind::count_,     2, true},
-        // a node, then two targets: the start, and the set to pick from
+        // a node, then two targets: the start, and the set to pick from,
+        // which may be omitted (every node of the graph)
         {"farthest",  ce_kind::farthest_,  3, true},
     };
     static bool is_quantifier(ce_kind k) {
@@ -480,13 +481,17 @@ struct analyzer {
         auto spec = lookup(builtins, e.ident);
         auto fail = [&](std::string msg) { return poison(e.loc, std::move(msg), t); };
         if (!spec) return fail("unknown function '" + e.ident + "'");
-        if ((int)e.args.size() != spec->arity && spec->graph)
+        // farthest's third argument is the one optional argument
+        bool optional_u = spec->kind == ce_kind::farthest_ && e.args.size() == 2;
+        if ((int)e.args.size() != spec->arity && spec->graph && !optional_u)
             return fail("'" + e.ident + "' takes a node" +
                         (is_quantifier(spec->kind) ? " and a selector, e.g. " + e.ident + "(?n, light[.])"
-                         : spec->arity == 3 ? " and two targets, e.g. " + e.ident + "(?n, rooms[Start], marks[leaf])"
+                         : spec->arity == 3 ? ", a target, and optionally a second target, e.g. " +
+                                              e.ident + "(?n, rooms[Start]) or " +
+                                              e.ident + "(?n, rooms[Start], marks[leaf])"
                          : spec->arity == 2 ? " and a target, e.g. " + e.ident + "(?n, rooms[Start])"
                                             : ", e.g. " + e.ident + "(?n)"));
-        if ((int)e.args.size() != spec->arity)
+        if ((int)e.args.size() != spec->arity && !optional_u)
             return fail("built-in '" + e.ident + "' takes " +
                         std::to_string(spec->arity) + " argument(s), got " +
                         std::to_string(e.args.size()));
@@ -565,7 +570,7 @@ struct analyzer {
             return -1;
         };
         int sel = -1, target = -1, set_sel = -1, set_node = -1;
-        for (int i = 1; i < spec.arity; ++i)
+        for (size_t i = 1; i < e.args.size(); ++i)
             if (int bad = i == 1 ? compile_target(*e.args[1], sel, target)
                                  : compile_target(*e.args[2], set_sel, set_node);
                 bad >= 0)
@@ -577,6 +582,8 @@ struct analyzer {
         if (spec.kind == ce_kind::value_)   // the source's type: a tag mask or a number
             t = out.layers[(size_t)out.graphs[(size_t)graph].source].tag_id < 0 ? val_type::num
                                                                                 : val_type::mask;
+        if (spec.kind == ce_kind::farthest_ && e.args.size() == 2)
+            set_sel = farthest_every_node;
         return add_expr({spec.kind, sel, graph, node, target, set_node, set_sel});
     }
 
