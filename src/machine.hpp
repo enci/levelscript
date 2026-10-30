@@ -3,6 +3,7 @@
 #include "sema.hpp"
 #include "sequence.hpp"
 #include <functional>
+#include <map>
 #include <memory>
 #include <random>
 #include <unordered_set>
@@ -257,6 +258,9 @@ private:
     enum class per_node { distance, neighbors, cells };
     std::vector<int> const& selection(int id, int sel, per_node what);
     std::vector<int> const& distances_to(int id, int from);
+    // farthest: the greatest distance from target t to a reachable node of
+    // set u (-1 = none). A key is a node id, or ~selector id.
+    int farthest_from(int id, long long t_key, long long u_key);
     long long eval_graph(compiled_expr const& e, int x, int y);
 
     static uint64_t mask_key(int grid_id, int flat) {
@@ -273,6 +277,8 @@ private:
         uint64_t   version{~0ull};   // the source's, when extracted
         graph_data data;
         std::vector<std::vector<int>> dist_to;   // per target node, filled on demand
+        struct farthest_entry { uint64_t t_version{~0ull}, u_version{~0ull}; int max{-1}; };
+        std::map<std::pair<long long, long long>, farthest_entry> farthest;   // per (t, u)
     };
     std::vector<graph_cache>        graphs_;   // indexed by graph id
     struct selection_cache {

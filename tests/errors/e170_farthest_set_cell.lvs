@@ -1,0 +1,11 @@
+// E170 (0.15.2, check 53): farthest's set is a target, and a selector cell must fit its grid.
+// @expect error
+// @expect stderr-contains is an integer, '.', or '!.'
+tag room { Hall, Exit }
+layers {
+    rooms: grid of room
+    depth: grid of number
+    plan:  graph of rooms
+}
+rule r { plan { ?n } when (farthest(?n, rooms[Hall], depth[Exit])) => rooms(?n)[Exit] }
+sequence main { resize(2, 2) once r }

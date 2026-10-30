@@ -388,7 +388,7 @@ struct analyzer {
     }
 
     struct builtin_spec { char const* name; ce_kind kind; int arity; bool graph; };
-    // A graph function's arity is its node plus, for the targeted ones, a target.
+    // A graph function's arity is its node plus, for the targeted ones, its targets.
     static constexpr builtin_spec builtins[] = {
         {"if",        ce_kind::if_,        3, false},
         {"min",       ce_kind::min_,       2, false},
@@ -409,6 +409,8 @@ struct analyzer {
         {"some",      ce_kind::some_,      2, true},
         {"every",     ce_kind::every_,     2, true},
         {"count",     ce_kind::count_,     2, true},
+        // a node, then two targets: the start, and the set to pick from
+        {"farthest",  ce_kind::farthest_,  3, true},
     };
     static bool is_quantifier(ce_kind k) {
         return k == ce_kind::some_ || k == ce_kind::every_ || k == ce_kind::count_;
@@ -481,6 +483,7 @@ struct analyzer {
         if ((int)e.args.size() != spec->arity && spec->graph)
             return fail("'" + e.ident + "' takes a node" +
                         (is_quantifier(spec->kind) ? " and a selector, e.g. " + e.ident + "(?n, light[.])"
+                         : spec->arity == 3 ? " and two targets, e.g. " + e.ident + "(?n, rooms[Start], marks[leaf])"
                          : spec->arity == 2 ? " and a target, e.g. " + e.ident + "(?n, rooms[Start])"
                                             : ", e.g. " + e.ident + "(?n)"));
         if ((int)e.args.size() != spec->arity)
@@ -526,13 +529,15 @@ struct analyzer {
         return add_expr({spec->kind, 0, -1, a[0], a[1], a[2]});
     }
 
-    // A graph function: its node first, then, for the targeted ones, a target
-    // (a node of the same graph, or a selector). Valid wherever a node is.
+    // A graph function: its node first, then, for the targeted ones, its
+    // targets (a node of the same graph, or a selector). Valid wherever a node is.
     int compile_graph_call(expr const& e, builtin_spec const& spec, val_type& t, int ctx_tag) {
         auto fail = [&](std::string msg) { return poison(e.loc, std::move(msg), t); };
-        bool targeted = spec.arity == 2;
+        bool targeted = spec.arity >= 2;
         bool quant = is_quantifier(spec.kind);
-        std::string usage = e.ident + (quant ? "(?n, light[.])" : targeted ? "(?n, rooms[Start])" : "(?n)");
+        std::string usage = e.ident + (quant ? "(?n, light[.])"
+                                     : spec.arity == 3 ? "(?n, rooms[Start], marks[leaf])"
+                                     : targeted ? "(?n, rooms[Start])" : "(?n)");
         if (e.args[0]->kind == expr_kind::selector)
             return fail("'" + e.ident + "' takes a node first, e.g. " + usage);
         val_type tn;
@@ -541,31 +546,38 @@ struct analyzer {
         if (tn != val_type::node || graph < 0)
             return fail("'" + e.ident + "' takes a node first, a variable bound by a graph "
                         "pattern, e.g. " + usage);
-        int sel = -1, target = -1;
-        if (targeted) {
-            expr const& a = *e.args[1];
+        // a target: a selector (sel = its id) or a node (target = its expr);
+        // -1, or the poisoned result after reporting an error
+        auto compile_target = [&](expr const& a, int& sel, int& target) {
             if (a.kind == expr_kind::selector) {
                 sel = compile_selector(a);
-            } else if (quant) {   // cells are counted against a selector, never a node
+                return -1;
+            }
+            if (quant)   // cells are counted against a selector, never a node
                 return fail("the second argument of '" + e.ident + "' is a selector, which it "
                             "tests against the node's cells, e.g. " + usage);
-            } else {
-                val_type tt;
-                target = compile_expr(a, ctx_tag, tt);
-                if (tt != val_type::node)
-                    return fail("the target of '" + e.ident + "' is a node or a selector, "
-                                "e.g. " + usage);
-                if (node_graph(target) != graph)
-                    return fail("the target of '" + e.ident + "' is a node of a different graph");
-            }
-        }
+            val_type tt;
+            target = compile_expr(a, ctx_tag, tt);
+            if (tt != val_type::node)
+                return fail("the target of '" + e.ident + "' is a node or a selector, e.g. " + usage);
+            if (node_graph(target) != graph)
+                return fail("the target of '" + e.ident + "' is a node of a different graph");
+            return -1;
+        };
+        int sel = -1, target = -1, set_sel = -1, set_node = -1;
+        for (int i = 1; i < spec.arity; ++i)
+            if (int bad = i == 1 ? compile_target(*e.args[1], sel, target)
+                                 : compile_target(*e.args[2], set_sel, set_node);
+                bad >= 0)
+                return bad;
         bool pred = spec.kind == ce_kind::adjacent_ || spec.kind == ce_kind::reachable_ ||
-                    spec.kind == ce_kind::some_ || spec.kind == ce_kind::every_;
+                    spec.kind == ce_kind::some_ || spec.kind == ce_kind::every_ ||
+                    spec.kind == ce_kind::farthest_;
         t = pred ? val_type::boolean : val_type::num;
         if (spec.kind == ce_kind::value_)   // the source's type: a tag mask or a number
             t = out.layers[(size_t)out.graphs[(size_t)graph].source].tag_id < 0 ? val_type::num
                                                                                 : val_type::mask;
-        return add_expr({spec.kind, sel, graph, node, target, -1});
+        return add_expr({spec.kind, sel, graph, node, target, set_node, set_sel});
     }
 
     // A selector `g[m]`: its grid, and the one cell, tested like a pattern
@@ -638,8 +650,8 @@ struct analyzer {
             return compile_call(e, ctx_tag, t, hint);
         case expr_kind::selector:
             return poison(e.loc, "a selector is valid only as the target of 'distance', "
-                          "'neighbors', 'adjacent', or 'reachable', or the second argument "
-                          "of 'some', 'every', or 'count'", t);
+                          "'neighbors', 'adjacent', 'reachable', or 'farthest', or the second "
+                          "argument of 'some', 'every', or 'count'", t);
         default:
             break;
         }

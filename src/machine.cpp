@@ -131,6 +131,7 @@ long long machine::eval(int idx, int x, int y) {
     case ce_kind::count_:
     case ce_kind::some_:
     case ce_kind::every_:
+    case ce_kind::farthest_:
         return eval_graph(e, x, y);
     case ce_kind::and_: return eval(e.a, x, y) != 0 && eval(e.b, x, y) != 0;   // lazy
     case ce_kind::or_:  return eval(e.a, x, y) != 0 || eval(e.b, x, y) != 0;
@@ -160,6 +161,7 @@ graph_data const& machine::graph(int id) {
         c.data = extract_graph(g, src.is_number, src.front, src.cols, src.rows);
         c.version = src.version;
         c.dist_to.clear();
+        c.farthest.clear();
     }
     return c.data;
 }
@@ -234,6 +236,30 @@ std::vector<int> const& machine::distances_to(int id, int from) {
     return d;
 }
 
+int machine::farthest_from(int id, long long t_key, long long u_key) {
+    graph_data const& g = graph(id);
+    // a selector target goes stale with its grid as well as with the graph
+    auto grid_version = [&](long long key) {
+        return key >= 0 ? 0 : grids_[(size_t)prog_->selectors[(size_t)~key].grid].version;
+    };
+    auto& entry = graphs_[(size_t)id].farthest[{t_key, u_key}];
+    uint64_t tv = grid_version(t_key), uv = grid_version(u_key);
+    if (entry.t_version == tv && entry.u_version == uv) return entry.max;
+    std::vector<int> dist = t_key >= 0 ? distances_to(id, (int)t_key)
+                                       : selection(id, (int)~t_key, per_node::distance);
+    std::vector<char> in_u((size_t)g.node_count(), 0);
+    if (u_key >= 0) in_u[(size_t)u_key] = 1;
+    else {
+        auto const& cells = selection(id, (int)~u_key, per_node::cells);
+        for (size_t m = 0; m < in_u.size(); ++m) in_u[m] = cells[m] > 0;
+    }
+    int max = -1;   // the whole graph, unreachable nodes of u left out
+    for (size_t m = 0; m < in_u.size(); ++m)
+        if (in_u[m] && dist[m] > max) max = dist[m];
+    entry = {tv, uv, max};
+    return max;
+}
+
 // A graph function: about its node argument, and its target (a node or a
 // selector) where it takes one. Bound nodes always exist; an id out of range
 // (a failed compile's stand-in) reads as 0.
@@ -246,6 +272,18 @@ long long machine::eval_graph(compiled_expr const& e, int x, int y) {
     if (e.b >= 0) {
         target = eval(e.b, x, y);
         if (target < 0 || target >= g.node_count()) return 0;
+    }
+    if (e.kind == ce_kind::farthest_) {
+        long long set = e.c2 >= 0 ? ~(long long)e.c2 : e.c >= 0 ? eval(e.c, x, y) : -1;
+        if (set >= g.node_count() || (target < 0 && e.val < 0) || (set < 0 && e.c2 < 0))
+            return 0;   // a failed compile's stand-in
+        long long t_key = target >= 0 ? target : ~e.val;
+        int max = farthest_from(e.ref, t_key, set);
+        if (max < 0) return 0;   // t or u empty, or no node of u reachable
+        bool in_u = set >= 0 ? set == node : selection(e.ref, e.c2, per_node::cells)[n] > 0;
+        int d = target >= 0 ? distances_to(e.ref, (int)target)[n]
+                            : selection(e.ref, (int)e.val, per_node::distance)[n];
+        return in_u && d == max;
     }
     switch (e.kind) {
     case ce_kind::degree_: return (long long)g.adj[n].size();

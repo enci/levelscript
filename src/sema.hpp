@@ -79,6 +79,9 @@ enum class ce_kind {
     count_,        // cells of the region the selector matches
     some_,         // count > 0
     every_,        // count == size
+    // farthest(n, t, u): t as for distance; u a selector (c2 = its id) or a
+    // node (c = its expr)
+    farthest_,
 };
 
 // What `distance` gives when no target node is reachable: 2^30, larger than
@@ -90,6 +93,7 @@ struct compiled_expr {
     long long val{0};
     int       ref{-1};            // grid_read / param_read / is_empty / var_read
     int       a{-1}, b{-1}, c{-1};   // child indices into the arena
+    int       c2{-1};             // farthest_: u's selector id
 };
 
 // ── compiled program ──────────────────────────────────────────────────────────
