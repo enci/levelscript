@@ -32,7 +32,7 @@
     },
     {
       "corner": "normal",
-      "mode": "text",
+      "mode": "shape",
       "name": "entities",
       "opacity": 1.0,
       "tileset": "",
@@ -41,11 +41,28 @@
   ],
   "mini_px": 24.0,
   "tag_colors": {
-    "entities": null,
+    "entities": {
+      "0": "00ff2d",
+      "1": "ff00e6",
+      "2": "00ff2d",
+      "3": "ffadad"
+    },
     "level": null,
     "room": {
       "0": "00ff2d",
       "1": "ff00e6"
+    }
+  },
+  "tag_shapes": {
+    "entities": {
+      "0": "ring",
+      "1": "circle",
+      "2": "diamond",
+      "3": "cross"
+    },
+    "room": {
+      "0": "ring",
+      "1": "triangle"
     }
   },
   "tilesets": [

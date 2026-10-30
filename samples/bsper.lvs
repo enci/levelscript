@@ -16,9 +16,15 @@ tag entities {
     I // @name=item
     D // @name=decoration
     V // @name=vegetation
+    G // @name=grave
 }
 
 tag room { start, exit, boss, reward, hub, challenge }
+
+params {
+    min_room_size : number = 5
+    max_room_size : number = 5
+}
 
 layers {
     level: grid of level
@@ -157,7 +163,7 @@ rule place_exit(rotation=all) {
 }
 
 rule place_pillars(rotation=all) { ordered
-    rooms(7,5)[hub]
+    rooms(7,5)[hub|challenge]
     level(7,5)[F]
     => level[
         * * * * * * * 
@@ -166,7 +172,7 @@ rule place_pillars(rotation=all) { ordered
         * W * W * W * 
         * * * * * * * ]
 
-    rooms(5,5)[hub]
+    rooms(5,5)[hub|challenge]
     level(5,5)[F]
     => level[
         * * * * *  
@@ -176,7 +182,7 @@ rule place_pillars(rotation=all) { ordered
         * * * * * ]
 
 
-    rooms(7,3)[hub]
+    rooms(7,3)[hub|challenge]
     level(7,3)[F]
     => level[
         * * * * * * * 
@@ -195,25 +201,22 @@ rule place_items(rotation=all) { any
 
     entities[. . ]
     level[W F ]
-    => entities[* I ]
-
-    entities[I . ]
-    level[F F ]
-    => entities[* I ]    
+    => entities[* I ] 
 }
 
-rule place_rewards(rotation=all) {
-    rooms(2,2)[reward]
-    entities(2, 2)[.]
-    level(2,2)[F]
-    => entities[
-        * * 
-        * I ] 
+rule place_enemies {
+    entities[.]
+    level[F]
+    => entities[N ] 
+}
+
+rule place_vegetation {    
+    entities[.] level[.] => entities[V ] 
 }
 
 sequence main {
     resize(24, 16)
-    bsp(into=zones, min=5, max=6)
+    bsp(into=zones, min=min_room_size, max=max_room_size)
 
     everywhere border       // @play=2
     settle connect_rooms    // @play=5
@@ -222,11 +225,9 @@ sequence main {
     settle(2) remove_edge_room
     settle(2) merge_rooms
 
-    // scatter(2) create_door
-
     pad(5)
-    settle add_walls        // @play=3
-    // settle (rotation=90) { level[. W|D .] => level[. . . ] } // @play=1
+    settle add_walls            // @play=3
+    everywhere (rotation=all) { level[. D ] => level[. W ] }
 
     once add_start              // @hold=10
     once add_hub                // @hold=10
@@ -236,9 +237,9 @@ sequence main {
     everywhere add_challenge    // @hold=10
 
     once place_player_and_entrance
-    once place_exit
-    once place_pillars
-    once place_rewards
-    once place_items
-    // once place_enemies
+    once place_exit             // @hold=10
+    once place_pillars          // @hold=10
+    scatter(15%) place_items        
+    scatter(12%) place_enemies
+    scatter(20%) place_vegetation   // @play=20
 }

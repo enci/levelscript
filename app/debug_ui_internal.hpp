@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <map>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -85,6 +86,14 @@ struct script {
     std::string status;       // one-line load status for the status bar
     std::string full_error;   // full diagnostics of a failed load; directive warnings else
     bool        ok{false};
+    // Input param overrides, by name (the Params window). They survive Reset
+    // and reloads; a name the script no longer declares is ignored. The
+    // first load seeds them from the root file's @param directives.
+    std::map<std::string, int> param_overrides;
+    bool                       params_seeded{false};
+    std::vector<std::pair<std::string, int>> run_params() const {
+        return { param_overrides.begin(), param_overrides.end() };
+    }
     std::chrono::steady_clock::time_point loaded_at{};   // the last (re)load: the status chip blinks
     double      compile_ms{0};   // the last load's generator::compile
 
@@ -139,8 +148,9 @@ struct debug_run {
     struct stmt_cost { double ms{0}; long apps{0}; };
     std::unordered_map<std::string, stmt_cost> costs;
 
-    void restart(generator const& g, int entry, uint64_t seed) {
-        gen = g.run(entry, seed, step_mode::application, observe::on);
+    void restart(generator const& g, int entry, uint64_t seed,
+                 std::vector<std::pair<std::string, int>> const& params = {}) {
+        gen = g.run(entry, seed, step_mode::application, observe::on, params);
         gen.stop_at_begin(true);   // stop before statements, not only after
         stmt_count = g.statement_count(entry);
         started = false;
@@ -331,6 +341,12 @@ void draw_rule_window(script const& sc, debug_run const& run, float mini_px,
                       project_config const& cfg);
 void draw_program_window(script& sc, debug_run const& run);
 void draw_tags_window(script const& sc, project_config& cfg);
+// Input params with their overrides; true when an override changed (the
+// caller restarts the run with the new values).
+bool draw_params_window(script& sc);
+// Engine time per statement as nested bars, each body inside the bar of the
+// statement that applied it, widths proportional to time.
+void draw_profiler_window(script& sc, debug_run const& run);
 void draw_grid_composite(script const& sc, debug_run const& run,
                          project_config const& cfg,
                          std::unordered_map<std::string, tile_texture> const& tile_textures,

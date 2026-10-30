@@ -15,116 +15,175 @@ layers {
 // wall through a horizontal run keeps the run, and a horizontal branch off a
 // vertical run takes the corner its side turns into.
 ///////////////////////////////////////////////////////////////////////////////
+
 // A wall's neighbour is either S (a wall or a door) or not: floor, or the
 // empty outside, which a bare complement would leave out - hence !S|.
 rule paint_walls { all
-    // horizontal runs, tees and crosses
+    // horizontal runs, now and then with a window
     level[
-        *  *  * 
-        S  W  S 
-        *  *  * ] =>
-    tiles[
-        * *   * ,
-        * 145 * ,
-        * *   * ]
+        *    !S|. *
+        S    W    S
+        *    !S|. *    ] => { any
+        (weight=12) tiles[* * *, * 145 *, * * *]
+        (weight=1)  tiles[* * *, * 151 *, * * *]
+    }
+    // tees and crosses
+    level[
+        *    S    *
+        S    W    S
+        *    *    *    ] => tiles[* * *, * 145 *, * * *]
+    level[
+        *    !S|. *
+        S    W    S
+        *    S    *    ] => tiles[* * *, * 145 *, * * *]
     // wall to the right only: corners, the left end of a run
     level[
-        *        S    *
-        !S|. W        S
-        *        *        *        ] => tiles[* * *, * 150 *, * * *]
+        *    S    *
+        !S|. W    S
+        *    *    *    ] => tiles[* * *, * 150 *, * * *]
     level[
-        *        !S|. *
-        !S|. W        S
-        *        S    *        ] => tiles[* * *, * 144 *, * * *]
+        *    !S|. *
+        !S|. W    S
+        *    S    *    ] => tiles[* * *, * 144 *, * * *]
     level[
-        *        !S|. *
-        !S|. W        S
-        *        !S|. *        ] => tiles[* * *, * 145 *, * * *]
+        *    !S|. *
+        !S|. W    S
+        *    !S|. *    ] => tiles[* * *, * 145 *, * * *]
     // wall to the left only
     level[
-        *        S    *
-        S    W        !S|.
-        *        *        *        ] => tiles[* * *, * 153 *, * * *]
+        *    S    *
+        S    W    !S|.
+        *    *    *    ] => tiles[* * *, * 153 *, * * *]
     level[
-        *        !S|. *
-        S    W        !S|.
-        *        S    *        ] => tiles[* * *, * 147 *, * * *]
+        *    !S|. *
+        S    W    !S|.
+        *    S    *    ] => tiles[* * *, * 147 *, * * *]
     level[
-        *        !S|. *
-        S    W        !S|.
-        *        !S|. *        ] => tiles[* * *, * 145 *, * * *]
+        *    !S|. *
+        S    W    !S|.
+        *    !S|. *    ] => tiles[* * *, * 145 *, * * *]
     // vertical runs and their ends
     level[
-        *        S    *
-        !S|. W        !S|.
-        *        *        *        ] => tiles[* * *, * 148 *, * * *]
+        *    S    *
+        !S|. W    !S|.
+        *    *    *    ] => tiles[* * *, * 148 *, * * *]
     level[
-        *        !S|. *
-        !S|. W        !S|.
-        *        S    *        ] => tiles[* * *, * 148 *, * * *]
-    // lone block
+        *    !S|. *
+        !S|. W    !S|.
+        *    S    *    ] => tiles[* * *, * 148 *, * * *]
+    // lone block, the pillars in hubs and challenge rooms
     level[
-        *        !S|. *
-        !S|. W        !S|.
-        *        !S|. *        ] => tiles[* * *, * 145 *, * * *]
-}
-
-// An arch in a horizontal wall, a gap in a vertical one
-rule paint_doors { all
-    level[
-        *  *  * 
-        S  D  S 
-        *  *  * ]
-    =>tiles[
-        * *   * 
-        * 146 * 
-        * *   * ]
-    level[
-        *    S  *     
-        !S|. D  !S|.
-        *   S   * ]
-    => tiles[
-        * *   * 
-        * 149 * 
-        * *   * ]
-}
-
-// Bare floor with now and then a prop or a critter, kept clear of doorways
-rule paint_floor {
-    level[
-        * !D * 
-        !D F !D
-        * !D * ] => { any
-        (weight=120) tiles[* * *, * 17 *, * * *]
-        (weight=2) tiles[* * *, * 41 *, * * *]    // pot
-        (weight=2) tiles[* * *, * 40 *, * * *]    // barrel
-        (weight=1) tiles[* * *, * 122 *, * * *]   // chest
-        (weight=1) tiles[* * *, * 20 *, * * *]    // slime
-        (weight=1) tiles[* * *, * 23 *, * * *]    // spider
-        (weight=1) tiles[* * *, * 10 *, * * *]    // skeleton
+        *    !S|. *
+        !S|. W    !S|.
+        *    !S|. *    ] => { any
+        tiles[* * *, * 29 *, * * *]
+        tiles[* * *, * 30 *, * * *]
     }
 }
 
-// Grass, pebbles and trees outside
+// A door in a horizontal wall is an arch, a gated arch or a wooden door, and
+// the one into the boss room is locked. In a vertical wall it is a gap; the
+// set has only the one.
+rule paint_doors { ordered
+    level[
+        *    *    * 
+        S    D    S 
+        *    *    *    ]
+    rooms[
+        *    boss * 
+        *    *    * 
+        *    *    *    ] => tiles[* * *, * 36 *, * * *]
+    level[
+        *    *    * 
+        S    D    S 
+        *    *    *    ]
+    rooms[
+        *    *    * 
+        *    *    * 
+        *    boss *    ] => tiles[* * *, * 36 *, * * *]
+    level[
+        *    *    * 
+        S    D    S 
+        *    *    *    ] => { any
+        (weight=4) tiles[* * *, * 146 *, * * *]
+        (weight=4) tiles[* * *, * 34 * , * * *]
+        (weight=2) tiles[* * *, * 152 *, * * *]
+        (weight=1) tiles[* * *, * 37 * , * * *]
+    }
+    level[
+        *    S    * 
+        !S|. D    !S|.
+        *    S    *    ] => tiles[* * *, * 160 *, * * *]
+}
+
+// What the generator put down. Enemies in the boss room are the big ones,
+// items in reward rooms the loot and the rest crates and pots by the walls.
+rule paint_entities { ordered
+    entities[S] => tiles[53]    // ladder in
+    entities[P] => tiles[4]     // hero
+    entities[E] => tiles[52]    // stairs down
+    entities[N] => { any
+        (weight=4) tiles[22]    // rat
+        (weight=2) tiles[23]    // spider
+        (weight=2) tiles[25]    // scorpion
+        (weight=2) tiles[21]    // dog
+        (weight=1) tiles[26]    // turtle
+        (weight=1) tiles[20]    // snake
+        (weight=1) tiles[12]    // beholder
+    }    
+    rooms[reward|challenge] entities[I] => { any
+        (weight=3) tiles[122]   // chest
+        (weight=2) tiles[88]    // coin
+        (weight=2) tiles[135]   // potion
+        (weight=1) tiles[89]    // ring
+        (weight=1) tiles[90]    // key
+    }
+    entities[I] => { any
+        (weight=3) tiles[40]    // barrel
+        (weight=3) tiles[41]    // pot
+        (weight=1) tiles[92]    // crate
+    }
+    entities[V] => { any
+        (weight=3) tiles[84]    // pine
+        (weight=3) tiles[85]    // tree
+        (weight=2) tiles[86]    // saplings
+    }
+}
+
+rule paint_boss_room {
+    entities[N]
+    rooms[boss] => { any
+        (weight=1) tiles[13]    // beholder
+        (weight=1) tiles[11]    // horned brute
+        (weight=1) tiles[27]    // demon
+    }
+}
+
+// Bare floor, a little rubble and the odd grate
+rule paint_floor {
+    level[F] => { any
+        (weight=100) tiles[17]
+        (weight=15)   tiles[68]  // rubble
+    }
+}
+
+// Grass and pebbles outside, the trees are vegetation entities
 rule paint_outside {
     level[.] => { any
         (weight=24) tiles[17]
-        (weight=3) tiles[69]    // grass
-        (weight=2) tiles[68]    // pebbles
-        (weight=2) tiles[84]    // pine
-        (weight=2) tiles[85]    // tree
-        (weight=1) tiles[86]    // saplings
+        (weight=3)  tiles[69]   // grass
+        (weight=2)  tiles[68]   // pebbles
     }
 }
-    
 
 sequence main_decorated {
     // main generation from the base BSP level
     once main
-    
-    everywhere paint_outside
-    everywhere { level[F] => tiles[17] }   // under the props, doorway cells included
-    everywhere paint_floor
-    everywhere paint_walls
-    everywhere paint_doors
+
+    everywhere paint_outside        // @play=20
+    everywhere paint_floor          // @play=15
+    everywhere paint_walls          // @play=10
+    everywhere paint_doors          
+    everywhere paint_entities       
+    scatter(50%) paint_boss_room
 }

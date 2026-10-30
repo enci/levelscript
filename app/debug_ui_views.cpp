@@ -845,6 +845,227 @@ void draw_program_window(script& sc, debug_run const& run) {
     ImGui::EndChild();
 }
 
+// ── params window ─────────────────────────────────────────────────────────────
+
+bool draw_params_window(script& sc) {
+    auto const& params = sc.ast.params;
+    if (params.empty()) {
+        ImGui::TextDisabled("(no params)");
+        return false;
+    }
+    bool changed = false;
+    if (ImGui::BeginTable("##params", 3, ImGuiTableFlags_SizingFixedFit |
+                                         ImGuiTableFlags_RowBg)) {
+        ImGui::TableSetupColumn("set",   ImGuiTableColumnFlags_WidthFixed);
+        ImGui::TableSetupColumn("name",  ImGuiTableColumnFlags_WidthFixed);
+        ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch);
+        for (size_t i = 0; i < params.size(); ++i) {
+            auto const& p = params[i];
+            std::string const& name = p.name.text;
+            std::string def = p.value ? expr_brief(*p.value) : "?";
+            ImGui::TableNextRow();
+            ImGui::PushID((int)i);
+
+            // derived params are computed, never supplied: shown, not edited
+            if (p.is_derived) {
+                ImGui::TableNextColumn();
+                ImGui::TableNextColumn();
+                ImGui::TextDisabled("%s", name.c_str());
+                ImGui::TableNextColumn();
+                ImGui::TextDisabled("= %s", def.c_str());
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Derived - computed at startup");
+                ImGui::PopID();
+                continue;
+            }
+
+            auto it  = sc.param_overrides.find(name);
+            bool set = it != sc.param_overrides.end();
+            ImGui::TableNextColumn();
+            if (ImGui::Checkbox("##set", &set)) {
+                if (set) {   // start from a literal default, else 0
+                    int v = p.value && p.value->kind == expr_kind::int_lit
+                          ? (int)p.value->int_val : 0;
+                    sc.param_overrides[name] = v;
+                } else {
+                    sc.param_overrides.erase(name);
+                }
+                changed = true;
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip(set ? "Use the declared default" : "Override the default");
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(name.c_str());
+            ImGui::TableNextColumn();
+            if (set) {
+                int& v = sc.param_overrides[name];
+                ImGui::SetNextItemWidth(-FLT_MIN);
+                // a typed value applies on Enter or when the field loses focus;
+                // the +/- buttons apply at once
+                ImGui::InputInt("##v", &v);
+                if (ImGui::IsItemDeactivatedAfterEdit() ||
+                    (ImGui::IsItemEdited() && !ImGui::GetIO().WantTextInput))
+                    changed = true;
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+                    ImGui::SetTooltip("Default: %s", def.c_str());
+            } else {
+                ImGui::TextDisabled("default %s", def.c_str());
+            }
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+    ImGui::Spacing();
+    ImGui::TextDisabled("Overrides re-run at once; they persist across Reset.");
+    return changed;
+}
+
+// ── profiler window ───────────────────────────────────────────────────────────
+//
+// An icicle chart of debug_run::costs: row 0 is the entry's body, each
+// statement a bar as wide as its engine time; a sequence application's body
+// sits in the row below, inside its bar (a statement's cost includes the
+// statements it applied, so children never outgrow the parent). Costs are
+// summed over iterations, so bars run in body order, not timeline order.
+
+namespace {
+
+struct profile_seg {
+    float       x0, x1;
+    int         depth;
+    std::string path;
+    std::string label;
+    double      ms;
+    long        apps;
+    bool        nested;   // a sequence body or a sequence: summed over iterations
+};
+
+struct profile_layout {
+    script const&                    sc;
+    debug_run const&                 run;
+    float                            px_per_ms;
+    std::vector<profile_seg>&        out;
+    int                              color_counter{0};
+    std::vector<int>                 color_index;   // parallel to out
+    int                              max_depth{0};
+
+    // Every statement takes a color index in tree order, costed or not, so
+    // the colors stay put while the run fills the bars in.
+    void list(std::vector<program_stmt> const& ast_list,
+              std::vector<compiled_stmt> const& meta_list,
+              int depth, float x, std::string const& prefix) {
+        int n = (int)std::min(ast_list.size(), meta_list.size());
+        for (int i = 0; i < n; ++i) {
+            auto const& stmt = ast_list[(size_t)i];
+            auto const& cs   = meta_list[(size_t)i];
+            int  color = color_counter++;
+            int  sid    = cs.what == compiled_stmt::kind::apply ? cs.seq_id : -1;
+            bool is_seq = sid >= 0 && sid < (int)sc.ast.sequences.size() &&
+                          sid < (int)sc.meta.sequences.size() && depth < 64;
+            std::string num = prefix + std::to_string(i);
+            auto it = run.costs.find(num);
+            double ms = it == run.costs.end() ? 0.0 : it->second.ms;
+            float  w  = (float)(ms * px_per_ms);
+            if (it != run.costs.end()) {
+                out.push_back({x, x + w, depth, num,
+                               std::string(stmt_icon(stmt, cs)) + "  " + stmt_desc(stmt),
+                               ms, it->second.apps, depth > 0 || is_seq});
+                color_index.push_back(color);
+                max_depth = std::max(max_depth, depth);
+            }
+            if (is_seq)   // recurse even when unrun: it keeps the color numbering
+                list(sc.ast.sequences[(size_t)sid].stmts, sc.meta.sequences[(size_t)sid].stmts,
+                     depth + 1, x, num + ".");
+            x += w;
+        }
+    }
+};
+
+// Golden-ratio hue steps: neighbours always land far apart on the wheel.
+ImU32 profile_color(int index, bool dark) {
+    constexpr float k_golden = 0.618033988749895f;
+    float h = std::fmod(0.12f + (float)index * k_golden, 1.f);
+    float r, g, b;
+    ImGui::ColorConvertHSVtoRGB(h, dark ? 0.55f : 0.45f, dark ? 0.72f : 0.93f, r, g, b);
+    return ImGui::ColorConvertFloat4ToU32({r, g, b, 1.f});
+}
+
+}  // namespace
+
+void draw_profiler_window(script& sc, debug_run const& run) {
+    if (sc.entry < 0 || sc.entry >= (int)sc.ast.sequences.size() ||
+        sc.entry >= (int)sc.meta.sequences.size()) {
+        ImGui::TextDisabled("(empty entry)");
+        return;
+    }
+    auto const& body      = sc.ast.sequences[(size_t)sc.entry].stmts;
+    auto const& meta_body = sc.meta.sequences[(size_t)sc.entry].stmts;
+
+    // the bars span the top-level statements' time
+    double total = 0;
+    for (size_t i = 0; i < body.size(); ++i)
+        if (auto it = run.costs.find(std::to_string(i)); it != run.costs.end())
+            total += it->second.ms;
+
+    ImGui::Text("%s engine time, %ld applications", fmt_ms(run.run_ms).c_str(), run.total_apps);
+    if (total <= 0.0) {
+        ImGui::TextDisabled("Nothing has run yet - step or Continue to profile.");
+        return;
+    }
+
+    float  row_h = ImGui::GetTextLineHeight() + 6.f;
+    ImVec2 p0    = ImGui::GetCursorScreenPos();
+    float  width = std::max(ImGui::GetContentRegionAvail().x, 50.f);
+
+    std::vector<profile_seg> segs;
+    profile_layout layout{sc, run, (float)(width / total), segs};
+    layout.list(body, meta_body, 0, p0.x, "");
+
+    float height = row_h * (float)(layout.max_depth + 1);
+    ImGui::InvisibleButton("##profile", {width, height});
+    bool   hovered = ImGui::IsItemHovered();
+    bool   clicked = ImGui::IsItemClicked();
+    ImVec2 mouse   = ImGui::GetIO().MousePos;
+
+    ImDrawList* dl   = ImGui::GetWindowDrawList();
+    bool        dark = is_dark_theme();
+    int         hit  = -1;
+    for (size_t k = 0; k < segs.size(); ++k) {
+        auto const& s = segs[k];
+        ImVec2 a{s.x0, p0.y + row_h * (float)s.depth};
+        ImVec2 b{std::max(s.x1, s.x0 + 1.f), a.y + row_h - 1.f};   // 1px gap between rows
+        ImU32  col = profile_color(layout.color_index[k], dark);
+        dl->AddRectFilled(a, b, col, 2.f);
+        if (s.x1 - s.x0 >= 3.f)   // a hairline between neighbours
+            dl->AddLine({b.x - 0.5f, a.y}, {b.x - 0.5f, b.y},
+                        ImGui::GetColorU32(ImGuiCol_WindowBg));
+        if (sc.selected == s.path)
+            dl->AddRect(a, b, ImGui::GetColorU32(ImGuiCol_Text), 2.f, 0, 2.f);
+        float tw = s.x1 - s.x0 - 8.f;
+        if (tw > 16.f) {
+            dl->PushClipRect(a, {b.x - 4.f, b.y}, true);
+            dl->AddText({a.x + 4.f, a.y + 3.f}, contrast_text_color(col), s.label.c_str());
+            dl->PopClipRect();
+        }
+        if (hovered && mouse.x >= a.x && mouse.x < b.x && mouse.y >= a.y && mouse.y < b.y)
+            hit = (int)k;
+    }
+
+    if (hit >= 0) {
+        auto const& s = segs[(size_t)hit];
+        dl->AddRect({s.x0, p0.y + row_h * (float)s.depth},
+                    {std::max(s.x1, s.x0 + 1.f), p0.y + row_h * (float)(s.depth + 1) - 1.f},
+                    ImGui::GetColorU32(ImGuiCol_Text, 0.6f), 2.f);
+        ImGui::BeginTooltip();
+        ImGui::Text("%s  %s", s.path.c_str(), s.label.c_str());
+        ImGui::Separator();
+        ImGui::Text("%s  (%.1f%%)", fmt_ms(s.ms).c_str(), 100.0 * s.ms / total);
+        ImGui::Text("%ld applications%s", s.apps, s.nested ? " (all iterations)" : "");
+        ImGui::TextDisabled("Click to show it in the Rule window");
+        ImGui::EndTooltip();
+        if (clicked) sc.selected = sc.selected == s.path ? std::string{} : s.path;
+    }
+}
+
 // ── shapes ────────────────────────────────────────────────────────────────────
 
 void draw_shape(ImDrawList* dl, ImVec2 c, float r, tag_shape shape, ImU32 col) {

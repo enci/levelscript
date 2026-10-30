@@ -106,6 +106,10 @@ bool load_script(script& sc) {
         if (d.key == "name") sc.value_names[(size_t)t][(size_t)v] = d.value;
     }
     sc.full_error = sc.dirs.warnings.format_all();
+    if (!sc.params_seeded) {   // later reloads keep the user's overrides
+        for (auto const& [n, v] : sc.dirs.params()) sc.param_overrides[n] = v;
+        sc.params_seeded = true;
+    }
 
     sc.gen    = std::move(gen);
     sc.ast    = std::move(mods.merged);
@@ -359,7 +363,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
     // The one in-flight run. Every step/snapshot/highlight below goes through
     // this public-API run; Reset constructs a fresh one via generator::run().
     debug_run run;
-    run.restart(sc.gen, sc.entry, seed);
+    run.restart(sc.gen, sc.entry, seed, sc.run_params());
 
     // ── SDL3 window ───────────────────────────────────────────────────────────
     SDL_Window* window = SDL_CreateWindow(
@@ -489,7 +493,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
         // the first diagnostic.
         if (load_script(sc)) cfg.sync_layers(sc.layer_names());
         if (!seed_locked) seed = make_seed();   // after the reload: an edited @seed
-        run.restart(sc.gen, sc.entry, seed);
+        run.restart(sc.gen, sc.entry, seed, sc.run_params());
     };
     // Reset, then run to the first breakpoint (VS Code's Restart).
     auto action_restart   = [&] {
@@ -522,7 +526,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
         load_script(sc);
         cfg = project_config::load(path, sc.layer_names());
         if (!seed_locked) seed = make_seed();
-        run.restart(sc.gen, sc.entry, seed);
+        run.restart(sc.gen, sc.entry, seed, sc.run_params());
         playing = false;
         SDL_SetWindowTitle(window, window_title().c_str());
     };
@@ -726,12 +730,15 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
                 right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.30f, nullptr, &center);
                 ImGui::DockBuilderSplitNode(left,  ImGuiDir_Down, 0.40f, &left_bottom,  &left);
                 ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.45f, &right_bottom, &right);
+                ImGuiID bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.18f, nullptr, &center);
                 ImGui::DockBuilderDockWindow("Sequence",   left);
                 ImGui::DockBuilderDockWindow("Layers",     left_bottom);
                 ImGui::DockBuilderDockWindow("Viewport", center);
                 ImGui::DockBuilderDockWindow("Rule",         right);
                 ImGui::DockBuilderDockWindow("Tags",         right_bottom);
                 ImGui::DockBuilderDockWindow("Settings", right_bottom);
+                ImGui::DockBuilderDockWindow("###PARAMS",   right_bottom);
+                ImGui::DockBuilderDockWindow("###PROFILER", bottom);
                 ImGui::DockBuilderFinish(dock_id);
             }
             // Docking draws its splitters in Border; paint them the gap color so they
@@ -857,7 +864,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
                     if (ImGui::Selectable(sc.gen.sequence_name(i).c_str(), sel) && !sel) {
                         sc.entry      = i;
                         sc.entry_name = sc.gen.sequence_name(i);
-                        run.restart(sc.gen, sc.entry, seed);
+                        run.restart(sc.gen, sc.entry, seed, sc.run_params());
                     }
                     if (sel) ImGui::SetItemDefaultFocus();
                 }
@@ -979,6 +986,19 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
         ImGui::SetNextWindowSize({260.f, 420.f}, ImGuiCond_FirstUseEver);
         begin_pane("Layers###LAYERS");
         if (loaded) draw_layers_window(sc, run, cfg, renderer, thumbs);
+        ImGui::End();
+
+        // An edited param re-runs at once, to the first breakpoint (Restart
+        // without the reload), so the viewport follows the value.
+        begin_pane("Params###PARAMS");
+        if (loaded && draw_params_window(sc)) {
+            run.restart(sc.gen, sc.entry, seed, sc.run_params());
+            if (!run.done) action_continue();
+        }
+        ImGui::End();
+
+        begin_pane("Profiler###PROFILER");
+        if (loaded) draw_profiler_window(sc, run);
         ImGui::End();
 
         begin_pane("Settings###SETTINGS");

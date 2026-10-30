@@ -20,8 +20,16 @@
     },
     {
       "corner": "normal",
-      "mode": "text",
+      "mode": "color",
       "name": "rooms",
+      "opacity": 1.0,
+      "tileset": "",
+      "visible": true
+    },
+    {
+      "corner": "normal",
+      "mode": "shape",
+      "name": "entities",
       "opacity": 1.0,
       "tileset": "",
       "visible": true
@@ -37,16 +45,36 @@
   ],
   "mini_px": 24.0,
   "tag_colors": {
-    "entities": null,
+    "entities": {
+      "0": "ff4d4d",
+      "1": "ff8f20",
+      "2": "ffff00",
+      "3": "ff3f3f",
+      "4": "6dffb6",
+      "6": "adffc4"
+    },
     "level": null,
-    "room": null
+    "room": {
+      "0": "ffadad"
+    }
+  },
+  "tag_shapes": {
+    "entities": {
+      "0": "ring",
+      "1": "circle",
+      "2": "diamond",
+      "3": "cross",
+      "4": "square",
+      "5": "star",
+      "6": "triangle"
+    }
   },
   "tilesets": [
     {
       "name": "Micro",
       "path": "/tiles/kenney_micro_roguelike.png",
-      "tile_h": 16,
-      "tile_w": 16
+      "tile_h": 8,
+      "tile_w": 8
     }
   ]
 }
