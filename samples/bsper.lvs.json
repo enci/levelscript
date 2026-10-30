@@ -16,18 +16,26 @@
     },
     {
       "corner": "normal",
-      "mode": "text",
+      "mode": "color",
       "name": "zones",
+      "opacity": 1.0,
+      "tileset": "",
+      "visible": false
+    },
+    {
+      "corner": "normal",
+      "mode": "corner",
+      "name": "rooms",
       "opacity": 1.0,
       "tileset": "",
       "visible": true
     },
     {
       "corner": "normal",
-      "mode": "tile",
-      "name": "tiles",
+      "mode": "text",
+      "name": "entities",
       "opacity": 1.0,
-      "tileset": "Micro",
+      "tileset": "",
       "visible": true
     }
   ],
@@ -35,7 +43,10 @@
   "tag_colors": {
     "entities": null,
     "level": null,
-    "room": null
+    "room": {
+      "0": "00ff2d",
+      "1": "ff00e6"
+    }
   },
   "tilesets": [
     {

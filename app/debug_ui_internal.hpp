@@ -86,6 +86,7 @@ struct script {
     std::string full_error;   // full diagnostics of a failed load; directive warnings else
     bool        ok{false};
     std::chrono::steady_clock::time_point loaded_at{};   // the last (re)load: the status chip blinks
+    double      compile_ms{0};   // the last load's generator::compile
 
     // Tool directives (spec Appendix B), and lookups of them by id
     directive_set                         dirs;
@@ -132,6 +133,11 @@ struct debug_run {
     std::vector<stmt_frame> entered, left;
     double run_ms{0};        // time spent inside the run's steps - engine only, no UI
     long   total_apps{0};    // applications since the start
+    // Engine time and applications per statement, by dotted path ("2.0.1"):
+    // a body statement over all its iterations, a sequence application with
+    // its body.
+    struct stmt_cost { double ms{0}; long apps{0}; };
+    std::unordered_map<std::string, stmt_cost> costs;
 
     void restart(generator const& g, int entry, uint64_t seed) {
         gen = g.run(entry, seed, step_mode::application, observe::on);
@@ -147,6 +153,7 @@ struct debug_run {
         left.clear();
         run_ms = 0;
         total_apps = 0;
+        costs.clear();
         refresh();
     }
 
@@ -164,20 +171,31 @@ struct debug_run {
         if (done) return false;
         auto t0 = std::chrono::steady_clock::now();
         bool stepped = gen.step();
-        run_ms += std::chrono::duration<double, std::milli>(
+        double ms = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - t0).count();
+        run_ms += ms;
         if (!stepped) { done = true; return false; }
         started = true;
-        // a new leaf statement - at top level or inside a sequence
         int s = gen.statement_index();
         auto st = gen.stmt_stack();
+        bool app = !gen.at_statement_boundary() && !gen.at_statement_begin();
+        // the step's cost, to its statement and every one applying it
+        std::string key;
+        for (size_t k = 0; k < st.size(); ++k) {
+            if (k) key += '.';
+            key += std::to_string(st[k].index);
+            auto& c = costs[key];
+            c.ms += ms;
+            if (app) c.apps++;
+        }
+        // a new leaf statement - at top level or inside a sequence
         bool same = s == counted_stmt && st.size() == counted_stack.size();
         for (size_t k = 0; same && k < st.size(); ++k)
             same = st[k].index == counted_stack[k].index &&
                    st[k].iteration == counted_stack[k].iteration;
         if (gen.at_statement_begin()) { left = std::move(entered); entered = st; }
         if (!same) { counted_stmt = s; counted_stack = std::move(st); apps_in_stmt = 0; }
-        if (!gen.at_statement_boundary() && !gen.at_statement_begin()) {
+        if (app) {
             apps_in_stmt++;
             total_apps++;
         }

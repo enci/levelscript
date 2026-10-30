@@ -1,0 +1,130 @@
+use "bsper.lvs"
+
+layers {
+    tiles : grid of number  // kenney_micro_roguelike.png, 16x10 tiles of 8x8
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Purely decoration!
+//
+// Paint the tiles layer from the level (kenney_micro_roguelike.png, index =
+// row * 16 + column). Walls use the sheet's bottom row set, whose vertical
+// wall is a band down the middle of the cell, so a one-cell wall reads right.
+// A horizontal run is a cap with a stone face under it, a vertical run just
+// the band; corners turn the cap into the band. The set has no tees, so a
+// wall through a horizontal run keeps the run, and a horizontal branch off a
+// vertical run takes the corner its side turns into.
+///////////////////////////////////////////////////////////////////////////////
+// A wall's neighbour is either S (a wall or a door) or not: floor, or the
+// empty outside, which a bare complement would leave out - hence !S|.
+rule paint_walls { all
+    // horizontal runs, tees and crosses
+    level[
+        *  *  * 
+        S  W  S 
+        *  *  * ] =>
+    tiles[
+        * *   * ,
+        * 145 * ,
+        * *   * ]
+    // wall to the right only: corners, the left end of a run
+    level[
+        *        S    *
+        !S|. W        S
+        *        *        *        ] => tiles[* * *, * 150 *, * * *]
+    level[
+        *        !S|. *
+        !S|. W        S
+        *        S    *        ] => tiles[* * *, * 144 *, * * *]
+    level[
+        *        !S|. *
+        !S|. W        S
+        *        !S|. *        ] => tiles[* * *, * 145 *, * * *]
+    // wall to the left only
+    level[
+        *        S    *
+        S    W        !S|.
+        *        *        *        ] => tiles[* * *, * 153 *, * * *]
+    level[
+        *        !S|. *
+        S    W        !S|.
+        *        S    *        ] => tiles[* * *, * 147 *, * * *]
+    level[
+        *        !S|. *
+        S    W        !S|.
+        *        !S|. *        ] => tiles[* * *, * 145 *, * * *]
+    // vertical runs and their ends
+    level[
+        *        S    *
+        !S|. W        !S|.
+        *        *        *        ] => tiles[* * *, * 148 *, * * *]
+    level[
+        *        !S|. *
+        !S|. W        !S|.
+        *        S    *        ] => tiles[* * *, * 148 *, * * *]
+    // lone block
+    level[
+        *        !S|. *
+        !S|. W        !S|.
+        *        !S|. *        ] => tiles[* * *, * 145 *, * * *]
+}
+
+// An arch in a horizontal wall, a gap in a vertical one
+rule paint_doors { all
+    level[
+        *  *  * 
+        S  D  S 
+        *  *  * ]
+    =>tiles[
+        * *   * 
+        * 146 * 
+        * *   * ]
+    level[
+        *    S  *     
+        !S|. D  !S|.
+        *   S   * ]
+    => tiles[
+        * *   * 
+        * 149 * 
+        * *   * ]
+}
+
+// Bare floor with now and then a prop or a critter, kept clear of doorways
+rule paint_floor {
+    level[
+        * !D * 
+        !D F !D
+        * !D * ] => { any
+        (weight=120) tiles[* * *, * 17 *, * * *]
+        (weight=2) tiles[* * *, * 41 *, * * *]    // pot
+        (weight=2) tiles[* * *, * 40 *, * * *]    // barrel
+        (weight=1) tiles[* * *, * 122 *, * * *]   // chest
+        (weight=1) tiles[* * *, * 20 *, * * *]    // slime
+        (weight=1) tiles[* * *, * 23 *, * * *]    // spider
+        (weight=1) tiles[* * *, * 10 *, * * *]    // skeleton
+    }
+}
+
+// Grass, pebbles and trees outside
+rule paint_outside {
+    level[.] => { any
+        (weight=24) tiles[17]
+        (weight=3) tiles[69]    // grass
+        (weight=2) tiles[68]    // pebbles
+        (weight=2) tiles[84]    // pine
+        (weight=2) tiles[85]    // tree
+        (weight=1) tiles[86]    // saplings
+    }
+}
+    
+
+sequence main_decorated {
+    // main generation from the base BSP level
+    once main
+    
+    everywhere paint_outside
+    everywhere { level[F] => tiles[17] }   // under the props, doorway cells included
+    everywhere paint_floor
+    everywhere paint_walls
+    everywhere paint_doors
+}

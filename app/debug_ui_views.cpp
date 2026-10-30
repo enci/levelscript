@@ -669,6 +669,15 @@ void draw_rule_window(script const& sc, debug_run const& run, float mini_px,
 
 // ── program window ────────────────────────────────────────────────────────────
 
+// A duration for the time column: "0.42 ms", "12.3 ms", "1.24 s".
+static std::string fmt_ms(double ms) {
+    char b[32];
+    if (ms < 10.0)        std::snprintf(b, sizeof(b), "%.2f ms", ms);
+    else if (ms < 1000.0) std::snprintf(b, sizeof(b), "%.1f ms", ms);
+    else                  std::snprintf(b, sizeof(b), "%.2f s", ms / 1000.0);
+    return b;
+}
+
 // One statement list - the entry's body, or a sequence's - as tree rows.
 // Sequence applications are tree nodes unfolding into their bodies (the
 // compiler rejects cycles, so the tree is finite). `cur` is the row the
@@ -677,6 +686,7 @@ void draw_rule_window(script const& sc, debug_run const& run, float mini_px,
 // it names, level by level, are the ones being executed.
 struct program_tree {
     script&                        sc;   // breakpoints are toggled here
+    debug_run const&               run;  // per-statement costs
     std::vector<stmt_frame> const& path;
     bool                           follow;   // the step moved: open + reveal its path
     ImVec4                         accent;
@@ -763,6 +773,18 @@ struct program_tree {
                     ImGui::TextDisabled("iteration %d", it);
             }
             if (indent > 0.f) ImGui::Unindent(indent);
+
+            // engine time so far, right-aligned; the application count on hover
+            ImGui::TableNextColumn();
+            if (auto it = run.costs.find(num); it != run.costs.end()) {
+                std::string t = fmt_ms(it->second.ms);
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetColumnWidth()
+                                     - ImGui::CalcTextSize(t.c_str()).x);
+                ImGui::TextUnformatted(t.c_str());
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s, %ld applications%s", t.c_str(), it->second.apps,
+                                      depth > 0 || is_seq ? " (all iterations)" : "");
+            }
             bool leaf_here = is_current && !inside;
             if (leaf_here && (ImGui::IsWindowAppearing() || (follow && !ImGui::IsItemVisible())))
                 ImGui::SetScrollHereY(0.25f);
@@ -810,11 +832,13 @@ void draw_program_window(script& sc, debug_run const& run) {
     ImGui::BeginChild("##program_list", {0.f, 0.f}, ImGuiChildFlags_Borders);
     // A real table keeps the tree column aligned however wide the dotted
     // numbers get.
-    if (ImGui::BeginTable("##program_table", 3, ImGuiTableFlags_SizingFixedFit)) {
+    if (ImGui::BeginTable("##program_table", 4, ImGuiTableFlags_SizingFixedFit)) {
         ImGui::TableSetupColumn("bp",   ImGuiTableColumnFlags_WidthFixed);
         ImGui::TableSetupColumn("#",    ImGuiTableColumnFlags_WidthFixed);
         ImGui::TableSetupColumn("stmt", ImGuiTableColumnFlags_WidthStretch);
-        program_tree tree{sc, path, follow, ImGui::GetStyleColorVec4(ImGuiCol_CheckMark)};
+        ImGui::TableSetupColumn("time", ImGuiTableColumnFlags_WidthFixed,
+                                ImGui::CalcTextSize("000.00 ms").x);
+        program_tree tree{sc, run, path, follow, ImGui::GetStyleColorVec4(ImGuiCol_CheckMark)};
         tree.list(body, meta_body, 0, current, false, "");
         ImGui::EndTable();
     }

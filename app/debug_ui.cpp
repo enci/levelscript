@@ -65,7 +65,10 @@ bool load_script(script& sc) {
 
     // Execution path: the public API compile. This generator is the only
     // thing that ever runs the script.
+    auto t0 = std::chrono::steady_clock::now();
     generator gen = generator::compile(src, name, fs_resolver());
+    sc.compile_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - t0).count();
     if (!gen) {
         sc.full_error = gen.error();
         auto nl       = sc.full_error.find('\n');
@@ -113,8 +116,10 @@ bool load_script(script& sc) {
         sc.entry_name = sc.gen.sequence_name(0);
     }
     size_t nw = sc.dirs.warnings.all.size();
-    sc.status = nw == 0 ? "Loaded OK"
-              : "Loaded OK - " + std::to_string(nw) + " directive warning" + (nw > 1 ? "s" : "");
+    char took[32];
+    std::snprintf(took, sizeof(took), " in %.1f ms", sc.compile_ms);
+    sc.status = std::string("Compiled") + took
+              + (nw == 0 ? "" : " - " + std::to_string(nw) + " directive warning" + (nw > 1 ? "s" : ""));
     sc.ok     = true;
     return true;
 }
@@ -1079,7 +1084,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
                          run.started ? icon(phosphor::PH_TIMER, cost) : std::string()))
                     bar_tip = "Engine time and rule applications since the start.\n"
                               "Excludes drawing and pauses; observing adds a little\n"
-                              "(levelscript --profile breaks it down per statement).";
+                              "(the Program window breaks it down per statement).";
             }
 
             // The run's state: last, as the one item that comes and goes.
@@ -1119,8 +1124,11 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
                 dl->AddText({ c0.x + chip_pad, wpos.y + status_pad_y },
                             ImGui::GetColorU32(text_col), msg.c_str());
                 dl->PopClipRect();
-                if (!sc.full_error.empty() && ImGui::IsMouseHoveringRect(c0, c1))
-                    bar_tip = sc.full_error;
+                if (ImGui::IsMouseHoveringRect(c0, c1))
+                    bar_tip = !sc.full_error.empty() ? sc.full_error
+                            : sc.ok ? "The last (re)load: the script's compile time, without\n"
+                                      "the debugger's display metadata."
+                                    : "";
             }
             ImGui::End();
             ImGui::PopStyleVar();
