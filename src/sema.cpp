@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <optional>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace ls {
@@ -198,7 +199,6 @@ static constexpr char const* logic = "'&&' / '||' require boolean operands";
 static constexpr char const* equal = "'==' / '!=' require two numbers, two tag values, or two nodes";
 static const operator_row operators[] = {
     {expr_kind::neg,    ce_kind::neg,    val_type::num,     false, val_type::num,     "unary '-' requires a number"},
-    {expr_kind::not_,   ce_kind::not_,   val_type::boolean, false, val_type::boolean, "'!' requires a boolean"},
     {expr_kind::add,    ce_kind::add,    val_type::num,     false, val_type::num,     arith},
     {expr_kind::sub,    ce_kind::sub,    val_type::num,     false, val_type::num,     arith},
     {expr_kind::mul,    ce_kind::mul,    val_type::num,     false, val_type::num,     arith},
@@ -272,6 +272,13 @@ struct analyzer {
         }
     };
     pair_vars* vars_{nullptr};
+    // Compiling a write-side expression (a write-side cell or a `value`
+    // argument): a tag complement is an error there, except inside an `is`
+    // operand, where it is tested, not written (check 15).
+    bool write_side_{false};
+    int  is_depth_{0};
+    // The tagset of each tag-constant expression, by arena index.
+    std::unordered_map<int, int> lit_tag_{};
     // The pair being compiled is a graph pair: its variables are declared by
     // its graph block, and its writes are node extents.
     bool graph_pair_{false};
@@ -363,6 +370,107 @@ struct analyzer {
              : add_expr({ce_kind::int_lit, num_empty, -1, -1, -1, -1});
     }
 
+    // A tag constant of tagset `tag`.
+    int tag_lit(int64_t mask, int tag) {
+        int c = add_expr({ce_kind::mask_lit, mask, -1, -1, -1, -1});
+        lit_tag_[c] = tag;
+        return c;
+    }
+
+    // A tag value or named mask `e` of tagset `tag`. A match-only named mask
+    // in a write-side expression, outside an `is` operand, is a complement
+    // written (check 15).
+    int name_lit(expr const& e, int tag) {
+        auto nm = out.named(tag, e.ident);
+        if (nm && !nm->writable() && write_side_ && is_depth_ == 0)
+            error(e.loc, "named mask '" + e.ident + "' is match-only (it has a " +
+                  (nm->complement ? "complement" : "'.' in a union") +
+                  ") and cannot be written");
+        return tag_lit(out.mask_of(tag, e.ident), tag);
+    }
+
+    // The tagset of a tag-typed expression, or -1 when nothing in it names
+    // one (a bare '.'): its constants, grid reads, variables, and node values.
+    int tagset_of(int idx) const {
+        auto const& e = out.exprs[(size_t)idx];
+        switch (e.kind) {
+        case ce_kind::mask_lit: {
+            auto it = lit_tag_.find(idx);
+            return it == lit_tag_.end() ? -1 : it->second;
+        }
+        case ce_kind::grid_read: return out.layers[(size_t)e.ref].tag_id;
+        case ce_kind::var_read: {
+            int type = vars_ ? vars_->vars[(size_t)e.ref].type : -1;
+            return type >= 0 ? type : -1;
+        }
+        case ce_kind::value_:
+            return out.layers[(size_t)out.graphs[(size_t)e.ref].source].tag_id;
+        case ce_kind::if_:
+        case ce_kind::bit_or:
+        case ce_kind::compl_: {
+            int a = e.kind == ce_kind::if_ ? e.b : e.a;
+            int b = e.kind == ce_kind::if_ ? e.c : e.b;
+            int t = a >= 0 ? tagset_of(a) : -1;
+            return t >= 0 || b < 0 ? t : tagset_of(b);
+        }
+        default: return -1;
+        }
+    }
+
+    // `!a`: boolean not, or the complement of a tag operand within its
+    // tagset, empty included (section 4.1).
+    int compile_not(expr const& e, int ctx_tag, val_type& t, int hint) {
+        val_type ta;
+        bool dot = e.args[0]->kind == expr_kind::empty_lit;
+        int a = compile_expr(*e.args[0], ctx_tag, ta,
+                             dot && (hint == (int)val_type::mask || ctx_tag >= 0)
+                                 ? (int)val_type::mask : hint);
+        if (ta == val_type::boolean) {
+            t = val_type::boolean;
+            return add_expr({ce_kind::not_, 0, -1, a, -1, -1});
+        }
+        if (ta != val_type::mask)
+            return poison(e.loc, "'!' requires a boolean or a tag value", t);
+        int tag = tagset_of(a);
+        if (tag < 0) tag = ctx_tag;
+        if (tag < 0)
+            return poison(e.loc, "'!' complements within a tagset, and nothing here names "
+                          "one; complement a tag value or a grid read", t);
+        if (write_side_ && is_depth_ == 0)   // check 15
+            error(e.loc, "tag complement '!' is not allowed on the write side "
+                  "(it is match-side only; test it with 'is')");
+        t = val_type::mask;
+        auto const& ce = out.exprs[(size_t)a];
+        if (ce.kind == ce_kind::mask_lit) {   // fold a constant
+            int64_t m = tag_universe(tag) & ~ce.val;
+            if (m == 0) error(e.loc, "this complement selects nothing");
+            return tag_lit(m, tag);
+        }
+        int c = add_expr({ce_kind::compl_, tag_universe(tag), -1, a, -1, -1});
+        return c;
+    }
+
+    // `a is m`: the overlap test of a mask cell (section 4.1), over two tag
+    // operands; a bare '.' is the empty mask.
+    int compile_is(expr const& e, int ctx_tag, val_type& t) {
+        ++is_depth_;
+        val_type ta, tb;
+        int a = compile_expr(*e.args[0], ctx_tag, ta, (int)val_type::mask);
+        int b = compile_expr(*e.args[1], ctx_tag, tb, (int)val_type::mask);
+        --is_depth_;
+        t = val_type::boolean;
+        if (ta != val_type::mask || tb != val_type::mask) {
+            error(e.loc, "'is' takes tag operands; a number grid tests empty with "
+                  "'==' / '!=' against '.'");
+            return num_lit();
+        }
+        int sa = tagset_of(a), sb = tagset_of(b);
+        if (sa >= 0 && sb >= 0 && sa != sb)
+            error(e.loc, "'is' matches within one tagset; this compares '" +
+                  out.tag_names[(size_t)sa] + "' with '" + out.tag_names[(size_t)sb] + "'");
+        return add_expr({ce_kind::is_, 0, -1, a, b, -1});
+    }
+
     // Report an expression error and stand in a number so nothing cascades.
     int poison(source_loc loc, std::string msg, val_type& t) {
         error(loc, std::move(msg));
@@ -418,8 +526,8 @@ struct analyzer {
     }
 
     // Resolve a bare identifier, first match wins: x/y/width/height → param → tag
-    // value or union of the enclosing cell's tagset → grid → a tag value or
-    // union of the one tagset that declares it.
+    // value or named mask of the enclosing cell's tagset → grid → a tag value
+    // or named mask of the one tagset that declares it.
     int compile_ident(expr const& e, int ctx_tag, val_type& t) {
         auto const& name = e.ident;
         if (is_reserved_ident(name)) {
@@ -441,11 +549,11 @@ struct analyzer {
             t = val_type::num;
             return add_expr({ce_kind::param_read, 0, pid, -1, -1, -1});
         }
-        if (ctx_tag >= 0) {   // tag value or union of the enclosing cell's tagset
+        if (ctx_tag >= 0) {   // tag value or named mask of the enclosing cell's tagset
             int64_t m = out.mask_of(ctx_tag, name);
             if (m != 0) {
                 t = val_type::mask;
-                return add_expr({ce_kind::mask_lit, m, -1, -1, -1, -1});
+                return name_lit(e, ctx_tag);
             }
         }
         int gid = out.layer_id(name);
@@ -466,7 +574,7 @@ struct analyzer {
         auto tagsets = tagsets_declaring(name, e.loc.mod);
         if (tagsets.size() == 1) {
             t = val_type::mask;
-            return add_expr({ce_kind::mask_lit, out.mask_of(tagsets[0], name), -1, -1, -1, -1});
+            return name_lit(e, tagsets[0]);
         }
         if (tagsets.size() > 1) {
             std::string list;
@@ -692,12 +800,16 @@ struct analyzer {
             }
         }
 
+        if (e.kind == expr_kind::not_) return compile_not(e, ctx_tag, t, hint);
+        if (e.kind == expr_kind::is_)  return compile_is(e, ctx_tag, t);
+
         auto op = lookup(operators, e.kind);
         if (!op) return poison(e.loc, "unsupported expression", t);
         int c[2] = {-1, -1};
         val_type ts[2];
-        for (size_t i = 0; i < e.args.size(); ++i)
-            c[i] = compile_expr(*e.args[i], ctx_tag, ts[i]);
+        for (size_t i = 0; i < e.args.size(); ++i)   // a '.' in a union is the empty mask
+            c[i] = compile_expr(*e.args[i], ctx_tag, ts[i],
+                                op->operand == val_type::mask ? (int)val_type::mask : -1);
         bool ok = true;
         for (size_t i = 0; i < e.args.size(); ++i)
             ok &= op->same_kind ? ts[i] == ts[0] && ts[0] != val_type::boolean
@@ -743,27 +855,24 @@ struct analyzer {
             out.tag_values.push_back(std::move(vals));
             tag_mod.push_back(t.loc.mod);
 
-            // Named unions: resolve in declaration order; a member is a
-            // value or an earlier union of this tagset; a union shares the
-            // value namespace and consumes no bit.
+            // Named masks: resolve in declaration order; a member is a value
+            // or an earlier named mask of this tagset; a named mask shares
+            // the value namespace and consumes no bit.
             int tid = (int)out.tag_names.size() - 1;
             out.tag_unions.push_back({});
             for (auto const& u : t.unions) {
                 auto const& [name, loc] = u.name;
-                check_name(loc, "union", name);
+                check_name(loc, "named mask", name);
                 if (out.value_id(tid, name) >= 0 || out.mask_of(tid, name) != 0)
-                    error(loc, "union '" + name +
-                          "' redeclares a tag value or union in '" + tname + "'");
-                int64_t mask = 0;
-                for (auto const& m : u.members) {
-                    int64_t mm = out.mask_of(tid, m);
-                    if (mm == 0)
-                        error(loc, "union '" + name + "' references '" + m +
-                              "', which is not a value or earlier union of '" +
-                              tname + "'");
-                    mask |= mm;
-                }
-                out.tag_unions[tid].push_back({name, mask});
+                    error(loc, "named mask '" + name +
+                          "' redeclares a tag value or named mask in '" + tname + "'");
+                compiled::named_mask nm{name};
+                bool ok = true;
+                nm.mask = named_mask_value(*u.value, tid, name, nm, ok);
+                if (ok && nm.mask == 0)   // check 59
+                    error(loc, "named mask '" + name + "' selects nothing: no cell can "
+                          "match it");
+                out.tag_unions[tid].push_back(std::move(nm));
             }
         }
 
@@ -818,21 +927,65 @@ struct analyzer {
         return full;
     }
 
+    // Every bit a mask over tagset `tag` may hold: empty and the value bits,
+    // the universe a complement is taken in (section 4.1).
+    int64_t tag_universe(int tag) const { return tag_empty | value_bits(tag); }
+
+    // A named mask's expression over tagset `tag`, resolved; records in `nm`
+    // whether it has a '!' or a '.', directly or through a name. Clears `ok`
+    // after reporting a bad member (check 25).
+    int64_t named_mask_value(expr const& e, int tag, std::string const& name,
+                             compiled::named_mask& nm, bool& ok) {
+        switch (e.kind) {
+        case expr_kind::empty_lit:
+            nm.dot = true;
+            return tag_empty;
+        case expr_kind::paren:
+            return named_mask_value(*e.args[0], tag, name, nm, ok);
+        case expr_kind::not_:
+            nm.complement = true;
+            return tag_universe(tag) & ~named_mask_value(*e.args[0], tag, name, nm, ok);
+        case expr_kind::bit_or:
+            return named_mask_value(*e.args[0], tag, name, nm, ok) |
+                   named_mask_value(*e.args[1], tag, name, nm, ok);
+        default: {   // ident
+            if (auto m = out.named(tag, e.ident)) {
+                nm.complement |= m->complement;
+                nm.dot        |= m->dot;
+                return m->mask;
+            }
+            int64_t m = out.mask_of(tag, e.ident);
+            if (m == 0) {
+                error(e.loc, "named mask '" + name + "' references '" + e.ident +
+                      "', which is not a value or earlier named mask of '" +
+                      out.tag_names[(size_t)tag] + "'");
+                ok = false;
+            }
+            return m;
+        }
+        }
+    }
+
     // A whitespace-free mask over tagset `tag`: its atoms' union, each `!a`
-    // the complement of `a` within the tagset. Unknown atoms are reported
-    // with `whose` ("for this grid") and add nothing.
+    // the complement of `a` within the tagset, empty included. Unknown atoms
+    // are reported with `whose` ("for this grid") and add nothing; a mask
+    // that selects no bit is reported (check 59).
     int64_t tag_mask(expr const& e, int tag, std::string const& whose) {
         std::vector<mask_atom> atoms;
         mask_atoms(e, atoms);
         int64_t mask = 0;
+        bool ok = true;
         for (auto const& a : atoms) {
             int64_t m = a.name == "." ? tag_empty : out.mask_of(tag, a.name);
             if (m == 0) {
                 error(a.loc, "unknown tag value '" + a.name + "' " + whose);
+                ok = false;
                 continue;
             }
-            mask |= a.negate ? value_bits(tag) & ~m : m;
+            mask |= a.negate ? tag_universe(tag) & ~m : m;
         }
+        if (ok && mask == 0)
+            error(e.loc, "this mask selects nothing: no cell can match it");
         return mask;
     }
 
@@ -1109,10 +1262,12 @@ struct analyzer {
             return cc;
         }
         case expr_kind::paren: {
+            write_side_ = is_rhs;
             int e = compile_as(*in.args[0], is_number ? val_type::num : val_type::mask, in.loc,
                                is_number ? "expression in a 'number' grid cell must evaluate to a number"
                                          : "expression in a tag grid cell must evaluate to a tag value",
                                scope_, tag);
+            write_side_ = false;
             auto const& ce = out.exprs[(size_t)e];
             if (ce.kind == ce_kind::int_lit || ce.kind == ce_kind::mask_lit)
                 cc.val = ce.val;   // a literal: tested like a bare cell
@@ -1145,14 +1300,28 @@ struct analyzer {
             }
             return cc;
         }
-        if (is_rhs && has_empty && atoms.size() > 1)
-            error(in.loc, "'.' cannot be written in a union: a cell holds empty or "
-                  "values, never both");
-        if (is_rhs)   // complement is match-side only
-            for (auto const& a : atoms)
-                if (a.negate)
+        if (is_rhs) {
+            // a named mask counts as its expansion: a match-only one is a
+            // complement written (check 15), or '.' in a union (check 47)
+            bool empty_union = has_empty && atoms.size() > 1;
+            for (auto const& a : atoms) {
+                if (a.negate) {   // complement is match-side only
                     error(a.loc, "tag complement '!" + a.name +
                           "' is not allowed on the write side");
+                    continue;
+                }
+                auto nm = out.named(tag, a.name);
+                if (!nm) continue;
+                if (nm->complement)
+                    error(a.loc, "named mask '" + a.name + "' is match-only (it has a "
+                          "complement) and cannot be written");
+                else if ((nm->mask & tag_empty) && (nm->mask != tag_empty || atoms.size() > 1))
+                    empty_union = true;
+            }
+            if (empty_union)
+                error(in.loc, "'.' cannot be written in a union: a cell holds empty or "
+                      "values, never both");
+        }
         cc.val = tag_mask(in, tag, "for this grid");
         return cc;
     }
@@ -1367,7 +1536,7 @@ struct analyzer {
         std::vector<mask_atom> atoms;
         mask_atoms(cell, atoms);
         for (auto const& at : atoms)
-            if (at.name == ".") {
+            if (auto nm = out.named(src_tag, at.name); at.name == "." || (nm && nm->dot)) {
                 error(at.loc, "a node is never empty; a node test has no '.' (test "
                       "non-emptiness with no test at all)");
                 return std::nullopt;
@@ -1632,7 +1801,7 @@ struct analyzer {
         else
             error(a.loc, "predicate '" + *name + "' in " + arg_ctx(op, pn) +
                   " is ambiguous (several layers could hold it); use an expression "
-                  "naming the grid, e.g. " + pn + "=(grid == " + *name + ")");
+                  "naming the grid, e.g. " + pn + "=(grid is " + *name + ")");
         return -1;
     }
 
@@ -1640,11 +1809,14 @@ struct analyzer {
     // name resolves against its tagset first.
     int op_value(op_arg const& a, char const* op, char const* pn, int into_grid) {
         int tid = out.layers[into_grid].tag_id;
-        return compile_as(*a.value, tid < 0 ? val_type::num : val_type::mask, a.loc,
-                          arg_ctx(op, pn) + " must be " +
-                          (tid < 0 ? "a number (the target grid is a number grid)"
-                                   : "a tag value (the target grid is a tag grid)"),
-                          scope{}, tid);
+        write_side_ = true;
+        int c = compile_as(*a.value, tid < 0 ? val_type::num : val_type::mask, a.loc,
+                           arg_ctx(op, pn) + " must be " +
+                           (tid < 0 ? "a number (the target grid is a number grid)"
+                                    : "a tag value (the target grid is a tag grid)"),
+                           scope{}, tid);
+        write_side_ = false;
+        return c;
     }
 
     // ── argument binding + per-op compilation ────────────────────────────────

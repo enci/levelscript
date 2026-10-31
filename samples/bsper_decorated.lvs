@@ -16,14 +16,14 @@ layers {
 // vertical run takes the corner its side turns into.
 ///////////////////////////////////////////////////////////////////////////////
 
-// A wall's neighbour is either S (a wall or a door) or not: floor, or the
-// empty outside, which a bare complement would leave out - hence !S|.
+// A wall's neighbour is either S (a wall or a door) or free: floor, open,
+// or the empty outside.
 rule paint_walls { all
     // horizontal runs, now and then with a window
     level[
-        *    !S|. *
+        *    free *
         S    W    S
-        *    !S|. *    ] => { any
+        *    free *    ] => { any
         (weight=12) tiles[* * *, * 145 *, * * *]
         (weight=1)  tiles[* * *, * 151 *, * * *]
     }
@@ -33,49 +33,49 @@ rule paint_walls { all
         S    W    S
         *    *    *    ] => tiles[* * *, * 145 *, * * *]
     level[
-        *    !S|. *
+        *    free *
         S    W    S
         *    S    *    ] => tiles[* * *, * 145 *, * * *]
     // wall to the right only: corners, the left end of a run
     level[
         *    S    *
-        !S|. W    S
+        free W    S
         *    *    *    ] => tiles[* * *, * 150 *, * * *]
     level[
-        *    !S|. *
-        !S|. W    S
+        *    free *
+        free W    S
         *    S    *    ] => tiles[* * *, * 144 *, * * *]
     level[
-        *    !S|. *
-        !S|. W    S
-        *    !S|. *    ] => tiles[* * *, * 145 *, * * *]
+        *    free *
+        free W    S
+        *    free *    ] => tiles[* * *, * 145 *, * * *]
     // wall to the left only
     level[
         *    S    *
-        S    W    !S|.
+        S    W    free
         *    *    *    ] => tiles[* * *, * 153 *, * * *]
     level[
-        *    !S|. *
-        S    W    !S|.
+        *    free *
+        S    W    free
         *    S    *    ] => tiles[* * *, * 147 *, * * *]
     level[
-        *    !S|. *
-        S    W    !S|.
-        *    !S|. *    ] => tiles[* * *, * 145 *, * * *]
+        *    free *
+        S    W    free
+        *    free *    ] => tiles[* * *, * 145 *, * * *]
     // vertical runs and their ends
     level[
         *    S    *
-        !S|. W    !S|.
+        free W    free
         *    *    *    ] => tiles[* * *, * 148 *, * * *]
     level[
-        *    !S|. *
-        !S|. W    !S|.
+        *    free *
+        free W    free
         *    S    *    ] => tiles[* * *, * 148 *, * * *]
     // lone block, the pillars in hubs and challenge rooms
     level[
-        *    !S|. *
-        !S|. W    !S|.
-        *    !S|. *    ] => { any
+        *    free *
+        free W    free
+        *    free *    ] => { any
         tiles[* * *, * 29 *, * * *]
         tiles[* * *, * 30 *, * * *]
     }
@@ -112,7 +112,7 @@ rule paint_doors { ordered
     }
     level[
         *    S    * 
-        !S|. D    !S|.
+        free D    free
         *    S    *    ] => tiles[* * *, * 160 *, * * *]
 }
 

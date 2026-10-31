@@ -1,6 +1,6 @@
 // E-union-1: a union member must be a value/union of the same tagset.
 // @expect error
-// @expect stderr-contains not a value or earlier union
+// @expect stderr-contains not a value or earlier named mask
 tag geometry { wall, floor, blocker = wall | nope }
 layers { level: grid of geometry }
 sequence main { resize(1,1) }

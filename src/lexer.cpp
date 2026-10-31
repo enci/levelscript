@@ -30,6 +30,7 @@ static token_type keyword_or_ident(std::string_view text) {
         {"when", token_type::kw_when},
         {"use", token_type::kw_use},
         {"weight", token_type::kw_weight},
+        {"is", token_type::kw_is},
     };
     auto it = keywords.find(text);
     return it == keywords.end() ? token_type::ident : it->second;

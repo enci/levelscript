@@ -22,6 +22,7 @@ char const* op_symbol(expr_kind k) {
     case expr_kind::and_:   return "&&";
     case expr_kind::or_:    return "||";
     case expr_kind::bit_or: return "|";
+    case expr_kind::is_:    return "is";
     case expr_kind::paren:  return "paren";
     default:                return "?";
     }
@@ -166,11 +167,8 @@ struct printer {
         for (auto const& t : ast.tags) {
             open("tag " + t.name.text, &t.loc);
             for (auto const& v : t.values) line("(value " + v.text + ")");
-            for (auto const& u : t.unions) {
-                std::string s = "(union " + u.name.text;
-                for (auto const& m : u.members) s += " " + m;
-                line(s + ")");
-            }
+            for (auto const& u : t.unions)
+                line("(union " + u.name.text + " " + expr_source(*u.value) + ")");
             close();
         }
         if (ast.has_layers) {
@@ -212,18 +210,19 @@ std::string dump_ast(std::string_view source, std::string_view name, bool spans,
 
 namespace {
 
-// Binding strength, as the parser's precedence table; 8 = unary, 9 = atom.
+// Binding strength, as the parser's precedence table; 9 = unary, 10 = atom.
 int precedence(expr_kind k) {
     switch (k) {
     case expr_kind::or_:    return 1;
     case expr_kind::and_:   return 2;
-    case expr_kind::bit_or: return 3;
-    case expr_kind::eq: case expr_kind::ne: return 4;
-    case expr_kind::lt: case expr_kind::le: case expr_kind::gt: case expr_kind::ge: return 5;
-    case expr_kind::add: case expr_kind::sub: return 6;
-    case expr_kind::mul: case expr_kind::div_: return 7;
-    case expr_kind::neg: case expr_kind::not_: return 8;
-    default: return 9;
+    case expr_kind::is_:    return 3;
+    case expr_kind::bit_or: return 4;
+    case expr_kind::eq: case expr_kind::ne: return 5;
+    case expr_kind::lt: case expr_kind::le: case expr_kind::gt: case expr_kind::ge: return 6;
+    case expr_kind::add: case expr_kind::sub: return 7;
+    case expr_kind::mul: case expr_kind::div_: return 8;
+    case expr_kind::neg: case expr_kind::not_: return 9;
+    default: return 10;
     }
 }
 
@@ -243,8 +242,8 @@ std::string expr_source(expr const& e) {
     case expr_kind::ident:
     case expr_kind::variable:  return e.ident;
     case expr_kind::paren:     return "(" + expr_source(*e.args[0]) + ")";
-    case expr_kind::neg:       return "-" + operand(*e.args[0], 8);
-    case expr_kind::not_:      return "!" + operand(*e.args[0], 8);
+    case expr_kind::neg:       return "-" + operand(*e.args[0], 9);
+    case expr_kind::not_:      return "!" + operand(*e.args[0], 9);
     case expr_kind::call:
     case expr_kind::selector: {
         bool call = e.kind == expr_kind::call;

@@ -1,6 +1,6 @@
 # LevelScript
 
-**Status**: Draft 0.15.3
+**Status**: Draft 0.16.0
 **File extension**: `.lvs`
 **CLI**: `levelscript [--seed N] [--entry name] [--param name=value ...] <file.lvs>` (`--entry` defaults to `main` and `--seed` to the root file's `@seed` directive, both tool conventions; section 6, Appendix B)
 **Embedding**: namespace `ls::` (see Appendix A)
@@ -72,7 +72,7 @@ tag  layers  grid  graph  of  number
 rule  sequence  params  where  when  use
 any  all  ordered
 once  scatter  everywhere  grow  settle
-weight
+weight  is
 ```
 
 Keywords are ASCII and match exactly.
@@ -100,9 +100,9 @@ A pattern cell is an **expression** (section 5.8). Cells are whitespace-separate
   |------|---------|
   | `*` | match any value, incl. empty (mask = all bits); on the RHS, **preserve** (not in the write footprint, section 5.7) |
   | `.` | empty (mask `0x1`) - match empty, or on the RHS clear the cell |
-  | `!.` | non-empty (every value bit) - match any non-empty cell; **match-side only** |
+  | `!.` | non-empty (every value bit: the complement of `.`) - match any non-empty cell; **match-side only** |
   | *tag* | a tag value (its single bit) |
-  | `!`*tag* | tag complement - **match-side only** |
+  | `!`*tag* | tag complement: every bit the tag lacks, empty included (section 4.1) - **match-side only** |
   | *tag* `\|` *tag* ... | tag union (bitwise OR of masks) |
   | *integer* | a numeric value (for `grid of number`) |
 
@@ -112,7 +112,7 @@ A pattern cell is an **expression** (section 5.8). Cells are whitespace-separate
 
 A bare `*` is always the wildcard; the multiplication operator `*` occurs only inside `( ... )`. A spaced operator (e.g. `wall | floor` with spaces) is **not** a bare cell - wrap it: `(wall | floor)`, or write it whitespace-free: `wall|floor`. A variable does not combine into a bare mask: `?a|wall` is a parse error; write `(?a | wall)`.
 
-A `mask_atom`'s `IDENT` (section 5.3) may be a `tag_value` or a `tag_union` (section 3); both resolve to masks and compose under `|` and `!` identically. A `mask_atom` may also be `.` (bit 0), which composes the same way on the match side: `!.` matches any non-empty cell, and `.|door` matches an empty cell or a door. On the write side `.` stands alone; a write-side union containing `.` is a compile error (check 47).
+A `mask_atom`'s `IDENT` (section 5.3) may be a `tag_value` or a `named_mask` (section 3); both resolve to masks and compose under `|` and `!` identically. A `mask_atom` may also be `.` (bit 0), which composes the same way on the match side: `!.` matches any non-empty cell, and `.|door` matches an empty cell or a door. Because `!` complements over empty too (section 4.1), `!door` already matches an empty cell, and `!door|.` is the same mask. On the write side `.` stands alone; a write-side union containing `.` is a compile error (check 47), as is a match-only named mask (section 3, check 15).
 
 ### 2.6 Modules
 
@@ -174,24 +174,30 @@ Tag values are referenced by their name in pattern bodies. Two tagsets may defin
 ```
 tag_decl       ::= 'tag' IDENT '{' tag_item_list? '}'
 tag_item_list  ::= tag_item (list_sep? tag_item)* list_sep?
-tag_item       ::= tag_value | tag_union
+tag_item       ::= tag_value | named_mask
 tag_value      ::= IDENT
-tag_union      ::= IDENT '=' union_expr
-union_expr     ::= union_atom ('|' union_atom)*
-union_atom     ::= IDENT
-list_sep       ::= ','
+named_mask     ::= IDENT '=' mask_expr
+mask_expr      ::= mask_term ('|' mask_term)*
+mask_term      ::= '!' mask_term | IDENT | '.' | '(' mask_expr ')'
 ```
 Commas between list items are optional, and a trailing comma is permitted. Line breaks are ordinary whitespace (section 2), so items may share a line or each take their own. The grammar delimits items: each list item ends unambiguously - a pattern at `]`, a block at `}`, a pattern pair after its write side, and a name, union, or expression at the first token that cannot continue it.
 
-A `tag_union` names a mask over the tagset's own members. Each `union_atom` is a `tag_value` of the same tagset, or a `tag_union` declared **earlier** in the same block (so unions may build on unions - `hazard = blocker | lava` - while remaining acyclic). A union references only members of its own tagset; there is no cross-tagset union.
+A `named_mask` names a mask over the tagset's own members, written as an expression: `|` is union, `!` is complement (section 4.1), `.` is empty, and parentheses group. Whitespace is free, since a declaration is not a pattern cell. Each `IDENT` is a `tag_value` of the same tagset, or a `named_mask` declared **earlier** in the same block (so names may build on names - `hazard = blocker | lava` - while remaining acyclic). A named mask references only members of its own tagset; there is no cross-tagset mask.
 
 ```ls
-tag geometry { wall, floor, door, blocker = wall | door }
+tag geometry {
+    wall, floor, door
+    blocker = wall | door
+    open    = !blocker         // floor or empty
+    ground  = !(blocker | .)   // floor: neither a blocker nor empty
+}
 ```
 
-**Encoding and cap.** A tagset holds at most **30** `tag_value`s (compile error if exceeded); these occupy bits 1..30 **in declaration order** - the first value declared is bit 1, the second bit 2, and so on. Bit 0 is reserved for **empty** (section 4.1), bit 31 is reserved. The bit assignment is normative: embedders may rely on it to compute a value's mask directly from its declaration position, without a name lookup. Each cell of a tag grid stores a 32-bit mask. A normal (single-valued) cell has exactly one value bit set; a cell may hold a multi-bit mask when written by a `|` expression or a named union (section 5.5).
+A named mask is **writable** iff, with its names expanded, it would be a legal write-side mask: it contains no `!`, and `.` only on its own (checks 15 and 47). Any other named mask, such as `open` above, is **match-only**.
 
-A `tag_union` is a **named alias** for a mask over the tagset's value bits. It consumes **no** bit of its own and does **not** count toward the 30-value cap. A union name resolves, everywhere it may appear, to the bitwise OR of its members' masks - it is fully equivalent to writing that `|` expression inline. A union name shares the tagset's value namespace (redeclaring a value name is a duplicate error).
+**Encoding and cap.** A tagset holds at most **30** `tag_value`s (compile error if exceeded); these occupy bits 1..30 **in declaration order** - the first value declared is bit 1, the second bit 2, and so on. Bit 0 is reserved for **empty** (section 4.1), bit 31 is reserved. The bit assignment is normative: embedders may rely on it to compute a value's mask directly from its declaration position, without a name lookup. Each cell of a tag grid stores a 32-bit mask. A normal (single-valued) cell has exactly one value bit set; a cell may hold a multi-bit mask when written by a `|` expression or a writable named mask (section 5.5).
+
+A `named_mask` is a **named alias** for a mask over the tagset's bits: its value bits and, through `.` or `!`, bit 0. It consumes **no** bit of its own and does **not** count toward the 30-value cap. A named mask resolves, everywhere it may appear, to the mask its expression denotes; using the name is equivalent to writing that mask inline. A named mask shares the tagset's value namespace (redeclaring a value name is a duplicate error).
 
 This encoding applies to **tag grids only**. `grid of number` cells store integers and are matched by value, not by mask.
 
@@ -243,7 +249,7 @@ algo[.]       // (on the RHS) clear the cell
 
 Numeric grids represent empty separately from `0`; `0` is a distinct stored value (section 10.3). A number grid has no masks: its only mask forms are `.`, which matches or writes empty, and `!.`, which matches any stored number, `0` included (check 47).
 
-Matching is uniform across all mask forms: a pattern cell carries a mask, and it matches the stored cell when `(stored & pattern_mask) != 0`. Thus `.` (mask `0x1`) matches only empty; `!.` (every bit except bit 0) matches any non-empty cell; a tag `t` (its single bit) matches a cell containing `t`; `*` (all bits, section 2.5) matches anything including empty.
+Matching is uniform across all mask forms: a pattern cell carries a mask, and it matches the stored cell when `(stored & pattern_mask) != 0`. In a tag grid this is the test the `is` operator performs (section 5.8): a mask cell `m` in grid `g` matches exactly where `(g is m)` is true. The **complement** `!m` of a tag mask is every bit of its tagset that `m` lacks, counting bit 0 (empty) and the tagset's value bits, so `!` means "not" for empty and values alike. Thus `.` (mask `0x1`) matches only empty; `!.` (every value bit) matches any non-empty cell; a tag `t` (its single bit) matches a cell containing `t`; `!t` matches an empty cell or one holding a value other than `t`; `*` (all bits, section 2.5) matches anything including empty.
 
 Empty is also nameable in expressions as the literal `.` (section 5.8): `(g == .)` tests empty, `(g != .)` tests non-empty, and a `.` result on the RHS clears the cell.
 
@@ -498,7 +504,7 @@ Weight is per-option, prefixed before the option. Omitted weight defaults to `1`
 
 **Union writes.** A RHS tag cell may be a union mask, e.g. `level[wall|floor]`, written via `|` (section 5.8). The cell then stores a multi-bit mask. Single-bit writes are **not** required. The meaning of a multi-valued cell under later matching is the any-overlap rule `(stored & mask) != 0` (section 4.1).
 
-A **named union** (section 3) behaves identically to the equivalent inline `|` mask: on the LHS it matches by the any-overlap rule, on the RHS it writes the combined bits, and `!blocker` (match-side only) is the complement of the union mask.
+A **named mask** (section 3) behaves identically to the equivalent inline mask: on the LHS it matches by the any-overlap rule, on the RHS (if writable, section 3) it writes the combined bits, and `!blocker` (match-side only) is the complement of the named mask (section 4.1).
 
 ### 5.6 Rule attributes
 
@@ -550,8 +556,8 @@ These are checks, not productions: the parser accepts any `attr` of section 5.1,
 
 Each pattern carries two compile-time footprints, derived from its cells:
 
-- **Read footprint**: the set of cell offsets the matcher actually reads. Every cell other than `*` contributes to the read footprint: a tag value, a complement, an inline or named union, an integer literal, `.` (empty), or a pattern variable (section 5.11). Expression cells are covered below. Cells marked `*` (any) are *not* in the read footprint, since the matcher never inspects them.
-- **Write footprint**: the set of cell offsets the rewriter actually writes. Every cell other than `*` contributes to the write footprint: a tag value, an inline or named union, an integer literal, `.` (which clears the cell), or a pattern variable (which writes its value). Expression cells are covered below. Cells marked `*` are *not* in the write footprint, since they preserve whatever was matched.
+- **Read footprint**: the set of cell offsets the matcher actually reads. Every cell other than `*` contributes to the read footprint: a tag value, a complement, an inline union or a named mask, an integer literal, `.` (empty), or a pattern variable (section 5.11). Expression cells are covered below. Cells marked `*` (any) are *not* in the read footprint, since the matcher never inspects them.
+- **Write footprint**: the set of cell offsets the rewriter actually writes. Every cell other than `*` contributes to the write footprint: a tag value, an inline union or a writable named mask, an integer literal, `.` (which clears the cell), or a pattern variable (which writes its value). Expression cells are covered below. Cells marked `*` are *not* in the write footprint, since they preserve whatever was matched.
 
 Footprints are defined relative to the pattern's origin (top-left corner). When the rule fires at grid position (x, y), each footprint is translated by (x, y) to identify which grid cells are read or written.
 
@@ -576,7 +582,8 @@ Expressions are **deterministic for a given seed**. Every built-in is pure excep
 ```
 expr        ::= or_expr
 or_expr     ::= and_expr ('||' and_expr)*
-and_expr    ::= bor_expr ('&&' bor_expr)*
+and_expr    ::= is_expr ('&&' is_expr)*
+is_expr     ::= bor_expr ('is' bor_expr)?      (* mask match; operands must be tag-typed *)
 bor_expr    ::= eq_expr  ('|'  eq_expr)*        (* tag-union; operands must be tag-typed *)
 eq_expr     ::= rel_expr (('==' | '!=') rel_expr)*
 rel_expr    ::= add_expr (('<' | '<=' | '>' | '>=') add_expr)*
@@ -592,12 +599,12 @@ primary     ::= INTEGER
 arg_list    ::= arg (',' arg)*
 arg         ::= expr | selector              (* selector - section 5.12 *)
 ```
-Precedence follows C conventions (lowest to highest): `||`, `&&`, `|`, equality, relational, additive, multiplicative, unary, primary.
+Precedence follows C conventions (lowest to highest): `||`, `&&`, `is`, `|`, equality, relational, additive, multiplicative, unary, primary. So `level is floor|door && x > 0` is `(level is (floor|door)) && (x > 0)`, and `!(level is wall)` negates a match while `!level is wall` complements the read.
 
-**Identifier resolution** (in order): a name followed by `(` is a built-in function call (section 5.10); else `x`/`y`/`width`/`height` are the reserved position/dimension values (section 2.4); else a declared param - input or derived (section 4.2); else, **inside a tag-grid cell**, a `tag_value` or `tag_union` of that grid's tagset (a union resolves to its members' combined mask, section 3); else a grid name, which reads **that grid's value at the current cell position** (same-position cross-grid read - no indices); else a `tag_value` or `tag_union` of the **one** tagset, among those the module sees (section 2.6), that declares the name - outside a tag-grid cell (a `where` cell, a guard, an operation argument) this is how tag names resolve, and a name that several such tagsets declare is ambiguous there. A name resolving to none of these is a compile error.
+**Identifier resolution** (in order): a name followed by `(` is a built-in function call (section 5.10); else `x`/`y`/`width`/`height` are the reserved position/dimension values (section 2.4); else a declared param - input or derived (section 4.2); else, **inside a tag-grid cell**, a `tag_value` or `named_mask` of that grid's tagset (a named mask resolves to its mask, section 3); else a grid name, which reads **that grid's value at the current cell position** (same-position cross-grid read - no indices); else a `tag_value` or `named_mask` of the **one** tagset, among those the module sees (section 2.6), that declares the name - outside a tag-grid cell (a `where` cell, a guard, an operation argument) this is how tag names resolve, and a name that several such tagsets declare is ambiguous there. A name resolving to none of these is a compile error.
 
 **Types.** Four value kinds: **tag-mask**, **number**, **bool**, and **node** (section 5.12).
-- Tag operators: `|` (union), `!` (complement, match-side only), `==`/`!=` between same-tagset operands -> bool.
+- Tag operators: `|` (union), `!` (complement over bit 0 and the value bits, section 4.1; never written, check 15), `is` (match: `a is m` iff `(a & m) != 0`, the test of a mask cell, section 4.1), and `==`/`!=` (exact equality) between same-tagset operands -> bool. `is` takes tag operands only; a number grid tests empty with `==`/`!=` against `.`.
 - Number operators: `+ - * /` -> number; `== != < <= > >=` -> bool. `number` is a signed 32-bit integer. `/` is integer division truncating toward zero; **`n / 0` is defined as `0`**. Arithmetic **saturates**: a result outside the 32-bit range is clamped to `-2^31` or `2^31 - 1`, so `-(-2^31)` and `-2^31 / -1` are `2^31 - 1`. Every expression is therefore **total**: it always evaluates to a value, never a fault.
 - Bool operators: `&& || !` -> bool.
 - Node operators: `==`/`!=` between nodes of one graph -> bool (identity). A node is otherwise valid only as a graph-function argument (section 5.12) or as the extent of a node-extent write (section 5.13): it has no arithmetic and cannot be written to a grid.
@@ -875,7 +882,7 @@ node_test   ::= INTEGER | tag_mask
 
 - `?n` declares a node variable.
 - `?a -- ?b` declares both variables and requires an edge between their nodes. `--` is a token only inside a graph block; inside `( ... )` two minus signs stay two operators.
-- `?n[m]` declares `?n` and tests its node's value (section 4.3) with cell semantics: overlap for a tag-grid source, equality for a number-grid source (section 4.1). A node is never empty, so a test mask has no `.` atom (`.`, `!.`, or a union such as `wall|.`), and a variable takes at most one test line (check 58).
+- `?n[m]` declares `?n` and tests its node's value (section 4.3) with cell semantics: overlap for a tag-grid source, equality for a number-grid source (section 4.1). A node is never empty, so a test mask has no `.` atom (`.`, `!.`, or a union such as `wall|.`, written or through a named mask), and a variable takes at most one test line (check 58).
 
 Every other condition, such as degrees, sizes, distances, and relations between values, is a rule guard.
 
@@ -993,12 +1000,12 @@ Each parameter has a **kind**, a **binding** (positional or named-only), and req
 |------|-----------|-------------|
 | `int` | a number expression, statement scope (section 5.8) | an integer, evaluated once when the statement is reached, before the operation runs |
 | `grid` | a name | a declared grid name (section 4) |
-| `pred` | a tag value or union, or a boolean expression, cell scope | a per-cell predicate (a tag or union means "cell overlaps this mask", section 6.6; an expression means its truth per cell) |
+| `pred` | a tag value or named mask, or a boolean expression, cell scope | a per-cell predicate (a tag or named mask means "cell overlaps this mask", section 6.6; an expression means its truth per cell) |
 | `value` | an expression typed by the target grid, cell scope | a cell value to write |
 | `expr` | a number expression, cell scope | a numeric expression evaluated per cell |
 | `enum{...}` | a name | one of a fixed set of words (validated per operation) |
 
-Every argument is written as an expression (section 6 grammar), and parentheses around it change nothing: `into=(tiles)` is `into=tiles`. Where a parameter takes a *name* - a `grid` or an `enum` - the argument must be a single `IDENT`. A `pred` that is a single `IDENT` is a tag value or union (section 6.6). A `value` is an expression in a cell of the target grid, so under section 5.8 a name resolves first as a tag value or union of that grid's tagset. Every other argument resolves under section 5.8.
+Every argument is written as an expression (section 6 grammar), and parentheses around it change nothing: `into=(tiles)` is `into=tiles`. Where a parameter takes a *name* - a `grid` or an `enum` - the argument must be a single `IDENT`. A `pred` that is a single `IDENT` is a tag value or named mask (section 6.6). A `value` is an expression in a cell of the target grid, so under section 5.8 a name resolves first as a tag value or named mask of that grid's tagset. Every other argument resolves under section 5.8.
 
 **Operation table.**
 
@@ -1094,7 +1101,7 @@ Parameters (section 6.0):
 
 Semantics: the route is the minimum-total-cost sequence of adjacent traversable cells from a `from` cell to the nearest `to` cell, **overwriting** `into` on the route cells. Ties break deterministically by seed (section 7.2). If no `to` is reachable (including an empty `from` or `to` set), `path` is a **no-op and emits a warning** (like `trim` on empty content, section 7.4), not an error. It writes only the route and exposes no distance field. Because a grid is an implicit graph, `path` also underlies connectivity guarantees, corridor carving, and room-linking; it generalizes to explicit graphs through `over`.
 
-**Predicate resolution.** A **bare tag** (or named union) as a `pred` reads **the unique tag layer whose tagset declares that name**, among the grids its module sees (section 2.6), with pattern-cell overlap semantics (`(stored & mask) != 0`, section 4.1); if no seen layer's tagset declares it, or **more than one** seen layer could hold it, that is a compile error (section 7.3, check 35) - use the expression form and name the grid (e.g. `passable=(level == floor)`). An expression `pred` is any boolean expression over same-position reads, `x`/`y`/`width`/`height`, and params. The **default `passable`** - "any non-empty cell" - means non-empty in **at least one layer**, the same union-of-layers content notion `trim` uses (section 6.3). Note that expressions have no mask-overlap operator, so the expr form tests exact `==` while the bare-tag form is pattern-style any-overlap.
+**Predicate resolution.** A **bare tag** (or named mask) as a `pred` reads **the unique tag layer whose tagset declares that name**, among the grids its module sees (section 2.6), with pattern-cell overlap semantics (`(stored & mask) != 0`, section 4.1); if no seen layer's tagset declares it, or **more than one** seen layer could hold it, that is a compile error (section 7.3, check 35) - use the expression form and name the grid (e.g. `passable=(level is floor)`). An expression `pred` is any boolean expression over same-position reads, `x`/`y`/`width`/`height`, and params. The **default `passable`** - "any non-empty cell" - means non-empty in **at least one layer**, the same union-of-layers content notion `trim` uses (section 6.3). In the expression form, `is` (section 5.8) applies the same overlap test as the bare-tag form.
 
 **The draw contract.** `path` pins its evaluation and PRNG behaviour exactly, so that the output is a pure function of (seed, params) regardless of how the search is implemented:
 
@@ -1367,7 +1374,7 @@ The compiler must reject:
 3. **Shape mismatch.** The match and write sides of a `pattern_pair` must have identical dimensions, recursively through nested write blocks (section 5.4).
 4. **Empty combinator block.** A combinator block (`{ all }`, `{ any }`, or a combinator rule body) with zero items. (Single-item blocks are legal, section 5.2.)
 5. **Weight scope.** `(weight=N)` is rejected inside `{ all ... }` blocks and on bare patterns (parse error).
-6. **Tag/grid resolution.** Every identifier in a pattern cell must resolve per section 5.8 (for a bare mask literal: a tag value or union of the grid's declared tagset).
+6. **Tag/grid resolution.** Every identifier in a pattern cell must resolve per section 5.8 (for a bare mask literal: a tag value or named mask of the grid's declared tagset).
 7. **Attribute validation.** Attribute names and values must be in the table of section 5.6.
 8. **Reference resolution.** Every tagset, grid, graph, param, rule, and sequence name must resolve to a declaration the referencing module sees (section 2.6). A name declared in the closure but not seen is reported as not visible, naming its declaring module. Rules and sequences may be referenced before they are declared; declaration order does not matter for them.
 9. **Unresolved module.** A `use` path that the resolver cannot map to a module (section 2.6, Appendix A).
@@ -1376,7 +1383,7 @@ The compiler must reject:
 12. **Reserved-name collision.** A tag value, grid, graph, or param named `x`, `y`, `width`, or `height`; or a param colliding with a grid or graph name.
 13. **Bare computed expression.** A computed expression (comparison/arithmetic/logical/call) in a cell without enclosing `( ... )`.
 14. **Expression type errors.** An operator applied to the wrong value kind; an expression in a real cell not evaluating to the grid's type; comparing across distinct tagsets; a `.` with no inferable type.
-15. **Complement write.** `!`tag or `!.` used on the RHS (complement is match-side only).
+15. **Complement write.** A complement written: `!`tag, `!.`, or a match-only named mask (section 3) as a write-side cell or a `value` argument (section 6.0), or `!` in a write-side expression other than within an operand of `is` (complement is match-side only).
 16. **Unknown function.** A call to a name that is not a section 5.10 built-in.
 17. **Duplicate params block.** More than one `params` block per module.
 18. **Invalid transform value.** A `rotation=` value that is not `none`/`all`, a bare `90`/`180`/`270`, or a set `{...}` of those angles; a `symmetry=` value other than `none`/`horizontal`/`vertical`/`all`; or an angle set containing a value other than 90/180/270. (An empty set `{}` and a `symmetry` set are also errors.)
@@ -1386,7 +1393,7 @@ The compiler must reject:
 22. **Guard scope.** A statement `when` guard that reads a grid or `x`/`y`; or whose expression is not boolean.
 23. **Derived param scope.** A derived param expression that reads a grid, `x`/`y`, or `width`/`height`; or that forward-references a later param; or that participates in a cycle.
 24. **Derived param type.** A derived param whose expression is not a `number`.
-25. **Invalid union.** A `tag_union` whose member is not a `tag_value` or earlier `tag_union` of the same tagset; a member that forward-references a later union; or a union cycle. (A union name colliding with a `tag_value` name, a grid, a param, a reserved identifier, or a built-in is caught by the existing duplicate/collision checks - a union shares the tagset's value namespace.)
+25. **Invalid named mask.** A `named_mask` whose member is not a `tag_value` or earlier `named_mask` of the same tagset; a member that forward-references a later name; or a cycle. (A named mask colliding with a `tag_value` name, a grid, a param, a reserved identifier, or a built-in is caught by the existing duplicate/collision checks - a named mask shares the tagset's value namespace.)
 26. **Default param scope.** A default expression (section 4.2) that reads a grid, `x`/`y`, or `width`/`height`; that forward-references a later param; or that participates in a cycle. (Same discipline as check 23; a default may reference earlier params and may call `random`.)
 27. **Input param without a default.** An `input_param` written as `name : number` with no `= expr` (every input param must carry a default, section 4.2).
 28. **Zero count.** Retired in 0.9.4: a count is an expression, and an out-of-range one is clamped at run time with a warning (sections 6, 7.4).
@@ -1408,7 +1415,7 @@ The compiler must reject:
 44. **Unbound variable.** A pattern variable used in an expression or on the write side with no binding cell (a bare occurrence) on the match side of its pattern pair (section 5.11), or, in a graph pair, not declared in its graph block (section 5.13).
 45. **Variable type.** Binding cells of one variable in grids of different types (distinct tagsets, a tag grid and a `number` grid, a grid and a graph, or two graphs); or a bare variable written into a grid whose type differs from the variable's, which includes every node variable.
 46. **Variable outside a pattern.** A pattern variable in a statement `when` guard, a count, a param expression, or an operation argument; or a bare variable cell in a `where` pattern (its cells are boolean expressions, section 5.9).
-47. **Misplaced empty mask.** A write-side `tag_mask` that unions `.` with any other atom (e.g. `.|wall`); or, in a number grid, a `tag_mask` other than `.` or `!.` (section 4.1).
+47. **Misplaced empty mask.** A write-side `tag_mask` that unions `.` with any other atom (e.g. `.|wall`), written or through a named mask; or, in a number grid, a `tag_mask` other than `.` or `!.` (section 4.1).
 48. **Graph source.** A graph layer whose `of` name does not resolve to a grid: a tagset, another graph, or an undeclared name (section 4.3).
 49. **Graph form.** A graph argument other than `nodes` or `edges`, or one given twice; `edges` without `nodes`; or `nodes`/`edges` on a graph whose source is a number grid (section 4.3).
 50. **Graph mask.** A `nodes` or `edges` mask naming a value outside the source grid's tagset; a mask that selects no value (e.g. `.`); or `nodes` and `edges` masks that share a value (section 4.3).
@@ -1419,7 +1426,8 @@ The compiler must reject:
 55. **Sized pattern.** A sized pattern `g(W, H)[c]` whose body is not exactly one cell, or whose `W` or `H` is not an integer literal from 1 to 256 (section 5.3).
 56. **Rule-guard scope.** A rule guard that reads a grid or `x`/`y`; or whose expression is not boolean (section 5.9.1).
 57. **Node extent.** A node extent `g(?n)[c]` outside the write side of a graph pair, whose variable is not declared in that pair's graph block, or whose body is not exactly one cell; or, in a graph pair, a write-side leaf that is not a node extent (sections 5.3 and 5.13).
-58. **Graph rule form.** A graph block whose name is not a graph layer; a variable with two test lines, or a test that does not fit the source (an integer on a tag-grid source, a tag mask on a number-grid source, or a mask with a `.` atom); an edge line joining a variable to itself; a `symmetry` or `rotation` attribute on a rule with a graph pair; or a body mixing graph and grid pairs (section 5.13).
+58. **Graph rule form.** A graph block whose name is not a graph layer; a variable with two test lines, or a test that does not fit the source (an integer on a tag-grid source, a tag mask on a number-grid source, or a mask with a `.` atom, written or through a named mask); an edge line joining a variable to itself; a `symmetry` or `rotation` attribute on a rule with a graph pair; or a body mixing graph and grid pairs (section 5.13).
+59. **Empty mask.** A pattern-cell mask or a named mask that selects no bit (e.g. `!(F|W|.)` in `tag t { F, W }`), which no cell can match (section 4.1).
 
 ### 7.4 Warnings
 
@@ -1686,7 +1694,7 @@ auto map   = level.graph("map");                    // a graph layer, by name
 | `explicit operator bool()` | True iff compilation succeeded. |
 | `std::string error()` | Formatted diagnostics when compile failed; `""` on success. |
 | `std::string warnings()` | Formatted warnings of a successful compile (e.g. the reductivity warning, section 7.4); `""` when none. They also went to the warning handler. |
-| `int tag(const std::string& qualified)` | Value mask, qualified by tagset: `tag("geometry.wall")` is that value's bit, and a named union's name gives its combined mask. Masks are per tagset, valid for every layer of that tagset. `0` if unknown, so an unknown name ORed into a combined mask adds nothing. |
+| `int tag(const std::string& qualified)` | Value mask, qualified by tagset: `tag("geometry.wall")` is that value's bit, and a named mask's name gives its mask. Masks are per tagset, valid for every layer of that tagset. `0` if unknown, so an unknown name ORed into a combined mask adds nothing. |
 | `int sequence(const std::string& name)` | Sequence id, for use as an entry (section 6). `-1` if unknown. Ids are `0 .. sequence_count() - 1` in canonical declaration order (section 2.6). |
 | `int sequence_count()` | Number of sequences in the closure. |
 | `std::string sequence_name(int id)` | Name of a sequence id (`""` if out of range). |
@@ -1817,7 +1825,7 @@ The same key twice on one target is a warning, and the last one applies. `@expec
 | `@expect` | the file | `TEXT` | a test expectation; repeatable (B.7) |
 | `@param` | the file | `TEXT`: `IDENT '=' '-'? INTEGER` | a param value for test runs (B.7) |
 
-A `tag_union`, a `layer_entry`, a rule, and a pattern cell are not targets.
+A `named_mask`, a `layer_entry`, a rule, and a pattern cell are not targets.
 
 ### B.3 `@seed`
 

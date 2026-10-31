@@ -4,7 +4,7 @@
   (value wall)
   (value door)
   (value floor)
-  (union blocker wall door))
+  (union blocker wall | door))
 (layers
   (grid level geo)
   (grid tiles number)

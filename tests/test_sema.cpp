@@ -437,9 +437,9 @@ sequence main { }
     CHECK(ok.prog.rules[0].pairs[0].lhs[0].at(0, 0).val == (ls::tag_bit(0) | ls::tag_bit(1)));
 
     CHECK(compile_result("tag geo { wall, b = nope }\n" + rprog)
-          .has_error("not a value or earlier union"));
+          .has_error("not a value or earlier named mask"));
     CHECK(compile_result("tag geo { wall, b = c, c = wall }\n" + rprog)
-          .has_error("not a value or earlier union"));   // forward reference
+          .has_error("not a value or earlier named mask"));   // forward reference
     CHECK(compile_result("tag geo { wall, wall = wall }\n" + rprog)
           .has_error("redeclares"));
 }

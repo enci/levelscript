@@ -35,6 +35,7 @@ enum class expr_kind {
     lt, le, gt, ge, eq, ne,
     and_, or_,
     bit_or,        // '|' tag union
+    is_,           // 'is' mask match: (a & m) != 0
     // pattern cells only
     wildcard,      // '*'
     paren,         // '(' expr ')': a computed cell; args [the expr]
@@ -55,11 +56,12 @@ struct expr {
 
 // ── declarations ─────────────────────────────────────────────────────────────
 
-// A named union: `blocker = wall | door` — a mask alias over the
-// tagset's own members (values or earlier unions). Consumes no bit.
+// A named mask: `blocker = wall | door`, `open = !(blocker | .)` — a mask
+// alias over the tagset's own members (values or earlier named masks),
+// with '|', '!', '.' and parentheses. Consumes no bit.
 struct tag_union {
-    ident                    name;
-    std::vector<std::string> members;
+    ident    name;
+    expr_ptr value;   // ident, empty_lit, not_, bit_or, paren
 };
 
 struct tag_decl {

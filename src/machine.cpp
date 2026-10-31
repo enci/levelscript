@@ -64,6 +64,7 @@ static long long ce_pure(ce_kind k, long long a, long long b, long long c) {
     case ce_kind::and_:   return a != 0 && b != 0;
     case ce_kind::or_:    return a != 0 || b != 0;
     case ce_kind::bit_or: return a | b;
+    case ce_kind::is_:    return (a & b) != 0;
     case ce_kind::if_:    return a != 0 ? b : c;
     case ce_kind::min_:   return a < b ? a : b;
     case ce_kind::max_:   return a > b ? a : b;
@@ -135,6 +136,7 @@ long long machine::eval(int idx, int x, int y) {
         return eval_graph(e, x, y);
     case ce_kind::and_: return eval(e.a, x, y) != 0 && eval(e.b, x, y) != 0;   // lazy
     case ce_kind::or_:  return eval(e.a, x, y) != 0 || eval(e.b, x, y) != 0;
+    case ce_kind::compl_: return e.val & ~eval(e.a, x, y);
     case ce_kind::random_: {   // inclusive [lo, hi]; exactly one draw per call
         auto lo = eval(e.a, x, y), hi = eval(e.b, x, y);
         // an empty range still draws once (uniform(1)) and yields lo

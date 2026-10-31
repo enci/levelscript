@@ -185,23 +185,26 @@ struct parser {
         return parse_primary();
     }
 
-    // Binary operators by precedence, lowest first (C conventions);
-    // all are left-associative.
+    // Binary operators by precedence, lowest first (C conventions, with
+    // `is` between '&&' and '|'); all are left-associative but `is`, which
+    // does not associate.
     struct binary_op { token_type tok; expr_kind kind; int prec; };
+    static constexpr int is_prec = 3;
     static constexpr binary_op binary_ops[] = {
         {token_type::pipe_pipe, expr_kind::or_,    1},
         {token_type::amp_amp,   expr_kind::and_,   2},
-        {token_type::pipe,      expr_kind::bit_or, 3},   // tag union
-        {token_type::eq_eq,     expr_kind::eq,     4},
-        {token_type::bang_eq,   expr_kind::ne,     4},
-        {token_type::lt,        expr_kind::lt,     5},
-        {token_type::le,        expr_kind::le,     5},
-        {token_type::gt,        expr_kind::gt,     5},
-        {token_type::ge,        expr_kind::ge,     5},
-        {token_type::plus,      expr_kind::add,    6},
-        {token_type::minus,     expr_kind::sub,    6},
-        {token_type::star,      expr_kind::mul,    7},
-        {token_type::slash,     expr_kind::div_,   7},
+        {token_type::kw_is,     expr_kind::is_,    is_prec},   // mask match
+        {token_type::pipe,      expr_kind::bit_or, 4},   // tag union
+        {token_type::eq_eq,     expr_kind::eq,     5},
+        {token_type::bang_eq,   expr_kind::ne,     5},
+        {token_type::lt,        expr_kind::lt,     6},
+        {token_type::le,        expr_kind::le,     6},
+        {token_type::gt,        expr_kind::gt,     6},
+        {token_type::ge,        expr_kind::ge,     6},
+        {token_type::plus,      expr_kind::add,    7},
+        {token_type::minus,     expr_kind::sub,    7},
+        {token_type::star,      expr_kind::mul,    8},
+        {token_type::slash,     expr_kind::div_,   8},
     };
 
     // Precedence climbing: operators binding at least as tightly as `min_prec`.
@@ -214,6 +217,9 @@ struct parser {
             if (!op || op->prec < min_prec) return e;
             eat();
             e = make_binary(op->kind, std::move(e), parse_expr(op->prec + 1));
+            if (op->kind == expr_kind::is_ && at(token_type::kw_is))
+                error_at(peek(), "'is' does not chain; join two matches with '&&', "
+                         "e.g. (a is m) && (b is n)");
         }
     }
 
@@ -229,14 +235,12 @@ struct parser {
         while (!at(token_type::rbrace) && !at_end()) {
             if (!expect(token_type::ident, "a tag value name")) { eat_bad(); list_sep(); continue; }
             ident name = prev_ident();
-            if (at(token_type::equals)) {   // named union: blocker = wall | door
+            if (at(token_type::equals)) {   // named mask: blocker = wall | door
                 tag_union u;
                 u.name = std::move(name);
                 eat();   // '='
-                do {
-                    if (!expect(token_type::ident, "a union member")) break;
-                    u.members.push_back(toks[pos - 1].text);
-                } while (accept(token_type::pipe));
+                u.value = parse_named_mask();
+                if (!u.value) { recover_tag_item(); continue; }
                 d.unions.push_back(std::move(u));
             } else {
                 d.values.push_back(std::move(name));
@@ -246,6 +250,66 @@ struct parser {
         expect(token_type::rbrace, "'}'");
         close(d.loc);
         out.tags.push_back(std::move(d));
+    }
+
+    // mask_expr ::= mask_term ('|' mask_term)*; whitespace is free, since a
+    // declaration is not a pattern cell. Null after reporting an error.
+    expr_ptr parse_named_mask() {
+        auto e = parse_named_mask_term();
+        while (e && at(token_type::pipe)) {
+            eat();
+            auto t = parse_named_mask_term();
+            if (!t) return nullptr;
+            e = make_binary(expr_kind::bit_or, std::move(e), std::move(t));
+        }
+        return e;
+    }
+
+    // mask_term ::= '!' mask_term | IDENT | '.' | '(' mask_expr ')'
+    expr_ptr parse_named_mask_term() {
+        if (at(token_type::bang)) {
+            auto e = make_expr(expr_kind::not_);
+            eat();
+            auto a = parse_named_mask_term();
+            if (!a) return nullptr;
+            e->args.push_back(std::move(a));
+            close(e->loc);
+            return e;
+        }
+        if (at(token_type::dot)) {
+            auto e = make_expr(expr_kind::empty_lit);
+            eat();
+            return e;
+        }
+        if (at(token_type::lparen)) {
+            auto e = make_expr(expr_kind::paren);
+            eat();
+            auto a = parse_named_mask();
+            if (!a || !expect(token_type::rparen, "')'")) return nullptr;
+            e->args.push_back(std::move(a));
+            close(e->loc);
+            return e;
+        }
+        if (!at(token_type::ident)) {
+            if (is_keyword(peek().type))
+                error_at(peek(), "expected a tag value, '.', '!' or '(' in a named mask, got '" +
+                         peek().text + "' - a reserved keyword cannot be used as a name");
+            else
+                error_at(peek(), "expected a tag value, '.', '!' or '(' in a named mask" +
+                         (peek().text.empty() ? std::string() : ", got '" + peek().text + "'"));
+            return nullptr;
+        }
+        auto e = make_expr(expr_kind::ident);
+        e->ident = eat().text;
+        return e;
+    }
+
+    // After a bad named mask: skip past the next ',' or to the block's '}'.
+    void recover_tag_item() {
+        while (!at(token_type::rbrace) && !at_end()) {
+            if (accept(token_type::comma)) return;
+            eat();
+        }
     }
 
     void parse_layers(ast_file& out) {

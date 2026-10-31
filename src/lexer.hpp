@@ -15,7 +15,7 @@ enum class token_type {
     kw_tag, kw_layers, kw_grid, kw_graph, kw_of, kw_number, kw_rule, kw_sequence,
     kw_all, kw_any, kw_ordered, kw_weight,
     kw_once, kw_scatter, kw_everywhere, kw_grow, kw_settle,   // modes
-    kw_params, kw_where, kw_when, kw_use,
+    kw_params, kw_where, kw_when, kw_is, kw_use,
     // punctuation
     lbrace, rbrace, lbracket, rbracket, lparen, rparen,
     comma, colon, equals, arrow, star, dot,

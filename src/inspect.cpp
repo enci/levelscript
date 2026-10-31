@@ -434,8 +434,8 @@ std::string inspect_json(std::string const& source, std::string const& name,
             o += "],\"unions\":[";
             comma_list ul{o};
             if (ti < (int)prog.tag_unions.size())
-                for (auto const& [uname, mask] : prog.tag_unions[ti]) {
-                    (void)mask;
+                for (auto const& u : prog.tag_unions[ti]) {
+                    std::string const& uname = u.name;
                     ul.next();
                     o += "{\"name\":";
                     js(o, uname);

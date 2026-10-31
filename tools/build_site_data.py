@@ -132,7 +132,7 @@ def api_entries(md: str) -> list:
 
 # One-line meaning for keywords, which the spec lists but does not tabulate.
 KEYWORDS = {
-    "tag": "declare a tagset: named cell values and unions", "layers": "declare the grids a generator works on",
+    "tag": "declare a tagset: named cell values and named masks", "layers": "declare the grids a generator works on",
     "grid": "a layer of cells", "graph": "a graph layer: regions as nodes, adjacency as edges",
     "of": "binds a grid to its tagset (grid of tagset)", "number": "numeric cell type",
     "rule": "a pattern => pattern rewrite", "sequence": "a named, reusable list of statements",
@@ -140,6 +140,7 @@ KEYWORDS = {
     "when": "guard: run the statement only if the param expression holds", "use": "import another module",
     "any": "pick one alternative at random", "all": "every sub-rule must match",
     "ordered": "sub-rules tried in priority order", "weight": "relative chance of an alternative",
+    "is": "mask match: a is m holds when a overlaps the mask m, as a pattern cell matches",
 }
 
 

@@ -140,7 +140,7 @@ std::string cell_glyph(compiled const& meta, int tag_id, int v) {
     // union slots follow the values (see mask_to_slot)
     int ui = v - (int)vals.size();
     if (tag_id < (int)meta.tag_unions.size() && ui < (int)meta.tag_unions[tag_id].size())
-        return meta.tag_unions[tag_id][ui].first.substr(0, 1);
+        return meta.tag_unions[tag_id][ui].name.substr(0, 1);
     return "?";
 }
 
@@ -165,7 +165,7 @@ static int mask_to_slot(compiled const& meta, int tag_id, int mask) {
     if (mask > 0 && tag_id >= 0 && tag_id < (int)meta.tag_unions.size()) {
         auto const& us = meta.tag_unions[tag_id];
         for (int i = 0; i < (int)us.size(); ++i)
-            if (us[i].second == mask)
+            if (us[i].mask == mask)
                 return (int)meta.tag_values[tag_id].size() + i;
     }
     return mask_to_vid(mask);
@@ -180,7 +180,7 @@ static std::string mask_label(script const& sc, int tag_id, int mask) {
     int slot = mask_to_slot(meta, tag_id, mask);
     auto const& vals = meta.tag_values[tag_id];
     if (slot >= (int)vals.size())
-        return meta.tag_unions[tag_id][slot - (int)vals.size()].first;
+        return meta.tag_unions[tag_id][slot - (int)vals.size()].name;
     std::string out;
     for (int vi = 0; vi < (int)vals.size() && vi < 30; ++vi)
         if (mask & (1 << (vi + 1))) {
@@ -1216,11 +1216,11 @@ void draw_tags_window(script const& sc, project_config& cfg) {
 
                     std::string members;
                     for (int vi = 0; vi < (int)vals.size() && vi < 30; ++vi)
-                        if (us[(size_t)ui].second & (int64_t(1) << (vi + 1))) {
+                        if (us[(size_t)ui].mask & (int64_t(1) << (vi + 1))) {
                             if (!members.empty()) members += " | ";
                             members += vals[(size_t)vi];
                         }
-                    ImGui::TextUnformatted(us[(size_t)ui].first.c_str());
+                    ImGui::TextUnformatted(us[(size_t)ui].name.c_str());
                     ImGui::SameLine();
                     ImGui::TextDisabled("= %s", members.c_str());
 

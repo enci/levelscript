@@ -60,6 +60,8 @@ enum class ce_kind {
     add, sub, mul, div_,
     lt, le, gt, ge, eq, ne,
     and_, or_, bit_or,
+    is_,           // mask match: (a & b) != 0
+    compl_,        // tag complement: val (the tagset's bit 0 and value bits) & ~a
     // built-ins: if is eager — both branches always evaluate
     if_, min_, max_, abs_, clamp_, mod_,
     random_,       // the one impure built-in: one PRNG draw per evaluation
@@ -291,8 +293,16 @@ struct compiled_selector {
 struct compiled {
     std::vector<std::string>              tag_names;
     std::vector<std::vector<std::string>> tag_values;   // [tag_id][value_id]
-    // named unions per tagset: (name, resolved mask)
-    std::vector<std::vector<std::pair<std::string, int64_t>>> tag_unions;
+    // named masks per tagset, in declaration order
+    struct named_mask {
+        std::string name;
+        int64_t     mask{0};          // resolved; may include bit 0 (empty)
+        bool        complement{false};   // has a '!', itself or through a name
+        bool        dot{false};          // has a '.', itself or through a name
+        // a legal write-side mask: no '!', and '.' only on its own (section 3)
+        bool writable() const { return !complement && (mask == 1 || (mask & 1) == 0); }
+    };
+    std::vector<std::vector<named_mask>> tag_unions;
     std::vector<compiled_layer>           layers;
     std::vector<compiled_graph>           graphs;   // not in the layer order
     std::vector<compiled_selector>        selectors;
@@ -309,12 +319,18 @@ struct compiled {
     std::vector<startup_expr> startup_exprs;
 
     int param_id(std::string_view name) const { return index_of(param_names, name); }
-    // A name's mask within a tagset: a value's bit or a union's mask; 0 = unknown.
+    // A name's mask within a tagset: a value's bit or a named mask's mask;
+    // 0 = unknown.
     int64_t mask_of(int tag, std::string_view name) const {
         int vid = value_id(tag, name);
         if (vid >= 0) return tag_bit(vid);
+        auto u = named(tag, name);
+        return u ? u->mask : 0;
+    }
+    // A tagset's named mask, or null.
+    named_mask const* named(int tag, std::string_view name) const {
         int u = union_id(tag, name);
-        return u >= 0 ? tag_unions[(size_t)tag][(size_t)u].second : 0;
+        return u >= 0 ? &tag_unions[(size_t)tag][(size_t)u] : nullptr;
     }
 
     int layer_id(std::string_view name) const { return index_of(layers, name, &compiled_layer::name); }
@@ -326,7 +342,7 @@ struct compiled {
     }
     int union_id(int tag, std::string_view name) const {
         if (tag < 0 || tag >= (int)tag_unions.size()) return -1;
-        return index_of(tag_unions[(size_t)tag], name, &std::pair<std::string, int64_t>::first);
+        return index_of(tag_unions[(size_t)tag], name, &named_mask::name);
     }
 };
 

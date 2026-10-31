@@ -6,6 +6,7 @@ tag level {
     D // @name=door
     O // @name=open
     S = W|D
+    free = !S   // floor, open, or outside
 }
 
 tag entities {
