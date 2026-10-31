@@ -196,14 +196,14 @@
         '<div class="canvas-wrap"><canvas width="960" height="' + (opts.height || 600) + '"></canvas>' +
         '<div class="status"></div><div class="cell-tip" hidden></div></div>' +
         '<div class="controls">' +
-          '<label>seed <input class="seed" type="number" min="0" step="1"></label>' +
-          '<button class="dice" title="Random seed"><i class="fas fa-dice"></i></button>' +
-          '<span class="params"></span>' +
-          '<span class="spacer"></span>' +
           '<button class="run"><i class="fas fa-play"></i> Run</button>' +
           '<button class="step" title="Apply one rule application"><i class="fas fa-forward-step"></i> Step</button>' +
           '<button class="stmt" title="Run to the end of the current statement"><i class="fas fa-angles-right"></i> Statement</button>' +
           '<button class="play" title="Animate the generation"><i class="fas fa-film"></i> Play</button>' +
+          '<span class="spacer"></span>' +
+          '<label>seed <input class="seed" type="number" min="0" step="1"></label>' +
+          '<button class="dice" title="Random seed"><i class="fas fa-dice"></i></button>' +
+          '<span class="params"></span>' +
         '</div>' +
         '<div class="layer-chips"></div>' +
         '<div class="legend"></div>' +
@@ -416,7 +416,7 @@
     }
     function markLine() {
       let line = 0;
-      for (let i = ta.value.lastIndexOf('\n', ta.selectionStart - 1); i >= 0; i = ta.value.lastIndexOf('\n', i - 1)) line++;
+      for (let i = ta.value.indexOf('\n'); i >= 0 && i < ta.selectionStart; i = ta.value.indexOf('\n', i + 1)) line++;
       if (line === caretLine) return;
       if (gutter.children[caretLine]) gutter.children[caretLine].classList.remove('on');
       caretLine = line;

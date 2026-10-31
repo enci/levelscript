@@ -111,7 +111,6 @@ rule add_end {
     when (degree(?e) == 1 && every(?e, rooms[.]) && farthest(?s, ?e))
     =>
     rooms(?e)[exit]
-    e.rooms = exit
 }
 
 rule add_boss {
