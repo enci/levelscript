@@ -330,44 +330,56 @@ button.diag-row:hover, .diag-row.active { border-color: var(--ls-green); backgro
   overflow: hidden;
 }
 
-.editor { --gw: 2; }
-.editor pre.hl, .editor textarea, .editor pre.gutter {
-  position: absolute;
-  inset: 0;
-  margin: 0;
-  padding: 1rem 1.2rem 1rem calc(var(--gw) * 1ch + 2rem);
-  font: 0.86rem/1.55 var(--mono);
-  tab-size: 4;
-  white-space: pre;
-  border: 0;
-  border-radius: 0;
-  background: none;
-  overflow: auto;
+/* CodeMirror (js/cm-editor.js): fills the frame, colours from the theme variables */
+.editor .cm-editor { height: 100%; background: none; color: var(--text); font: 0.86rem/1.55 var(--mono); }
+.editor .cm-editor.cm-focused { outline: none; }
+.editor .cm-scroller { font: inherit; line-height: inherit; overflow: auto; }
+.editor .cm-content { padding: 1rem 0; caret-color: var(--hi); }
+.editor .cm-line { padding: 0 1.2rem 0 0.6rem; }
+.editor .cm-cursor { border-left: 2px solid var(--hi); }
+.editor .cm-gutters { background: none; border: 0; color: color-mix(in srgb, var(--muted) 45%, transparent); padding-left: 0.4rem; }
+.editor .cm-gutter-lint { width: 0.9em; }
+.editor .cm-activeLineGutter { background: none; color: var(--muted); }
+.editor .cm-activeLine { background: color-mix(in srgb, var(--text) 4%, transparent); }
+.editor .cm-editor:not(.cm-focused) .cm-activeLine { background: none; }
+.editor .cm-editor:not(.cm-focused) .cm-activeLineGutter { color: inherit; }
+.editor .cm-selectionBackground, .editor .cm-focused .cm-selectionBackground,
+.editor .cm-content ::selection { background: rgba(63, 196, 110, 0.3) !important; }
+.editor .cm-selectionMatch { background: color-mix(in srgb, var(--hi) 18%, transparent); }
+.editor .cm-matchingBracket { background: color-mix(in srgb, var(--ls-green) 25%, transparent); outline: 1px solid color-mix(in srgb, var(--ls-green) 60%, transparent); }
+.editor .cm-nonmatchingBracket { color: #ef476f; }
+.editor .cm-cell { border-radius: 2px; }
+/* diagnostics: wavy underlines, as before */
+.editor .cm-lintRange-error { background: none; text-decoration: underline wavy #ef476f; text-decoration-skip-ink: none; }
+.editor .cm-lintRange-warning { background: none; text-decoration: underline wavy #f5b83d; text-decoration-skip-ink: none; }
+.editor .cm-lintPoint-error::after { border-bottom-color: #ef476f; }
+.editor .cm-lintPoint-warning::after { border-bottom-color: #f5b83d; }
+/* tooltips: completion, hover, lint, search panel */
+.editor .cm-tooltip {
+  background: var(--tip-bg);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  font: 0.8rem/1.45 var(--mono);
 }
-
-.editor pre.hl { pointer-events: none; overflow: hidden; }
-/* line numbers: a dim column left of the code, the caret's line a little brighter */
-.editor pre.gutter {
-  right: auto;
-  width: calc(var(--gw) * 1ch + 1.2rem);
-  padding: 1rem 0.6rem 3rem;
-  text-align: right;
-  color: color-mix(in srgb, var(--muted) 45%, transparent);
-  pointer-events: none;
-  overflow: hidden;
-  user-select: none;
+.editor .cm-tooltip-autocomplete > ul { font: inherit; max-height: 16em; }
+.editor .cm-tooltip-autocomplete > ul > li { padding: 0.1rem 0.6rem; }
+.editor .cm-tooltip-autocomplete > ul > li[aria-selected] { background: color-mix(in srgb, var(--ls-green) 30%, transparent); color: var(--text); }
+.editor .cm-completionDetail { color: var(--muted); font-style: normal; margin-left: 1rem; }
+.editor .cm-completionMatchedText { text-decoration: none; color: var(--hi); font-weight: 700; }
+.editor .cm-lvs-hover { padding: 0.4rem 0.7rem; max-width: 36rem; }
+.editor .cm-lvs-hover code { display: block; margin-top: 0.3rem; padding: 0; background: none; color: var(--muted); white-space: pre-wrap; }
+.editor .cm-lvs-hover b { color: var(--hi); }
+.editor .cm-diagnostic { padding: 0.35rem 0.7rem; border-left-width: 4px; }
+.editor .cm-diagnostic-error { border-left-color: #ef476f; }
+.editor .cm-diagnostic-warning { border-left-color: #f5b83d; }
+.editor .cm-panels { background: var(--bg-2); color: var(--text); border-color: var(--line); }
+.editor .cm-panel.cm-search { font: 0.8rem var(--sans); padding: 0.4rem 0.6rem; }
+.editor .cm-panel.cm-search input, .editor .cm-panel.cm-search button {
+  font: 0.8rem var(--sans); color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 0.15rem 0.4rem;
 }
-.editor pre.gutter .on { color: var(--muted); }
-.editor pre.hl code { font: inherit; background: none; padding: 0; color: var(--text); }
-
-.editor textarea {
-  color: transparent;
-  caret-color: var(--hi);
-  resize: none;
-  outline: none;
-}
-
-.editor textarea::selection { background: rgba(63, 196, 110, 0.35); }
+.editor .cm-searchMatch { background: color-mix(in srgb, var(--hi) 30%, transparent); }
 .editor:focus-within { border-color: var(--ls-green); box-shadow: 0 0 0 2px rgba(63, 196, 110, 0.2); }
 
 .output { min-width: 0; }
@@ -594,6 +606,7 @@ footer {
   cursor: pointer;
 }
 .sandbox-bar select { background: var(--bg-2); }
+#sb-script { font-weight: 700; min-width: 10rem; max-width: 16rem; }
 .sandbox-bar button:hover:not(:disabled), .file-btn:hover, .ref-row button:hover { border-color: var(--ls-green); color: var(--hi); }
 .sandbox-bar button:disabled, .controls button:disabled { opacity: 0.45; cursor: default; }
 #sb-note { color: var(--err-text); }
@@ -639,12 +652,23 @@ footer {
 .lab-head img { width: 26px; height: 26px; border-radius: 6px; }
 .lab-head h1 {
   font-size: 1.15rem;
-  margin-right: auto;
   background: var(--grad-text);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
 }
+.lab-badge {
+  margin-right: auto;
+  font: 700 0.68rem var(--sans);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ls-deep);
+  background: var(--grad);
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  white-space: nowrap;
+}
+.lab-badge i { margin-right: 0.15rem; }
 .lab-head .sandbox-bar { margin: 0; }
 .lab-main {
   flex: 1;
@@ -735,3 +759,19 @@ nav .theme-toggle:hover { background: rgba(255, 255, 255, 0.45); }
 .lab-head .theme-toggle { color: var(--text); background: var(--panel); border: 1px solid var(--line); padding: 0.4rem 0.7rem; }
 .lab-head .theme-toggle:hover { border-color: var(--ls-green); color: var(--hi); }
 :root[data-theme="light"] .hero-visual .canvas-wrap { box-shadow: 0 12px 32px rgba(6, 53, 44, 0.18); }
+
+/* sandbox toolbar: "your script" and "open as new script", each a framed group with a label */
+.sb-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.35rem 0.25rem 0.6rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+.sb-label { font: 600 0.7rem var(--sans); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-right: 0.2rem; white-space: nowrap; }
+.sb-label i { color: var(--accent); margin-right: 0.15rem; }
+.sandbox-bar .sb-group button, .sandbox-bar .sb-group select, .sb-group .file-btn { background: var(--bg-2); }
+.sandbox-bar button.danger:hover:not(:disabled) { border-color: #ef476f; color: #ef476f; }

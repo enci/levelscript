@@ -234,9 +234,7 @@
     let last = null;
 
     host.classList.add('lvs-widget');
-    const editorHtml = '<div class="editor"><pre class="gutter" aria-hidden="true"></pre>' +
-      '<pre class="hl" aria-hidden="true"><code></code></pre>' +
-      '<textarea spellcheck="false" aria-label="LevelScript source"></textarea></div>';
+    const editorHtml = '<div class="editor"></div>';   // CodeMirror (js/cm-editor.js, built from web/)
     const diagHtml = '<div class="diag-list" hidden></div>';
     // diagUnderEditor: the diagnostics list goes below the editor instead of below the output
     host.innerHTML =
@@ -263,7 +261,25 @@
 
     const $ = s => host.querySelector(s);
     const canvas = $('canvas'), status = $('.status'), errBox = $('.error');
-    const ta = $('textarea'), hl = $('.hl code'), diagBox = $('.diag-list'), gutter = $('.gutter');
+    const diagBox = $('.diag-list');
+    if (opts.editor !== false && !window.LVS_CM) {
+      // a local checkout without the bundle: say how to build it instead of failing silently
+      $('.editor').innerHTML = '<pre class="error">The editor bundle is missing (docs/js/cm-editor.js).\n' +
+        'Build it with:  npm --prefix web ci && npm --prefix web run build</pre>';
+      opts.editor = false;
+    }
+    const ed = opts.editor === false ? null : window.LVS_CM.create({
+      parent: $('.editor'),
+      doc: typeof init.source === 'string' ? init.source : sample.source,
+      fileName,
+      onChange: () => {
+        sync(true);
+        if (opts.dynamicParams) buildParams(parseParams(ed.value()));
+        changed();
+        scheduleRun(SETTLE_MS);
+      },
+      onCursor: () => markActive(),
+    });
     const seedInput = $('.seed');
     seedInput.value = seed;
 
@@ -303,7 +319,7 @@
     }
     buildParams(sample.params || [], init.params);
 
-    function source() { return ta ? ta.value : sample.source; }
+    function source() { return ed ? ed.value() : sample.source; }
     function showError(msg) { errBox.hidden = !msg; errBox.textContent = msg || ''; }
     function stopPlay() { if (playTimer) { cancelAnimationFrame(playTimer); playTimer = null; } $('.play').innerHTML = '<i class="fas fa-film"></i> Play'; }
     function endSession() { if (sessionId >= 0 && mod) { mod.run_end(sessionId); } sessionId = -1; }
@@ -392,8 +408,8 @@
     let displayNames = {}, plays = {}, holds = {};
     function inspectNow() {
       insp = null;
-      if (!mod || !ta) return;
-      try { insp = JSON.parse(mod.inspect_json(ta.value, fileName, resolver(fileName))); } catch (e) { insp = null; }
+      if (!mod || !ed) return;
+      try { insp = JSON.parse(mod.inspect_json(ed.value(), fileName, resolver(fileName))); } catch (e) { insp = null; }
       displayNames = {};
       plays = {};
       holds = {};
@@ -454,46 +470,24 @@
       status.textContent = 'compile error';
       return true;
     }
-    function scrollSync() { hl.parentNode.scrollTop = gutter.scrollTop = ta.scrollTop; hl.parentNode.scrollLeft = ta.scrollLeft; }
-    // line numbers: rebuilt when the line count changes; --gw is the digit count, which sizes the gutter
-    let lineCount = 0, caretLine = -1;
-    function numberLines(src) {
-      let n = 1;
-      for (let i = src.indexOf('\n'); i >= 0; i = src.indexOf('\n', i + 1)) n++;
-      if (n === lineCount) return;
-      lineCount = n;
-      caretLine = -1;
-      ta.parentNode.style.setProperty('--gw', Math.max(2, String(n).length));
-      let html = '';
-      for (let i = 1; i <= n; i++) html += '<span>' + i + '</span>\n';
-      gutter.innerHTML = html;
-    }
-    function markLine() {
-      let line = 0;
-      for (let i = ta.value.indexOf('\n'); i >= 0 && i < ta.selectionStart; i = ta.value.indexOf('\n', i + 1)) line++;
-      if (line === caretLine) return;
-      if (gutter.children[caretLine]) gutter.children[caretLine].classList.remove('on');
-      caretLine = line;
-      if (gutter.children[line]) gutter.children[line].classList.add('on');
-    }
     function sync(typing) {
-      const src = ta.value;
+      const src = ed.value();
       inspectNow();
-      const lex = model.lexRuns(src, window.LVS_EDITOR);
       const bgs = insp ? model.cellRanges(src, insp, window.LVS_EDITOR, fileName) : [];
       diag = insp ? model.diagnosticRanges(src, insp, fileName) : null;
-      view = { src, lex, bgs };
+      view = { bgs };
       applyFileDirectives();
-      numberLines(src);
       paint(typing);
     }
     function paint(typing) {
       clearTimeout(settleTimer);
       shown = typing && diag && shown ? model.keepDiagnostics(diag, shown) : diag;
       if (typing && shown !== diag) settleTimer = setTimeout(paint, SETTLE_MS);
-      hl.innerHTML = model.renderHtml(view.src, view.lex, view.bgs, shown) + '\n';
+      // underlines and hover messages: the diagnostics in this file
+      const lint = (shown ? shown.rows : []).filter(r => r.at !== null && r.from !== null)
+        .map(r => ({ from: r.from, to: r.to, severity: r.severity === 'error' ? 'error' : 'warning', message: r.message }));
+      ed.paint(insp, view.bgs, lint);
       renderDiagList();
-      scrollSync();
     }
     function renderDiagList() {
       const rows = shown ? shown.rows : [];
@@ -503,25 +497,15 @@
         const el = document.createElement(r.at === null ? 'div' : 'button');
         el.className = 'diag-row ' + r.severity;
         el.textContent = (r.module ? r.module + ': ' : '') + r.line + ':' + r.col + '  ' + r.message;
-        if (r.at !== null) { el.type = 'button'; el.onclick = () => goTo(r.at); }
+        if (r.at !== null) { el.type = 'button'; el.onclick = () => { ed.goTo(r.at); markActive(); }; }
         diagBox.appendChild(el);
       });
       markActive();
     }
-    function goTo(at) {
-      ta.focus();
-      ta.setSelectionRange(at, at);
-      const line = ta.value.slice(0, at).split('\n').length - 1;
-      const lh = parseFloat(getComputedStyle(ta).lineHeight) || 20;
-      ta.scrollTop = Math.max(0, line * lh - ta.clientHeight / 3);
-      scrollSync();
-      markActive();
-    }
-    // there is no hover (the textarea covers the overlay), so the row under the caret is marked
+    // the list row of the diagnostic under the caret is marked
     function markActive() {
-      markLine();
-      if (!shown) return;
-      const p = ta.selectionStart;
+      if (!shown || !ed) return;
+      const p = ed.cursor();
       [...diagBox.children].forEach((el, i) => {
         const r = shown.rows[i];
         el.classList.toggle('active', r.from !== null && p >= r.from && p <= r.to);
@@ -643,45 +627,24 @@
       playTimer = requestAnimationFrame(frame);
     }
 
-    if (ta) {
-      ta.value = typeof init.source === 'string' ? init.source : sample.source;
-      ta.addEventListener('input', () => {
-        sync(true);
-        if (opts.dynamicParams) buildParams(parseParams(ta.value));
-        changed();
-        scheduleRun(SETTLE_MS);
-      });
-      ta.addEventListener('scroll', scrollSync);
-      ['keyup', 'click', 'select'].forEach(ev => ta.addEventListener(ev, markActive));
-      ta.addEventListener('keydown', e => {
-        if (e.key === 'Tab') {
-          e.preventDefault();
-          const s = ta.selectionStart;
-          ta.setRangeText('    ', s, ta.selectionEnd, 'end');
-          ta.dispatchEvent(new Event('input'));
-        }
-      });
-      sync();
-    }
+    if (ed) sync();
 
     const api = {
-      host, replay: () => $('.play').click(), restart: runAll,
+      host, replay: () => $('.play').click(), restart: runAll, source,
       // replace the whole program (sandbox): source, and optionally seed and param values
-      setSource(src, newSeed, savedParams) {
-        ta.value = src;
+      // fresh: another document (a different script), so undo cannot reach back into the old one
+      setSource(src, newSeed, savedParams, fresh) {
         fileDirs = null;
         if (Number.isInteger(newSeed)) { seed = newSeed; seedInput.value = seed; }
         buildParams(parseParams(src), savedParams);
-        ta.dispatchEvent(new Event('scroll'));
-        ta.dispatchEvent(new Event('input'));
+        if (!fresh) { ed.setValue(src); return; }   // one undoable edit; onChange inspects and reruns
+        ed.reset(src);
+        shown = null;
+        sync();
+        scheduleRun(0);
       },
       // put text at the caret, without replacing a selection
-      insert(text) {
-        const at = ta.selectionStart;
-        ta.setRangeText(text, at, at, 'end');
-        ta.focus();
-        ta.dispatchEvent(new Event('input'));
-      }
+      insert(text) { ed.insert(text); }
     };
     opts.onApi && opts.onApi(api);
     if (opts.dynamicParams) {
@@ -692,7 +655,7 @@
     return loadRuntime().then(m => {
       mod = m;
       host.querySelectorAll('.controls button').forEach(b => { b.disabled = false; });
-      if (ta) sync();
+      if (ed) sync();
       if (opts.autoplay) { $('.play').click(); } else { runAll(); }
       return api;
     }).catch(err => {
@@ -760,56 +723,215 @@
   // ---------- sandbox: one editor, a draft kept in localStorage, a searchable reference ----------
   const sandboxEl = document.getElementById('sandbox');
   if (sandboxEl) {
-    const KEY = 'lvs.sandbox.v1', PREV = KEY + '.prev';
+    // Your scripts, kept in localStorage under one key:
+    //   { current: id, scripts: [{ id, name, source, seed, params, base, updated }] }
+    // base: the sample a script was opened from (so an untouched copy is not opened twice).
+    // Every change re-reads the stored library and edits only its own entry, so a second tab
+    // does not wipe scripts made in the first. The single draft of earlier versions
+    // (lvs.sandbox.v1, .prev) becomes the first script(s) on the first visit.
+    const LIB = 'lvs.scripts.v1', OLD = 'lvs.sandbox.v1', OLD_PREV = OLD + '.prev';
     const DEFAULT_SAMPLE = 'dungeon';
+    const STARTER = [
+      'tag terrain { wall, floor }',
+      'layers { level: grid of terrain }',
+      '',
+      '// every empty cell becomes wall or floor',
+      'rule fill {',
+      '    level[.]',
+      '    =>',
+      '    { any',
+      '      (weight=45) level[wall]',
+      '      (weight=55) level[floor]',
+      '    }',
+      '}',
+      '',
+      'sequence main {',
+      '    resize(40, 25)',
+      '    everywhere fill',
+      '}',
+      ''].join('\n');
     const note = document.getElementById('sb-note');
-    const store = (() => { try { const st = window.localStorage; st.getItem(KEY); return st; } catch (e) { return null; } })();
-
-    function read(key) {
-      if (!store) return null;
-      try {
-        const d = JSON.parse(store.getItem(key));
-        return d && typeof d.source === 'string' ? d : null;
-      } catch (e) { return null; }
-    }
-    function write(key, d) {
-      if (!store) return false;
-      try { store.setItem(key, JSON.stringify(d)); return true; } catch (e) { return false; }
-    }
+    const store = (() => { try { const st = window.localStorage; st.getItem(LIB); return st; } catch (e) { return null; } })();
     function say(msg) { note.textContent = msg || ''; }
-    if (!store) say('Your draft will not be kept: this browser is blocking local storage.');
+    if (!store) say('Your scripts will not be kept: this browser is blocking local storage.');
 
-    let draft = read(KEY);       // what is stored (and what the editor holds, after a flush)
-    let dirty = null;            // an edit not yet written
-    let timer = null;
-    let widget = null;
+    function readJson(key) {
+      if (!store) return null;
+      try { return JSON.parse(store.getItem(key)); } catch (e) { return null; }
+    }
+    function isScript(d) { return d && typeof d.source === 'string' && typeof d.id === 'string' && typeof d.name === 'string'; }
+    let lib = { current: null, scripts: [] };   // in memory; the stored copy wins on every change
+    function load() {
+      const d = readJson(LIB);
+      return d && Array.isArray(d.scripts) ? { current: d.current, scripts: d.scripts.filter(isScript) } : null;
+    }
+    function save() {
+      if (!store) return;
+      try { store.setItem(LIB, JSON.stringify(lib)); }
+      catch (e) { say('Could not save (storage is full).'); }
+    }
+    // read-modify-write against what is stored now
+    function change(fn) {
+      lib = load() || lib;
+      fn(lib);
+      save();
+      fillPicker();
+    }
+    const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    function byId(id) { return lib.scripts.find(x => x.id === id) || null; }
+    function uniqueName(name) {
+      name = (name || '').trim() || 'untitled';
+      const taken = new Set(lib.scripts.map(x => x.name));
+      if (!taken.has(name)) return name;
+      let i = 2;
+      while (taken.has(name + ' ' + i)) i++;
+      return name + ' ' + i;
+    }
+    function make(name, d) {
+      return { id: newId(), name: uniqueName(name), source: d.source, seed: Number.isInteger(d.seed) ? d.seed : 1,
+        params: d.params || {}, base: d.base || null, updated: Date.now() };
+    }
+    function fromSample(s) { return { source: s.source, seed: s.seed, params: {}, base: s.name }; }
+    // untouched: still exactly the sample it came from
+    function untouched(x) {
+      const base = x.base && sampleByName(x.base);
+      return !!base && base.source === x.source;
+    }
 
+    lib = load();
+    if (!lib) {   // first visit with this version: bring the old draft (and its previous) along
+      lib = { current: null, scripts: [] };
+      [readJson(OLD_PREV), readJson(OLD)].forEach((d, i) => {
+        if (!d || typeof d.source !== 'string' || !d.source.trim()) return;
+        const name = i === 0 ? 'previous draft' : (d.base || 'my draft');
+        lib.scripts.push(make(name, d));
+      });
+      if (!lib.scripts.length) {
+        const s = sampleByName(DEFAULT_SAMPLE) || (window.LVS_SAMPLES || [])[0];
+        lib.scripts.push(s ? make(s.name, fromSample(s)) : make('untitled', { source: STARTER, seed: 1 }));
+      }
+      lib.current = lib.scripts[lib.scripts.length - 1].id;
+      save();
+    }
+    if (!byId(lib.current)) lib.current = lib.scripts[0].id;
+
+    // edits: debounced into the current script
+    let dirty = null, timer = null, widget = null;
     function flush() {
       clearTimeout(timer);
       if (!dirty) return;
-      const d = Object.assign({}, dirty, { savedAt: Date.now() });
+      const d = dirty;
       dirty = null;
-      draft = d;
-      if (store && !write(KEY, d)) say('Could not save the draft (storage is full).');
+      change(l => {
+        const x = l.scripts.find(y => y.id === d.id);
+        if (x) Object.assign(x, { source: d.source, seed: d.seed, params: d.params, updated: Date.now() });
+      });
     }
     function onChange(d) {
-      dirty = Object.assign({ base: draft && draft.base || null }, d);
+      dirty = Object.assign({ id: lib.current }, d);
       clearTimeout(timer);
       timer = setTimeout(flush, 400);
     }
     window.addEventListener('pagehide', flush);
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
 
-    function current() {
+    // switch the editor to a script (saving the one being left first)
+    function open(id) {
       flush();
-      return draft;
+      change(l => { l.current = id; });
+      const x = byId(id);
+      if (x && widget) widget.setSource(x.source, x.seed, x.params, true);
+      say('');
     }
-    // A draft is worth asking about unless it is empty or still exactly a bundled sample.
-    function modified(d) {
-      if (!d || !d.source.trim()) return false;
-      const base = d.base && sampleByName(d.base);
-      return !(base && base.source === d.source);
+    function add(name, d) {
+      flush();
+      const x = make(name, d);
+      change(l => { l.scripts.push(x); });
+      open(x.id);
     }
+
+    // the starting point: a #sample= link (as a new script, or its untouched copy), else the last script
+    const hashed = /^#sample=([\w.-]+)$/.exec(location.hash);
+    const linked = hashed && sampleByName(decodeURIComponent(hashed[1]));
+    if (hashed) history.replaceState(null, '', location.pathname + location.search);
+    if (linked) {
+      const copy = lib.scripts.find(x => x.base === linked.name && untouched(x));
+      if (copy) lib.current = copy.id;
+      else { const x = make(linked.name, fromSample(linked)); lib.scripts.push(x); lib.current = x.id; }
+      save();
+    }
+    const start = byId(lib.current);
+
+    createWidget(sandboxEl, {
+      name: 'sandbox', source: start.source, seed: start.seed, params: parseParams(start.source)
+    }, {
+      height: Number(sandboxEl.dataset.height) || 420, worker: true, dynamicParams: true, fileName: 'sandbox.lvs',
+      diagUnderEditor: 'diagUnderEditor' in sandboxEl.dataset,
+      initial: { source: start.source, seed: start.seed, params: start.params },
+      onChange, onApi: api => { widget = api; window.LVS_sandbox = api; }
+    });
+
+    // toolbar: the script picker, newest edit first
+    const picker = document.getElementById('sb-script');
+    function fillPicker() {
+      if (!picker) return;
+      picker.innerHTML = '';
+      lib.scripts.slice().sort((a, b) => b.updated - a.updated).forEach(x => {
+        const o = document.createElement('option');
+        o.value = x.id;
+        o.textContent = x.name;
+        picker.appendChild(o);
+      });
+      picker.value = lib.current;
+    }
+    fillPicker();
+    picker.addEventListener('change', () => open(picker.value));
+    // another tab changed the library: refresh the list (the open script stays as it is here)
+    window.addEventListener('storage', e => {
+      if (e.key !== LIB) return;
+      const cur = lib.current;
+      lib = load() || lib;
+      if (byId(cur)) lib.current = cur;
+      fillPicker();
+    });
+
+    document.getElementById('sb-new').addEventListener('click', () => {
+      const name = window.prompt('Name of the new script:', uniqueName('untitled'));
+      if (name === null) return;
+      add(name, { source: STARTER, seed: 1 });
+    });
+    document.getElementById('sb-rename').addEventListener('click', () => {
+      const x = byId(lib.current);
+      if (!x) return;
+      const name = window.prompt('Rename "' + x.name + '" to:', x.name);
+      if (name === null || !name.trim() || name.trim() === x.name) return;
+      flush();
+      const next = uniqueName(name);
+      change(l => { const y = l.scripts.find(z => z.id === x.id); if (y) y.name = next; });
+    });
+    document.getElementById('sb-delete').addEventListener('click', () => {
+      const x = byId(lib.current);
+      if (!x || !window.confirm('Delete "' + x.name + '"? This cannot be undone.')) return;
+      dirty = null;
+      clearTimeout(timer);
+      change(l => { l.scripts = l.scripts.filter(y => y.id !== x.id); });
+      if (!lib.scripts.length) { add('untitled', { source: STARTER, seed: 1 }); return; }
+      open(lib.scripts.slice().sort((a, b) => b.updated - a.updated)[0].id);
+    });
+
+    // a sample or a file always opens as a new script: nothing is overwritten
+    const pick = document.getElementById('sb-sample');
+    (window.LVS_SAMPLES || []).forEach(s => {
+      const o = document.createElement('option');
+      o.value = s.name;
+      o.textContent = s.name + '.lvs';
+      pick.appendChild(o);
+    });
+    pick.addEventListener('change', () => {
+      const s = sampleByName(pick.value);
+      pick.value = '';
+      if (s) add(s.name, fromSample(s));
+    });
     // The `// @seed=N` directive of a file (spec Appendix B): on its own line before the first
     // declaration. undefined: none.
     function fileSeed(text) {
@@ -822,93 +944,23 @@
       }
       return undefined;
     }
-    // Replace the whole program. The old draft is kept one level deep for "restore previous".
-    function replaceWith(next, label, confirmFirst) {
-      const cur = current();
-      if (confirmFirst && modified(cur) && !window.confirm('Replace your current draft with ' + label + '?')) return;
-      if (cur && cur.source.trim()) write(PREV, cur);
-      draft = { source: next.source, seed: next.seed, params: next.params || {}, base: next.base || null };
-      dirty = null;
-      write(KEY, Object.assign({ savedAt: Date.now() }, draft));
-      widget.setSource(next.source, next.seed, next.params);
-      updatePrev();
-    }
-    function fromSample(s) { return { source: s.source, seed: s.seed, params: {}, base: s.name }; }
-
-    const prevBtn = document.getElementById('sb-prev');
-    function updatePrev() { prevBtn.disabled = !read(PREV); }
-
-    // the starting point: a #sample= link, else the stored draft, else the default sample
-    const hashed = /^#sample=([\w.-]+)$/.exec(location.hash);
-    const linked = hashed && sampleByName(decodeURIComponent(hashed[1]));
-    if (hashed) history.replaceState(null, '', location.pathname + location.search);
-    let start = draft;
-    let asked = false;
-    if (linked) {
-      if (!modified(draft) || window.confirm('Replace your current draft with ' + linked.name + '.lvs?')) {
-        if (draft && modified(draft)) write(PREV, draft);
-        start = fromSample(linked);
-      }
-      asked = true;
-    }
-    if (!start || !start.source.trim()) start = fromSample(sampleByName(DEFAULT_SAMPLE) || (window.LVS_SAMPLES || [])[0]);
-    draft = { source: start.source, seed: start.seed, params: start.params || {}, base: start.base || null };
-    if (asked) write(KEY, Object.assign({ savedAt: Date.now() }, draft));
-
-    createWidget(sandboxEl, {
-      name: 'sandbox', source: start.source, seed: start.seed, params: parseParams(start.source)
-    }, {
-      height: Number(sandboxEl.dataset.height) || 420, worker: true, dynamicParams: true, fileName: 'sandbox.lvs',
-      diagUnderEditor: 'diagUnderEditor' in sandboxEl.dataset,
-      initial: { source: start.source, seed: start.seed, params: start.params },
-      onChange, onApi: api => { widget = api; window.LVS_sandbox = api; }
-    });
-
-    // toolbar
-    const pick = document.getElementById('sb-sample');
-    (window.LVS_SAMPLES || []).forEach(s => {
-      const o = document.createElement('option');
-      o.value = s.name;
-      o.textContent = s.name + '.lvs';
-      pick.appendChild(o);
-    });
-    pick.addEventListener('change', () => {
-      const s = sampleByName(pick.value);
-      pick.value = '';
-      if (s) replaceWith(fromSample(s), s.name + '.lvs', true);
-    });
-    document.getElementById('sb-reset').addEventListener('click', () => {
-      const s = sampleByName(DEFAULT_SAMPLE) || (window.LVS_SAMPLES || [])[0];
-      if (s) replaceWith(fromSample(s), s.name + '.lvs', false);
-    });
-    prevBtn.addEventListener('click', () => {
-      const prev = read(PREV);
-      if (!prev) return;
-      const cur = current();
-      if (cur && cur.source.trim()) write(PREV, cur); else if (store) store.removeItem(PREV);
-      draft = { source: prev.source, seed: prev.seed, params: prev.params || {}, base: prev.base || null };
-      dirty = null;
-      write(KEY, Object.assign({ savedAt: Date.now() }, draft));
-      widget.setSource(prev.source, prev.seed, prev.params);
-      updatePrev();
-    });
-    document.getElementById('sb-download').addEventListener('click', () => {
-      const src = (current() || draft).source;
-      const url = URL.createObjectURL(new Blob([src], { type: 'text/plain' }));
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'sandbox.lvs';
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    });
     document.getElementById('sb-open').addEventListener('change', e => {
       const f = e.target.files[0];
       e.target.value = '';
       if (!f) return;
-      f.text().then(text => replaceWith({ source: text, seed: fileSeed(text) ?? draft.seed, params: {}, base: null },
-        f.name, true));
+      f.text().then(text => add(f.name.replace(/\.lvs$/i, ''), { source: text, seed: fileSeed(text) ?? 1 }));
     });
-    updatePrev();
+    document.getElementById('sb-download').addEventListener('click', () => {
+      flush();
+      const x = byId(lib.current);
+      const src = widget ? widget.source() : (x && x.source) || '';
+      const url = URL.createObjectURL(new Blob([src], { type: 'text/plain' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = ((x && x.name) || 'sandbox').replace(/[\\/:*?"<>|]+/g, '_') + '.lvs';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    });
 
     // reference
     const refRoot = document.getElementById('reference');

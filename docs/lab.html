@@ -16,12 +16,21 @@
     <header class="lab-head">
       <img src="img/levelscript.png" alt="LevelScript logo">
       <h1>LevelScript</h1>
+      <span class="lab-badge" title="The LevelScript lab: write, run and keep scripts in your browser"><i class="fas fa-flask"></i> lab</span>
       <div class="sandbox-bar">
-        <select id="sb-sample" aria-label="Load a sample"><option value="">load a sample&hellip;</option></select>
-        <button type="button" id="sb-reset" title="Back to the default sample"><i class="fas fa-rotate-left"></i> Reset</button>
-        <button type="button" id="sb-prev" title="Bring back the draft that was replaced last" disabled><i class="fas fa-clock-rotate-left"></i> Restore previous</button>
-        <button type="button" id="sb-download"><i class="fas fa-download"></i> Download .lvs</button>
-        <label class="file-btn"><i class="fas fa-folder-open"></i> Open .lvs<input type="file" id="sb-open" accept=".lvs,text/plain" hidden></label>
+        <div class="sb-group" role="group" aria-label="Your script">
+          <span class="sb-label"><i class="fas fa-file-code"></i> script</span>
+          <select id="sb-script" aria-label="Your scripts" title="Your scripts, kept in this browser"></select>
+          <button type="button" id="sb-new" title="Start a new script"><i class="fas fa-plus"></i> New</button>
+          <button type="button" id="sb-rename" title="Rename this script"><i class="fas fa-pen"></i> Rename</button>
+          <button type="button" id="sb-download" title="Save this script as a .lvs file"><i class="fas fa-download"></i> Download</button>
+          <button type="button" id="sb-delete" class="danger" title="Delete this script"><i class="fas fa-trash"></i> Delete</button>
+        </div>
+        <div class="sb-group" role="group" aria-label="Open as a new script">
+          <span class="sb-label">open as new script</span>
+          <select id="sb-sample" aria-label="Open a sample as a new script"><option value="">sample&hellip;</option></select>
+          <label class="file-btn" title="Open a .lvs file from your computer as a new script"><i class="fas fa-folder-open"></i> File&hellip;<input type="file" id="sb-open" accept=".lvs,text/plain" hidden></label>
+        </div>
         <span id="sb-note" role="status"></span>
       </div>
     </header>
@@ -39,6 +48,7 @@
   <script src="js/samples-data.js"></script>
   <script src="js/api-search.js"></script>
   <script src="js/editor-model.js"></script>
+  <script src="js/cm-editor.js"></script>
   <script src="js/main.js"></script>
 </body>
 </html>

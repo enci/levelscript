@@ -1,6 +1,6 @@
 name: Website
 
-# Builds the WASM module and the sample data on every deploy, so neither is committed.
+# Builds the WASM module, the sample data and the editor bundle on every deploy, so none is committed.
 # One-time setup: repo Settings > Pages > Source: "GitHub Actions".
 
 on:
@@ -15,6 +15,8 @@ on:
       - "tests/golden/graphs/**"
       - "tools/build_site_data.py"
       - "tools/check_wasm_runs.js"
+      - "web/**"
+      - "extension/src/completion.ts"
       - "CMakeLists.txt"
       - ".github/workflows/pages.yml"
   release:
@@ -52,6 +54,11 @@ jobs:
       # The live demos must match the native goldens, or the site would lie.
       - name: Check WASM output against goldens
         run: node tools/check_wasm_runs.js
+
+      - name: Build editor bundle
+        run: |
+          npm --prefix web ci
+          npm --prefix web run build
 
       - name: Assemble site
         run: |

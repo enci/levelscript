@@ -13,7 +13,10 @@ Local preview of the whole site (CI does the same, see .github/workflows/pages.y
     emcmake cmake -B build/wasm -DCMAKE_BUILD_TYPE=Release && cmake --build build/wasm
     mkdir -p docs/wasm && cp extension/ls_wasm.js extension/ls_wasm.wasm docs/wasm/
     python tools/build_site_data.py
+    npm --prefix web ci && npm --prefix web run build     # the editor: docs/js/cm-editor.js
     python -m http.server -d docs
+
+While working on the editor, `npm --prefix web run watch` rebuilds the bundle on every save.
 """
 import json
 import re

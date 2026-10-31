@@ -18,3 +18,5 @@ build-release
 # Website build products (CI generates these; see tools/build_site_data.py)
 docs/wasm/
 docs/js/samples-data.js
+docs/js/cm-editor.js
+web/node_modules/
