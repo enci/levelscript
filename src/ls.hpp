@@ -244,7 +244,7 @@ public:
     std::string warnings() const { return warnings_; }
 
     /// Value mask, qualified by tagset: tag("geo.wall") -> that value's bit;
-    /// also resolves a named union to its composite mask. Masks are per
+    /// also resolves a named mask to its mask (which may include empty). Masks are per
     /// tagset, valid for every layer of that tagset. 0 if unknown (an
     /// unknown tag ORed into a composite mask degrades correctly, unlike -1
     /// would).

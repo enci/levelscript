@@ -22,10 +22,10 @@
 //     "tokens":      [{"line","col","len","tag","value"}],   // colorable
 //                    // pattern cells (1-based positions). tag >= 0: id into
 //                    // symbols.tags, value = palette slot (values first,
-//                    // then unions); tag -1 '*', -2 '.', -3 number literal
+//                    // then named masks); tag -1 '*', -2 '.', -3 number literal
 //                    // (value = the number)
 //     "symbols": {
-//       "tags":   [{"name","values":[{"name","loc"}],"unions":[{"name","loc"}]}],
+//       "tags":   [{"name","values":[{"name","loc"}],"masks":[{"name","loc"}]}],
 //       "layers": [{"name","type"}],       // type: tagset name or "number"
 //       "graphs": [{"name","source"}],     // source: the grid it is built from
 //       "params": [{"name","derived"}],

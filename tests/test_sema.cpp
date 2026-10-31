@@ -317,7 +317,7 @@ sequence main { grow(5) mark }
     CHECK(!has_warning(bounded, "may never terminate"));
 }
 
-// -- step 4: expression types, scopes, params, unions --
+// -- step 4: expression types, scopes, params, named masks --
 
 static const std::string rprog = "sequence main { }\n";
 
@@ -420,7 +420,7 @@ TEST_CASE("sema: when guard discipline") {
     CHECK(ok.ok);
 }
 
-TEST_CASE("sema: named unions") {
+TEST_CASE("sema: named masks") {
     // check 25
     compile_result ok(R"(
 tag geo { wall, door, floor, blocker = wall | door, solid = blocker | floor }
@@ -433,7 +433,7 @@ sequence main { }
     CHECK(ok.prog.mask_of(0, "blocker") == (ls::tag_bit(0) | ls::tag_bit(1)));
     CHECK(ok.prog.mask_of(0, "solid") ==
           (ls::tag_bit(0) | ls::tag_bit(1) | ls::tag_bit(2)));
-    // the rule's LHS cell carries the union mask
+    // the rule's LHS cell carries the named mask
     CHECK(ok.prog.rules[0].pairs[0].lhs[0].at(0, 0).val == (ls::tag_bit(0) | ls::tag_bit(1)));
 
     CHECK(compile_result("tag geo { wall, b = nope }\n" + rprog)
@@ -888,7 +888,7 @@ TEST_CASE("sema: operation arguments are expressions resolved by kind") {
 
 TEST_CASE("sema: a tag name outside a tag cell names the one tagset declaring it") {
     // check 6
-    // a union resolves like a value (a 'where' cell has no tagset of its own)
+    // a named mask resolves like a value (a 'where' cell has no tagset of its own)
     CHECK(compile_result("tag t { a, b, ab = a | b }\nlayers { g: grid of t }\n"
                          "rule r { g[*] where[(g == ab)] => g[b] }\nsequence main { }\n").ok);
     // two tagsets declaring the name make it ambiguous; inside a cell it is not

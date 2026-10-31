@@ -38,8 +38,8 @@ function cellLen(doc: vscode.TextDocument, t: DecorationSpan, next: DecorationSp
     return c === ' ' || c === '\t' ? t.len + 1 : t.len;
 }
 
-// Colors pattern cells (tag values, unions, number literals, `*`, `.`) and,
-// using the same palette, the value and union names in their `tag { ... }`
+// Colors pattern cells (tag values, named masks, number literals, `*`, `.`) and,
+// using the same palette, the value and named-mask names in their `tag { ... }`
 // declaration — the declaration doubles as the legend.
 export function applyDecorations(editor: vscode.TextEditor, tokens: DecorationSpan[], tags: InspectionResult['symbols']['tags']) {
     clearAll(editor);
@@ -74,9 +74,9 @@ export function applyDecorations(editor: vscode.TextEditor, tokens: DecorationSp
             const color = tagColor(valueIdx + tagIdx * 12, isDark);
             addRange(map, color, v.loc.line, v.loc.col, v.loc.len);
         });
-        tag.unions.forEach((u, unionIdx) => {
+        tag.masks.forEach((u, maskIdx) => {
             if (!here(u.loc) || !u.loc) return;
-            const color = tagColor(tag.values.length + unionIdx + tagIdx * 12, isDark);
+            const color = tagColor(tag.values.length + maskIdx + tagIdx * 12, isDark);
             addRange(map, color, u.loc.line, u.loc.col, u.loc.len);
         });
     });

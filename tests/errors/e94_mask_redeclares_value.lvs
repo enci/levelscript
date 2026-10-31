@@ -1,4 +1,4 @@
-// E-union-3: a union shares the tagset's value namespace.
+// E-mask-3: a named mask shares the tagset's value namespace.
 // @expect error
 // @expect stderr-contains redeclares
 tag geometry { wall, floor, wall = wall | floor }

@@ -33,7 +33,7 @@ TEST_CASE("inspect: healthy file emits ok, symbols, and no diagnostics") {
     CHECK(has(j, "\"diagnostics\":[]"));
     CHECK(has(j, "\"name\":\"geo\""));
     CHECK(has(j, "\"values\":[{\"name\":\"wall\",\"loc\":"));
-    CHECK(has(j, "\"unions\":[{\"name\":\"blocker\",\"loc\":{\"line\":2,\"col\":24,\"len\":7,"
+    CHECK(has(j, "\"masks\":[{\"name\":\"blocker\",\"loc\":{\"line\":2,\"col\":24,\"len\":7,"
                  "\"module\":\"test.lvs\"}}]"));
     CHECK(has(j, "{\"name\":\"level\",\"type\":\"geo\",\"loc\":"));
     CHECK(has(j, "{\"name\":\"tiles\",\"type\":\"number\",\"loc\":"));
@@ -105,7 +105,7 @@ TEST_CASE("inspect: message strings are JSON-escaped") {
     CHECK(has(j, "\\\""));   // escaped quote inside a message
 }
 
-TEST_CASE("inspect: unions, number literals, and wildcards are colorable") {
+TEST_CASE("inspect: named masks, number literals, and wildcards are colorable") {
     std::string j = ls::inspect_json(R"(tag t { F, W, D = F | W }
 layers {
     g: grid of t
@@ -115,7 +115,7 @@ rule r { g[* D] n[* 12] => { all g[F D]  n[. 3] } }
 sequence main { }
 )", "test.lvs");
     CHECK(has(j, "\"diagnostics\":[]"));
-    // union D takes the slot after its tag's values (F=0, W=1 -> D=2)
+    // named mask D takes the slot after its tag's values (F=0, W=1 -> D=2)
     CHECK(has(j, "{\"line\":6,\"col\":14,\"len\":1,\"tag\":0,\"value\":2}"));
     CHECK(has(j, "{\"line\":6,\"col\":38,\"len\":1,\"tag\":0,\"value\":2}"));
     // '*' in a tag grid and in a number grid
@@ -153,7 +153,7 @@ TEST_CASE("inspect: an outline of the declarations, and every node's range") {
                  ",\"select\":" + range(3, 1, 3, 7) + ",\"children\":[{\"kind\":\"grid\""));
     CHECK(has(j, "{\"kind\":\"params\",\"name\":\"params\",\"range\":" + range(7, 1, 10, 2)));
     CHECK(has(j, "{\"kind\":\"param\",\"name\":\"budget\",\"range\":" + range(9, 5, 9, 28)));
-    CHECK(has(j, "{\"kind\":\"union\",\"name\":\"blocker\""));
+    CHECK(has(j, "{\"kind\":\"mask\",\"name\":\"blocker\""));
     // node ranges: the sub-rule, a statement, and the multi-line blocks
     CHECK(has(j, range(11, 13, 11, 37)));    // level[.] => level[floor]
     CHECK(has(j, range(13, 5, 13, 17)));     // resize(4, 4)

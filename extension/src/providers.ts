@@ -37,7 +37,7 @@ export const definitionProvider: vscode.DefinitionProvider = {
             if (t && t.tag >= 0 && t.value >= 0) {
                 const tag = cached.symbols.tags[t.tag];
                 if (tag) {
-                    const sym = tag.values[t.value] ?? tag.unions[t.value - tag.values.length];
+                    const sym = tag.values[t.value] ?? tag.masks[t.value - tag.values.length];
                     if (sym && sym.loc) return spanToLocation(doc.uri, sym.loc);
                 }
             }
@@ -75,15 +75,15 @@ export const hoverProvider: vscode.HoverProvider = {
         if (t && t.tag >= 0 && t.value >= 0) {
             const tag = cached.symbols.tags[t.tag];
             if (tag) {
-                const isUnion = t.value >= tag.values.length;
-                const name = isUnion ? tag.unions[t.value - tag.values.length]?.name
+                const isMask = t.value >= tag.values.length;
+                const name = isMask ? tag.masks[t.value - tag.values.length]?.name
                                      : tag.values[t.value]?.name;
                 const md = new vscode.MarkdownString();
-                const display = isUnion ? undefined : cached.directives?.find(d =>
+                const display = isMask ? undefined : cached.directives?.find(d =>
                     d.key === 'name' && d.target.owner === tag.name && d.target.name === name)?.value;
-                md.appendMarkdown(`**${name}**${display ? ` (${display})` : ''} — *${isUnion ? 'union in ' : ''}${tag.name}*\n\n`);
+                md.appendMarkdown(`**${name}**${display ? ` (${display})` : ''} — *${isMask ? 'named mask in ' : ''}${tag.name}*\n\n`);
 
-                const valueList = [...tag.values, ...tag.unions]
+                const valueList = [...tag.values, ...tag.masks]
                     .map((v, i) => i === t.value ? `**${v.name}**` : v.name).join(', ');
                 md.appendMarkdown(`tag ${tag.name} { ${valueList} }`);
                 return new vscode.Hover(md);
@@ -151,7 +151,7 @@ export const completionProvider: vscode.CompletionItemProvider = {
         };
         const tagValues = (tag: InspectionResult['symbols']['tags'][number] | undefined) => {
             tag?.values.forEach(v => word(v.name, K.EnumMember, tag.name));
-            tag?.unions.forEach(u => word(u.name, K.Enum, `union in ${tag.name}`));
+            tag?.masks.forEach(u => word(u.name, K.Enum, `named mask in ${tag.name}`));
         };
         const allTagValues = () => sym?.tags.forEach(t => tagValues(t));
         const grids = () => sym?.layers.forEach(l => word(l.name, K.Class, `grid of ${l.type}`));
@@ -166,9 +166,12 @@ export const completionProvider: vscode.CompletionItemProvider = {
             snippet('rule', 'rule ${1:name} {\n\t$0\n}', K.Keyword);
             snippet('sequence', 'sequence ${1:name} {\n\t$0\n}', K.Keyword);
             break;
-        case 'unionMember':
-            sym?.tags.find(t => t.name === ctx.tag)?.values.forEach(v => word(v.name, K.EnumMember));
+        case 'maskMember': {   // a value or a named mask of the same tagset
+            const tag = sym?.tags.find(t => t.name === ctx.tag);
+            tag?.values.forEach(v => word(v.name, K.EnumMember));
+            tag?.masks.forEach(m => word(m.name, K.Enum, `named mask in ${tag.name}`));
             break;
+        }
         case 'gridOf':
             snippet('grid of', 'grid of ${1}', K.Keyword);
             snippet('graph of', 'graph of ${1}', K.Keyword, 'a read-only view of a grid');

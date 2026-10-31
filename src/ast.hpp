@@ -27,7 +27,7 @@ struct ident {
 enum class expr_kind {
     int_lit,       // integer literal
     empty_lit,     // '.' — polymorphic empty value (typed from context)
-    ident,         // grid read / param / x,y,width,height / tag value or union
+    ident,         // grid read / param / x,y,width,height / tag value or named mask
     variable,      // '?name' pattern variable; ident holds '?name'
     call,          // built-in function call
     neg, not_,
@@ -59,7 +59,7 @@ struct expr {
 // A named mask: `blocker = wall | door`, `open = !(blocker | .)` — a mask
 // alias over the tagset's own members (values or earlier named masks),
 // with '|', '!', '.' and parentheses. Consumes no bit.
-struct tag_union {
+struct named_mask_decl {
     ident    name;
     expr_ptr value;   // ident, empty_lit, not_, bit_or, paren
 };
@@ -68,7 +68,7 @@ struct tag_decl {
     source_loc             loc;
     ident                  name;
     std::vector<ident>     values;
-    std::vector<tag_union> unions;
+    std::vector<named_mask_decl> masks;
 };
 
 // A graph entry's argument: `nodes=M` or `edges=E`.

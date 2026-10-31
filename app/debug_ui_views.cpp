@@ -137,10 +137,10 @@ std::string cell_glyph(compiled const& meta, int tag_id, int v) {
         return std::to_string(v);
     auto const& vals = meta.tag_values[tag_id];
     if (v < (int)vals.size()) return vals[v].substr(0, 1);
-    // union slots follow the values (see mask_to_slot)
+    // named-mask slots follow the values (see mask_to_slot)
     int ui = v - (int)vals.size();
-    if (tag_id < (int)meta.tag_unions.size() && ui < (int)meta.tag_unions[tag_id].size())
-        return meta.tag_unions[tag_id][ui].name.substr(0, 1);
+    if (tag_id < (int)meta.named_masks.size() && ui < (int)meta.named_masks[tag_id].size())
+        return meta.named_masks[tag_id][ui].name.substr(0, 1);
     return "?";
 }
 
@@ -157,13 +157,13 @@ static int mask_to_vid(int mask) {
 }
 
 // The display slot for a tag-layer mask - what tag_color(), cell_glyph() and
-// the tag-color overrides key by. A mask that is exactly a named union takes
-// that union's slot, numbered after the tagset's values (the same numbering
+// the tag-color overrides key by. A mask that is exactly a named mask takes
+// that named mask's slot, numbered after the tagset's values (the same numbering
 // the VS Code extension's decorations use); anything else falls back to its
 // lowest value bit.
 static int mask_to_slot(compiled const& meta, int tag_id, int mask) {
-    if (mask > 0 && tag_id >= 0 && tag_id < (int)meta.tag_unions.size()) {
-        auto const& us = meta.tag_unions[tag_id];
+    if (mask > 0 && tag_id >= 0 && tag_id < (int)meta.named_masks.size()) {
+        auto const& us = meta.named_masks[tag_id];
         for (int i = 0; i < (int)us.size(); ++i)
             if (us[i].mask == mask)
                 return (int)meta.tag_values[tag_id].size() + i;
@@ -172,7 +172,7 @@ static int mask_to_slot(compiled const& meta, int tag_id, int mask) {
 }
 
 // Tooltip label for a tag-layer mask: the value's display name (@name, else
-// its name), the union name when the mask is exactly a named union, else the
+// its name), the named mask's name when the mask is exactly one, else the
 // member names joined by '|'.
 static std::string mask_label(script const& sc, int tag_id, int mask) {
     compiled const& meta = sc.meta;
@@ -180,7 +180,7 @@ static std::string mask_label(script const& sc, int tag_id, int mask) {
     int slot = mask_to_slot(meta, tag_id, mask);
     auto const& vals = meta.tag_values[tag_id];
     if (slot >= (int)vals.size())
-        return meta.tag_unions[tag_id][slot - (int)vals.size()].name;
+        return meta.named_masks[tag_id][slot - (int)vals.size()].name;
     std::string out;
     for (int vi = 0; vi < (int)vals.size() && vi < 30; ++vi)
         if (mask & (1 << (vi + 1))) {
@@ -343,7 +343,7 @@ static cell_view pattern_cell_view(compiled const& meta, compiled_pattern const&
         return { tag_color(-1, (int)cc.val, nullptr), std::to_string(cc.val) };
     }
     // Tag mask: empty-only reads as '.'; a single value or an exact named
-    // union shows its glyph; all values but one reads as its complement
+    // mask shows its glyph; all values but one reads as its complement
     // ('!W'); any other multi-value mask reads as '|'. A trailing '.' marks
     // a mask that also matches empty ('F.', '!W.').
     int  mask       = (int)cc.val;
@@ -1197,10 +1197,10 @@ void draw_tags_window(script const& sc, project_config& cfg) {
 
                 ImGui::PopID();
             }
-            // Named unions follow the values, in the palette slots after them
+            // Named masks follow the values, in the palette slots after them
             // (mask_to_slot) - `D = F | W` gets its own editable swatch.
-            if (ti < (int)meta.tag_unions.size()) {
-                auto const& us = meta.tag_unions[(size_t)ti];
+            if (ti < (int)meta.named_masks.size()) {
+                auto const& us = meta.named_masks[(size_t)ti];
                 for (int ui = 0; ui < (int)us.size(); ++ui) {
                     int slot = (int)vals.size() + ui;
                     ImGui::PushID(slot);
@@ -1257,7 +1257,7 @@ void layer_thumbs::reset(project_config& cfg) {
 }
 
 // Repaint every layer's texture from the snapshot: tag layers in the shared
-// tag palette (unions included, mask_to_slot), number layers as a heatmap
+// tag palette (named masks included, mask_to_slot), number layers as a heatmap
 // over the layer's own value range, empty cells in a neutral tone.
 static void rebuild_thumbs(script const& sc, debug_run const& run,
                            project_config const& cfg, SDL_Renderer* renderer,

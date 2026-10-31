@@ -167,8 +167,8 @@ struct printer {
         for (auto const& t : ast.tags) {
             open("tag " + t.name.text, &t.loc);
             for (auto const& v : t.values) line("(value " + v.text + ")");
-            for (auto const& u : t.unions)
-                line("(union " + u.name.text + " " + expr_source(*u.value) + ")");
+            for (auto const& u : t.masks)
+                line("(mask " + u.name.text + " " + expr_source(*u.value) + ")");
             close();
         }
         if (ast.has_layers) {

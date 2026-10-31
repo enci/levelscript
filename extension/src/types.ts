@@ -6,7 +6,7 @@ export interface Location {
 }
 
 // tag >= 0: index into symbols.tags, value = palette slot (the tag's values
-// first, then its unions); tag -1 '*', -2 '.', -3 a number-grid literal
+// first, then its named masks); tag -1 '*', -2 '.', -3 a number-grid literal
 // (value = the number).
 export interface DecorationSpan extends Location {
     tag: number;
@@ -38,7 +38,7 @@ export interface SourceRange {
 
 // One outline entry: a declaration's whole range, and its name's.
 export interface OutlineSymbol {
-    kind: 'tag' | 'value' | 'union' | 'layers' | 'grid' | 'graph' | 'params' | 'param' | 'rule' | 'sequence';
+    kind: 'tag' | 'value' | 'mask' | 'layers' | 'grid' | 'graph' | 'params' | 'param' | 'rule' | 'sequence';
     name: string;
     range: SourceRange;
     select: SourceRange;
@@ -70,7 +70,7 @@ export interface InspectionResult {
     spans?: SourceRange[];   // every node of the file's rules and sequences, but lone tokens
     symbols: {
         modules?: string[];
-        tags: { name: string, values: { name: string, loc?: Location }[], unions: { name: string, loc?: Location }[] }[];
+        tags: { name: string, values: { name: string, loc?: Location }[], masks: { name: string, loc?: Location }[] }[];
         layers: { name: string, type: string, loc?: Location }[];
         graphs?: { name: string, source: string, loc?: Location }[];
         params: { name: string, derived: boolean }[];

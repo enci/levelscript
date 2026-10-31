@@ -11,7 +11,7 @@
 export type CompletionContext =
     | { kind: 'none' }
     | { kind: 'top' }                                   // use / tag / layers / params / rule / sequence
-    | { kind: 'unionMember'; tag: string }              // tag t { ..., D = F | _ }
+    | { kind: 'maskMember'; tag: string }               // tag t { ..., D = !(F | _ }
     | { kind: 'gridOf' }                                // layers { g: _ }
     | { kind: 'of' }                                    // layers { g: grid _ } / { m: graph _ }
     | { kind: 'gridType' }                              // layers { g: grid of _ }
@@ -199,6 +199,7 @@ function openFrame(c: '{' | '[' | '(', stack: Frame[]): Frame {
     }
     // '('
     if (parent.owner === 'top' && currentDecl(toks)[0]?.t === 'rule') return frame('attrs');
+    if (parent.owner.startsWith('tag:')) return frame(parent.owner);   // a named mask's group
     if (parent.owner === 'statements') {
         if (prev && COUNTED.has(prev)) return frame('count:' + prev, 'restricted');   // params only
         if (last && endsMode(last)) return frame('attrs');   // an inline rule's attributes
@@ -315,7 +316,9 @@ function classify(stack: Frame[]): CompletionContext {
         return none;   // where cells are '(' expressions
     }
     if (f.owner.startsWith('tag:'))
-        return prev === '=' || prev === '|' ? { kind: 'unionMember', tag: f.owner.slice(4) } : none;
+        // in a named mask: after '=', '|', '!', or a group's '('
+        return prev === '=' || prev === '|' || prev === '!' || (f.open === '(' && prev === undefined)
+            ? { kind: 'maskMember', tag: f.owner.slice(4) } : none;
     if (f.owner.startsWith('grid:')) {
         // a cell may start anywhere except right after an atom-joining '|' / '!' ... which also want a value
         return { kind: 'cell', grid: f.owner.slice(5) };

@@ -48,15 +48,15 @@ struct comma_list {
     }
 };
 
-// Palette slot of a named union: the "next colors" after its tag's values,
-// so a union reads as its own swatch rather than a blend of its members.
-int union_slot(compiled const& prog, int tid, std::string const& name) {
-    int u = prog.union_id(tid, name);
+// Palette slot of a named mask: the "next colors" after its tag's values,
+// so a named mask reads as its own swatch rather than a blend of its members.
+int mask_slot(compiled const& prog, int tid, std::string const& name) {
+    int u = prog.named_mask_id(tid, name);
     return u < 0 ? -1 : (int)prog.tag_values[(size_t)tid].size() + u;
 }
 
 // One colorable occurrence in a pattern cell — what the colored-pattern
-// decorations paint. tag >= 0: a tag value or union (value = palette slot);
+// decorations paint. tag >= 0: a tag value or named mask (value = palette slot);
 // -1: '*'; -2: '.'; -3: a number-grid literal (value = the number).
 // `tid` is the cell's tagset (-1: a number grid). Paints a bare cell; '!'
 // and '|' are painted through to their atoms, and a parenthesized cell is
@@ -80,7 +80,7 @@ void emit_cell_tokens(std::string& o, comma_list& cl, compiled const& prog, int 
         case expr_kind::ident: {
             if (tid < 0) return;
             int vid = prog.value_id(tid, e.ident);
-            if (vid < 0) vid = union_slot(prog, tid, e.ident);
+            if (vid < 0) vid = mask_slot(prog, tid, e.ident);
             if (vid >= 0) token(tid, vid);   // unknown names stay unpainted
             return;
         }
@@ -343,8 +343,8 @@ std::string inspect_json(std::string const& source, std::string const& name,
             o += ",\"children\":[";
             comma_list vl{o};
             for (auto const& v : t.values) { emit_symbol(o, vl, "value", v.text, v.loc, v.loc); o += "}"; }
-            for (auto const& u : t.unions) {
-                emit_symbol(o, vl, "union", u.name.text, u.name.loc, u.name.loc);
+            for (auto const& u : t.masks) {
+                emit_symbol(o, vl, "mask", u.name.text, u.name.loc, u.name.loc);
                 o += "}";
             }
             o += "]}";
@@ -431,15 +431,15 @@ std::string inspect_json(std::string const& source, std::string const& name,
                     emit_loc(o, mods, td->values[(size_t)i]);
                 o += "}";
             }
-            o += "],\"unions\":[";
+            o += "],\"masks\":[";
             comma_list ul{o};
-            if (ti < (int)prog.tag_unions.size())
-                for (auto const& u : prog.tag_unions[ti]) {
+            if (ti < (int)prog.named_masks.size())
+                for (auto const& u : prog.named_masks[ti]) {
                     std::string const& uname = u.name;
                     ul.next();
                     o += "{\"name\":";
                     js(o, uname);
-                    if (auto au = td ? lookup(td->unions, uname) : nullptr)
+                    if (auto au = td ? lookup(td->masks, uname) : nullptr)
                         emit_loc(o, mods, au->name);
                     o += "}";
                 }

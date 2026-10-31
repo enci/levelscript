@@ -1,4 +1,4 @@
-// Declarations: uses head the file; tagsets with values and named unions;
+// Declarations: uses head the file; tagsets with values and named masks;
 // one layers block of grids and graphs; input and derived params.
 use "schema.lvs"
 use "lib/rules.lvs"

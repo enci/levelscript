@@ -1,4 +1,4 @@
-// E-union-1: a union member must be a value/union of the same tagset.
+// E-mask-1: a named mask's member must be a value or named mask of the same tagset.
 // @expect error
 // @expect stderr-contains not a value or earlier named mask
 tag geometry { wall, floor, blocker = wall | nope }

@@ -764,7 +764,7 @@ sequence main {
     CHECK(count_val(lv, "flags", gen.tag("geo.mark")) == 2);
 }
 
-TEST_CASE("api: union masks match either value") {
+TEST_CASE("api: named masks match either value") {
     auto gen = make(R"(
 tag geo { wall, door, floor, blocker = wall | door }
 layers { level: grid of geo }

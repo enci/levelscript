@@ -53,9 +53,9 @@ rgba number_color(int v) {
              (uint8_t)(b * 255.f + 0.5f), 255 };
 }
 
-// A tag cell's lowest value bit as its 0-based value id. Named unions take
+// A tag cell's lowest value bit as its 0-based value id. Named masks take
 // their own palette slot in the debugger; the public API can't see them, so a
-// union cell takes its first member's color here.
+// multi-value cell takes its first member's color here.
 int mask_to_vid(int mask) {
     for (int b = 1; b <= 30; ++b)
         if (mask & (1 << b)) return b - 1;

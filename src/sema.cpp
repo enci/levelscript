@@ -302,7 +302,7 @@ struct analyzer {
         return is_node_type(type) ? -2 - type : -1;
     }
 
-    // The tagsets this module sees that declare `name` as a value or union.
+    // The tagsets this module sees that declare `name` as a value or named mask.
     std::vector<int> tagsets_declaring(std::string const& name, int mod) const {
         std::vector<int> found;
         for (int ti = 0; ti < (int)out.tag_names.size(); ++ti)
@@ -570,7 +570,7 @@ struct analyzer {
             return poison(e.loc, "graph '" + name + "' cannot be read in an expression; "
                           "a graph heads a match-side pattern that binds its nodes, e.g. " + name + "[?n]", t);
         }
-        // a tag value or union of the one tagset this module sees that declares it
+        // a tag value or named mask of the one tagset this module sees that declares it
         auto tagsets = tagsets_declaring(name, e.loc.mod);
         if (tagsets.size() == 1) {
             t = val_type::mask;
@@ -839,7 +839,7 @@ struct analyzer {
             std::string const& tname = t.name.text;
             if (out.tag_id(tname) >= 0)
                 error(t.name.loc, "duplicate tag '" + tname + "'");
-            if (t.values.empty() && t.unions.empty())
+            if (t.values.empty() && t.masks.empty())
                 error(t.name.loc, "tagset '" + tname + "' has no values");
             if ((int)t.values.size() > 30)   // bits 1..30; 0 = empty, 31 reserved
                 error(t.name.loc, "tagset '" + tname + "' has " +
@@ -859,8 +859,8 @@ struct analyzer {
             // or an earlier named mask of this tagset; a named mask shares
             // the value namespace and consumes no bit.
             int tid = (int)out.tag_names.size() - 1;
-            out.tag_unions.push_back({});
-            for (auto const& u : t.unions) {
+            out.named_masks.push_back({});
+            for (auto const& u : t.masks) {
                 auto const& [name, loc] = u.name;
                 check_name(loc, "named mask", name);
                 if (out.value_id(tid, name) >= 0 || out.mask_of(tid, name) != 0)
@@ -872,7 +872,7 @@ struct analyzer {
                 if (ok && nm.mask == 0)   // check 59
                     error(loc, "named mask '" + name + "' selects nothing: no cell can "
                           "match it");
-                out.tag_unions[tid].push_back(std::move(nm));
+                out.named_masks[tid].push_back(std::move(nm));
             }
         }
 

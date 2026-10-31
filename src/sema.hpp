@@ -302,7 +302,7 @@ struct compiled {
         // a legal write-side mask: no '!', and '.' only on its own (section 3)
         bool writable() const { return !complement && (mask == 1 || (mask & 1) == 0); }
     };
-    std::vector<std::vector<named_mask>> tag_unions;
+    std::vector<std::vector<named_mask>> named_masks;
     std::vector<compiled_layer>           layers;
     std::vector<compiled_graph>           graphs;   // not in the layer order
     std::vector<compiled_selector>        selectors;
@@ -329,8 +329,8 @@ struct compiled {
     }
     // A tagset's named mask, or null.
     named_mask const* named(int tag, std::string_view name) const {
-        int u = union_id(tag, name);
-        return u >= 0 ? &tag_unions[(size_t)tag][(size_t)u] : nullptr;
+        int u = named_mask_id(tag, name);
+        return u >= 0 ? &named_masks[(size_t)tag][(size_t)u] : nullptr;
     }
 
     int layer_id(std::string_view name) const { return index_of(layers, name, &compiled_layer::name); }
@@ -340,9 +340,9 @@ struct compiled {
         if (tag < 0 || tag >= (int)tag_values.size()) return -1;
         return index_of(tag_values[(size_t)tag], name);
     }
-    int union_id(int tag, std::string_view name) const {
-        if (tag < 0 || tag >= (int)tag_unions.size()) return -1;
-        return index_of(tag_unions[(size_t)tag], name, &named_mask::name);
+    int named_mask_id(int tag, std::string_view name) const {
+        if (tag < 0 || tag >= (int)named_masks.size()) return -1;
+        return index_of(named_masks[(size_t)tag], name, &named_mask::name);
     }
 };
 

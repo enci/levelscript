@@ -32,7 +32,10 @@ const cases = [
     ['rule r { g[F] // note ▮', { kind: 'none' }],
 
     // tag / layers / params blocks
-    ['tag t { F, W }\ntag u { A, B = A | ▮', { kind: 'unionMember', tag: 'u' }],
+    ['tag t { F, W }\ntag u { A, B = A | ▮', { kind: 'maskMember', tag: 'u' }],
+    ['tag u { A, B = !▮', { kind: 'maskMember', tag: 'u' }],
+    ['tag u { A, B = !(A | ▮', { kind: 'maskMember', tag: 'u' }],
+    ['tag u { A, B = !(▮', { kind: 'maskMember', tag: 'u' }],
     ['tag t { F, ▮', { kind: 'none' }],                  // declaring a value
     ['layers { g: ▮', { kind: 'gridOf' }],
     ['layers { g: grid ▮', { kind: 'of' }],

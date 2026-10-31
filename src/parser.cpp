@@ -236,12 +236,12 @@ struct parser {
             if (!expect(token_type::ident, "a tag value name")) { eat_bad(); list_sep(); continue; }
             ident name = prev_ident();
             if (at(token_type::equals)) {   // named mask: blocker = wall | door
-                tag_union u;
+                named_mask_decl u;
                 u.name = std::move(name);
                 eat();   // '='
                 u.value = parse_named_mask();
                 if (!u.value) { recover_tag_item(); continue; }
-                d.unions.push_back(std::move(u));
+                d.masks.push_back(std::move(u));
             } else {
                 d.values.push_back(std::move(name));
             }

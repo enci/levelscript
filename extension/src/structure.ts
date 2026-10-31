@@ -12,7 +12,7 @@ function toRange(r: SourceRange): vscode.Range {
 const KINDS: Record<OutlineSymbol['kind'], vscode.SymbolKind> = {
     tag: vscode.SymbolKind.Enum,
     value: vscode.SymbolKind.EnumMember,
-    union: vscode.SymbolKind.EnumMember,
+    mask: vscode.SymbolKind.EnumMember,
     layers: vscode.SymbolKind.Struct,
     grid: vscode.SymbolKind.Field,
     graph: vscode.SymbolKind.Interface,
