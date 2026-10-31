@@ -1,6 +1,6 @@
 # Sandbox page and API reference
 
-Spec for a standalone sandbox page (`docs/sandbox.html`) with a searchable language reference below the editor. It builds on `web-editor-spec.md`, which upgrades the editor widget itself; this spec covers the page around it. It is written against `main` as of 2026-10-18.
+Spec for a standalone sandbox page (`docs/sandbox.html`) with a searchable language reference below the editor. It covers the page around the editor widget. It is written against `main` as of 2026-10-18.
 
 ## Motivation
 
@@ -25,7 +25,7 @@ The editor exists only as widgets embedded in the home page and the samples page
 Key `lvs.sandbox.v1`, holding JSON: `{ source, seed, params, savedAt }`. `params` is the map of param name to value for the current source; values for names the source no longer declares are dropped on load.
 
 - Every read and write is wrapped in `try/catch`. Storage can throw in private windows, with blocked site data, or on quota errors. If it is unavailable the page works as normal and shows a one-line note that the draft will not be kept.
-- Writes are debounced at 400 ms after the last `input`, and flushed on `pagehide` and `visibilitychange` to hidden. They never run inside the per-keystroke inspection path of `web-editor-spec.md` D2.
+- Writes are debounced at 400 ms after the last `input`, and flushed on `pagehide` and `visibilitychange` to hidden. They never run inside the per-keystroke inspection path.
 - A stored value that fails to parse or has the wrong shape is ignored, not an error.
 - `v1` is in the key so the shape can change later without migrating by hand.
 
@@ -43,7 +43,7 @@ A "reset" action loads the default sample, without a prompt, since it can be und
 "Download .lvs" saves the source as `sandbox.lvs`. "Open .lvs" loads a local file into the editor through a file input. Nothing is uploaded anywhere. Importing goes through the same replace prompt as D2.
 
 **D5. Modules.**
-The sandbox edits a single file, named `sandbox.lvs`. `use "path"` resolves through the existing `resolver()` against the bundled `LVS_FILES`, so the two bundled modules work. Any other path fails like any unresolved import and the compiler's message is shown in the diagnostics list (`web-editor-spec.md` C3). No special handling and no extra explanation text.
+The sandbox edits a single file, named `sandbox.lvs`. `use "path"` resolves through the existing `resolver()` against the bundled `LVS_FILES`, so the two bundled modules work. Any other path fails like any unresolved import and the compiler's message is shown in the diagnostics list. No special handling and no extra explanation text.
 
 **D6. The reference is generated from the spec.**
 `tools/build_site_data.py` reads `docs/spec.md` and emits `window.LVS_API` into `samples-data.js`. The spec stays the only place the content lives.

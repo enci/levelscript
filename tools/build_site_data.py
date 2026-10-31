@@ -148,7 +148,7 @@ def editor_data() -> dict:
     """Vocabulary and palette for the site's editor, single-sourced from the extension.
 
     Keywords and builtins come from the TextMate grammar; the palette from palette.ts.
-    Only the dark set is read, because the site is dark-only. Fails if a pattern is missing.
+    Both the dark and the light set are read (the site has both themes). Fails if a pattern is missing.
     """
     grammar = json.loads((ROOT / "extension" / "syntaxes" / "levelscript.tmLanguage.json").read_text(encoding="utf-8"))
 
@@ -160,19 +160,24 @@ def editor_data() -> dict:
         return words
 
     ts = (ROOT / "extension" / "src" / "palette.ts").read_text(encoding="utf-8")
-    m = re.search(r"PALETTE_DARK\s*=\s*\[(.*?)\]", ts, re.S)
-    palette = re.findall(r"'(#[0-9a-fA-F]{6})'", m.group(1)) if m else []
-    if len(palette) != 12:
-        raise SystemExit(f"palette.ts: expected 12 colors in PALETTE_DARK, found {len(palette)}")
 
-    def dark_of(fn: str) -> str:
-        m = re.search(rf"function {fn}\(dark: boolean\)[^{{]*\{{\s*return dark \? '(#[0-9a-fA-F]{{6}})'", ts)
+    def palette_of(name: str) -> list:
+        m = re.search(rf"{name}\s*=\s*\[(.*?)\]", ts, re.S)
+        colors = re.findall(r"'(#[0-9a-fA-F]{6})'", m.group(1)) if m else []
+        if len(colors) != 12:
+            raise SystemExit(f"palette.ts: expected 12 colors in {name}, found {len(colors)}")
+        return colors
+
+    def both_of(fn: str) -> tuple:
+        m = re.search(rf"function {fn}\(dark: boolean\)[^{{]*\{{\s*return dark \? '(#[0-9a-fA-F]{{6}})'\s*:\s*'(#[0-9a-fA-F]{{6}})'", ts)
         if not m:
-            raise SystemExit(f"palette.ts: dark value of {fn} not found")
-        return m.group(1)
+            raise SystemExit(f"palette.ts: dark/light values of {fn} not found")
+        return m.group(1), m.group(2)
 
+    empty, any_ = both_of("emptyColor"), both_of("anyColor")
     return {"keywords": alternation("keyword"), "builtins": alternation("builtin"),
-            "palette": palette, "empty": dark_of("emptyColor"), "any": dark_of("anyColor")}
+            "palette": palette_of("PALETTE_DARK"), "empty": empty[0], "any": any_[0],
+            "light": {"palette": palette_of("PALETTE_LIGHT"), "empty": empty[1], "any": any_[1]}}
 
 
 def main() -> None:

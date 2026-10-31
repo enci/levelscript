@@ -23,6 +23,13 @@
   // the lexer and renderers live in editor-model.js.
   const model = window.LVS_model;
 
+  // pattern-cell colors for both themes, as CSS variables (see cellVarsCss)
+  if (window.LVS_EDITOR) {
+    const st = document.createElement('style');
+    st.textContent = model.cellVarsCss(window.LVS_EDITOR);
+    document.head.appendChild(st);
+  }
+
   function esc(s) {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
@@ -75,6 +82,13 @@
     goblin: '#6ab04c', troll: '#8e6e53', dragon: '#e55039'
   };
 
+  // Light theme: the dark terrain (walls, rock, empty cells) is lifted so the map does not sit
+  // as a dark slab on a light page. Everything else keeps its colour.
+  const NAMED_LIGHT = { wall: '#8aa298', rock: '#97a39e' };
+  const EMPTY = { dark: '#15231f', light: '#dfe7e2' };
+  const lightTheme = () => document.documentElement.dataset.theme === 'light';
+  const named = n => (lightTheme() && NAMED_LIGHT[n]) || NAMED[n];
+
   function hashColor(s) {
     let h = 0;
     for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
@@ -88,7 +102,7 @@
       return 'rgb(' + v + ',' + v + ',' + v + ')';
     }
     const name = cell[0];
-    return NAMED[name] || hashColor(name);
+    return named(name) || hashColor(name);
   }
 
   function isEmpty(layer, cell) {
@@ -114,7 +128,7 @@
         for (let x = 0; x < w; x++) {
           const cell = layer.cells[y * w + x];
           if (isEmpty(layer, cell)) {
-            if (first) { g.fillStyle = '#15231f'; g.fillRect(ox + x * cs, oy + y * cs, cs, cs); }
+            if (first) { g.fillStyle = lightTheme() ? EMPTY.light : EMPTY.dark; g.fillRect(ox + x * cs, oy + y * cs, cs, cs); }
             continue;
           }
           g.fillStyle = cellColor(layer, cell);
@@ -156,6 +170,41 @@
     return vis.size ? vis : new Set(lvl.layers.map(l => l.name));
   }
 
+  // Which layers are shown, remembered per program file in localStorage:
+  // { [fileName]: { shown: [...], hidden: [...] } }. Names only, so a program that gains or
+  // renames a layer keeps the choice for the layers it still has.
+  const LAYERS_STORE = 'lvs.layers.v1';
+  function layerPrefs() {
+    try { return JSON.parse(localStorage.getItem(LAYERS_STORE)) || {}; } catch (e) { return {}; }
+  }
+  function saveLayerPrefs(file, lvl, visible) {
+    const all = layerPrefs();
+    const prev = all[file] || { shown: [], hidden: [] };
+    const names = new Set(lvl.layers.map(l => l.name));
+    // keep what was said about layers this run does not have (e.g. another sample in the sandbox)
+    const shown = new Set(prev.shown.filter(n => !names.has(n)));
+    const hidden = new Set(prev.hidden.filter(n => !names.has(n)));
+    names.forEach(n => (visible.has(n) ? shown : hidden).add(n));
+    all[file] = { shown: [...shown], hidden: [...hidden] };
+    try { localStorage.setItem(LAYERS_STORE, JSON.stringify(all)); } catch (e) {}
+  }
+
+  // The visible set for a new list of layers: a layer this widget already showed keeps its
+  // state, then the remembered choice, then the default.
+  function chooseVisible(lvl, prevNames, prevVisible, saved) {
+    const def = defaultVisible(lvl);
+    const vis = new Set();
+    lvl.layers.forEach(({ name }) => {
+      let on;
+      if (prevNames.has(name)) on = prevVisible.has(name);
+      else if (saved && saved.shown.includes(name)) on = true;
+      else if (saved && saved.hidden.includes(name)) on = false;
+      else on = def.has(name);
+      if (on) vis.add(name);
+    });
+    return vis.size ? vis : def;
+  }
+
   function legendFor(lvl, visible) {
     const seen = new Set();
     lvl.layers.forEach(l => {
@@ -172,6 +221,7 @@
     opts = opts || {};
     const init = opts.initial || {};
     const fileName = opts.fileName || sample.name + '.lvs';
+    const remember = opts.editor !== false;   // the hero has no layer chips: always the default
     const params = {};
     let seed = Number.isInteger(init.seed) ? init.seed : sample.seed;
     let worker = null, runToken = 0, runTimer = null, pending = false;
@@ -258,13 +308,16 @@
     function stopPlay() { if (playTimer) { cancelAnimationFrame(playTimer); playTimer = null; } $('.play').innerHTML = '<i class="fas fa-film"></i> Play'; }
     function endSession() { if (sessionId >= 0 && mod) { mod.run_end(sessionId); } sessionId = -1; }
 
+    document.addEventListener('ls-themechange', () => { if (last) render(last); });
+
     function render(state) {
       last = state;
       const lvl = state.level;
       const key = lvl.layers.map(l => l.name).join(',');
       if (key !== layersKey) {
+        const prevNames = new Set(layersKey ? layersKey.split(',') : []);
         layersKey = key;
-        visible = defaultVisible(lvl);
+        visible = chooseVisible(lvl, prevNames, visible, remember ? layerPrefs()[fileName] : null);
         const chips = $('.layer-chips');
         chips.innerHTML = '';
         if (lvl.layers.length > 1) lvl.layers.forEach(layer => {
@@ -275,6 +328,7 @@
           c.onclick = () => {
             if (visible.has(layer.name)) { if (visible.size > 1) visible.delete(layer.name); }
             else visible.add(layer.name);
+            if (remember) saveLayerPrefs(fileName, lvl, visible);
             chips.querySelectorAll('.chip').forEach((el, i) => el.classList.toggle('on', visible.has(lvl.layers[i].name)));
             render(last);
           };
@@ -284,7 +338,7 @@
       geom = drawState(canvas, state, visible);
       showTip();
       $('.legend').innerHTML = legendFor(lvl, visible)
-        .map(n => '<span><i style="background:' + NAMED[n] + '"></i>' + esc(n) +
+        .map(n => '<span><i style="background:' + (named(n) || hashColor(n)) + '"></i>' + esc(n) +
           (displayNames[n] ? ' <em>' + esc(displayNames[n]) + '</em>' : '') + '</span>').join('');
       status.textContent = (state.done ? 'done' : 'statement ' + Math.min(state.statementIndex + 1, state.statementCount) +
         ' / ' + state.statementCount) + ' · ' + lvl.width + '×' + lvl.height;

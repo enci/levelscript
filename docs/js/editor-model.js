@@ -1,6 +1,6 @@
 // What the site's editor draws over the source: lexical classes, pattern-cell backgrounds and
 // diagnostics. Pure functions from (source, inspection result) to ranges; no DOM, so a later
-// switch to CodeMirror can reuse them. See docs/web-editor-spec.md.
+// switch to CodeMirror can reuse them.
 //
 // Offsets are UTF-16 code units into the source. The compiler reports 1-based lines and
 // byte columns (tab and \r count 1), so every position goes through `offsetOf`.
@@ -79,8 +79,19 @@
 
   // ---------- pattern-cell backgrounds ----------
 
-  function paletteColor(editor, slot) {
-    return editor.palette[((slot % 12) + 12) % 12];
+  // Colors are CSS variables (--cell-0..11, --cell-any, --cell-empty) so the light and dark
+  // palettes swap with the theme without re-rendering; cellVarsCss() defines them.
+  function paletteColor(slot) {
+    return 'var(--cell-' + (((slot % 12) + 12) % 12) + ')';
+  }
+
+  // CSS defining the cell variables for both themes, from window.LVS_EDITOR (palette.ts).
+  function cellVarsCss(editor) {
+    const block = (sel, set) => sel + ' {' + set.palette.map((c, i) => ' --cell-' + i + ': ' + c + ';').join('') +
+      ' --cell-any: ' + set.any + '; --cell-empty: ' + set.empty + '; }';
+    let css = block(':root', editor);
+    if (editor.light) css += '\n' + block(':root[data-theme="light"]', editor.light);
+    return css;
   }
 
   // A cell's background runs across the whitespace up to the next cell on the same line, so a
@@ -93,10 +104,10 @@
     const toks = (insp.tokens || []).slice().sort((a, b) => a.line - b.line || a.col - b.col);
     toks.forEach((t, k) => {
       let color;
-      if (t.tag === -1) color = editor.any;
-      else if (t.tag === -2) color = editor.empty;
-      else if (t.tag === -3) color = paletteColor(editor, t.value);
-      else color = paletteColor(editor, t.value + t.tag * 12);
+      if (t.tag === -1) color = 'var(--cell-any)';
+      else if (t.tag === -2) color = 'var(--cell-empty)';
+      else if (t.tag === -3) color = paletteColor(t.value);
+      else color = paletteColor(t.value + t.tag * 12);
       const from = offsetOf(ix, t.line, t.col - 1);
       const end = offsetOf(ix, t.line, t.col - 1 + t.len);
       let to = end;
@@ -114,11 +125,11 @@
     const legend = (loc, slot) => {
       const from = offsetOf(ix, loc.line, loc.col - 1);
       const to = offsetOf(ix, loc.line, loc.col - 1 + loc.len);
-      if (to > from) out.push({ from, to, color: paletteColor(editor, slot) });
+      if (to > from) out.push({ from, to, color: paletteColor(slot) });
     };
     ((insp.symbols && insp.symbols.tags) || []).forEach((tag, ti) => {
       tag.values.forEach((v, vi) => { if (here(v.loc)) legend(v.loc, vi + ti * 12); });
-      tag.unions.forEach((u, ui) => { if (here(u.loc)) legend(u.loc, tag.values.length + ui + ti * 12); });
+      tag.masks.forEach((u, ui) => { if (here(u.loc)) legend(u.loc, tag.values.length + ui + ti * 12); });
     });
     return out;
   }
@@ -228,6 +239,6 @@
     return renderHtml(src, lexRuns(src, vocab), [], null);
   }
 
-  root.LVS_model = { indexLines, offsetOf, lexRuns, cellRanges, diagnosticRanges, keepDiagnostics, renderHtml, highlightHtml };
+  root.LVS_model = { indexLines, offsetOf, lexRuns, cellRanges, cellVarsCss, diagnosticRanges, keepDiagnostics, renderHtml, highlightHtml };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.LVS_model;
 })(typeof window !== 'undefined' ? window : globalThis);
