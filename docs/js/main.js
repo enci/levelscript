@@ -97,12 +97,40 @@
 
   // A cell is an array of tag value names ([] = empty) or, in number layers, a number / null.
   function cellColor(layer, cell) {
-    if (layer.isNumber) {
-      const v = Math.min(255, 40 + (cell * 7) % 200);
-      return 'rgb(' + v + ',' + v + ',' + v + ')';
-    }
+    if (layer.isNumber) return numberGray(cell);
     const name = cell[0];
     return named(name) || hashColor(name);
+  }
+
+  // Tag-value colours are shared by the map and the editor, and the map leads: the editor tints
+  // each value with its map colour (editorTint below).
+  // A map colour as an editor background. Hue and saturation are kept; lightness is
+  // pulled into a band per theme, so near-black walls still show on the dark editor, white
+  // pieces still show on the light one, and the text on top stays readable.
+  const TINT_BAND = { dark: [26, 36], light: [76, 86] };
+  function toHsl(color) {
+    let m = /^hsl\((\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)%\s+(\d+(?:\.\d+)?)%\)$/.exec(color);
+    if (m) return [+m[1], +m[2], +m[3]];
+    m = /^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/.exec(color) || /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(color);
+    if (!m) return null;
+    const [r, g, b] = (color[0] === '#' ? m.slice(1).map(x => parseInt(x, 16)) : m.slice(1).map(Number)).map(x => x / 255);
+    const max = Math.max(r, g, b), min = Math.min(r, g, b), l = (max + min) / 2, d = max - min;
+    if (!d) return [0, 0, l * 100];
+    const sat = d / (1 - Math.abs(2 * l - 1));
+    const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return [(h * 60 + 360) % 360, sat * 100, l * 100];
+  }
+  function editorTint(color) {
+    const hsl = toHsl(color);
+    if (!hsl) return color;
+    const [lo, hi] = TINT_BAND[lightTheme() ? 'light' : 'dark'];
+    const l = lo + (hi - lo) * (hsl[2] / 100);          // keep the order of light and dark values
+    const sat = Math.min(hsl[1], lightTheme() ? 75 : 45); // vivid colours are toned down behind text
+    return 'hsl(' + hsl[0].toFixed(0) + ' ' + sat.toFixed(0) + '% ' + l.toFixed(1) + '%)';
+  }
+  function numberGray(n) {
+    const v = Math.min(255, 40 + (n * 7) % 200);
+    return 'rgb(' + v + ',' + v + ',' + v + ')';
   }
 
   function isEmpty(layer, cell) {
@@ -205,13 +233,14 @@
     return vis.size ? vis : def;
   }
 
+  // every value on a visible tag layer, hand-picked and hashed colours alike
   function legendFor(lvl, visible) {
     const seen = new Set();
     lvl.layers.forEach(l => {
       if (l.isNumber || !visible.has(l.name)) return;
       l.cells.forEach(c => c.forEach(n => seen.add(n)));
     });
-    return [...seen].filter(n => NAMED[n]);
+    return [...seen];
   }
 
   // ---------- the widget ----------
@@ -324,7 +353,10 @@
     function stopPlay() { if (playTimer) { cancelAnimationFrame(playTimer); playTimer = null; } $('.play').innerHTML = '<i class="fas fa-film"></i> Play'; }
     function endSession() { if (sessionId >= 0 && mod) { mod.run_end(sessionId); } sessionId = -1; }
 
-    document.addEventListener('ls-themechange', () => { if (last) render(last); });
+    document.addEventListener('ls-themechange', () => {
+      if (ed) sync();   // the editor tints follow the theme
+      if (last) render(last);
+    });
 
     function render(state) {
       last = state;
@@ -354,7 +386,7 @@
       geom = drawState(canvas, state, visible);
       showTip();
       $('.legend').innerHTML = legendFor(lvl, visible)
-        .map(n => '<span><i style="background:' + (named(n) || hashColor(n)) + '"></i>' + esc(n) +
+        .map(n => '<span><i style="background:' + cellColor({}, [n]) + '"></i>' + esc(n) +
           (displayNames[n] ? ' <em>' + esc(displayNames[n]) + '</em>' : '') + '</span>').join('');
       status.textContent = (state.done ? 'done' : 'statement ' + Math.min(state.statementIndex + 1, state.statementCount) +
         ' / ' + state.statementCount) + ' · ' + lvl.width + '×' + lvl.height;
@@ -406,6 +438,11 @@
     // From the tool directives (spec Appendix B): value -> its @name, and
     // "sequence#index" -> the statement's @play and @hold.
     let displayNames = {}, plays = {}, holds = {};
+    // the editor's tag-value backgrounds come from the map
+    function editorColor(info) {
+      if (info.number !== undefined) return editorTint(numberGray(info.number));
+      return editorTint(named(info.name) || hashColor(info.name));
+    }
     function inspectNow() {
       insp = null;
       if (!mod || !ed) return;
@@ -473,7 +510,7 @@
     function sync(typing) {
       const src = ed.value();
       inspectNow();
-      const bgs = insp ? model.cellRanges(src, insp, window.LVS_EDITOR, fileName) : [];
+      const bgs = insp ? model.cellRanges(src, insp, window.LVS_EDITOR, fileName, editorColor) : [];
       diag = insp ? model.diagnosticRanges(src, insp, fileName) : null;
       view = { bgs };
       applyFileDirectives();

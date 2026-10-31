@@ -98,7 +98,11 @@
   // row reads as a solid strip even when columns are aligned with several spaces. The last cell
   // of a row covers just the one whitespace character after it, never a `]` or a comment.
   // Port of applyDecorations/cellLen in extension/src/decorations.ts.
-  function cellRanges(src, insp, editor, fileName) {
+  // colorFor (optional): { name } for a tag value or { number } for a number cell -> a CSS colour,
+  // or nothing for the palette colour. Named masks, `*` and `.` always use the palette.
+  function cellRanges(src, insp, editor, fileName, colorFor) {
+    const tags = (insp.symbols && insp.symbols.tags) || [];
+    const hook = info => (colorFor && colorFor(info)) || null;
     const ix = indexLines(src);
     const out = [];
     const toks = (insp.tokens || []).slice().sort((a, b) => a.line - b.line || a.col - b.col);
@@ -106,8 +110,11 @@
       let color;
       if (t.tag === -1) color = 'var(--cell-any)';
       else if (t.tag === -2) color = 'var(--cell-empty)';
-      else if (t.tag === -3) color = paletteColor(t.value);
-      else color = paletteColor(t.value + t.tag * 12);
+      else if (t.tag === -3) color = hook({ number: t.value }) || paletteColor(t.value);
+      else {
+        const v = tags[t.tag] && tags[t.tag].values[t.value];
+        color = (v && hook({ name: v.name })) || paletteColor(t.value + t.tag * 12);
+      }
       const from = offsetOf(ix, t.line, t.col - 1);
       const end = offsetOf(ix, t.line, t.col - 1 + t.len);
       let to = end;
@@ -122,13 +129,13 @@
 
     // the tag declarations are the legend: same palette slots, only the ones in this file
     const here = loc => !!loc && (!loc.module || loc.module === fileName);
-    const legend = (loc, slot) => {
+    const legend = (loc, slot, name) => {
       const from = offsetOf(ix, loc.line, loc.col - 1);
       const to = offsetOf(ix, loc.line, loc.col - 1 + loc.len);
-      if (to > from) out.push({ from, to, color: paletteColor(slot) });
+      if (to > from) out.push({ from, to, color: (name && hook({ name })) || paletteColor(slot) });
     };
-    ((insp.symbols && insp.symbols.tags) || []).forEach((tag, ti) => {
-      tag.values.forEach((v, vi) => { if (here(v.loc)) legend(v.loc, vi + ti * 12); });
+    tags.forEach((tag, ti) => {
+      tag.values.forEach((v, vi) => { if (here(v.loc)) legend(v.loc, vi + ti * 12, v.name); });
       tag.masks.forEach((u, ui) => { if (here(u.loc)) legend(u.loc, tag.values.length + ui + ti * 12); });
     });
     return out;

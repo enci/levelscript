@@ -331,7 +331,7 @@ button.diag-row:hover, .diag-row.active { border-color: var(--ls-green); backgro
 }
 
 /* CodeMirror (js/cm-editor.js): fills the frame, colours from the theme variables */
-.editor .cm-editor { height: 100%; background: none; color: var(--text); font: 0.86rem/1.55 var(--mono); }
+.editor .cm-editor { height: 100%; background: none; color: var(--text); font: 0.8rem/1.55 var(--mono); }
 .editor .cm-editor.cm-focused { outline: none; }
 .editor .cm-scroller { font: inherit; line-height: inherit; overflow: auto; }
 .editor .cm-content { padding: 1rem 0; caret-color: var(--hi); }
