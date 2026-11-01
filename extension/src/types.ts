@@ -79,5 +79,6 @@ export interface InspectionResult {
         ops: string[];
         builtins: string[];
         graph_functions?: string[];   // built-ins on node variables, in rules only
+        node_attributes?: string[];   // `n.degree`, `n.size`, `n.value`
     };
 }

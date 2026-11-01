@@ -8,7 +8,9 @@
 (function (root) {
   'use strict';
 
-  const LEX = ['', 'tk-cm', 'tk-str', 'tk-num', 'tk-kw', 'tk-fn', 'tk-op', 'tk-var', 'tk-dir'];
+  const LEX = ['', 'tk-cm', 'tk-str', 'tk-num', 'tk-kw', 'tk-fn', 'tk-op', 'tk-var', 'tk-dir', 'tk-ty'];
+  // node attributes (spec 5.12): `n.size`, `map.degree` - a name after '.' with no whitespace
+  const ATTRIBUTES = new Set(['degree', 'size', 'value']);
   const SEVERITY = { warning: 1, error: 2 };
 
   // ---------- positions ----------
@@ -66,6 +68,8 @@
         // the grammar's lookahead is (?=\s*\(): whitespace before the paren is allowed
         if (kw.has(m[6])) runs.push({ from, to, cls: 'tk-kw' });
         else if (fn.has(m[6]) && /^\s*\(/.test(src.slice(to, to + 64))) runs.push({ from, to, cls: 'tk-fn' });
+        else if (ATTRIBUTES.has(m[6]) && src[from - 1] === '.' && /\w/.test(src[from - 2] || ''))
+          runs.push({ from, to, cls: 'tk-ty' });
       } else {
         const c = m[7];
         if (c === '[') brackets++;

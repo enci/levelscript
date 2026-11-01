@@ -198,6 +198,27 @@ TEST_CASE("inspect: graph layers in symbols, outline, and refs") {
     CHECK(has(j, "\"node_attributes\":[\"degree\",\"size\",\"value\"]"));
 }
 
+TEST_CASE("inspect: expression refs: grids, selectors, attributes, region reads") {
+    std::string src =
+        "tag algo { R, H }\n"
+        "layers {\n"
+        "    level: grid of algo\n"
+        "    depth: grid of number\n"
+        "    map: graph of level(nodes=R, edges=H)\n"
+        "}\n"
+        "rule a { level[R] where[ (map.size > depth) ] => level[H] }\n"
+        "rule b { map { ?n } when (n.depth > 2 && distance(n, level[R]) > 1) => n.depth = 0 }\n";
+    std::string j = ls::inspect_json(src, "test.lvs");
+    INFO(j);
+    CHECK(has(j, "\"ok\":true"));
+    // a graph before '.' (rule a, col 27), a grid read by name (col 38)
+    CHECK(has(j, "{\"line\":7,\"col\":27,\"len\":3,\"kind\":\"graph\",\"target\":\"map\"}"));
+    CHECK(has(j, "{\"line\":7,\"col\":38,\"len\":5,\"kind\":\"layer\",\"target\":\"depth\"}"));
+    // a region read's grid (rule b, col 29) and a selector's grid (col 54)
+    CHECK(has(j, "{\"line\":8,\"col\":29,\"len\":5,\"kind\":\"layer\",\"target\":\"depth\"}"));
+    CHECK(has(j, "{\"line\":8,\"col\":54,\"len\":5,\"kind\":\"layer\",\"target\":\"level\"}"));
+}
+
 TEST_CASE("inspect: graph blocks in refs, tokens, and spans") {
     std::string src =
         "tag algo { R, H }\n"
