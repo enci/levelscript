@@ -24,11 +24,11 @@ rule lattice { level[.] where[ (x - x / 4 * 4 < 3 && y - y / 4 * 4 < 3) ] => lev
 rule hall_across { level[.] where[ (x - x / 4 * 4 == 3 && y - y / 4 * 4 == 1) ] => level[hall] }
 rule hall_down   { level[.] where[ (y - y / 4 * 4 == 3 && x - x / 4 * 4 == 1) ] => level[hall] }
 
-rule dead_ends { map[?n] when (degree(?n) == 1) => roles[dead_end] }
-rule pick_start { map[?n] when (degree(?n) == 1) => roles[start] }
-rule spread_start { map[?n] when (distance(?n, roles[start]) == 0) => roles[start] }
-rule guards { map[?n] roles[.] when (adjacent(?n, roles[start])) => roles[guard] }
-rule hubs { map[?n] roles[.] when (degree(?n) >= 3) => roles[hub] }
+rule dead_ends { map[?n] when (n.degree == 1) => roles[dead_end] }
+rule pick_start { map[?n] when (n.degree == 1) => roles[start] }
+rule spread_start { map[?n] when (distance(n, roles[start]) == 0) => roles[start] }
+rule guards { map[?n] roles[.] when (adjacent(n, roles[start])) => roles[guard] }
+rule hubs { map[?n] roles[.] when (n.degree >= 3) => roles[hub] }
 
 sequence main {
     resize(15, 11)

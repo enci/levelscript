@@ -1,0 +1,17 @@
+// E177 (0.17, check 23): params are bound before the first statement, so a
+// param reads no global query.
+// @expect error
+// @expect stderr-contains which a param expression cannot
+tag algo { R, H }
+tag room { Hall, Inn }
+tag loot { coin }
+layers {
+    level: grid of algo
+    rooms: grid of room
+    items: grid of loot
+    depth: grid of number
+    map:   graph of level(nodes=R, edges=H)
+    plan:  graph of rooms
+}
+params { k = count(level[R]) }
+sequence main { resize(2, 2) }

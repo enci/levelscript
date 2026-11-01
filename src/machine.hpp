@@ -265,6 +265,11 @@ private:
     static constexpr long long every_node_key = LLONG_MIN;
     int farthest_from(int id, long long t_key, long long u_key);
     long long eval_graph(compiled_expr const& e, int x, int y);
+    // The graph reads that are not functions of a node argument: an
+    // attribute at a cell, a region read, and the global queries.
+    long long eval_cell_attr(compiled_expr const& e, int x, int y);
+    long long eval_region(compiled_expr const& e, int x, int y);
+    long long eval_count(int sel);
 
     static uint64_t mask_key(int grid_id, int flat) {
         return ((uint64_t)grid_id << 40) | (uint64_t)flat;
@@ -289,6 +294,9 @@ private:
         std::vector<int> per_node;
     };
     std::vector<selection_cache>    selections_;   // indexed by selector id
+    // count(s), per selector: valid while its grid keeps the version counted
+    struct count_cache { uint64_t version{~0ull}; long long count{0}; };
+    std::vector<count_cache>        counts_;       // indexed by selector id
     // The stack's dimensions - kept apart from the layers so a layer-less
     // program still has a size (width/height, stability, the level).
     int                             rows_{0}, cols_{0};

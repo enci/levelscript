@@ -38,20 +38,20 @@
   (pair
     (match
       (pattern g
-        (row ?a (paren (!= g ?a)) (paren ?a))))
+        (row ?a (paren (!= g a)) (paren a))))
     (write
       (pattern g
-        (row ?a * *)))))
+        (row (paren a) * *)))))
 (rule variable_where
   (pair
     (match
       (pattern g
         (row ?a))
       (where
-        (row (paren (> ?a 3)))))
+        (row (paren (> a 3)))))
     (write
       (pattern g
-        (row (paren (| ?a wall)))))))
+        (row (paren (| a wall)))))))
 (rule precedence
   (pair
     (match
@@ -122,8 +122,8 @@
         (row ?a ?b))
       (pattern n
         (row ?n *))
-      (when (&& (&& (== (call degree ?a) 1) (< (call distance ?a (selector rooms Start)) 3)) (> (call neighbors ?b (selector ids (! .))) 0)))
-      (when (&& (&& (> (call size ?b) ?n) (call adjacent ?a ?b)) (! (call reachable ?b (selector rooms Boss))))))
+      (when (&& (&& (== (attr a degree) 1) (< (call distance a (selector rooms Start)) 3)) (> (call neighbors b (selector ids (! .))) 0)))
+      (when (&& (&& (> (attr b size) n) (call adjacent a b)) (! (call reachable b (selector rooms Boss))))))
     (write
       (pattern rooms
         (row DeadEnd *)))))
@@ -132,7 +132,7 @@
     (match
       (pattern map
         (row ?n))
-      (when (> (+ (call neighbors ?n (selector ids 3)) (call neighbors ?n (selector rooms (| A (! B))))) 0)))
+      (when (> (+ (call neighbors n (selector ids 3)) (call neighbors n (selector rooms (| A (! B))))) 0)))
     (write
       (pattern g
         (row a)))))

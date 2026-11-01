@@ -2,29 +2,24 @@
   (pair
     (match
       (pattern room
-        (size 8 6)
         (row ?r))
       (where
-        (size 8 6)
         (row (paren (&& (!= path .) (== path 0)))))
       (pattern map
-        (size 8 6)
         (row ?n))
-      (when (> (call degree ?n) 1)))
+      (when (> (attr n degree) 1)))
     (write
       (pattern fine
-        (size 8 6)
-        (row W)))))
+        (row W W)
+        (row W W)))))
 (rule mixed
   (pair
     (match
       (pattern g
-        (size 2 1)
         (row .)))
     (write
       (any
         (pattern g
           (row a b))
         (pattern g
-          (size 2 1)
           (row c))))))

@@ -1,0 +1,17 @@
+// E176 (0.17, check 46): `?v` marks a binding cell; inside ( ... ) a variable
+// is its bare name.
+// @expect error
+// @expect stderr-contains marks a binding position
+tag algo { R, H }
+tag room { Hall, Inn }
+tag loot { coin }
+layers {
+    level: grid of algo
+    rooms: grid of room
+    items: grid of loot
+    depth: grid of number
+    map:   graph of level(nodes=R, edges=H)
+    plan:  graph of rooms
+}
+rule r { depth[?v .] => depth[* (?v + 1)] }
+sequence main { resize(2, 2) everywhere r }

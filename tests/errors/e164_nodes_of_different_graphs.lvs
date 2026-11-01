@@ -7,5 +7,5 @@ layers {
     map:    graph of level(nodes=R, edges=H)
     layout: graph of level(nodes=R|H)
 }
-rule r { map[?a] layout[?b] when (?a != ?b) => level[H] }
+rule r { map[?a] layout[?b] when (a != b) => level[H] }
 sequence main { resize(2, 2) everywhere r }

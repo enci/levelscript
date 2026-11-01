@@ -1,6 +1,6 @@
-// E131 (0.9, check 46): variables exist only in patterns.
+// E131 (0.9, check 46): `?v` marks a binding position; a statement guard has none.
 // @expect error
-// @expect stderr-contains outside a pattern
+// @expect stderr-contains marks a binding position
 tag t { a }
 layers { g: grid of t }
 rule r { g[.] => g[a] }

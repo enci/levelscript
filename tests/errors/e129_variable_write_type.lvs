@@ -6,5 +6,5 @@ layers {
     g: grid of t
     n: grid of number
 }
-rule r { n[?v] => g[?v] }
+rule r { n[?v] => g[(v)] }
 sequence main { resize(2, 2) once r }

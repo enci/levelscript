@@ -181,9 +181,9 @@ rule paint_outside {
 
 sequence add_graves {
     once (rotation=all) {    
-        level(7,5)[.]
-        tiles(7,5)[.]
-        zones(7,5)[!.]
+        level[.]
+        tiles[.]
+        zones[!.]
         => { any
         tiles[
             * *   * *   * *   * 
@@ -195,9 +195,9 @@ sequence add_graves {
     }
 
     once (rotation=all) {    
-        level(5,5)[.]
-        tiles(5,5)[.]
-        zones(5,5)[!.]
+        level[.]
+        tiles[.]
+        zones[!.]
         => { any
         tiles[
             * *   * *   * 

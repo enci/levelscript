@@ -1,8 +1,10 @@
 // @seed=5
-// Sized patterns (0.12): `g(W, H)[c]` repeats one cell over W x H. A room id
-// written before `upscale` is the same over each 4x3 room and differs from
-// every neighbour, so `room(4, 3)[?r]` matches exactly once per room, lined
-// up with it. `ordered` gives each room the first template that applies.
+// Uplift (0.17, section 5.4): a 1x1 pattern in a larger pair stands for the
+// pair-sized pattern of its one cell. A room id written before `upscale` is
+// the same over each 4x3 room and differs from every neighbour, so `room[?r]`
+// in a 4x3 pair matches exactly once per room, lined up with it. Each pair
+// takes its size from a pattern written in full. `ordered` gives each room
+// the first template that applies.
 // @expect grid fine count(D) == 1
 // @expect grid fine count(.) > 0
 
@@ -19,16 +21,19 @@ rule ids { room[.] => room[(y * width + x)] }
 rule pick { mark[.] where[(x == 0 && y == 0)] => mark[start] }
 
 rule rooms { ordered
-    room(4, 3)[?r] mark(4, 3)[start]
+    room[?r] mark[start]
     => fine[
         W W W W
         W D . .
         W W W W ]
 
-    room(4, 3)[?r] where(4, 3)[ (?r == 4) ]
-    => fine(4, 3)[W]
+    room[?r] where[ (r == 4) ]
+    => fine[
+        W W W W
+        W W W W
+        W W W W ]
 
-    room(4, 3)[?r]
+    room[?r]
     => fine[
         W W W W
         . . . .

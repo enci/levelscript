@@ -36,7 +36,7 @@ layers {
 }
 
 rule border(rotation=90) {
-    zones[?a ?b] when(?b != ?a) => level[* W ]
+    zones[?a ?b] when(b != a) => level[* W ]
 }
 
 rule create_door(rotation=all) {
@@ -68,7 +68,7 @@ sequence connect_rooms {
 rule clear_walls (rotation=all) { level[. W|D . ] => level[. . . ] }
 
 sequence remove_edge_room {
-    once (rotation=all) { map[* ?n] level[. F ] when (degree(?n) == 1) => level[. O] }
+    once (rotation=all) { map[* ?n] level[. F ] when (n.degree == 1) => level[. O] }
     settle (rotation=all) { level[O F ] => level[O O] }     // @play=3
     settle (rotation=all) { level[O ] => level[.] }         // @play=3
     settle clear_walls
@@ -78,7 +78,7 @@ sequence merge_rooms {
     once (rotation=all) {
         level[F D F ]                           // Find a door between rooms
         map[?a * ?b]                            // map the tiles of the target rooms to variables ?a and ?b
-        when(size(?a) <= 36 && size(?b) <= 50)  // make sure both rooms are small enough to merge
+        when(a.size <= 36 && b.size <= 50)  // make sure both rooms are small enough to merge
         =>
         level[* O *]                            // O will create and "opening" in the next step
     }
@@ -104,43 +104,43 @@ rule add_walls(rotation=all) { ordered
 }
 
 rule add_start {
-    map {?n} when (degree(?n) == 1) => rooms(?n)[start]
+    map {?n} when (n.degree == 1) => n.rooms = start
 }
 
 rule add_end {
     map {?s ?e}
-    when (degree(?e) == 1 && every(?e, rooms[.]) && farthest(?s, ?e))
+    when (e.degree == 1 && e.rooms is . && farthest(s, e))
     =>
-    rooms(?e)[exit]
+    e.rooms = exit
 }
 
 rule add_boss {
     map {?e -- ?b}
-    when (every(?e, rooms[exit]))
-    => rooms(?b)[boss]
+    when (e.rooms is exit)
+    => b.rooms = boss
 }
 
 rule add_reward {
     map {?n}
-    when (degree(?n) == 1 && every(?n, rooms[.]))
-    => rooms(?n)[reward]
+    when (n.degree == 1 && n.rooms is .)
+    => n.rooms = reward
 }
 
 rule add_hub {
     map {?n}
-    when (degree(?n) >= 3 && every(?n, rooms[.]))
-    => rooms(?n)[hub]
+    when (n.degree >= 3 && n.rooms is .)
+    => n.rooms = hub
 }
 
 rule add_challenge {
     map {?n}
-    when (every(?n, rooms[.]))
-    => rooms(?n)[challenge]
+    when (n.rooms is .)
+    => n.rooms = challenge
 }
 
 rule place_player_and_entrance(rotation=all) {
-    rooms(3,3)[start]
-    entities(3, 3)[.]
+    rooms[start]
+    entities[.]
     level[
         F F F 
         F F F 
@@ -152,8 +152,8 @@ rule place_player_and_entrance(rotation=all) {
 }
 
 rule place_exit(rotation=all) {
-    rooms(3,3)[exit]
-    entities(3, 3)[.]
+    rooms[exit]
+    entities[.]
     level[
         F F F 
         F F F 
@@ -165,8 +165,8 @@ rule place_exit(rotation=all) {
 }
 
 rule place_pillars(rotation=all) { ordered
-    rooms(7,5)[hub|challenge]
-    level(7,5)[F]
+    rooms[hub|challenge]
+    level[F]
     => level[
         * * * * * * * 
         * W * W * W * 
@@ -174,8 +174,8 @@ rule place_pillars(rotation=all) { ordered
         * W * W * W * 
         * * * * * * * ]
 
-    rooms(5,5)[hub|challenge]
-    level(5,5)[F]
+    rooms[hub|challenge]
+    level[F]
     => level[
         * * * * *  
         * W * W * 
@@ -184,8 +184,8 @@ rule place_pillars(rotation=all) { ordered
         * * * * * ]
 
 
-    rooms(7,3)[hub|challenge]
-    level(7,3)[F]
+    rooms[hub|challenge]
+    level[F]
     => level[
         * * * * * * * 
         * W * W * W * 
@@ -193,7 +193,7 @@ rule place_pillars(rotation=all) { ordered
 }
 
 rule place_items(rotation=all) { any
-    entities(2, 2)[.]
+    entities[.]
     level[
         W W 
         W F ]

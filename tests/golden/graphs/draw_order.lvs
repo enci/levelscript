@@ -25,6 +25,6 @@ sequence main {
         map { ?a -- ?b }
         when (random(0, 2) > 0)
         =>
-        { all from(?a)[ (random(1, 9)) ] to(?b)[ (random(1, 9)) ] }
+        { all a.from = (random(1, 9)) b.to = (random(1, 9)) }
     }
 }

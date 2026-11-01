@@ -1,27 +1,27 @@
-// Graph rules (5.13): a graph block of node variables, edges, and value
-// tests, then rule guards; the write side writes node extents `g(?n)[c]`.
+// Graph rules (5.13): a graph block of node variables and edges, then rule
+// guards (attributes and region reads); the write side is graph writes `n.g = c`.
 rule treasure_room {
     plan { ?n }
-    when (degree(?n) == 1 && distance(?n, rooms[Start]) > 3)
+    when (n.degree == 1 && distance(n, rooms[Start]) > 3)
     =>
-    rooms(?n)[Treasure]
+    n.rooms = Treasure
 }
 rule market_hub {
     plan {
-        ?hub[Hall]
-        ?a[Shop|Inn]
+        ?hub
+        ?a
         ?hub -- ?a
         ?hub--?b, ?hub -- ?c
-    }
-    when (degree(?hub) == 4)
-    when (?b != ?c)
+    } when (hub.rooms is Hall) when (a.rooms is Shop|Inn)
+    when (hub.degree == 4)
+    when (b != c)
     =>
     { all
-        rooms(?hub)[Market]
-        { any decor(?a)[stall] decor(?a)[(if(size(?a) > 4, stall, .))] }
+        hub.rooms = Market
+        { any a.decor = stall a.decor = (if(a.size > 4, stall, .)) }
     }
 }
 rule numbered { all
-    zones_graph { ?z[3] } => zones(?z)[(value(?z) + 1)]
-    plan { ?n[!Hall] } when (size(?n) < 9) => rooms(?n)[Closet]
+    zones_graph { ?z } when (z.zones == 3) => z.zones = (z.value + 1)
+    plan { ?n } when (n.rooms is !Hall) when (n.size < 9) => n.rooms = Closet
 }

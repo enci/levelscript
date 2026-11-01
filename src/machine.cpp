@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <limits>
 #include <queue>
+#include <set>
 #include <tuple>
 
 namespace ls::internal {
@@ -16,6 +17,7 @@ machine::machine(std::shared_ptr<compiled const> prog, uint64_t seed, int entry,
     param_supplied_.assign(prog_->param_names.size(), 0);
     graphs_.resize(prog_->graphs.size());
     selections_.resize(prog_->selectors.size());
+    counts_.resize(prog_->selectors.size());
 }
 
 void machine::warn(std::string msg) const {
@@ -131,9 +133,18 @@ long long machine::eval(int idx, int x, int y) {
     case ce_kind::value_:
     case ce_kind::count_:
     case ce_kind::some_:
-    case ce_kind::every_:
     case ce_kind::farthest_:
         return eval_graph(e, x, y);
+    case ce_kind::cell_attr_: return eval_cell_attr(e, x, y);
+    case ce_kind::region_:    return eval_region(e, x, y);
+    case ce_kind::gcount_:    return eval_count((int)e.val);
+    case ce_kind::gnodes_:    return graph(e.ref).node_count();
+    case ce_kind::gedges_: {   // the adjacency sets hold each edge twice
+        graph_data const& g = graph(e.ref);
+        long long ends = 0;
+        for (auto const& a : g.adj) ends += (long long)a.size();
+        return ends / 2;
+    }
     case ce_kind::and_: return eval(e.a, x, y) != 0 && eval(e.b, x, y) != 0;   // lazy
     case ce_kind::or_:  return eval(e.a, x, y) != 0 || eval(e.b, x, y) != 0;
     case ce_kind::compl_: return e.val & ~eval(e.a, x, y);
@@ -298,12 +309,10 @@ long long machine::eval_graph(compiled_expr const& e, int x, int y) {
     case ce_kind::size_:   return g.sizes[n];
     case ce_kind::value_:  return g.values[n];
     case ce_kind::count_:
-    case ce_kind::some_:
-    case ce_kind::every_: {
+    case ce_kind::some_: {
         if (e.val < 0) return 0;   // a failed compile's stand-in
         int k = selection(e.ref, (int)e.val, per_node::cells)[n];
-        return e.kind == ce_kind::count_ ? k
-             : e.kind == ce_kind::some_  ? k > 0 : k == g.sizes[n];
+        return e.kind == ce_kind::count_ ? k : k > 0;
     }
     case ce_kind::neighbors_:
     case ce_kind::adjacent_: {
@@ -321,6 +330,72 @@ long long machine::eval_graph(compiled_expr const& e, int x, int y) {
         return e.kind == ce_kind::reachable_ ? dist < graph_unreachable : dist;
     }
     }
+}
+
+// `map.size` at a cell: the node covering (x, y), or for an uncovered cell
+// 0 (degree, size) or empty (value).
+long long machine::eval_cell_attr(compiled_expr const& e, int x, int y) {
+    graph_data const& g = graph(e.ref);
+    int n = g.node_at(x, y);
+    if (n < 0) {
+        if (e.val != 2) return 0;
+        return grids_[(size_t)prog_->graphs[(size_t)e.ref].source].is_number ? num_empty : tag_empty;
+    }
+    switch (e.val) {
+    case 0:  return (long long)g.adj[(size_t)n].size();
+    case 1:  return g.sizes[(size_t)n];
+    default: return g.values[(size_t)n];
+    }
+}
+
+// `n.g op b`: true iff the comparison holds at every cell of n's region in
+// grid g. The other operand reads no region, so it is evaluated once.
+long long machine::eval_region(compiled_expr const& e, int x, int y) {
+    graph_data const& g = graph(e.ref);
+    long long node = eval(e.a, x, y);
+    if (node < 0 || node >= g.node_count() || e.c2 < 0) return 0;
+    long long other = eval(e.b, x, y);
+    grid_state const& grid = grids_[(size_t)e.c2];
+    long long op = e.val & region_op_bits;
+    bool complement = (e.val & region_complement) != 0;
+    bool raw = (e.val & region_raw) != 0;
+    int64_t universe = 0;
+    if (complement) {
+        int tag = prog_->layers[(size_t)e.c2].tag_id;
+        universe = tag_empty;
+        for (int i = 0; i < (int)prog_->tag_values[(size_t)tag].size(); ++i) universe |= tag_bit(i);
+    }
+    for (int const* c = g.region_begin((int)node); c != g.region_end((int)node); ++c) {
+        long long v = grid.front[(size_t)*c];
+        if (grid.is_number && v == num_empty && !raw) v = 0;   // empty reads as 0
+        if (complement) v = universe & ~v;
+        bool holds;
+        switch (op) {
+        case region_is: holds = (v & other) != 0; break;
+        case region_eq: holds = v == other; break;
+        case region_ne: holds = v != other; break;
+        case region_lt: holds = v <  other; break;
+        case region_le: holds = v <= other; break;
+        case region_gt: holds = v >  other; break;
+        default:        holds = v >= other; break;
+        }
+        if (!holds) return 0;
+    }
+    return 1;
+}
+
+// count(s): the cells of s's grid that match s, cached until the grid changes.
+long long machine::eval_count(int sel) {
+    if (sel < 0) return 0;   // a failed compile's stand-in
+    auto const& s = prog_->selectors[(size_t)sel];
+    grid_state const& g = grids_[(size_t)s.grid];
+    auto& c = counts_[(size_t)sel];
+    if (c.version == g.version) return c.count;
+    long long n = 0;
+    for (int64_t v : g.front)
+        n += g.is_number ? (v == s.val) != s.ne : (v & s.val) != 0;
+    c = {g.version, n};
+    return n;
 }
 
 // The one execution core. Statements run top to bottom; the mode algebra lives
@@ -1233,10 +1308,6 @@ void machine::collect_assignments(compiled_rule const& rule, std::vector<match>&
         graph_data const& g = graph(pair.graph);
         int k = (int)pair.var_names.size();
         if (k == 0 || g.node_count() < k) continue;
-        bool number = grids_[(size_t)prog_->graphs[(size_t)pair.graph].source].is_number;
-        std::vector<int64_t> test(k);
-        std::vector<char> tested(k, 0);
-        for (auto const& t : pair.node_tests) { test[(size_t)t.slot] = t.val; tested[(size_t)t.slot] = 1; }
         std::vector<std::vector<int>> joined(k);   // per slot: the earlier slots it is adjacent to
         for (auto const& e : pair.node_edges) {
             int lo = std::min(e.a, e.b), hi = std::max(e.a, e.b);
@@ -1246,17 +1317,18 @@ void machine::collect_assignments(compiled_rule const& rule, std::vector<match>&
         auto fits = [&](int s, int n) {
             for (int i = 0; i < s; ++i)
                 if (nodes[(size_t)i] == n) return false;   // distinct variables, distinct nodes
-            if (tested[(size_t)s]) {
-                int64_t v = g.values[(size_t)n];
-                if (number ? v != test[(size_t)s] : (v & test[(size_t)s]) == 0) return false;
-            }
             for (int j : joined[(size_t)s]) {
                 auto const& adj = g.adj[(size_t)n];
                 if (!std::binary_search(adj.begin(), adj.end(), nodes[(size_t)j])) return false;
             }
             return true;
         };
-        // Phase 2 on a full assignment: rule guards, in written order.
+        // Under symmetry=none, the matching assignments so far: one that a
+        // symmetry of the pair maps onto one of them is its duplicate.
+        std::set<std::vector<int>> kept;
+        std::vector<int> image(k);
+        // Phase 2 on a full assignment: rule guards, in written order. A
+        // duplicate is dropped after them, so the guards draw as without it.
         auto accept = [&] {
             int at = (int)assigned_.size();
             assigned_.insert(assigned_.end(), nodes.begin(), nodes.end());
@@ -1264,6 +1336,13 @@ void machine::collect_assignments(compiled_rule const& rule, std::vector<match>&
             cur_nodes_ = at;
             for (auto const& gd : pair.guards)
                 if (eval(gd.expr, 0, 0) == 0) { assigned_.resize((size_t)at); return; }   // reads no x/y
+            if (!pair.symmetries.empty()) {
+                for (auto const& perm : pair.symmetries) {   // image[perm[s]] = nodes[s]
+                    for (int s = 0; s < k; ++s) image[(size_t)perm[(size_t)s]] = nodes[(size_t)s];
+                    if (kept.count(image)) { assigned_.resize((size_t)at); return; }
+                }
+                kept.insert(nodes);
+            }
             out.push_back({pi, 0, 0, at});
         };
         auto assign = [&](auto& self, int s) -> void {

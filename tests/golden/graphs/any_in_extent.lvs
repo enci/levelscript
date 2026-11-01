@@ -24,8 +24,8 @@ sequence main {
         map { ?n }
         =>
         { all
-            { any (weight=2) items(?n)[gold] items(?n)[ruby] }
-            noise(?n)[ (random(0, 9)) ]
+            { any (weight=2) n.items = gold n.items = ruby }
+            n.noise = (random(0, 9))
         }
     }
 }

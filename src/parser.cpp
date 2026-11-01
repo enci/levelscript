@@ -106,6 +106,13 @@ struct parser {
         return e;
     }
 
+    // `a.b`: an identifier, '.', and an identifier, all touching.
+    bool at_attr() const {
+        return at(token_type::ident) && peek(1).is(token_type::dot) &&
+               peek(2).is(token_type::ident) && adjacent(peek(), peek(1)) &&
+               adjacent(peek(1), peek(2));
+    }
+
     expr_ptr parse_primary() {
         if (at(token_type::integer)) {
             auto e = make_expr(expr_kind::int_lit);
@@ -126,6 +133,15 @@ struct parser {
         if (at(token_type::variable)) {
             auto e = make_expr(expr_kind::variable);
             e->ident = eat().text;
+            return e;
+        }
+        if (at_attr()) {   // a.b - no whitespace around the '.'
+            auto e = make_expr(expr_kind::attr);
+            e->ident = eat().text;
+            eat();   // '.'
+            e->member_loc = loc();
+            e->member = eat().text;
+            close(e->loc);
             return e;
         }
         if (at(token_type::ident)) {
@@ -418,11 +434,16 @@ struct parser {
         }
         if (at(token_type::variable)) {
             error_at(peek(), "a pattern variable does not combine into a bare mask; "
-                     "write (... | " + peek().text + ")");
+                     "write (... | " + peek().text.substr(1) + ")");
             return nullptr;
         }
         if (!at(token_type::ident)) {
             error_at(peek(), "expected a tag value");
+            return nullptr;
+        }
+        if (at_attr()) {
+            error_at(peek(), "an attribute read is an expression, not a bare cell; "
+                     "parenthesize it, e.g. (" + peek().text + "." + peek(2).text + " > 0)");
             return nullptr;
         }
         auto e = make_expr(expr_kind::ident);
@@ -473,7 +494,7 @@ struct parser {
             e->ident = eat().text;
             if (at(token_type::pipe) && adjacent(toks[pos - 1], peek())) {
                 error_at(peek(), "a pattern variable does not combine into a bare mask; "
-                         "write (" + e->ident + " | ...)");
+                         "write (" + e->ident.substr(1) + " | ...)");
                 eat();   // the '|'; recovery skips the atom after it
                 return nullptr;
             }
@@ -496,25 +517,20 @@ struct parser {
             if (!expect(token_type::ident, "a grid name")) return false;
             p.grid = prev_ident();
         }
-        // extent ::= '(' INTEGER ',' INTEGER ')' - width, then height
-        //          | '(' VARIABLE ')'          - a node extent
-        if (at(token_type::lparen) && peek(1).is(token_type::variable)) {
-            p.size_loc = loc();
-            closing size_closer{*this, p.size_loc};
-            eat();   // '('
-            p.extent = {eat().text, prev_loc()};
-            if (!expect(token_type::rparen, "')' after a node extent's variable")) return false;
-        } else if (at(token_type::lparen)) {
-            p.sized = true;
-            p.size_loc = loc();
-            closing size_closer{*this, p.size_loc};
-            eat();   // '('
-            if (!expect(token_type::integer, "the pattern width")) return false;
-            p.size_cols = toks[pos - 1].int_val;
-            if (!expect(token_type::comma, "',' and the pattern height")) return false;
-            if (!expect(token_type::integer, "the pattern height")) return false;
-            p.size_rows = toks[pos - 1].int_val;
-            if (!expect(token_type::rparen, "')'")) return false;
+        // Removed in 0.17: a sized pattern `g(W, H)[c]` and a node extent
+        // `g(?n)[c]`. Each is reported with its replacement, and the body
+        // still parses, so the rest of the rule is checked.
+        if (at(token_type::lparen)) {
+            std::string head = p.is_where ? "where" : p.grid.text;
+            if (peek(1).is(token_type::variable))
+                error_at(peek(), "node extents were removed in 0.17; a graph rule writes "
+                         "a node's region with a graph write, e.g. " +
+                         peek(1).text.substr(1) + "." + head + " = c");
+            else
+                error_at(peek(), "sized patterns were removed in 0.17; write the one cell "
+                         "alone, " + head + "[c], and it is uplifted to its pair's "
+                         "size, which a pattern written in full sets");
+            recover_to(token_type::rparen);
         }
         if (!expect(token_type::lbracket, "'['")) return false;
         in_grid = true;    // newlines separate rows until ']'
@@ -590,6 +606,7 @@ struct parser {
     void parse_rule_attrs(rule_decl& r) {
         do {
             if (accept_word("symmetry")) {
+                r.symmetry_given = true;
                 if (!expect(token_type::equals, "'='")) return;
                 // value text captured raw; validated in sema
                 if (at(token_type::kw_all) || at(token_type::ident))
@@ -615,8 +632,9 @@ struct parser {
 
     // ── match side: pattern+ ─────────────────────────────────────────────────
 
-    // A head, then '[' or an extent `(INTEGER` / `(?n` - nothing else in a
-    // rule body starts with a name followed by '('.
+    // A head, then '[' - or the removed `(INTEGER` / `(?n` extents, which
+    // parse_pattern reports; nothing else in a rule body starts with a name
+    // followed by '('.
     bool at_pattern_head() const {
         return (at(token_type::ident) || at(token_type::kw_where)) &&
                (peek(1).is(token_type::lbracket) ||
@@ -714,9 +732,9 @@ struct parser {
     }
 
     // graph_block ::= IDENT '{' graph_item (list_sep? graph_item)* list_sep? '}'
-    // graph_item  ::= VARIABLE '[' node_test ']' | VARIABLE ('--' VARIABLE)?
-    // node_test   ::= INTEGER | tag_mask
-    // `--` is two touching '-' tokens; it is a token only here.
+    // graph_item  ::= VARIABLE ('--' VARIABLE)?
+    // `--` is two touching '-' tokens; it is a token only here. Node tests
+    // `?n[m]` were removed in 0.17: a rule guard tests what a node holds.
     bool parse_graph_block(graph_block& b) {
         b.loc = loc();
         closing closer{*this, b.loc};
@@ -732,17 +750,13 @@ struct parser {
             graph_item it;
             it.loc = loc();
             if (!expect(token_type::variable, "a node variable '?name'")) return false;
-            it.a = prev_ident();
-            if (accept(token_type::lbracket)) {
-                it.what = graph_item::kind::test;
-                if (at(token_type::integer)) {
-                    it.test = make_expr(expr_kind::int_lit);
-                    it.test->int_val = eat().int_val;
-                } else {
-                    it.test = parse_tag_mask();
-                    if (!it.test) return false;
-                }
-                if (!expect(token_type::rbracket, "']' after a node test's one cell")) return false;
+            it.a = bare_variable();
+            if (at(token_type::lbracket)) {
+                error_at(peek(), "node tests were removed in 0.17; a graph block is topology "
+                         "only, so test the node in a rule guard: when (" + it.a.text +
+                         ".g is m), with g the graph's source grid");
+                recover_to(token_type::rbracket);
+                return false;
             } else if (at(token_type::minus)) {
                 token const& m1 = eat();
                 if (!at(token_type::minus) || !adjacent(m1, peek())) {
@@ -752,7 +766,7 @@ struct parser {
                 eat();
                 it.what = graph_item::kind::edge;
                 if (!expect(token_type::variable, "a node variable after '--'")) return false;
-                it.b = prev_ident();
+                it.b = bare_variable();
                 if (at(token_type::minus)) {
                     error_at(peek(), "edge lines do not chain; write each edge on its own line");
                     return false;
@@ -765,6 +779,13 @@ struct parser {
         return expect(token_type::rbrace, "'}' closing the graph block");
     }
 
+    // The variable just consumed, without its '?': the name it has
+    // everywhere but its binding position.
+    ident bare_variable() const {
+        ident v = prev_ident();
+        v.text = v.text.substr(1);
+        return v;
+    }
     // '(' expr ')' after a `when` - a statement or a rule guard.
     expr_ptr parse_guard_expr() {
         if (!expect(token_type::lparen, "'('")) return nullptr;
@@ -774,6 +795,49 @@ struct parser {
     }
 
     // ── write side: a recursive write term ───────────────────────────────────
+
+    // graph_write ::= IDENT '.' IDENT '=' write_value
+    // write_value ::= INTEGER | tag_mask | '(' expr ')'
+    // Kept as a one-cell pattern whose `node` is the written node.
+    bool parse_graph_write(pattern& p) {
+        p.loc = loc();
+        closing closer{*this, p.loc};
+        p.node = {eat().text, prev_loc()};
+        eat();   // '.'
+        p.grid = {eat().text, prev_loc()};
+        eat();   // '='
+        expr_ptr v;
+        if (at(token_type::integer)) {
+            v = make_expr(expr_kind::int_lit);
+            v->int_val = eat().int_val;
+        } else if (at(token_type::lparen)) {
+            v = make_expr(expr_kind::paren);
+            eat();
+            v->args.push_back(parse_expr());
+            if (!expect(token_type::rparen, "')'")) return false;
+            close(v->loc);
+        } else if (at(token_type::variable)) {
+            error_at(peek(), "a graph write writes a value; write a variable's value as an "
+                     "expression, (" + peek().text.substr(1) + ")");
+            eat();
+            return false;
+        } else if (at(token_type::star)) {
+            error_at(peek(), "a graph write writes a value; '*' writes nothing");
+            eat();
+            return false;
+        } else if (at(token_type::ident) || at(token_type::bang) || at(token_type::dot)) {
+            v = parse_tag_mask();
+            if (!v) return false;
+        } else {
+            error_at(peek(), "expected the value of a graph write: an integer, a tag mask, "
+                     "or a parenthesized expression");
+            return false;
+        }
+        p.cells.emplace_back();
+        p.cells[0].push_back(std::move(v));
+        p.rows = p.cols = 1;
+        return true;
+    }
 
     bool parse_write_term(write_term& t, bool weight_allowed) {
         t.loc = loc();
@@ -794,6 +858,7 @@ struct parser {
 
         if (!at(token_type::lbrace)) {   // leaf
             t.what = write_term::kind::leaf;
+            if (at_attr() && peek(3).is(token_type::equals)) return parse_graph_write(t.pat);
             return parse_pattern(t.pat);
         }
 

@@ -29,6 +29,8 @@ enum class token_type {
 inline bool is_keyword(token_type t) {
     return t >= token_type::kw_tag && t <= token_type::kw_use;
 }
+// Whether `text` lexes as a reserved word rather than a name.
+bool is_keyword_text(std::string_view text);
 
 struct token {
     token_type  type{token_type::end};

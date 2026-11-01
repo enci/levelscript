@@ -16,9 +16,9 @@ layers {
 
 rule absorb {
     areas { ?small ?big -- ?small }
-    when (size(?small) < 4 && size(?big) > size(?small))
+    when (small.size < 4 && big.size > small.size)
     =>
-    zones(?small)[ (value(?big)) ]
+    small.zones = (big.value)
 }
 
 sequence main {

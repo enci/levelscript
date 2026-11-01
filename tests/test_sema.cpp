@@ -57,9 +57,14 @@ TEST_CASE("sema: cell/grid type mismatches") {
 }
 
 TEST_CASE("sema: shape mismatch") {
-    // check 3
-    CHECK(compile_result(prelude + "rule r { level[. .] => level[wall] }\nsequence main { }")
+    // check 3: patterns that are not 1x1 agree; a 1x1 pattern is uplifted
+    CHECK(compile_result(prelude + "rule r { level[. .] => level[wall wall wall] }\nsequence main { }")
           .has_error("dimension mismatch"));
+    compile_result up(prelude + "rule r { level[. .] => level[wall] }\nsequence main { }");
+    INFO(up.diags.format_all());
+    REQUIRE(up.ok);
+    auto const& rhs = up.prog.rules[0].pairs[0].rhs.pattern;
+    CHECK((rhs.rows == 1 && rhs.cols == 2));   // the write covers the pair
 }
 
 TEST_CASE("sema: inconsistent row widths") {
@@ -136,7 +141,7 @@ rule r {
     =>
     { any
       level[wall wall]
-      level[floor]
+      level[floor floor floor]
     }
 }
 sequence main { }
@@ -334,7 +339,7 @@ TEST_CASE("sema: expression type errors") {
     CHECK(compile_result(prelude + "rule r { level[ (. == .) ] => level[floor] }\n" + rprog)
           .has_error("no inferable type"));
     CHECK(compile_result(prelude + "rule r { level[ (nope + 1) ] => level[floor] }\n" + rprog)
-          .has_error("unknown identifier 'nope'"));
+          .has_error("'nope' is not bound in this pair"));
 }
 
 TEST_CASE("sema: built-in calls") {
@@ -607,7 +612,7 @@ sequence main { resize(2, 2) everywhere r everywhere s everywhere u }
     }
     SECTION("a bare built-in name with no declaration still does not resolve") {
         CHECK(compile_result(trio + "rule r { where[ (abs > 0) ] => g[a] }\n" + rprog)
-              .has_error("unknown identifier"));
+              .has_error("'abs' is not bound in this pair"));
     }
     SECTION("attribute and axis values are still validated") {
         CHECK(compile_result(trio + "rule r(symmetry=rotation) { g[.] => g[a] }\n" + rprog)
@@ -679,64 +684,76 @@ static bool variables_check_ok(std::string const& src) {
 }
 
 TEST_CASE("sema: pattern variables bind, type, and are used") {
-    CHECK(variables_check_ok("rule r { tiles[?a *] where[* (tiles != ?a)] => level[* wall] }"));
-    CHECK(variables_check_ok("rule r { tiles[?v .] => tiles[. ?v] }"));
-    CHECK(variables_check_ok("rule r { level[?t ?t] => level[. ?t] }"));
-    CHECK(variables_check_ok("rule r { tiles[?d] where[ (?d > 3) ] => tiles[ (?d - 1) ] }"));
-    CHECK(variables_check_ok("rule r { level[?t] => level[ (?t | wall) ] }"));
-    CHECK(variables_check_ok("rule r { level[(?t)] level[?t] => level[*] }"));   // a use before the binding cell
-    CHECK(variables_check_ok("rule r { level[?all] => level[?all] }"));           // own namespace
-    CHECK(variables_check_ok("rule r { level[?level] tiles[?tiles] => tiles[?tiles] }"));
+    CHECK(variables_check_ok("rule r { tiles[?a *] where[* (tiles != a)] => level[* wall] }"));
+    CHECK(variables_check_ok("rule r { tiles[?v .] => tiles[. (v)] }"));
+    CHECK(variables_check_ok("rule r { level[?t ?t] => level[. (t)] }"));
+    CHECK(variables_check_ok("rule r { tiles[?d] where[ (d > 3) ] => tiles[ (d - 1) ] }"));
+    CHECK(variables_check_ok("rule r { level[?t] => level[ (t | wall) ] }"));
+    CHECK(variables_check_ok("rule r { level[(t)] level[?t] => level[*] }"));   // a use before the binding cell
+    // check 60: a variable is read by its bare name, so it has a name of its own
+    CHECK(compile_result(prelude + "rule r { level[?all] => level[*] }\n" + rprog)
+          .has_error("named like the reserved keyword 'all'"));
+    CHECK(compile_result(prelude + "rule r { level[?level] => level[*] }\n" + rprog)
+          .has_error("named like a grid 'level'"));
+    CHECK(compile_result(prelude + "rule r { level[?wall] => level[*] }\n" + rprog)
+          .has_error("named like a tag value 'wall'"));
+    CHECK(compile_result(prelude + "rule r { level[?x] => level[*] }\n" + rprog)
+          .has_error("named like the reserved identifier 'x'"));
 }
 
 TEST_CASE("sema: unbound pattern variables") {
     // check 44
-    compile_result write(prelude + "rule r { level[.] => level[?v] }\n" + rprog);
-    CHECK(write.has_error("'?v' is never bound"));
-    compile_result paren(prelude + "rule r { level[(?v)] => level[*] }\n" + rprog);
-    CHECK(paren.has_error("'?v' is never bound"));
+    compile_result write(prelude + "rule r { level[.] => level[(v)] }\n" + rprog);
+    CHECK(write.has_error("'v' is not bound in this pair"));
+    compile_result paren(prelude + "rule r { level[(v)] => level[*] }\n" + rprog);
+    CHECK(paren.has_error("'v' is not bound in this pair"));
     CHECK(!paren.has_error("must evaluate to"));   // no cascade
-    compile_result where(prelude + "rule r { level[*] where[ (?v > 1) ] => level[*] }\n" + rprog);
-    CHECK(where.has_error("'?v' is never bound"));
+    compile_result where(prelude + "rule r { level[*] where[ (v > 1) ] => level[*] }\n" + rprog);
+    CHECK(where.has_error("'v' is not bound in this pair"));
     // the sub-rules of one body share no variables
-    compile_result sub(prelude + "rule r { all\n level[?v] => level[.]\n level[.] => level[?v]\n}\n" + rprog);
-    CHECK(sub.has_error("'?v' is never bound"));
+    compile_result sub(prelude + "rule r { all\n level[?v] => level[.]\n level[.] => level[(v)]\n}\n" + rprog);
+    CHECK(sub.has_error("'v' is not bound in this pair"));
 }
 
 TEST_CASE("sema: pattern variable types") {
     // check 45
     CHECK(compile_result(prelude + "rule r { level[?v] tiles[?v] => level[*] }\n" + rprog)
           .has_error("binds a number cell here but a tagset 'geo' cell elsewhere"));
-    CHECK(compile_result(prelude + "rule r { tiles[?v] => level[?v] }\n" + rprog)
+    CHECK(compile_result(prelude + "rule r { tiles[?v] => level[(v)] }\n" + rprog)
           .has_error("holds a number value but is written into a tagset 'geo' grid"));
-    CHECK(compile_result(prelude + "rule r { level[?v] => tiles[?v] }\n" + rprog)
+    CHECK(compile_result(prelude + "rule r { level[?v] => tiles[(v)] }\n" + rprog)
           .has_error("is written into a number grid"));
-    CHECK(compile_result(prelude + "rule r { tiles[?v] => level[ (?v) ] }\n" + rprog)
-          .has_error("must evaluate to a tag value"));
+    CHECK(compile_result(prelude + "rule r { tiles[?v] => level[ (v) ] }\n" + rprog)
+          .has_error("holds a number value but is written into"));
 }
 
 TEST_CASE("sema: pattern variables outside a pattern") {
-    // check 46
+    // check 46: `?v` marks a binding position, which these places have none of
     auto outside = [](std::string const& src) {
-        return compile_result(prelude + src).has_error("outside a pattern");
+        return compile_result(prelude + src).has_error("marks a binding position");
     };
     CHECK(outside("rule r { level[.] => level[wall] }\nsequence main { once r when (?v > 0) }"));
     CHECK(outside("rule r { level[.] => level[wall] }\nsequence main { scatter(?v) r }"));
     CHECK(outside("params { p: number = ?v }\nsequence main { }"));
     CHECK(outside("sequence main { path(from=wall, to=floor, into=level, write=floor, "
                   "passable=(level == ?v)) }"));
+    // ... and inside ( ... ), a variable is its bare name
+    CHECK(outside("rule r { tiles[?v] => tiles[(?v + 1)] }\n" + rprog));
     CHECK(compile_result(prelude + "rule r { tiles[?v] where[?v] => tiles[.] }\n" + rprog)
-          .has_error("cannot be a bare pattern variable"));
+          .has_error("cannot be a binding cell"));
+    // a write-side binding cell: the value is written as an expression cell
+    CHECK(compile_result(prelude + "rule r { tiles[?v] => tiles[?v] }\n" + rprog)
+          .has_error("write the variable's value as an expression cell, (v)"));
 }
 
 TEST_CASE("sema: rule guards read params, dimensions, and variables") {
     std::string pre = prelude + "params { k: number = 1 }\n";
     for (char const* rule : {
-             "rule r { tiles[?a ?b] when (?a != ?b) => level[* wall] }",
-             "rule r { level[?t] when (?t == wall) => level[floor] }",
-             "rule r { tiles[?a] when (k > 0 && width > ?a) when (random(0, 1) == 0) "
+             "rule r { tiles[?a ?b] when (a != b) => level[* wall] }",
+             "rule r { level[?t] when (t == wall) => level[floor] }",
+             "rule r { tiles[?a] when (k > 0 && width > a) when (random(0, 1) == 0) "
              "=> tiles[.] }",
-             "rule r { tiles[?a] when (height > 1) where[(?a > x)] => tiles[.] }",
+             "rule r { tiles[?a] when (height > 1) where[(a > x)] => tiles[.] }",
          }) {
         INFO(rule);
         compile_result ok(pre + rule + "\n" + rprog);
@@ -752,23 +769,23 @@ TEST_CASE("sema: rule guard scope") {
     CHECK(err("rule r { tiles[?a] when (x > 0) => tiles[.] }").has_error("cannot be read here"));
     CHECK(err("rule r { tiles[?a] when (y > 0) => tiles[.] }").has_error("cannot be read here"));
     CHECK(err("rule r { tiles[?a] when (tiles > 0) => tiles[.] }").has_error("cannot be read here"));
-    CHECK(err("rule r { tiles[?a] when (?a + k) => tiles[.] }")
+    CHECK(err("rule r { tiles[?a] when (a + k) => tiles[.] }")
           .has_error("a rule guard must be a boolean expression"));
-    CHECK(err("rule r { tiles[?a] when (degree(?a) > 0) => tiles[.] }")
-          .has_error("'degree' takes a node first"));
+    CHECK(err("rule r { tiles[?a] when (a.degree > 0) => tiles[.] }")
+          .has_error("'a' holds a value, not a node"));
     // check 44: a guard binds nothing
-    CHECK(err("rule r { tiles[.] when (?v > 0) => tiles[.] }").has_error("'?v' is never bound"));
+    CHECK(err("rule r { tiles[.] when (v > 0) => tiles[.] }").has_error("'v' is not bound in this pair"));
 }
 
 TEST_CASE("sema: rule guards are part of the variant dedup key") {
     std::string pre = prelude + "params { k: number = 1 }\n";
     // a one-cell rule's rotations collapse, guard and all
-    compile_result one(pre + "rule r(rotation=all) { tiles[?a] when (?a > k) => tiles[.] }\n" + rprog);
+    compile_result one(pre + "rule r(rotation=all) { tiles[?a] when (a > k) => tiles[.] }\n" + rprog);
     REQUIRE(one.ok);
     REQUIRE(one.prog.rules[0].pairs.size() == 1);
     REQUIRE(one.prog.rules[0].pairs[0].guards.size() == 1);
     // variants keep their guard, unchanged
-    compile_result two(pre + "rule r(symmetry=horizontal) { tiles[?a ?b] when (?a < ?b) "
+    compile_result two(pre + "rule r(symmetry=horizontal) { tiles[?a ?b] when (a < b) "
                        "=> tiles[. *] }\n" + rprog);
     REQUIRE(two.ok);
     auto const& pairs = two.prog.rules[0].pairs;
@@ -799,13 +816,13 @@ TEST_CASE("sema: reductivity with pattern variables") {
     CHECK(warns("rule r { level[?v] tiles[?n] => tiles[*] }"));
     CHECK(warns("rule r { tiles[?n ?n] => level[floor *] }"));
     // certain invalidation: '.' over a binding cell, a variable over a '.' cell
-    CHECK(!warns("rule r { level[?v, .] => level[., ?v] }"));   // fall
+    CHECK(!warns("rule r { level[?v, .] => level[., (v)] }"));   // fall
     CHECK(!warns("rule r { level[?v] => level[.] }"));
-    CHECK(!warns("rule r { level[?v .] => level[* ?v] }"));
+    CHECK(!warns("rule r { level[?v .] => level[* (v)] }"));
     // uncertain: any other write over a binding cell, or of a variable
-    CHECK(!warns("rule r { level[?v] => level[?v] }"));
+    CHECK(!warns("rule r { level[?v] => level[(v)] }"));
     CHECK(!warns("rule r { level[?v ?v] => level[* wall] }"));
-    CHECK(!warns("rule r { level[?v wall] => level[* ?v] }"));
+    CHECK(!warns("rule r { level[?v wall] => level[* (v)] }"));
 }
 
 // ── '.' as a mask atom ───────────────────────────────────────────────────────
@@ -977,31 +994,50 @@ TEST_CASE("sema: a derived param is a number") {
     CHECK(compile_result(decls + "params { p = 2 * 3 }").ok);
 }
 
-TEST_CASE("sema: a sized pattern repeats its one cell") {
-    // check 55; section 5.3
+TEST_CASE("sema: a 1x1 pattern is uplifted to its pair") {
+    // section 5.4; check 3
     std::string decls = "tag t { a, b }\nlayers { g: grid of t\n n: grid of number }\n";
-    CHECK(compile_result(decls + "rule r { g(3, 2)[.] => g(3, 2)[a] }").ok);
-    CHECK(compile_result(decls + "rule r { g(3, 2)[.] where(3, 2)[(x > 0)] => g[a a a, b b b] }").ok);
-    CHECK(compile_result(decls + "rule r { n(2, 2)[?v] => n(2, 2)[(?v + 1)] }").ok);
-
-    // the declared size is the shape the mismatch check sees
-    CHECK(compile_result(decls + "rule r { g(3, 2)[.] => g(2, 3)[a] }").has_error("dimension mismatch"));
-    CHECK(compile_result(decls + "rule r { g(3, 2)[.] => g[a a a] }").has_error("dimension mismatch"));
-    CHECK(compile_result(decls + "rule r { g(1, 1)[.] => g[a] }").ok);
-
-    // the body is exactly one cell
-    CHECK(compile_result(decls + "rule r { g(2, 1)[. .] => g[a a] }").has_error("repeats a single cell"));
-    CHECK(compile_result(decls + "rule r { g(1, 2)[., .] => g[a, a] }").has_error("repeats a single cell"));
-
-    // sizes are 1..256 integer literals
-    CHECK(compile_result(decls + "rule r { g(0, 2)[.] => g(0, 2)[a] }").has_error("pattern size must be between"));
-    CHECK(compile_result(decls + "rule r { g(257, 1)[.] => g(257, 1)[a] }").has_error("pattern size must be between"));
-    CHECK(compile_result(decls + "rule r { g(256, 1)[.] => g(256, 1)[a] }").ok);
-    CHECK_FALSE(compile_result(decls + "params { w: number = 2 }\nrule r { g(w, 2)[.] => g(2, 2)[a] }").ok);
-    CHECK_FALSE(compile_result(decls + "rule r { g(2)[.] => g(2, 1)[a] }").ok);
+    auto shape = [&](std::string const& rule, int pattern) {
+        compile_result r(decls + rule);
+        INFO(r.diags.format_all());
+        REQUIRE(r.ok);
+        auto const& pr = r.prog.rules[0].pairs[0];
+        auto const& p = pattern < (int)pr.lhs.size() ? pr.lhs[(size_t)pattern] : pr.rhs.pattern;
+        return std::to_string(p.cols) + "x" + std::to_string(p.rows);
+    };
+    // the pair's size comes from the patterns written in full, on either side
+    CHECK(shape("rule r { g[.] => g[a a a, b b b] }", 0) == "3x2");
+    CHECK(shape("rule r { g[. . ., . . .] => g[a] }", 1) == "3x2");
+    CHECK(shape("rule r { g[.] where[(x > 0)] => g[a a a, b b b] }", 1) == "3x2");
+    // a pair of 1x1 patterns is 1x1
+    CHECK(shape("rule r { g[.] => g[a] }", 0) == "1x1");
+    // patterns that are not 1x1 still agree
+    CHECK(compile_result(decls + "rule r { g[. . .] => g[a a] }").has_error("dimension mismatch"));
+    CHECK(compile_result(decls + "rule r { g[. .] => { any g[a] g[a, a] } }").has_error("dimension mismatch"));
+    // sized patterns were removed (check 55 retired)
+    CHECK(compile_result(decls + "rule r { g(3, 2)[.] => g[a a a, b b b] }").has_error("sized patterns were removed"));
 }
 
-TEST_CASE("sema: a sized pattern runs as its written-out form") {
+TEST_CASE("sema: an uplifted position read is warned about") {
+    // warning 3
+    std::string decls = "tag t { a, b }\nlayers { g: grid of t\n n: grid of number }\n";
+    auto warns = [&](std::string const& rule) {
+        compile_result r(decls + rule);
+        INFO(r.diags.format_all());
+        REQUIRE(r.ok);
+        for (auto const& d : r.diags.all)
+            if (!d.is_error && d.message.find("evaluated at every cell of the pair") != std::string::npos)
+                return true;
+        return false;
+    };
+    CHECK(warns("rule r { g[. .] where[(x == 0)] => g[a] }"));
+    CHECK(warns("rule r { g[. .] => g[(if(y > 0, a, b))] }"));
+    CHECK_FALSE(warns("rule r { g[. .] where[(x == 0) *] => g[a] }"));   // written in full
+    CHECK_FALSE(warns("rule r { g[.] where[(x == 0)] => g[a] }"));      // a 1x1 pair
+    CHECK_FALSE(warns("rule r { g[. .] where[(width > 2)] => g[a] }")); // no position read
+}
+
+TEST_CASE("sema: an uplifted pattern runs as its written-out form") {
     // one id per 2x2 room; `?r` over the whole room lines the template up
     std::string decls = "tag t { a, b }\nlayers { g: grid of t\n n: grid of number }\n";
     auto run = [&](std::string const& rule) {
@@ -1013,12 +1049,13 @@ sequence main {
     everywhere r
 }
 )");
+        INFO(gen.error());
         REQUIRE(static_cast<bool>(gen));
         return ts::show(gen.generate(gen.sequence("main"), 7), "g");
     };
-    std::string sized   = run("rule r { n(2, 2)[?r] where(2, 2)[(?r > 1)] => g(2, 2)[a] }");
-    std::string written = run("rule r { n[?r ?r, ?r ?r] where[(?r > 1) (?r > 1), (?r > 1) (?r > 1)]"
-                              " => g[a a, a a] }");
-    CHECK(sized == written);
-    CHECK(sized == "....aa/....aa/aaaaaa/aaaaaa");
+    std::string uplifted = run("rule r { n[?r] where[(r > 1)] => g[a a, a a] }");
+    std::string written  = run("rule r { n[?r ?r, ?r ?r] where[(r > 1) (r > 1), (r > 1) (r > 1)]"
+                               " => g[a a, a a] }");
+    CHECK(uplifted == written);
+    CHECK(uplifted == "....aa/....aa/aaaaaa/aaaaaa");
 }

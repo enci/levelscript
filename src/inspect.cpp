@@ -101,16 +101,6 @@ void emit_pattern_tokens(std::string& o, comma_list& cl,
         for (auto const& c : row) emit_cell_tokens(o, cl, prog, tid, *c);
 }
 
-// A graph block's test cells, painted in the graph's source tagset.
-void emit_block_tokens(std::string& o, comma_list& cl, compiled const& prog,
-                       graph_block const& b) {
-    int graph = prog.graph_id(b.graph.text);
-    if (graph < 0) return;
-    int tid = prog.layers[(size_t)prog.graphs[(size_t)graph].source].tag_id;
-    for (auto const& it : b.items)
-        if (it.test) emit_cell_tokens(o, cl, prog, tid, *it.test);
-}
-
 // A pattern head as a hover/definition reference: a grid ("layer") or a graph.
 void emit_pattern_refs(std::string& o, comma_list& cl, compiled const& prog, pattern const& p) {
     if (p.is_where) return;
@@ -295,7 +285,6 @@ std::string inspect_json(std::string const& source, std::string const& name,
     {
         comma_list cl{o};
         for_each_root_pair(*ast, mods.root, [&](rule_pair const& pr) {
-            if (pr.is_graph) emit_block_tokens(o, cl, prog, pr.block);
             for_each_pattern(pr, [&](pattern const& p) { emit_pattern_tokens(o, cl, prog, p); });
         });
     }
@@ -516,8 +505,9 @@ std::string inspect_json(std::string const& source, std::string const& name,
     // completion vocabulary — kept in sync with the sema tables by the tests
     o += "],\"ops\":[\"resize\",\"upscale\",\"trim\",\"mirror\",\"pad\",\"path\",\"bsp\",\"voronoi\",\"noise\"]";
     o += ",\"builtins\":[\"if\",\"min\",\"max\",\"abs\",\"clamp\",\"mod\",\"random\"]";
-    o += ",\"graph_functions\":[\"degree\",\"size\",\"distance\",\"neighbors\","
-         "\"adjacent\",\"reachable\",\"value\",\"some\",\"every\",\"count\",\"farthest\"]";
+    o += ",\"graph_functions\":[\"distance\",\"neighbors\",\"adjacent\",\"reachable\","
+         "\"some\",\"count\",\"farthest\",\"nodes\",\"edges\"]";
+    o += ",\"node_attributes\":[\"degree\",\"size\",\"value\"]";
     o += "}}";
     return o;
 }

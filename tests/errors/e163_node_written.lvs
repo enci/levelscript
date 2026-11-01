@@ -1,6 +1,6 @@
 // E163 (0.14, check 45): a node variable is never written to a grid.
 // @expect error
-// @expect stderr-contains holds a node of graph 'map' value
+// @expect stderr-contains holds a node of graph 'map' but is written
 tag algo { R, H }
 tag room { Start }
 layers {
@@ -8,5 +8,5 @@ layers {
     rooms: grid of room
     map:   graph of level(nodes=R, edges=H)
 }
-rule r { map[?n] => rooms[?n] }
+rule r { map[?n] => rooms[(n)] }
 sequence main { resize(2, 2) everywhere r }

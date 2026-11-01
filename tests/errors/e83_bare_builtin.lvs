@@ -1,6 +1,6 @@
-// E83: a built-in name not followed by '(' does not resolve.
+// E83: a built-in name not followed by '(' does not resolve; in a pair it is reported as unbound.
 // @expect error
-// @expect stderr-contains unknown identifier
+// @expect stderr-contains not bound in this pair
 tag t { a }
 layers { g: grid of t }
 rule bad { where[ (abs > 0) ] => g[a] }

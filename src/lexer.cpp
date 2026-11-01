@@ -36,6 +36,8 @@ static token_type keyword_or_ident(std::string_view text) {
     return it == keywords.end() ? token_type::ident : it->second;
 }
 
+bool is_keyword_text(std::string_view text) { return is_keyword(keyword_or_ident(text)); }
+
 std::vector<token> lex(std::string_view src, std::string_view file,
                        diagnostics& diags, std::vector<directive_comment>* directives) {
     std::vector<token> out;

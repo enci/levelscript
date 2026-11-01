@@ -186,15 +186,16 @@ TEST_CASE("inspect: graph layers in symbols, outline, and refs") {
         "    level: grid of algo\n"
         "    map: graph of level(nodes=R, edges=H)\n"
         "}\n"
-        "rule dead_end { map[?n] when (degree(?n) == 1) => level[H] }\n";
+        "rule dead_end { map[?n] when (n.degree == 1) => level[H] }\n";
     std::string j = ls::inspect_json(src, "test.lvs");
     CHECK(has(j, "\"ok\":true"));
     CHECK(has(j, "\"graphs\":[{\"name\":\"map\",\"source\":\"level\",\"loc\":"));
     CHECK(has(j, "{\"kind\":\"graph\",\"name\":\"map\""));
     CHECK(has(j, "{\"line\":6,\"col\":17,\"len\":3,\"kind\":\"graph\",\"target\":\"map\"}"));
-    CHECK(has(j, "{\"line\":6,\"col\":51,\"len\":5,\"kind\":\"layer\",\"target\":\"level\"}"));
-    CHECK(has(j, "\"graph_functions\":[\"degree\",\"size\",\"distance\",\"neighbors\","
-                 "\"adjacent\",\"reachable\",\"value\",\"some\",\"every\",\"count\",\"farthest\"]"));
+    CHECK(has(j, "{\"line\":6,\"col\":49,\"len\":5,\"kind\":\"layer\",\"target\":\"level\"}"));
+    CHECK(has(j, "\"graph_functions\":[\"distance\",\"neighbors\",\"adjacent\",\"reachable\","
+                 "\"some\",\"count\",\"farthest\",\"nodes\",\"edges\"]"));
+    CHECK(has(j, "\"node_attributes\":[\"degree\",\"size\",\"value\"]"));
 }
 
 TEST_CASE("inspect: graph blocks in refs, tokens, and spans") {
@@ -205,18 +206,17 @@ TEST_CASE("inspect: graph blocks in refs, tokens, and spans") {
         "    map: graph of level\n"
         "}\n"
         "rule hub {\n"
-        "    map { ?n[R|H] ?n -- ?m }\n"
-        "    => level(?n)[H]\n"
+        "    map { ?n ?n -- ?m } when (n.level is R|H)\n"
+        "    => n.level = H\n"
         "}\n";
     std::string j = ls::inspect_json(src, "test.lvs");
     INFO(j);
     CHECK(has(j, "\"ok\":true"));
-    // the block's graph and the extent's grid are references
+    // the block's graph and the graph write's grid are references
     CHECK(has(j, "{\"line\":7,\"col\":5,\"len\":3,\"kind\":\"graph\",\"target\":\"map\"}"));
-    CHECK(has(j, "{\"line\":8,\"col\":8,\"len\":5,\"kind\":\"layer\",\"target\":\"level\"}"));
-    // the test's atoms paint in the source's tagset (tag 0): R and H
-    CHECK(has(j, "{\"line\":7,\"col\":14,\"len\":1,\"tag\":0,\"value\":0}"));
-    CHECK(has(j, "{\"line\":7,\"col\":16,\"len\":1,\"tag\":0,\"value\":1}"));
+    CHECK(has(j, "{\"line\":8,\"col\":10,\"len\":5,\"kind\":\"layer\",\"target\":\"level\"}"));
+    // the graph write's value paints in its grid's tagset (tag 0): H
+    CHECK(has(j, "{\"line\":8,\"col\":18,\"len\":1,\"tag\":0,\"value\":1}"));
     // the block folds
-    CHECK(has(j, "{\"line\":7,\"col\":5,\"end_line\":7,\"end_col\":29}"));
+    CHECK(has(j, "{\"line\":7,\"col\":5,\"end_line\":7,\"end_col\":24}"));
 }

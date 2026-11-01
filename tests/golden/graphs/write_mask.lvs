@@ -1,7 +1,7 @@
 // Graph rules (v0.15.0, sections 5.13 and 6.8): the write mask over regions.
 //
 // Under a batch, two assignments conflict iff they write one grid over a
-// node they share. On a star - a hub with four arms - `?hub -- ?arm`
+// node they share. On a star - a hub with four arms - `?h -- ?a`
 // writing the hub conflicts with every other assignment, so one arm wins
 // the shuffle; writing only the arm, all four apply. A one-variable rule
 // never conflicts with itself.
@@ -23,6 +23,6 @@ sequence main {
     resize(5, 5)
     once { level[* * * * *, * * * * *, * * * * *, * * * * *, * * * * *] =>
            level[. . R . ., . . H . ., R H R H R, . . H . ., . . R . .] }
-    everywhere { map { ?hub ?arm -- ?hub } when (degree(?hub) == 4) => { all one(?hub)[hub] one(?arm)[arm] } }
-    everywhere { map { ?hub ?arm -- ?hub } when (degree(?hub) == 4) => each(?arm)[arm] }
+    everywhere { map { ?h ?a -- ?h } when (h.degree == 4) => { all h.one = hub a.one = arm } }
+    everywhere { map { ?h ?a -- ?h } when (h.degree == 4) => a.each = arm }
 }

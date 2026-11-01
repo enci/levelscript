@@ -152,8 +152,10 @@ TEST_CASE("masks: named mask members") {
           .has_error("in a named mask"));
 }
 
-TEST_CASE("masks: a node test has no '.' through a name") {
-    // check 58
+TEST_CASE("masks: region reads take named masks") {
+    // node tests were removed in 0.17, and with them check 58's '.' atom: a
+    // region read tests what a node holds, and a node is never empty, so
+    // `.` in its mask is simply never matched
     std::string world = R"(
 tag room { Hall, Inn, open = !Hall, dot = Hall | . }
 layers {
@@ -161,10 +163,10 @@ layers {
     plan:  graph of rooms
 }
 )";
-    CHECK(compile_result(world + "rule r { plan { ?n[dot] } => rooms(?n)[Inn] }\n")
-          .has_error("a node is never empty"));
-    // `!Hall` covers empty too, but has no '.' atom
-    ok(world + "rule r { plan { ?n[open] } => rooms(?n)[Inn] }\n");
+    ok(world + "rule r { plan { ?n } when (n.rooms is dot) => n.rooms = Inn }\n");
+    ok(world + "rule r { plan { ?n } when (n.rooms is open) => n.rooms = Inn }\n");
+    // a match-only named mask is still never written (check 15)
+    CHECK(compile_result(world + "rule r { plan { ?n } => n.rooms = open }\n").has_error("match-only"));
 }
 
 TEST_CASE("masks: a mask that selects nothing") {

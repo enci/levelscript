@@ -19,7 +19,7 @@ rule split { all
 }
 rule wall_between(symmetry=horizontal) {
     regions[?a ?b]
-    when (?a != ?b)
+    when (a != b)
     =>
     level[wall *]
 }

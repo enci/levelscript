@@ -1,10 +1,10 @@
-// E165 (0.15, check 57): a node extent writes a node's region; only a graph rule has nodes to write.
+// E165 (0.15, check 57): a graph write writes a node's region; it is a write of a graph rule only.
 // @expect error
-// @expect stderr-contains appears only on the write side of a graph rule
+// @expect stderr-contains is a write of a graph rule only
 tag room { Hall, Inn }
 layers {
     rooms: grid of room
     plan:  graph of rooms
 }
-rule r { plan[?n] => rooms(?n)[Inn] }
+rule r { plan[?n] => n.rooms = Inn }
 sequence main { resize(2, 2) everywhere r }

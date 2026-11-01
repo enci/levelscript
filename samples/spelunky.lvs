@@ -39,7 +39,7 @@ rule coarse_carve  { any
         open[?o * ]
     } => { all
         coarse[normal head]     // Move the algorithm forward
-        open[(?o|right) left]    // Mark the exits for the rooms
+        open[(o|right) left]    // Mark the exits for the rooms
     }
 
     // Expand to the left
@@ -48,7 +48,7 @@ rule coarse_carve  { any
         open[* ?o]
     } => { all
         coarse[head normal]     // 
-        open[right (?o|left)]    // Mark the exits for the rooms
+        open[right (o|left)]    // Mark the exits for the rooms
     }
 
     // Expand downward (`,` is a row break without a new line)
@@ -57,7 +57,7 @@ rule coarse_carve  { any
         open[?o, *]
     } => { all
         coarse[normal, head]   // Mark the current tile as visited and move the head down
-        open[(?o|down), up]     // Mark the exits for the rooms
+        open[(o|down), up]     // Mark the exits for the rooms
     }
 }
 
@@ -76,10 +76,10 @@ sequence coarse_off_path {
 // Room carving
 ///////////////////////////////////////////////////////////////////////////////
 rule fine_fill_rooms {
-    // This syntax will create (expand) a patten of 8x6 and with all the tiles
-    // with the same value (or variable in the case of ?r)
-    coarse(8, 6)[!.]
-    room_id(8, 6)[?r]  
+    // The one-cell patterns are uplifted to the 8x6 of the `fine` write: every
+    // cell is coarse-non-empty, and every cell holds the same room id ?r
+    coarse[!.]
+    room_id[?r]  
     => fine [
         S S S S S S S S 
         S B B B B B B S 
@@ -90,7 +90,7 @@ rule fine_fill_rooms {
 }
 
 rule fine_room_templates { ordered
-    room_id(8, 6)[?r] open(8,6)[left]
+    room_id[?r] open[left]
      => fine[
         * * * * * * * * 
         * * * * * * * * 
@@ -99,7 +99,7 @@ rule fine_room_templates { ordered
         * * * * * * * * 
         * * * * * * * * ]
 
-    room_id(8, 6)[?r] open(8,6)[right]
+    room_id[?r] open[right]
      => fine[
         * * * * * * * * 
         * * * * * * * * 
@@ -109,7 +109,7 @@ rule fine_room_templates { ordered
         * * * * * * * * ]
 
 
-    room_id(8, 6)[?r] open(8,6)[up]
+    room_id[?r] open[up]
      => fine[
         * * * C C * * * 
         * * * * * * * * 
@@ -119,7 +119,7 @@ rule fine_room_templates { ordered
         * * * * * * * * ]
 
 
-    room_id(8, 6)[?r] open(8,6)[down]
+    room_id[?r] open[down]
      => fine[
         * * * * * * * * 
         * * * * * * * * 
@@ -302,20 +302,20 @@ rule paint_props { all
 // The cave mouth (3x2) marks the start and the exit rooms, ideally on a
 // flat floor, but a ledge (or thin air) will do
 rule paint_start { ordered
-    coarse(3, 3)[start] fine[!S !S !S, !S !S !S, S S S]
+    coarse[start] fine[!S !S !S, !S !S !S, S S S]
     => tiles[11138 11139 11140, 11266 11267 11268, * * *]
-    coarse(3, 3)[start] fine[!S !S !S, !S !S !S, * S *]
+    coarse[start] fine[!S !S !S, !S !S !S, * S *]
     => tiles[11138 11139 11140, 11266 11267 11268, * * *]
-    coarse(3, 2)[start] fine[!S !S !S, !S !S !S]
+    coarse[start] fine[!S !S !S, !S !S !S]
     => tiles[11138 11139 11140, 11266 11267 11268]
 }
 
 rule paint_exit { ordered
-    coarse(3, 3)[exit] fine[!S !S !S, !S !S !S, S S S]
+    coarse[exit] fine[!S !S !S, !S !S !S, S S S]
     => tiles[11138 11139 11140, 11266 11267 11268, * * *]
-    coarse(3, 3)[exit] fine[!S !S !S, !S !S !S, * S *]
+    coarse[exit] fine[!S !S !S, !S !S !S, * S *]
     => tiles[11138 11139 11140, 11266 11267 11268, * * *]
-    coarse(3, 2)[exit] fine[!S !S !S, !S !S !S]
+    coarse[exit] fine[!S !S !S, !S !S !S]
     => tiles[11138 11139 11140, 11266 11267 11268]
 }
 

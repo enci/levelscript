@@ -1,0 +1,12 @@
+// Uplift (5.4): a 1x1 pattern in a larger pair stands for the pair's size.
+// The parser keeps it as written, one cell, on either side, for grids,
+// `where`, and graph patterns alike; sema expands it.
+rule rooms {
+    room[?r]
+    where[ (path != . && path == 0) ]
+    map[?n]
+    when (n.degree > 1)
+    =>
+    fine[W W, W W]
+}
+rule mixed { g[.] => { any g[a b] g[c] } }
