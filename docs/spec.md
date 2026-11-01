@@ -1907,10 +1907,12 @@ The same key twice on one target is a warning, and the last one applies. `@expec
 | `@name` | a `tag_value` | `IDENT` | display name (B.4) |
 | `@play` | a `statement` | `INTEGER` | steps per frame while playing (B.5) |
 | `@hold` | a `statement` | `INTEGER` | frames its result stays on screen while playing (B.6) |
+| `@view` | a grid `layer_entry` | `IDENT` | how the tools first draw the grid (B.8) |
+| `@tileset` | a grid `layer_entry` | `IDENT` | the tileset its `tiles` view draws from (B.8) |
 | `@expect` | the file | `TEXT` | a test expectation; repeatable (B.7) |
 | `@param` | the file | `TEXT`: `IDENT '=' '-'? INTEGER` | a param value for test runs (B.7) |
 
-A `named_mask`, a `layer_entry`, a rule, and a pattern cell are not targets.
+A `named_mask`, a graph `layer_entry`, a rule, and a pattern cell are not targets. A grid `layer_entry` starts at its name.
 
 ### B.3 `@seed`
 
@@ -2008,3 +2010,38 @@ In the `grid` form, `CELL` is a value name, `.` for an empty cell, or a number i
 
 params { difficulty: number = 0 }
 ```
+
+### B.8 `@view` and `@tileset`
+
+`@view` sets how the tools draw a grid when a program is opened. The tools draw the views that colour whole cells (`fill`, `ramp`, `tiles`) first, then the marks (`corner`, `shape`, `text`), then the `border` lines, so a mark is never covered by a square. Within each group, grids are drawn in declaration order, the first at the bottom. The view is chosen before the run starts and does not depend on what the grid holds, so it stays the same while the debugger plays. A tool may let the user change a grid's view for a session; the directive sets only the starting view.
+
+| view | draws |
+|---|---|
+| `fill` | each cell as a square in its value's colour |
+| `shape` | a marker in each cell: a shape and a colour per value |
+| `corner` | a small triangle in a corner of each cell; each `corner` grid takes the next corner, so up to four stay visible together |
+| `text` | the value written in each cell: the number in a `grid of number`, else the start of the value's name (not its `@name`) |
+| `border` | a line between neighbouring cells that hold different values, and nothing inside them |
+| `ramp` | each cell of a `grid of number` as a square, coloured on a gradient from the lowest value the grid has held so far in the run to the highest |
+| `tiles` | each cell as a tile from the grid's `@tileset` |
+| `hidden` | nothing, until the user shows the grid |
+
+Text needs room: where the cells are too small to read it, a tool leaves a `text` grid out and says so, rather than drawing it in another view. The `ramp` range only widens, so a field written in one operation, such as `noise`, keeps its colours for the rest of the run.
+
+Without `@view`, the first grid is drawn as `fill` and every other grid as `shape`. In a `grid of number`, each value has a colour of its own, as a tag value does, except under `ramp`.
+
+`@tileset` names the tileset a `tiles` view draws from. A tileset is a tool setting, not part of the program: an image, a tile size, and the tile of each tag value, kept by the tool under a name. The program names it and never refers to a file. A grid may have a `@tileset` without `@view=tiles`, for the user to switch to.
+
+It is a warning, and the grid is drawn as `fill`, when `ramp` is set on a tag grid, or `tiles` on a grid without `@tileset`. A tool that knows no tileset of the given name draws the grid as `fill` and says so; that is the tool's notice, not a directive warning, since each tool keeps its own tilesets.
+
+```ls
+layers {
+    zones: grid of number    // @view=border
+    level: grid of geometry  // @view=tiles @tileset=dungeon
+    roles: grid of role      // @view=corner
+    items: grid of items     // @view=shape
+    algo:  grid of algo      // @view=hidden
+}
+```
+
+Here the dungeon is drawn in tiles with the room borders on top, each cell's role as a corner mark and the items as markers. The working grid `algo` stays hidden until the user shows it.

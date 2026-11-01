@@ -96,10 +96,40 @@ TEST_CASE("directives: no target, or an ambiguous one") {
     CHECK(warns(read("// @name=x\ntag t {\n a\n}\n"), "none starts on line 2"));
     CHECK(warns(read("tag t {\n a\n}\n// @name=x\n"), "none starts after it"));
     CHECK(warns(read("tag t { a }\nlayers {\n g: grid of t // @play=1\n}\n"), "needs a statement"));
-    // tiles are the tools' settings, not the script's
-    CHECK(warns(read("tag t { a }\nlayers {\n g: grid of t // @tileset=s\n}\n"),
-                "unknown directive '@tileset'"));
+    // a tile index belongs to the tileset, not to the script
     CHECK(warns(read("tag t {\n a // @tile=3\n}\n"), "unknown directive '@tile'"));
+}
+
+TEST_CASE("directives: @view and @tileset attach to grids") {
+    auto d = read("tag t { a }\nlayers {\n"
+                  "    zones: grid of number   // @view=border\n"
+                  "    // @view=tiles @tileset=dungeon\n"
+                  "    level: grid of t\n"
+                  "    algo:  grid of t        // @view=hidden\n"
+                  "}\n");
+    CHECK(d.warnings.all.empty());
+    CHECK(d.find("view", directive_target::layer, "", "zones")->value == "border");
+    CHECK(d.find("view", directive_target::layer, "", "level")->value == "tiles");
+    CHECK(d.find("tileset", directive_target::layer, "", "level")->value == "dungeon");
+    CHECK(d.find("view", directive_target::layer, "", "algo")->value == "hidden");
+    CHECK(read("layers {\n g: grid of number // @view=text\n}\n").warnings.all.empty());
+    CHECK(warns(read("tag t { a }\nlayers {\n g: grid of t // @view=dots\n}\n"),
+                "'@view' takes fill, shape, corner, text, border, ramp, tiles or hidden, got 'dots'"));
+    CHECK(warns(read("tag t {\n a // @view=fill\n}\n"), "needs a grid"));
+    CHECK(warns(read("tag t { a }\nlayers {\n g: grid of t\n h: grid of t\n}\n"
+                     "sequence main {\n resize(2, 2) // @view=fill\n}\n"), "needs a grid"));
+    CHECK(warns(read("layers { g: grid of number, h: grid of number } // @view=fill\n"),
+                "ambiguous: 2 grids"));
+}
+
+TEST_CASE("directives: a @view that does not suit its grid warns") {
+    CHECK(warns(read("tag t { a }\nlayers {\n g: grid of t // @view=ramp\n}\n"),
+                "'@view=ramp' is for a grid of number"));
+    CHECK(read("layers {\n g: grid of number // @view=ramp\n}\n").warnings.all.empty());
+    CHECK(warns(read("tag t { a }\nlayers {\n g: grid of t // @view=tiles\n}\n"),
+                "'@view=tiles' needs a '@tileset'"));
+    // a tileset without the tiles view is kept for the tools to switch to
+    CHECK(read("tag t { a }\nlayers {\n g: grid of t // @tileset=s\n}\n").warnings.all.empty());
 }
 
 TEST_CASE("directives: the same key twice - the last one applies") {

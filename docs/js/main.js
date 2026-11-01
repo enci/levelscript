@@ -57,7 +57,7 @@
     return runtime;
   }
 
-  // `use "path"` inside a sample resolves against the bundled sample modules.
+  // `use "path"` inside a sample resolves against the bundled sample files (samples/<group>/...).
   function resolver(from) {
     const files = window.LVS_FILES || {};
     return (path, importer) => {
@@ -65,7 +65,10 @@
       const out = [];
       parts.forEach(p => { if (p === '..') out.pop(); else if (p && p !== '.') out.push(p); });
       const name = out.join('/');
-      return name in files ? { name, source: files[name] } : null;
+      if (name in files) return { name, source: files[name] };
+      // a sample opened in the sandbox (sandbox.lvs) still finds the files next to it
+      const near = Object.keys(files).filter(k => k.endsWith('/' + name));
+      return near.length === 1 ? { name: near[0], source: files[near[0]] } : null;
     };
   }
 
@@ -89,18 +92,18 @@
   const lightTheme = () => document.documentElement.dataset.theme === 'light';
   const named = n => (lightTheme() && NAMED_LIGHT[n]) || NAMED[n];
 
-  function hashColor(s) {
+  function strHash(s) {
     let h = 0;
     for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-    return 'hsl(' + (h % 360) + ' 55% 62%)';
+    return h;
   }
-
-  // A cell is an array of tag value names ([] = empty) or, in number layers, a number / null.
-  function cellColor(layer, cell) {
-    if (layer.isNumber) return numberGray(cell);
-    const name = cell[0];
-    return named(name) || hashColor(name);
-  }
+  // The colours of tag values without one in NAMED, and of numbers. Picked to stay apart from
+  // each other and from the greens of the named terrain; only one is green.
+  const PALETTE = ['#4e9fff', '#ff8c42', '#c77dff', '#ffd23f', '#ff5c8a', '#3fd0d0',
+                   '#a3e048', '#b5835a', '#f25c54', '#8c9eff', '#ff9ff3', '#e8e8e8'];
+  const paletteAt = i => PALETTE[((i % PALETTE.length) + PALETTE.length) % PALETTE.length];
+  // A value whose tagset is unknown (e.g. the legend before the first inspection)
+  function hashColor(s) { return paletteAt(strHash(s)); }
 
   // Tag-value colours are shared by the map and the editor, and the map leads: the editor tints
   // each value with its map colour (editorTint below).
@@ -128,19 +131,57 @@
     const sat = Math.min(hsl[1], lightTheme() ? 75 : 45); // vivid colours are toned down behind text
     return 'hsl(' + hsl[0].toFixed(0) + ' ' + sat.toFixed(0) + '% ' + l.toFixed(1) + '%)';
   }
-  function numberGray(n) {
-    const v = Math.min(255, 40 + (n * 7) % 200);
-    return 'rgb(' + v + ',' + v + ',' + v + ')';
+  // A colour per number, as a tag value has one: consecutive ids never share a colour.
+  function numberColor(n) { return paletteAt(n); }
+  // @view=ramp: viridis, from the lowest value to the highest
+  const RAMP = [[68, 1, 84], [59, 82, 139], [33, 145, 140], [94, 201, 98], [253, 231, 37]];
+  function rampColor(t) {
+    const f = Math.max(0, Math.min(1, t)) * (RAMP.length - 1);
+    const i = Math.min(RAMP.length - 2, Math.floor(f)), k = f - i;
+    return 'rgb(' + RAMP[i].map((v, j) => Math.round(v + (RAMP[i + 1][j] - v) * k)).join(',') + ')';
   }
 
   function isEmpty(layer, cell) {
     return layer.isNumber ? cell === null : cell.length === 0;
   }
 
-  const HIDDEN_BY_DEFAULT = new Set(['a', 'algo']);
+  // The views of spec B.8 a layer can be switched to here. `tiles` is drawn as fill: the site
+  // has no tilesets yet.
+  const VIEWS = ['fill', 'shape', 'corner', 'text', 'border', 'ramp', 'hidden'];
+  const TEXT_MIN_CELL = 12;   // px: below this a text view is left out (spec B.8)
+  const SHAPES = ['circle', 'square', 'diamond', 'triangle', 'ring', 'cross'];
 
-  // state: parsed run_* JSON. visible: Set of layer names. Returns where the cells were drawn.
-  function drawState(canvas, state, visible) {
+  // A marker of radius r at (cx, cy), filled with the current fillStyle.
+  function drawShape(g, shape, cx, cy, r) {
+    g.beginPath();
+    if (shape === 'square') g.rect(cx - r * 0.85, cy - r * 0.85, r * 1.7, r * 1.7);
+    else if (shape === 'diamond') { g.moveTo(cx, cy - r); g.lineTo(cx + r, cy); g.lineTo(cx, cy + r); g.lineTo(cx - r, cy); }
+    else if (shape === 'triangle') { g.moveTo(cx, cy - r); g.lineTo(cx + r, cy + r * 0.8); g.lineTo(cx - r, cy + r * 0.8); }
+    else if (shape === 'cross') {
+      const t = r * 0.38;
+      [[-t, -r], [t, -r], [t, -t], [r, -t], [r, t], [t, t], [t, r], [-t, r], [-t, t], [-r, t], [-r, -t], [-t, -t]]
+        .forEach(([dx, dy], i) => (i ? g.lineTo : g.moveTo).call(g, cx + dx, cy + dy));
+    } else g.arc(cx, cy, shape === 'ring' ? r * 0.75 : r, 0, Math.PI * 2);
+    g.closePath();
+    if (shape === 'ring') {
+      const fill = g.fillStyle;
+      g.lineWidth = Math.max(1.5, r * 0.45);
+      g.strokeStyle = 'rgba(0,0,0,0.55)';
+      g.stroke();
+      g.lineWidth = Math.max(1, r * 0.3);
+      g.strokeStyle = fill;
+      g.stroke();
+      return;
+    }
+    g.fill();
+    g.lineWidth = 1;
+    g.strokeStyle = 'rgba(0,0,0,0.55)';
+    g.stroke();
+  }
+
+  // state: parsed run_* JSON. look: { view(layer, i), range(layer), shape(layer, cell) }.
+  // Returns where the cells were drawn.
+  function drawState(canvas, state, look) {
     const lvl = state.level;
     const w = lvl.width, h = lvl.height;
     const g = canvas.getContext('2d');
@@ -149,30 +190,88 @@
     const cs = Math.max(2, Math.floor(Math.min(canvas.width / w, canvas.height / h)));
     const ox = Math.floor((canvas.width - w * cs) / 2);
     const oy = Math.floor((canvas.height - h * cs) / 2);
-    let first = true;
-    lvl.layers.forEach(layer => {
-      if (!visible.has(layer.name)) return;
+    g.fillStyle = lightTheme() ? EMPTY.light : EMPTY.dark;
+    g.fillRect(ox, oy, w * cs, h * cs);
+    // squares first, then the marks, then the border lines (spec B.8); each in declaration order
+    const RANK = { fill: 0, ramp: 0, corner: 1, shape: 1, text: 1, border: 2 };
+    const order = lvl.layers.map((layer, li) => ({ layer, view: look.view(layer, li), li }))
+      .filter(e => e.view !== 'hidden')
+      .sort((a, b) => RANK[a.view] - RANK[b.view] || a.li - b.li);
+    let corners = 0;
+    order.forEach(({ layer, view }) => {
+      if (view === 'border') {
+        const key = c => layer.isNumber ? String(c) : c.join('|');
+        g.strokeStyle = lightTheme() ? 'rgba(10,30,22,0.85)' : 'rgba(245,250,240,0.9)';
+        g.lineWidth = Math.max(1, Math.round(cs / 6));
+        g.beginPath();
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            const k = key(layer.cells[y * w + x]);
+            if (x + 1 < w && key(layer.cells[y * w + x + 1]) !== k) {
+              g.moveTo(ox + (x + 1) * cs, oy + y * cs); g.lineTo(ox + (x + 1) * cs, oy + (y + 1) * cs);
+            }
+            if (y + 1 < h && key(layer.cells[(y + 1) * w + x]) !== k) {
+              g.moveTo(ox + x * cs, oy + (y + 1) * cs); g.lineTo(ox + (x + 1) * cs, oy + (y + 1) * cs);
+            }
+          }
+        }
+        g.stroke();
+        return;
+      }
+      if (view === 'text') {
+        if (cs < TEXT_MIN_CELL) return;
+        // as large as fits: up to 3/4 of the cell, smaller for longer text down to MIN_PX, and
+        // cut to what fits at MIN_PX. A monospace character is about 0.6 of the font size wide.
+        const MIN_PX = 9, room = cs * 0.92;
+        const maxChars = Math.max(1, Math.floor(room / (MIN_PX * 0.6)));
+        g.textAlign = 'center';
+        g.textBaseline = 'middle';
+        g.lineJoin = 'round';
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            const cell = layer.cells[y * w + x];
+            if (isEmpty(layer, cell)) continue;
+            const t = (layer.isNumber ? String(cell) : cell[0]).slice(0, maxChars);
+            const px = Math.max(MIN_PX, Math.floor(Math.min(cs * 0.75, room / (t.length * 0.6))));
+            const cx = ox + x * cs + cs / 2, cy = oy + y * cs + cs / 2 + 0.5;
+            // the value's colour, outlined in black, or in white for the dark colours
+            const color = look.color(layer, cell), hsl = toHsl(color);
+            g.font = '700 ' + px + 'px ui-monospace, monospace';
+            g.lineWidth = Math.max(2, px / 5);
+            g.strokeStyle = hsl && hsl[2] < 40 ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.8)';
+            g.strokeText(t, cx, cy);
+            g.fillStyle = color;
+            g.fillText(t, cx, cy);
+          }
+        }
+        return;
+      }
+      const range = view === 'ramp' ? look.range(layer) : null;
+      const slot = view === 'corner' ? corners++ % 4 : 0;   // TL, TR, BR, BL
+      const r = Math.max(1.5, cs * 0.36), leg = cs * 0.5;
       for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
           const cell = layer.cells[y * w + x];
-          if (isEmpty(layer, cell)) {
-            if (first) { g.fillStyle = lightTheme() ? EMPTY.light : EMPTY.dark; g.fillRect(ox + x * cs, oy + y * cs, cs, cs); }
+          if (isEmpty(layer, cell)) continue;
+          const x0 = ox + x * cs, y0 = oy + y * cs;
+          if (view === 'ramp') {
+            g.fillStyle = rampColor(range.hi > range.lo ? (cell - range.lo) / (range.hi - range.lo) : 0.5);
+            g.fillRect(x0, y0, cs, cs);
             continue;
           }
-          g.fillStyle = cellColor(layer, cell);
-          if (first) g.fillRect(ox + x * cs, oy + y * cs, cs, cs);
-          else {
-            const r = Math.max(1.5, cs * 0.36);
+          g.fillStyle = look.color(layer, cell);
+          if (view === 'shape') drawShape(g, look.shape(layer, cell), x0 + cs / 2, y0 + cs / 2, r);
+          else if (view === 'corner') {
+            const cx = slot === 1 || slot === 2 ? x0 + cs : x0, cy = slot >= 2 ? y0 + cs : y0;
             g.beginPath();
-            g.arc(ox + x * cs + cs / 2, oy + y * cs + cs / 2, r, 0, Math.PI * 2);
+            g.moveTo(cx, cy);
+            g.lineTo(cx + (cx === x0 ? leg : -leg), cy);
+            g.lineTo(cx, cy + (cy === y0 ? leg : -leg));
+            g.closePath();
             g.fill();
-            g.lineWidth = 1;
-            g.strokeStyle = 'rgba(0,0,0,0.55)';
-            g.stroke();
-          }
+          } else g.fillRect(x0, y0, cs, cs);   // fill, and tiles until the site has tilesets
         }
       }
-      first = false;
     });
     if (cs >= 8) {
       g.strokeStyle = 'rgba(0,0,0,0.12)';
@@ -183,62 +282,28 @@
       g.stroke();
     }
     // the cells the last rule application matched / wrote; a finished run shows just the level
+    // in colours no tag value uses, over a dark outline so they show on any cell
     (state.done ? [] : state.highlights || []).forEach(hl => {
       const layer = lvl.layers[hl.layer];
-      if (!layer || !visible.has(layer.name)) return;
+      if (!layer || look.view(layer, hl.layer) === 'hidden') return;
+      const x0 = ox + hl.x * cs + 1, y0 = oy + hl.y * cs + 1;
+      g.lineWidth = 4;
+      g.strokeStyle = 'rgba(0,0,0,0.7)';
+      g.strokeRect(x0, y0, cs - 2, cs - 2);
       g.lineWidth = 2;
-      g.strokeStyle = hl.what === 'write' ? '#3fe0a5' : '#f5dd7e';
-      g.strokeRect(ox + hl.x * cs + 1, oy + hl.y * cs + 1, cs - 2, cs - 2);
+      g.strokeStyle = hl.what === 'write' ? '#ff3df2' : '#ffffff';
+      g.strokeRect(x0, y0, cs - 2, cs - 2);
     });
     return { cs, ox, oy, w, h };
   }
 
-  function defaultVisible(lvl) {
-    const vis = new Set(lvl.layers.filter(l => !HIDDEN_BY_DEFAULT.has(l.name)).map(l => l.name));
-    return vis.size ? vis : new Set(lvl.layers.map(l => l.name));
-  }
-
-  // Which layers are shown, remembered per program file in localStorage:
-  // { [fileName]: { shown: [...], hidden: [...] } }. Names only, so a program that gains or
-  // renames a layer keeps the choice for the layers it still has.
-  const LAYERS_STORE = 'lvs.layers.v1';
-  function layerPrefs() {
-    try { return JSON.parse(localStorage.getItem(LAYERS_STORE)) || {}; } catch (e) { return {}; }
-  }
-  function saveLayerPrefs(file, lvl, visible) {
-    const all = layerPrefs();
-    const prev = all[file] || { shown: [], hidden: [] };
-    const names = new Set(lvl.layers.map(l => l.name));
-    // keep what was said about layers this run does not have (e.g. another sample in the sandbox)
-    const shown = new Set(prev.shown.filter(n => !names.has(n)));
-    const hidden = new Set(prev.hidden.filter(n => !names.has(n)));
-    names.forEach(n => (visible.has(n) ? shown : hidden).add(n));
-    all[file] = { shown: [...shown], hidden: [...hidden] };
-    try { localStorage.setItem(LAYERS_STORE, JSON.stringify(all)); } catch (e) {}
-  }
-
-  // The visible set for a new list of layers: a layer this widget already showed keeps its
-  // state, then the remembered choice, then the default.
-  function chooseVisible(lvl, prevNames, prevVisible, saved) {
-    const def = defaultVisible(lvl);
-    const vis = new Set();
-    lvl.layers.forEach(({ name }) => {
-      let on;
-      if (prevNames.has(name)) on = prevVisible.has(name);
-      else if (saved && saved.shown.includes(name)) on = true;
-      else if (saved && saved.hidden.includes(name)) on = false;
-      else on = def.has(name);
-      if (on) vis.add(name);
-    });
-    return vis.size ? vis : def;
-  }
-
-  // every value on a visible tag layer, hand-picked and hashed colours alike
-  function legendFor(lvl, visible) {
-    const seen = new Set();
-    lvl.layers.forEach(l => {
-      if (l.isNumber || !visible.has(l.name)) return;
-      l.cells.forEach(c => c.forEach(n => seen.add(n)));
+  // every value on a drawn tag layer, hand-picked and palette colours alike: [name, colour]
+  function legendFor(lvl, look) {
+    const seen = new Map();
+    lvl.layers.forEach((l, i) => {
+      const view = look.view(l, i);
+      if (l.isNumber || view === 'hidden' || view === 'border') return;
+      l.cells.forEach(c => c.forEach(n => { if (!seen.has(n)) seen.set(n, look.color(l, [n])); }));
     });
     return [...seen];
   }
@@ -249,15 +314,21 @@
   function createWidget(host, sample, opts) {
     opts = opts || {};
     const init = opts.initial || {};
-    const fileName = opts.fileName || sample.name + '.lvs';
-    const remember = opts.editor !== false;   // the hero has no layer chips: always the default
+    const fileName = opts.fileName || sample.file || sample.name + '.lvs';
     const params = {};
     let seed = Number.isInteger(init.seed) ? init.seed : sample.seed;
     let worker = null, runToken = 0, runTimer = null, pending = false;
     let sessionId = -1;
     let mod = null;
-    let visible = new Set();
-    let layersKey = '';
+    // Layer views (spec B.8): the @view directives, and what the user switched this session.
+    // A user's choice lasts until the layer's directive changes.
+    let dirViews = {}, tilesets = {}, userViews = {};
+    let rampRange = {};    // number layer -> { lo, hi } seen so far in this run
+    let valueIndex = {};   // layer -> { value: position in its tagset }, for the marker shapes
+    let layerTag = {};     // layer -> its tagset
+    let slots = {};        // tagset -> { value: palette slot }, for values without a NAMED colour
+    let colorKey = {};     // tagset -> { value: its @name, if it has one }
+    let chipsKey = '';
     let playTimer = null;
     let debounce = null;
     let last = null;
@@ -358,35 +429,82 @@
       if (last) render(last);
     });
 
+    // A layer's view: the user's switch, else its @view, else fill for the first layer and
+    // shape for the rest. Known before the run starts, so it never changes while playing.
+    function baseView(layer, i) {
+      let v = dirViews[layer.name] || (i === 0 ? 'fill' : 'shape');
+      if (v === 'ramp' && !layer.isNumber) v = 'fill';
+      return v === 'tiles' ? 'fill' : v;
+    }
+    // A tag value's colour comes from its @name, else its own name: the NAMED colour of that
+    // name, else the palette slot its hash picks, moved on to the next free one if an earlier
+    // value of the tagset has it. So a name looks the same in every file, and two values of
+    // one tagset never share a colour.
+    function tagColor(tagset, name) {
+      const key = (colorKey[tagset] || {})[name] || name;
+      const slot = (slots[tagset] || {})[name];
+      return named(key) || (slot !== undefined ? paletteAt(slot) : hashColor(key));
+    }
+    const look = {
+      view: (layer, i) => userViews[layer.name] || baseView(layer, i),
+      color: (layer, cell) => layer.isNumber ? numberColor(cell) : tagColor(layerTag[layer.name], cell[0]),
+      range: layer => rampRange[layer.name] || { lo: 0, hi: 0 },
+      shape(layer, cell) {
+        const at = layer.isNumber ? cell : (valueIndex[layer.name] || {})[cell[0]] ?? strHash(cell[0]);
+        return SHAPES[((at % SHAPES.length) + SHAPES.length) % SHAPES.length];
+      }
+    };
+    // number layers: the ramp range only widens during a run (spec B.8)
+    function widenRanges(lvl) {
+      lvl.layers.forEach(l => {
+        if (!l.isNumber) return;
+        const r = rampRange[l.name] || (rampRange[l.name] = { lo: Infinity, hi: -Infinity });
+        l.cells.forEach(c => { if (c !== null) { if (c < r.lo) r.lo = c; if (c > r.hi) r.hi = c; } });
+      });
+    }
+    // one chip per layer: its name shows or hides it, its menu switches the view
+    function buildChips(lvl) {
+      const chips = $('.layer-chips');
+      chips.innerHTML = '';
+      lvl.layers.forEach((layer, i) => {
+        const view = look.view(layer, i);
+        const c = document.createElement('span');
+        c.className = 'chip' + (view === 'hidden' ? '' : ' on');
+        if (view === 'text' && geom && geom.cs < TEXT_MIN_CELL)
+          c.title = 'The cells are too small for text here; hover a cell to read its values';
+        else if (dirViews[layer.name] === 'tiles')
+          c.title = 'tileset ' + (tilesets[layer.name] || '?') + ': the site has no tilesets yet, so the layer is drawn as fill';
+        const name = document.createElement('span');
+        name.textContent = layer.name;
+        name.title = 'Show or hide the layer';
+        name.onclick = () => {
+          const base = baseView(layer, i);
+          userViews[layer.name] = view !== 'hidden' ? 'hidden' : base !== 'hidden' ? base : i === 0 ? 'fill' : 'shape';
+          render(last);
+        };
+        const menu = document.createElement('select');
+        menu.className = 'chip-view';
+        menu.title = 'How the layer is drawn';
+        menu.setAttribute('aria-label', 'View of ' + layer.name);
+        VIEWS.filter(v => v !== 'ramp' || layer.isNumber).forEach(v => menu.add(new Option(v, v)));
+        menu.value = view;
+        menu.onchange = () => { userViews[layer.name] = menu.value; render(last); };
+        c.append(name, menu);
+        chips.appendChild(c);
+      });
+    }
+
     function render(state) {
       last = state;
       const lvl = state.level;
-      const key = lvl.layers.map(l => l.name).join(',');
-      if (key !== layersKey) {
-        const prevNames = new Set(layersKey ? layersKey.split(',') : []);
-        layersKey = key;
-        visible = chooseVisible(lvl, prevNames, visible, remember ? layerPrefs()[fileName] : null);
-        const chips = $('.layer-chips');
-        chips.innerHTML = '';
-        if (lvl.layers.length > 1) lvl.layers.forEach(layer => {
-          const c = document.createElement('span');
-          c.className = 'chip' + (visible.has(layer.name) ? ' on' : '');
-          c.textContent = layer.name;
-          c.title = 'Toggle layer';
-          c.onclick = () => {
-            if (visible.has(layer.name)) { if (visible.size > 1) visible.delete(layer.name); }
-            else visible.add(layer.name);
-            if (remember) saveLayerPrefs(fileName, lvl, visible);
-            chips.querySelectorAll('.chip').forEach((el, i) => el.classList.toggle('on', visible.has(lvl.layers[i].name)));
-            render(last);
-          };
-          chips.appendChild(c);
-        });
-      }
-      geom = drawState(canvas, state, visible);
+      widenRanges(lvl);
+      const key = lvl.layers.map((l, i) => l.name + ':' + l.isNumber + ':' + look.view(l, i)).join(',') +
+        ':' + (geom && geom.cs < TEXT_MIN_CELL);
+      if (key !== chipsKey) { chipsKey = key; buildChips(lvl); }
+      geom = drawState(canvas, state, look);
       showTip();
-      $('.legend').innerHTML = legendFor(lvl, visible)
-        .map(n => '<span><i style="background:' + cellColor({}, [n]) + '"></i>' + esc(n) +
+      $('.legend').innerHTML = legendFor(lvl, look)
+        .map(([n, color]) => '<span><i style="background:' + color + '"></i>' + esc(n) +
           (displayNames[n] ? ' <em>' + esc(displayNames[n]) + '</em>' : '') + '</span>').join('');
       status.textContent = (state.done ? 'done' : 'statement ' + Math.min(state.statementIndex + 1, state.statementCount) +
         ' / ' + state.statementCount) + ' · ' + lvl.width + '×' + lvl.height;
@@ -415,7 +533,7 @@
       if (!at) return;
       const lvl = last.level, i = at.y * lvl.width + at.x;
       tip.innerHTML = '<b>' + at.x + ', ' + at.y + '</b>' + lvl.layers.map(l =>
-        '<div' + (visible.has(l.name) ? '' : ' class="off"') + '><span>' + esc(l.name) + '</span>' +
+        '<div' + (look.view(l, lvl.layers.indexOf(l)) === 'hidden' ? ' class="off"' : '') + '><span>' + esc(l.name) + '</span>' +
         valueText(l, l.cells[i]) + '</div>').join('');
     }
     canvas.addEventListener('mousemove', e => {
@@ -440,21 +558,56 @@
     let displayNames = {}, plays = {}, holds = {};
     // the editor's tag-value backgrounds come from the map
     function editorColor(info) {
-      if (info.number !== undefined) return editorTint(numberGray(info.number));
-      return editorTint(named(info.name) || hashColor(info.name));
+      if (info.number !== undefined) return editorTint(numberColor(info.number));
+      return editorTint(tagColor(info.tag, info.name));
     }
     function inspectNow() {
       insp = null;
-      if (!mod || !ed) return;
-      try { insp = JSON.parse(mod.inspect_json(ed.value(), fileName, resolver(fileName))); } catch (e) { insp = null; }
+      if (!mod) return;
+      try { insp = JSON.parse(mod.inspect_json(source(), fileName, resolver(fileName))); } catch (e) { insp = null; }
       displayNames = {};
       plays = {};
       holds = {};
+      const prevViews = dirViews;
+      colorKey = {};
+      dirViews = {};
+      tilesets = {};
       ((insp && insp.directives) || []).forEach(d => {
-        if (d.key === 'name') displayNames[d.target.name] = d.value;
+        if (d.key === 'name') {
+          displayNames[d.target.name] = d.value;
+          (colorKey[d.target.owner] || (colorKey[d.target.owner] = {}))[d.target.name] = d.value;
+        }
         if (d.key === 'play') plays[d.target.owner + '#' + d.target.index] = +d.value;
         if (d.key === 'hold') holds[d.target.owner + '#' + d.target.index] = +d.value;
+        if (d.key === 'view') dirViews[d.target.name] = d.value;
+        if (d.key === 'tileset') tilesets[d.target.name] = d.value;
       });
+      Object.keys(userViews).forEach(n => { if (dirViews[n] !== prevViews[n]) delete userViews[n]; });
+      valueIndex = {};
+      layerTag = {};
+      slots = {};
+      if (insp && insp.symbols) {
+        const tags = {};
+        (insp.symbols.tags || []).forEach(t => {
+          tags[t.name] = t.values.map(v => v.name);
+          const taken = new Set();
+          slots[t.name] = {};
+          t.values.forEach(v => {
+            const key = (colorKey[t.name] || {})[v.name] || v.name;
+            if (NAMED[key]) return;
+            let slot = strHash(key) % PALETTE.length;
+            for (let i = 0; i < PALETTE.length && taken.has(slot); i++) slot = (slot + 1) % PALETTE.length;
+            taken.add(slot);
+            slots[t.name][v.name] = slot;
+          });
+        });
+        (insp.symbols.layers || []).forEach(l => {
+          if (!tags[l.type]) return;
+          layerTag[l.name] = l.type;
+          valueIndex[l.name] = {};
+          tags[l.type].forEach((v, i) => { valueIndex[l.name][v] = i; });
+        });
+      }
     }
     // The @play pace at a run state: the innermost statement on its stack with one (a sequence
     // application's covers its body). undefined: none.
@@ -554,6 +707,7 @@
       endSession();
       showError('');
       if (blocked()) return false;
+      rampRange = {};
       const id = mod.run_begin(source(), fileName, seed >>> 0, 'main', resolver(fileName), params);
       if (id < 0) { showError(mod.run_last_error()); status.textContent = 'compile error'; return false; }
       sessionId = id;
@@ -593,6 +747,7 @@
         clearTimeout(runTimer);
         pending = false;
         if (e.data.error) { showError(e.data.error); status.textContent = 'compile error'; return; }
+        rampRange = {};
         render(JSON.parse(e.data.state));
       };
       worker.onerror = () => { stopWorker(); showError('The run worker failed to start.'); status.textContent = 'runtime unavailable'; };
@@ -624,13 +779,14 @@
       stopPlay();
       render(JSON.parse(mod.run_next_statement(sessionId)));
     };
-    $('.play').onclick = () => {
-      if (playTimer) { stopPlay(); return; }
+    function startPlay() {
+      clearTimeout(debounce);
       if (!begin()) return;
       render(JSON.parse(mod.run_state(sessionId)));
       $('.play').innerHTML = '<i class="fas fa-pause"></i> Pause';
       play();
-    };
+    }
+    $('.play').onclick = () => { if (playTimer) stopPlay(); else startPlay(); };
     $('.dice').onclick = () => { seed = Math.floor(Math.random() * 1e6); seedInput.value = seed; changed(); runAll(); };
     seedInput.addEventListener('input', () => {
       const v = parseInt(seedInput.value, 10);
@@ -678,7 +834,7 @@
         ed.reset(src);
         shown = null;
         sync();
-        scheduleRun(0);
+        if (opts.autoplay && mod) startPlay(); else scheduleRun(0);
       },
       // put text at the caret, without replacing a selection
       insert(text) { ed.insert(text); }
@@ -693,7 +849,7 @@
       mod = m;
       host.querySelectorAll('.controls button').forEach(b => { b.disabled = false; });
       if (ed) sync();
-      if (opts.autoplay) { $('.play').click(); } else { runAll(); }
+      if (opts.autoplay) startPlay(); else runAll();
       return api;
     }).catch(err => {
       showError(String(err.message || err));
@@ -724,22 +880,34 @@
 
   document.querySelectorAll('[data-demo]').forEach(el => {
     const s = sampleByName(el.dataset.demo);
-    if (s) lazy(el, () => createWidget(el, s, { height: 400 }));
+    if (s) lazy(el, () => createWidget(el, s, { height: 400, autoplay: true }));
   });
 
   // ---------- hero: the dungeon generating itself, step by step ----------
+  const HERO = 'roguelike';
   const hero = document.getElementById('hero-widget');
-  if (hero && sampleByName('dungeon')) {
+  if (hero && sampleByName(HERO)) {
     let w;
     const loop = () => setTimeout(() => w && w.replay(), 2500);
-    createWidget(hero, sampleByName('dungeon'), { editor: false, autoplay: true, height: 600, onFinish: loop })
+    createWidget(hero, sampleByName(HERO), { editor: false, autoplay: true, height: 600, onFinish: loop })
       .then(x => { w = x; });
   }
 
   // ---------- samples gallery ----------
+  // one section per samples/ folder, in the order build_site_data.py emits them
+  const GROUP_TITLES = { tutorial: 'Tutorial', techniques: 'Techniques', games: 'Games' };
   const gallery = document.getElementById('sample-grid');
   if (gallery) {
+    let group = null;
     (window.LVS_SAMPLES || []).forEach(s => {
+      if (s.group && s.group !== group) {
+        group = s.group;
+        const h = document.createElement('h2');
+        h.className = 'sample-group';
+        h.id = group;
+        h.textContent = GROUP_TITLES[group] || group;
+        gallery.appendChild(h);
+      }
       const card = document.createElement('article');
       card.className = 'sample-card';
       card.id = s.name;
@@ -748,7 +916,7 @@
         '<i class="fas fa-up-right-from-square"></i> open in sandbox</a></header>' +
         (s.about ? '<p class="about">' + esc(s.about) + '</p>' : '') + '<div class="host"></div>';
       gallery.appendChild(card);
-      lazy(card, () => createWidget(card.querySelector('.host'), s, { height: 420 }));
+      lazy(card, () => createWidget(card.querySelector('.host'), s, { height: 420, autoplay: true }));
     });
     if (location.hash) {
       const t = document.getElementById(decodeURIComponent(location.hash.slice(1)));
@@ -767,7 +935,7 @@
     // does not wipe scripts made in the first. The single draft of earlier versions
     // (lvs.sandbox.v1, .prev) becomes the first script(s) on the first visit.
     const LIB = 'lvs.scripts.v1', OLD = 'lvs.sandbox.v1', OLD_PREV = OLD + '.prev';
-    const DEFAULT_SAMPLE = 'dungeon';
+    const DEFAULT_SAMPLE = 'roguelike';
     const STARTER = [
       'tag terrain { wall, floor }',
       'layers { level: grid of terrain }',
@@ -903,6 +1071,7 @@
       name: 'sandbox', source: start.source, seed: start.seed, params: parseParams(start.source)
     }, {
       height: Number(sandboxEl.dataset.height) || 420, worker: true, dynamicParams: true, fileName: 'sandbox.lvs',
+      autoplay: true,
       diagUnderEditor: 'diagUnderEditor' in sandboxEl.dataset,
       initial: { source: start.source, seed: start.seed, params: start.params },
       onChange, onApi: api => { widget = api; window.LVS_sandbox = api; }
@@ -958,11 +1127,18 @@
 
     // a sample or a file always opens as a new script: nothing is overwritten
     const pick = document.getElementById('sb-sample');
+    let optgroup = pick;
     (window.LVS_SAMPLES || []).forEach(s => {
+      if (s.group && s.group !== optgroup.dataset.group) {
+        optgroup = document.createElement('optgroup');
+        optgroup.label = GROUP_TITLES[s.group] || s.group;
+        optgroup.dataset.group = s.group;
+        pick.appendChild(optgroup);
+      }
       const o = document.createElement('option');
       o.value = s.name;
       o.textContent = s.name + '.lvs';
-      pick.appendChild(o);
+      optgroup.appendChild(o);
     });
     pick.addEventListener('change', () => {
       const s = sampleByName(pick.value);
@@ -998,6 +1174,21 @@
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     });
+
+    // Ctrl/Cmd+S out of habit: every edit is kept already, so it saves at once and says so,
+    // instead of the browser's "save page". With Shift it downloads the .lvs file.
+    const savedIcon = document.getElementById('sb-saved');
+    document.addEventListener('keydown', e => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== 's') return;
+      e.preventDefault();
+      if (e.shiftKey) { document.getElementById('sb-download').click(); return; }
+      flush();
+      if (!store || !savedIcon) return;   // the note already says the scripts are not kept
+      savedIcon.classList.remove('flash');
+      void savedIcon.offsetWidth;   // restart the blink on a quick second save
+      savedIcon.classList.add('flash');
+      savedIcon.lastChild.textContent = 'Saved';
+    }, true);
 
     // reference
     const refRoot = document.getElementById('reference');

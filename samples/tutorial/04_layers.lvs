@@ -1,0 +1,100 @@
+// @seed=11
+// Step 4 - multiple layers. The walk now only sketches the cave in an `algo`
+// grid; a second grid, `level`, holds the result. A rule can match in one
+// grid and write another, and an `all` body runs several such rules at once.
+// @expect grid level count(floor) >= 150
+// @expect grid level count(wall) >= 80
+// @expect grid level count(water) >= 1
+
+// Each grid has its own tagset. Values of different tagsets never mix, so
+// `algo` keeps the working marks and `level` only what the game needs.
+tag algo {
+    floor
+    head
+    wall
+}
+
+tag geometry {
+    wall
+    floor
+    water
+}
+
+// All grids of the layers block form one stack: they always have the same
+// size, and a cell position means the same place in every grid.
+//
+// A `@view` comment tells the tools how to draw a grid: `fill` colours whole
+// cells, `corner` puts a small mark in a corner, so the sketch stays visible on
+// top of the level. The chips under the map switch views while you watch.
+layers {
+    algo:  grid of algo       // @view=corner
+    level: grid of geometry   // @view=fill
+}
+
+rule place_head {
+    algo[
+        . . .
+        . . .
+        . . . ]
+    =>
+    algo[
+        * * *
+        * head *
+        * * * ]
+}
+
+rule walk(rotation=all) {
+    algo[head .|floor *]
+    =>
+    algo[floor head *]
+}
+
+rule wall_side(rotation=all) {
+    algo[floor|head .]
+    =>
+    algo[* wall]
+}
+
+rule wall_corner(rotation=all) {
+    algo[
+        floor|head .
+        .          . ]
+    =>
+    algo[
+        * *
+        * wall ]
+}
+
+// A rule body with several sub-rules needs a combinator. `all` collects the
+// matches of every sub-rule together, so one `everywhere` translates the whole
+// sketch. Each sub-rule matches in `algo` and writes `level`. The two grids
+// name a value `wall` each, and each name resolves through the tagset of the
+// grid it is written in.
+rule build { all
+    algo[floor|head] => level[floor]
+    algo[wall]       => level[wall]
+}
+
+// The patterns of a match side must all match at one position, and they may
+// lie in different grids: a floor cell of `level` whose `algo` cell is where
+// the walker stopped becomes a pool of water.
+rule pool {
+    algo[head]
+    level[floor]
+    =>
+    level[water]
+}
+
+sequence main {
+    resize(40, 30)
+    once place_head
+    grow(600) walk          // @play=8
+    everywhere wall_side
+    everywhere wall_corner  // @hold=10
+    everywhere build        // @hold=10
+    once pool
+}
+
+// Exercise: add a third layer, `entities: grid of entities`, with a tagset
+// `entities { player }`, and a rule that puts the player on a floor cell of
+// `level` where `entities` is still empty.

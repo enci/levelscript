@@ -1,7 +1,8 @@
-use "bsper.lvs"
+use "roguelike.lvs"
 
 layers {
-    tiles : grid of number  // kenney_micro_roguelike.png, 16x10 tiles of 8x8
+    // kenney_micro_roguelike.png, 16x10 tiles of 8x8
+    tiles : grid of number  // @view=tiles @tileset=Micro
 }
 
 ///////////////////////////////////////////////////////////////////////////////

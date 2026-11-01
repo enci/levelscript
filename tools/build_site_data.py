@@ -3,7 +3,8 @@
 
 The site runs every program live through the WASM build, so this only needs the
 sources: each sample's text, pinned seed, one-line description and declared
-params, plus the modules samples `use` (tests/golden/programs/modules/).
+params, from samples/{tutorial,techniques,games}/. Every sample file also goes
+into LVS_FILES under its folder path, so `use "other.lvs"` resolves next to it.
 
     python tools/build_site_data.py
 
@@ -24,9 +25,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# Gallery order; anything not listed follows alphabetically.
-ORDER = ["dungeon", "cave", "island", "rooms", "drunkard", "arena", "pathways",
-         "graph_rooms", "corridor", "decorate", "terrain", "sprout", "flood"]
+# Gallery sections, in order; samples within one sort by path (tutorials are
+# numbered, a game of several modules sits in its own subfolder).
+GROUPS = ["tutorial", "techniques", "games"]
 
 
 def header(src: str) -> str:
@@ -184,18 +185,21 @@ def editor_data() -> dict:
 
 
 def main() -> None:
-    samples = []
-    for lvs in sorted((ROOT / "tests" / "golden" / "programs").glob("*.lvs")):
-        src = lvs.read_text(encoding="utf-8")
-        seed = re.search(r"//\s*@seed=(\d+)", src)
-        samples.append({"name": lvs.stem, "seed": int(seed.group(1)) if seed else 42,
-                        "about": header(src), "params": params(src),
-                        "source": src.rstrip() + "\n"})
-    rank = {n: i for i, n in enumerate(ORDER)}
-    samples.sort(key=lambda s: (rank.get(s["name"], len(ORDER)), s["name"]))
-
-    files = {f"modules/{p.name}": p.read_text(encoding="utf-8")
-             for p in sorted((ROOT / "tests" / "golden" / "programs" / "modules").glob("*.lvs"))}
+    samples, files = [], {}
+    for group in GROUPS:
+        for lvs in sorted((ROOT / "samples" / group).rglob("*.lvs")):
+            src = lvs.read_text(encoding="utf-8")
+            seed = re.search(r"//\s*@seed=(\d+)", src)
+            file = lvs.relative_to(ROOT / "samples").as_posix()
+            files[file] = src
+            samples.append({"name": lvs.stem, "group": group, "file": file,
+                            "seed": int(seed.group(1)) if seed else 42,
+                            "about": header(src), "params": params(src),
+                            "source": src.rstrip() + "\n"})
+    names = [s["name"] for s in samples]
+    dupes = sorted({n for n in names if names.count(n) > 1})
+    if dupes:
+        raise SystemExit(f"sample names must be unique across folders: {', '.join(dupes)}")
 
     editor = editor_data()
     api = api_entries((ROOT / "docs" / "spec.md").read_text(encoding="utf-8"))
@@ -208,7 +212,7 @@ def main() -> None:
                    "window.LVS_API = " + json.dumps(api, separators=(",", ":")) + ";\n"
                    "window.LVS_EDITOR = " + json.dumps(editor, separators=(",", ":")) + ";\n",
                    encoding="utf-8")
-    print(f"wrote {out.relative_to(ROOT)}: {len(samples)} samples, {len(files)} modules, {len(api)} api entries")
+    print(f"wrote {out.relative_to(ROOT)}: {len(samples)} samples, {len(files)} files, {len(api)} api entries")
 
 
 if __name__ == "__main__":

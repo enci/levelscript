@@ -5,14 +5,17 @@ importScripts('../wasm/ls_wasm.js');
 
 const ready = createLsModule({ locateFile: f => new URL('../wasm/' + f, self.location.href).href });
 
-// Same contract as the page's resolver: `use "path"` resolves against the bundled modules.
+// Same contract as the page's resolver: `use "path"` resolves against the bundled sample files.
 function resolver(files, from) {
   return (path, importer) => {
     const parts = (importer || from).split('/').slice(0, -1).concat(path.split('/'));
     const out = [];
     parts.forEach(p => { if (p === '..') out.pop(); else if (p && p !== '.') out.push(p); });
     const name = out.join('/');
-    return name in files ? { name, source: files[name] } : null;
+    if (name in files) return { name, source: files[name] };
+    // a sample opened in the sandbox (sandbox.lvs) still finds the files next to it
+    const near = Object.keys(files).filter(k => k.endsWith('/' + name));
+    return near.length === 1 ? { name: near[0], source: files[near[0]] } : null;
   };
 }
 

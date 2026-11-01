@@ -283,7 +283,7 @@ std::string inspect_json(std::string const& source, std::string const& name,
     {
         comma_list cl{o};
         for (auto const& d : dirs.all) {
-            static char const* const targets[] = {"file", "tag_value", "statement"};
+            static char const* const targets[] = {"file", "tag_value", "statement", "layer"};
             cl.next();
             o += "{\"key\":";
             js(o, d.key);

@@ -33,10 +33,11 @@
     <div class="sandbox-bar">
       <div class="sb-group" role="group" aria-label="Your script">
         <span class="sb-label"><i class="fas fa-file-code"></i> script</span>
-        <select id="sb-script" aria-label="Your scripts" title="Your scripts, kept in this browser"></select>
+        <select id="sb-script" aria-label="Your scripts" title="Your scripts, kept in this browser as you type (Ctrl/Cmd+S saves at once)"></select>
+        <span id="sb-saved" class="sb-saved" role="status" title="Saved in this browser"><i class="fas fa-floppy-disk" aria-hidden="true"></i><span class="sr-only"></span></span>
         <button type="button" id="sb-new" title="Start a new script"><i class="fas fa-plus"></i> New</button>
         <button type="button" id="sb-rename" title="Rename this script"><i class="fas fa-pen"></i> Rename</button>
-        <button type="button" id="sb-download" title="Save this script as a .lvs file"><i class="fas fa-download"></i> Download</button>
+        <button type="button" id="sb-download" title="Save this script as a .lvs file (Ctrl/Cmd+Shift+S)"><i class="fas fa-download"></i> Download</button>
         <button type="button" id="sb-delete" class="danger" title="Delete this script"><i class="fas fa-trash"></i> Delete</button>
       </div>
       <div class="sb-group" role="group" aria-label="Open as a new script">

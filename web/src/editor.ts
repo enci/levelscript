@@ -11,7 +11,7 @@ import {
     EditorView, Decoration, DecorationSet, ViewPlugin, ViewUpdate, keymap, lineNumbers,
     highlightActiveLineGutter, highlightActiveLine, drawSelection, hoverTooltip, Tooltip,
 } from '@codemirror/view';
-import { defaultKeymap, history, historyKeymap, indentWithTab, toggleLineComment } from '@codemirror/commands';
+import { defaultKeymap, history, historyKeymap, insertTab, indentLess, toggleLineComment } from '@codemirror/commands';
 import { indentUnit, bracketMatching, indentOnInput } from '@codemirror/language';
 import {
     autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap, snippetCompletion,
@@ -238,7 +238,8 @@ function create(o: EditorOptions) {
             ...closeBracketsKeymap, ...completionKeymap, ...searchKeymap, ...historyKeymap,
             { key: 'Mod-/', run: toggleLineComment },
             { key: 'F12', run: v => gotoDefinition(v.state.selection.main.head) },
-            indentWithTab,
+            // Tab inserts a tab at the caret, as in most editors; with a selection it indents the lines
+            { key: 'Tab', run: insertTab, shift: indentLess },
             ...defaultKeymap,
         ]),
         // Cmd/Ctrl-click: go to the definition

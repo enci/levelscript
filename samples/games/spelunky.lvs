@@ -12,12 +12,13 @@ tag fine {
 }
 
 layers {
-    coarse : grid of coarse
-    open : grid of opening
-    fine : grid of fine
-    room_id : grid of number
-    back : grid of number   // background tiles (tranquil_tunnels_transparent.png)
-    tiles : grid of number  // foreground tiles, drawn over back
+    coarse : grid of coarse     // @view=fill
+    open : grid of opening      // @view=corner
+    fine : grid of fine         // @view=fill
+    room_id : grid of number    // @view=border
+    // background tiles (tranquil_tunnels_transparent.png), and the foreground drawn over them
+    back : grid of number       // @view=tiles @tileset=Tunnels
+    tiles : grid of number      // @view=tiles @tileset=Tunnels
 }
 
 ///////////////////////////////////////////////////////////////////////////////

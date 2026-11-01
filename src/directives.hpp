@@ -16,12 +16,14 @@
 //   @name=ID       a tag value     display name
 //   @play=N        a statement     steps per frame while the debugger plays
 //   @hold=N        a statement     play frames its result stays on screen
+//   @view=ID       a grid          how the tools first draw it
+//   @tileset=ID    a grid          the named tileset its `tiles` view draws from
 //   @expect TEXT   the file        a test expectation (repeatable)
 //   @param P=N     the file        a param value for test runs (name = P, value = N)
 
 namespace ls {
 
-enum class directive_target { file, tag_value, statement };
+enum class directive_target { file, tag_value, statement, layer };
 
 struct directive {
     std::string      key;      // without the '@'
@@ -32,7 +34,7 @@ struct directive {
     source_loc       target_loc;   // the target's range; the file: none
     // tag_value: owner = tagset, name = value;
     // statement: owner = sequence, index = position in its body (what
-    // run::stmt_stack() reports)
+    // run::stmt_stack() reports); layer: name = the grid
     std::string      owner, name;
     int              index{-1};
 };

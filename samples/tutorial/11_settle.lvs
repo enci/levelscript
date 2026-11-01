@@ -1,0 +1,146 @@
+// @seed=11
+// Step 11 - cellular automata. `settle` repeats a batch until a pass changes
+// nothing, and a `sequence` groups statements so they can be repeated
+// together. A cave room is filled with noise and smoothed by two rules taking
+// turns until the shapes stop changing.
+// @expect grid roles count(cave) >= 1
+
+tag geometry {
+    wall
+    floor
+    door
+}
+
+tag role {
+    hall
+    cave
+}
+
+layers {
+    zones: grid of number     // @view=border
+    level: grid of geometry   // @view=fill
+    roles: grid of role       // @view=corner
+}
+
+rule wall_between(rotation=90) {
+    zones[?a ?b]
+    when (a != b)
+    =>
+    level[* wall]
+}
+
+rule fill_floor { level[.] => level[floor] }
+rule fill_wall  { level[.] => level[wall] }
+
+rule pick_role {
+    level[
+        wall wall
+        wall floor ]
+    =>
+    { any
+      (weight=2) roles[* *, * hall]
+      (weight=1) roles[* *, * cave]
+    }
+}
+
+rule spread_role(rotation=all) {
+    level[floor floor]
+    roles[?r .]
+    =>
+    roles[* (r)]
+}
+
+// The noise: every cell of a cave room becomes rock or floor.
+rule noise {
+    roles[cave]
+    level[floor]
+    =>
+    { any
+      (weight=45) level[wall]
+      (weight=55) level[floor]
+    }
+}
+
+// A cave wall with floor on three sides crumbles; a cave floor with wall on
+// three sides fills in. Only the centre must be cave, so the room's own walls
+// count as wall but are never changed.
+rule erode(rotation=all) {
+    roles[
+        * *    *
+        * cave *
+        * *    * ]
+    level[
+        *     floor *
+        floor wall  floor
+        *     *     * ]
+    =>
+    level[
+        * *     *
+        * floor *
+        * *     * ]
+}
+
+rule dilate(rotation=all) {
+    roles[
+        * *    *
+        * cave *
+        * *    * ]
+    level[
+        *    wall  *
+        wall floor wall
+        *    *     * ]
+    =>
+    level[
+        * *    *
+        * wall *
+        * *    * ]
+}
+
+// A sequence is a named list of statements. Applied with `settle`, its body
+// runs again and again until a whole run of it changes nothing: the grid is
+// stable. `settle(N)` stops after at most N runs, stable or not.
+//
+// A stable state is not guaranteed: two rules can undo each other forever.
+// The count makes sure this one ends.
+sequence smooth {
+    everywhere erode
+    everywhere dilate
+}
+
+rule door(rotation=90) {
+    level[
+        *     wall  *
+        floor wall  floor
+        *     wall  * ]
+    zones[
+        *  *  *
+        ?a *  ?b
+        *  *  * ]
+    when (a != b)
+    =>
+    level[
+        * *    *
+        * door *
+        * *    * ]
+}
+
+sequence main {
+    resize(40, 30)
+    bsp(into=zones, min=6, max=14)
+    everywhere wall_between
+    everywhere fill_floor
+    pad(1)
+    everywhere fill_wall
+    everywhere pick_role
+    grow spread_role                // @play=40 @hold=10
+    everywhere noise                // @hold=10
+    settle(12) smooth               // @play=1 @hold=10
+    scatter(16) door
+}
+
+// Exercise: write a rule that never settles - one cave rule that turns floor
+// into wall and wall into floor - and run it with a plain `settle`. The site
+// sandbox stops the run after a few seconds; the CLI keeps going until you
+// stop it.
+// Then compare `grow` without a count over a rule whose write leaves its own
+// match in place: the compiler warns about that one before the run starts.

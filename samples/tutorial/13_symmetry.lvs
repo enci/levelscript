@@ -1,0 +1,88 @@
+// @seed=13
+// Step 13 - symmetry and framing. A walk carves one quarter of an arena;
+// `trim`, `resize` and two `mirror`s turn it into the whole arena, `upscale`
+// doubles it, and `pad` adds a border. The `symmetry` attribute flips a
+// rule's pattern the way `rotation` turns it.
+// @expect grid arena count(floor) >= 200
+// @expect grid arena count(pillar) >= 4
+
+tag arena {
+    floor
+    wall
+    pillar
+    head
+}
+
+layers {
+    arena: grid of arena
+}
+
+// The walk starts in the bottom-right corner of the quarter, which becomes
+// the middle of the arena.
+rule place_head {
+    arena[.]
+    where[ (x == width - 2 && y == height - 2) ]
+    =>
+    arena[head]
+}
+
+rule walk(rotation=all) {
+    arena[head .|floor *]
+    =>
+    arena[floor head *]
+}
+
+rule walls(rotation=all) { all
+    arena[floor|head .] => arena[* wall]
+    arena[
+        floor|head .
+        .          . ]
+    =>
+    arena[
+        * *
+        * wall ]
+}
+
+// A pillar in a corner of the floor. As written the pattern only finds
+// corners open to the bottom right. `symmetry=all` adds its mirror images
+// left-right, top-bottom and both, so it finds all four kinds of corner.
+rule corner_pillar(symmetry=all) {
+    arena[
+        wall wall  *
+        wall floor floor
+        *    floor floor ]
+    =>
+    arena[
+        * *      *
+        * pillar *
+        * *      * ]
+}
+
+rule frame { arena[.] => arena[wall] }
+
+// trim:      crop every grid to the cells that hold anything
+// resize:    grow to twice the size; new cells are added right and bottom
+// mirror:    copy the left half onto the right, reflected; then the top half
+//            onto the bottom
+// pad:       add an empty border on all four sides, room for the outer wall
+// upscale:   every cell becomes a 2x2 block
+sequence main {
+    resize(24, 18)
+    once place_head
+    grow(160) walk                      // @play=4
+    everywhere { arena[head] => arena[floor] }
+    trim()                              // @hold=10
+    resize(width * 2, height * 2)       // @hold=10
+    mirror(horizontal)                  // @hold=10
+    mirror(vertical)                    // @hold=10
+    pad(1)
+    everywhere walls
+    everywhere corner_pillar            // @hold=10
+    upscale(2, 2)                       // @hold=10
+    pad(2)
+    everywhere frame
+}
+
+// Exercise: drop `mirror(vertical)` and the arena is mirrored left-right only.
+// Then move `upscale(2, 2)` up, before `pad(1)`, and compare how thick the
+// walls come out.

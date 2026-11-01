@@ -102,7 +102,7 @@
   // row reads as a solid strip even when columns are aligned with several spaces. The last cell
   // of a row covers just the one whitespace character after it, never a `]` or a comment.
   // Port of applyDecorations/cellLen in extension/src/decorations.ts.
-  // colorFor (optional): { name } for a tag value or { number } for a number cell -> a CSS colour,
+  // colorFor (optional): { name, tag } for a tag value (tag: its tagset) or { number } for a number cell -> a CSS colour,
   // or nothing for the palette colour. Named masks, `*` and `.` always use the palette.
   function cellRanges(src, insp, editor, fileName, colorFor) {
     const tags = (insp.symbols && insp.symbols.tags) || [];
@@ -117,7 +117,7 @@
       else if (t.tag === -3) color = hook({ number: t.value }) || paletteColor(t.value);
       else {
         const v = tags[t.tag] && tags[t.tag].values[t.value];
-        color = (v && hook({ name: v.name })) || paletteColor(t.value + t.tag * 12);
+        color = (v && hook({ name: v.name, tag: tags[t.tag].name })) || paletteColor(t.value + t.tag * 12);
       }
       const from = offsetOf(ix, t.line, t.col - 1);
       const end = offsetOf(ix, t.line, t.col - 1 + t.len);
@@ -133,13 +133,13 @@
 
     // the tag declarations are the legend: same palette slots, only the ones in this file
     const here = loc => !!loc && (!loc.module || loc.module === fileName);
-    const legend = (loc, slot, name) => {
+    const legend = (loc, slot, name, tag) => {
       const from = offsetOf(ix, loc.line, loc.col - 1);
       const to = offsetOf(ix, loc.line, loc.col - 1 + loc.len);
-      if (to > from) out.push({ from, to, color: (name && hook({ name })) || paletteColor(slot) });
+      if (to > from) out.push({ from, to, color: (name && hook({ name, tag })) || paletteColor(slot) });
     };
     tags.forEach((tag, ti) => {
-      tag.values.forEach((v, vi) => { if (here(v.loc)) legend(v.loc, vi + ti * 12, v.name); });
+      tag.values.forEach((v, vi) => { if (here(v.loc)) legend(v.loc, vi + ti * 12, v.name, tag.name); });
       tag.masks.forEach((u, ui) => { if (here(u.loc)) legend(u.loc, tag.values.length + ui + ti * 12); });
     });
     return out;

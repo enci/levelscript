@@ -60,7 +60,7 @@
   "tilesets": [
     {
       "name": "Tunnels",
-      "path": "tiles/tranquil_tunnels_transparent.png",
+      "path": "../tiles/tranquil_tunnels_transparent.png",
       "tile_h": 8,
       "tile_w": 8
     }

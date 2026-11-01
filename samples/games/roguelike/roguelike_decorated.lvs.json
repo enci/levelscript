@@ -75,7 +75,7 @@
   "tilesets": [
     {
       "name": "Micro",
-      "path": "/tiles/kenney_micro_roguelike.png",
+      "path": "../../tiles/kenney_micro_roguelike.png",
       "tile_h": 8,
       "tile_w": 8
     }

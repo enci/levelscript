@@ -16,7 +16,7 @@ tag algo {
 // Everything in the algo grid 
 layers {
     algo : grid of algo
-    tiles : grid of number
+    tiles : grid of number  // @view=tiles @tileset=Tiles
 }
 
 params {

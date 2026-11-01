@@ -1,0 +1,63 @@
+// @seed=14
+// Step 14 - paths and terrain. `noise` writes a smooth random elevation
+// field, a rule turns it into terrain, and `path` carves the cheapest road
+// from the start on the left edge to the exit on the right, around the hills.
+// @expect grid land count(road) >= 40
+// @expect grid land count(water) >= 100
+
+tag terrain {
+    water
+    grass
+    forest
+    hill
+    road
+    start
+    exit
+}
+
+layers {
+    elevation: grid of number    // @view=ramp
+    land:      grid of terrain   // @view=fill
+}
+
+// Elevations from 0 to 9. With the default `normalize=rank` every elevation
+// covers about the same share of the map, whatever the seed or scale:
+// `elevation < 3` is always close to 30% of the cells. `normalize=range` keeps the field's
+// own shape instead, stretched so its lowest point is 0 and its highest 9.
+rule terrain {
+    land[.]
+    =>
+    land[ (if(elevation < 3, water, if(elevation < 6, grass, if(elevation < 8, forest, hill)))) ]
+}
+
+rule place_start {
+    land[grass|forest]
+    where[ (x == 0) ]
+    =>
+    land[start]
+}
+
+rule place_exit {
+    land[grass|forest]
+    where[ (x == width - 1) ]
+    =>
+    land[exit]
+}
+
+// `path` finds the cheapest route from any `from` cell to the nearest `to`
+// cell, stepping only on `passable` cells, and writes `write` along it into
+// `into`. `cost` is what it costs to step onto a cell: here the elevation, so
+// the road follows the low ground. Water is not passable.
+sequence main {
+    resize(48, 32)
+    noise(into=elevation, lo=0, hi=9, scale=12, octaves=2)  // @hold=10
+    everywhere terrain                                      // @hold=10
+    once place_start
+    once place_exit                                         // @hold=10
+    path(from=start, to=exit, into=land, write=road,
+         passable=(!(land is water)), cost=(1 + elevation))
+}
+
+// Exercise: let the road cross water, at a price. Drop `passable` and give
+// `cost` a term for water, such as `cost=(if(land is water, 30, 1 + elevation))`.
+// Lower the 30 until the road starts building bridges.

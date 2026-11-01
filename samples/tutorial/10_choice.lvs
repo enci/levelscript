@@ -1,0 +1,133 @@
+// @seed=10
+// Step 10 - choice and weights. A write side `{ any ... }` picks one of its
+// alternatives, by weight; `{ all ... }` writes all of them; the two nest.
+// Every room gets a role - hub, reward or challenge - and its contents are
+// drawn by role.
+// @expect grid roles count(.) >= 1
+// @expect grid items count(chest) >= 1
+
+tag geometry {
+    wall
+    floor
+    door
+}
+
+tag role {
+    hub
+    reward
+    challenge
+}
+
+tag items {
+    chest
+    coin
+    spikes
+    bones
+}
+
+layers {
+    zones: grid of number     // @view=border
+    level: grid of geometry   // @view=fill
+    roles: grid of role       // @view=corner
+    items: grid of items
+}
+
+rule wall_between(rotation=90) {
+    zones[?a ?b]
+    when (a != b)
+    =>
+    level[* wall]
+}
+
+rule fill_floor { level[.] => level[floor] }
+rule fill_wall  { level[.] => level[wall] }
+
+// Every room is a rectangle of floor inside walls, so it has exactly one cell
+// with wall above, to the left, and diagonally: its top-left corner. The
+// corner draws the room's role. A weight biases the pick: out of every 6
+// rooms, about 3 are hubs, 2 challenges and 1 a reward room. An alternative
+// without a weight counts as `(weight=1)`.
+rule pick_role {
+    level[
+        wall wall
+        wall floor ]
+    =>
+    { any
+      (weight=3) roles[* *, * hub]
+      (weight=2) roles[* *, * challenge]
+      (weight=1) roles[* *, * reward]
+    }
+}
+
+// From the corner, the role spreads over the room's floor: a captured role
+// `?r` is copied into the next floor cell. Walls stop it at the room's edge.
+rule spread_role(rotation=all) {
+    level[floor floor]
+    roles[?r .]
+    =>
+    roles[* (r)]
+}
+
+// Contents by role. `{ all }` inside `{ any }` makes one alternative write
+// several things at once: a hub cell is now and then a pillar, which changes
+// the floor into wall and keeps the cell free of items.
+//
+// Each `{ any }` the write passes through draws once, outer before inner, so
+// the same seed always picks the same contents.
+rule contents { any
+    roles[challenge] level[floor] items[.]
+    =>
+    { any
+      (weight=20) items[.]
+      (weight=2)  items[spikes]
+      (weight=1)  items[bones]
+    }
+
+    roles[reward] level[floor] items[.]
+    =>
+    { any
+      (weight=20) items[.]
+      (weight=3)  items[coin]
+      (weight=1)  items[chest]
+    }
+
+    roles[hub] level[floor] items[.]
+    =>
+    { any
+      (weight=40) items[.]
+      (weight=1)  { all level[wall] roles[.] }
+    }
+}
+
+rule door(rotation=90) {
+    level[
+        *     wall  *
+        floor wall  floor
+        *     wall  * ]
+    zones[
+        *  *  *
+        ?a *  ?b
+        *  *  * ]
+    when (a != b)
+    =>
+    level[
+        * *    *
+        * door *
+        * *    * ]
+}
+
+sequence main {
+    resize(40, 30)
+    bsp(into=zones, min=5, max=12)
+    everywhere wall_between
+    everywhere fill_floor
+    pad(1)
+    everywhere fill_wall            // @hold=10
+    everywhere pick_role            // @hold=10
+    grow spread_role                // @play=40 @hold=10
+    everywhere contents             // @hold=10
+    scatter(16) door
+}
+
+// Exercise: make reward rooms rarer, by lowering the weight of `reward` in
+// `pick_role` against the other two. Then give challenge rooms a rare chest.

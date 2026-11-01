@@ -1,0 +1,59 @@
+// Step 2 - random walks. A walker steps into a random neighbouring cell and
+// leaves floor behind; 'grow(N)' repeats that N times, each step woking on the
+// grid of the previous application and 'rotation=all' lets one rule walk in
+// all four directions.
+
+tag algo {
+    F	// @name=floor
+    H   // @name=head
+}
+
+layers {
+    algo: grid of algo
+}
+
+// This a bigger rule and shows the main feature of LevelScript
+// the pattern matching and replacement for 2D grids
+rule place_head(rotation=all) {
+	// We are looking for a 3x3 pattern with all empty '.' cells
+    algo[
+        . . . 
+        . . . 
+        . . . ]
+    =>
+    // Replace the middle of the pattern with 'head', leaving the 
+    // rest unchanged '*'. This needs to be a 3x3 pattern as well.
+    algo[
+        * * * 
+        * F H 
+        * * * ]
+}
+
+// As written, the walker steps right: onto an empty cell, or back over floor
+// it already carved. 'rotation=all' adds the same rule turned by 90, 180 and
+// 270 degrees, so every step picks among the four directions. The third
+// cell, '*', matches anything, but must exist. Thehe walker never carve
+// onto the outer rim of the grid.
+rule walk(rotation=all) {
+    algo[H .|F * ]
+    //      ^- The union opertor '|' lets us combine tags, empty or floor
+    //		In this case that is same as just '*'. You can test that :)
+    // The spaces separate the tags
+    =>
+    algo[F H * ]
+}
+
+// 'once' and 'grow' are the step modes: each application sees every write
+// before it, so the walker moves from where it last stopped.
+//
+// 'grow' without a count runs until the rule no longer matches anywhere. The
+// walker can always step back over its own floor, so it will run forever in
+// this case (making the browser tab hang, save before trying it out ;] )
+sequence main {
+    resize(40, 30)
+    once place_head
+    grow(200) walk      // @play=4
+}
+
+// Try this: change the rotation to 'rotation=180' (right and left only) and
+// then to 'rotation={90, 180}', and compare the shapes the walk leaves.

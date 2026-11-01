@@ -28,11 +28,11 @@ params {
 }
 
 layers {
-    level: grid of level
-    zones: grid of number
+    level: grid of level        // @view=fill
+    zones: grid of number       // @view=border
     map : graph of level(nodes=F, edges=D)
-    rooms: grid of room
-    entities: grid of entities
+    rooms: grid of room         // @view=corner
+    entities: grid of entities  // @view=shape
 }
 
 rule border(rotation=90) {
