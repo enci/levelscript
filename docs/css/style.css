@@ -25,11 +25,11 @@
   --err-text: #ffb3c4;
   /* the title bar, the same on both themes: the logo gradient with its yellow end swapped
      for a green-tinted near-black, so the logo sits on black and the bar stands apart from the page */
-  --nav-bg: linear-gradient(90deg, #0a1a15 0%, #0a1a15 35%, var(--ls-green) 75%, var(--ls-teal) 100%);
-  --nav-ink: #f2f6f4;
-  --nav-btn: rgba(255, 255, 255, 0.1);
+  --nav-bg: linear-gradient(90deg, #0a1a15 25%, #0f8c72 75%);
+  --nav-ink: #ceffe7;
+  --nav-btn: rgba(255, 255, 255, 0.2);
   --nav-btn-hover: rgba(255, 255, 255, 0.2);
-  --nav-active-bg: rgba(255, 255, 255, 0.92);
+  --nav-active-bg: rgba(211, 255, 238, 0.92);
   --nav-active-ink: var(--ls-deep);
   --nav-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
   --tk-kw: #f5dd7e; --tk-ty: #6fd8c0; --tk-fn: #8fd3ff; --tk-num: #ffb286; --tk-cm: #6b8179;
@@ -52,7 +52,7 @@
   --tip-bg: rgba(255, 255, 255, 0.97);
   --err-text: #b3203f;
   /* the title bar starts white here instead, with dark text */
-  --nav-bg: linear-gradient(90deg, #ffffff 0%, #ffffff 35%, var(--ls-green) 75%, var(--ls-teal) 100%);
+  --nav-bg: linear-gradient(90deg,#ffffff 25%, var(--ls-teal) 100%);
   --nav-ink: var(--ls-deep);
   --nav-btn: rgba(6, 53, 44, 0.07);
   --nav-btn-hover: rgba(6, 53, 44, 0.14);
@@ -93,7 +93,7 @@ nav .nav-logo img {
   height: 44px;
   width: 44px;
   border-radius: 10px;
-  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.45)) drop-shadow(0 0 10px rgba(6, 53, 44, 0.55));
+  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.15)) drop-shadow(0 0 10px rgba(6, 53, 44, 0.15));
 }
 
 nav .nav-links {
@@ -151,6 +151,9 @@ nav .nav-toggle span {
 
 /* ---------- Layout ---------- */
 .container { max-width: 1080px; margin: 0 auto; padding: 2rem; }
+/* samples and the lab put an editor beside a map: give them more room (text keeps its own max-width, see .lead) */
+.wide .container { max-width: 1400px; }
+.wide .lead { max-width: none; }
 
 h1, h2, h3 { line-height: 1.25; }
 
@@ -175,14 +178,15 @@ ul, ol { margin: 0 0 1rem 1.5rem; }
 li { margin-bottom: 0.35rem; }
 
 /* ---------- Hero ---------- */
-.hero {
+/* the glow behind the landing hero, shared by the labs (lab.html, standalone_lab.html) */
+.hero, body.lab {
   background:
     radial-gradient(900px 400px at 20% -10%, rgba(63, 196, 110, 0.22), transparent 70%),
     radial-gradient(700px 400px at 90% 10%, rgba(245, 221, 126, 0.14), transparent 70%),
     radial-gradient(800px 420px at 70% 110%, rgba(15, 140, 114, 0.24), transparent 70%), /* teal, the logo's third colour */
     var(--bg-2);
-  border-bottom: 1px solid var(--line);
 }
+.hero { border-bottom: 1px solid var(--line); }
 
 .hero-inner {
   max-width: 1080px;
@@ -246,32 +250,38 @@ li { margin-bottom: 0.35rem; }
 /* ---------- Cards ---------- */
 .features {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 1.2rem;
-  margin: 1.5rem 0;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.8rem;
+  margin: 1.2rem 0;
 }
 
+/* compact: the icon sits beside the heading, the text runs under both */
 .feature-card {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 0.6rem;
+  row-gap: 0.35rem;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 1.4rem;
+  border-radius: 10px;
+  padding: 0.9rem 1.1rem;
   transition: transform 0.2s, border-color 0.2s;
 }
 
-.feature-card:hover { transform: translateY(-4px); border-color: var(--ls-green); }
+.feature-card:hover { transform: translateY(-3px); border-color: var(--ls-green); }
 
 .feature-icon {
-  font-size: 1.9rem;
-  margin-bottom: 0.8rem;
+  font-size: 1.3rem;
+  line-height: 1;
   background: var(--grad-text);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
-.feature-card h3 { color: var(--hi); margin: 0 0 0.4rem; font-size: 1.1rem; }
-.feature-card p { margin: 0; color: var(--muted); font-size: 0.95rem; }
+.feature-card h3 { color: var(--hi); margin: 0; font-size: 1.05rem; }
+.feature-card p { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 0.9rem; line-height: 1.5; }
 
 /* ---------- Code ---------- */
 pre {
@@ -340,6 +350,8 @@ button.diag-row:hover, .diag-row.active { border-color: var(--ls-green); backgro
 }
 
 .lvs-widget:not(:has(.editor)) { grid-template-columns: 1fr; margin: 0; }
+/* samples and lab: the code gets the larger share; the player keeps the width its control row needs on one line */
+.wide .lvs-widget { grid-template-columns: minmax(0, 11fr) minmax(29rem, 9fr); }
 
 .editor {
   position: relative;
@@ -448,6 +460,7 @@ button.diag-row:hover, .diag-row.active { border-color: var(--ls-green); backgro
 .controls { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-top: 0.7rem; font: 0.8rem var(--mono); color: var(--muted); }
 .controls .spacer { flex: 1; min-width: 0; }
 .controls label { display: inline-flex; align-items: center; gap: 0.35rem; }
+.controls .seed-group { display: inline-flex; align-items: center; gap: 0.4rem; white-space: nowrap; } /* the dice never wraps away from its seed */
 
 .controls input {
   width: 4.6rem;
@@ -469,11 +482,12 @@ button.diag-row:hover, .diag-row.active { border-color: var(--ls-green); backgro
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 7px;
-  padding: 0.4rem 0.6rem;
+  padding: 0.4rem 0.5rem;
   cursor: pointer;
   transition: border-color 0.2s, color 0.2s;
 }
 
+.controls .ph { font-size: 1em; vertical-align: -0.12em; } /* not the 1.15em of icons.css: the player row must fit on one line */
 .controls button:hover { border-color: var(--ls-green); color: var(--hi); }
 .controls button.run { background: var(--grad); color: var(--ls-deep); border: 0; }
 .controls button.run:hover { color: var(--ls-deep); }
@@ -528,20 +542,6 @@ button.diag-row:hover, .diag-row.active { border-color: var(--ls-green); backgro
 .legend { display: flex; gap: 0.9rem; flex-wrap: wrap; margin-top: 0.6rem; font: 0.72rem var(--mono); color: var(--muted); }
 .legend i { display: inline-block; width: 0.75rem; height: 0.75rem; border-radius: 2px; margin-right: 0.3rem; vertical-align: -1px; }
 
-/* ---------- Samples gallery ---------- */
-.sample-grid { display: grid; gap: 1.6rem; margin: 1.5rem 0; }
-
-.sample-card {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 1.2rem;
-}
-
-.sample-card h3 { margin: 0 0 0.3rem; color: var(--hi); font-family: var(--mono); font-size: 1.1rem; }
-.sample-card .about { color: var(--muted); font-size: 0.93rem; margin-bottom: 0.8rem; }
-.sample-card .lvs-widget { margin: 0; }
-
 /* ---------- Tables / notes ---------- */
 table { border-collapse: collapse; margin: 1rem 0 1.5rem; width: 100%; font-size: 0.93rem; }
 th, td { text-align: left; padding: 0.5rem 0.8rem; border-bottom: 1px solid var(--line); vertical-align: top; }
@@ -573,25 +573,29 @@ kbd {
 .steps li {
   counter-increment: s;
   position: relative;
-  padding: 0.2rem 0 0.9rem 3rem;
+  padding: 0 0 0.5rem 2.3rem;
 }
 .steps li::before {
   content: counter(s);
   position: absolute;
   left: 0;
-  top: 0;
-  width: 2rem;
-  height: 2rem;
+  top: 0.1rem;
+  width: 1.5rem;
+  height: 1.5rem;
   border-radius: 50%;
   background: var(--grad);
   color: var(--ls-deep);
+  font-size: 0.8rem;
   font-weight: 800;
   display: grid;
   place-items: center;
 }
 
 /* ---------- Samples gallery ---------- */
-.sample-grid { display: grid; gap: 1.6rem; margin: 1.5rem 0; }
+.sample-grid { display: grid; gap: 1.6rem; margin: 1rem 0; }
+/* group headings: close to the cards they title (the grid gap already adds 1.6rem below) */
+.sample-grid .sample-group { margin: 1.4rem 0 -0.8rem; }
+.sample-grid .sample-group:first-child { margin-top: 0; }
 
 .sample-card {
   background: var(--panel);
@@ -606,21 +610,33 @@ kbd {
 .sample-card .about { color: var(--muted); font-size: 0.93rem; margin-bottom: 0.8rem; }
 .sample-card details { margin-top: 0.8rem; }
 .sample-card summary { cursor: pointer; color: var(--accent); font-weight: 600; }
-.sample-card .demo { margin: 0; grid-template-columns: 1fr; }
+.sample-card .lvs-widget { margin: 0; }
 
 /* ---------- Footer ---------- */
 footer {
   border-top: 1px solid var(--line);
-  margin-top: 4rem;
-  padding: 2rem;
-  text-align: center;
+  margin-top: 2.5rem;
+  padding: 0.7rem 2rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;   /* one centred row, like the nav; wraps on narrow screens */
+  gap: 0.6rem 2.5rem;
   color: var(--muted);
-  font-size: 0.9rem;
+  font-size: 0.8rem;
 }
+.footer-logos { display: flex; align-items: center; gap: 1.4rem; }
+.footer-logos a { display: flex; }
+/* the school logos are white: shown as is on the dark theme, turned dark on the light one */
+.footer-logos img { height: 28px; width: auto; opacity: 0.7; transition: opacity 0.2s; }
+.footer-logos a:hover img { opacity: 1; }
+:root[data-theme="light"] .footer-logos img { filter: brightness(0); opacity: 0.55; }
+:root[data-theme="light"] .footer-logos a:hover img { opacity: 0.85; }
+@media (max-width: 600px) { footer { text-align: center; } }
 
-/* ---------- Sandbox ---------- */
-.sandbox-bar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 1.2rem 0 0; font: 0.8rem var(--mono); color: var(--muted); }
-.sandbox-bar button, .sandbox-bar select, .file-btn, .ref-row button {
+/* ---------- Lab toolbar ---------- */
+.lab-bar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 1.2rem 0 0; font: 0.8rem var(--mono); color: var(--muted); }
+.lab-bar button, .lab-bar select, .file-btn, .ref-row button {
   font: 600 0.8rem var(--sans);
   color: var(--text);
   background: var(--panel);
@@ -629,11 +645,11 @@ footer {
   padding: 0.4rem 0.7rem;
   cursor: pointer;
 }
-.sandbox-bar select { background: var(--bg-2); }
-#sb-script { font-weight: 700; min-width: 10rem; max-width: 16rem; }
-.sandbox-bar button:hover:not(:disabled), .file-btn:hover, .ref-row button:hover { border-color: var(--ls-green); color: var(--hi); }
-.sandbox-bar button:disabled, .controls button:disabled { opacity: 0.45; cursor: default; }
-#sb-note { color: var(--err-text); }
+.lab-bar select { background: var(--bg-2); }
+#lab-script { font-weight: 700; min-width: 10rem; max-width: 16rem; }
+.lab-bar button:hover:not(:disabled), .file-btn:hover, .ref-row button:hover { border-color: var(--ls-green); color: var(--hi); }
+.lab-bar button:disabled, .controls button:disabled { opacity: 0.45; cursor: default; }
+#lab-note { color: var(--err-text); }
 
 #reference { margin-top: 2.5rem; }
 #reference h2 { margin-bottom: 0.2rem; }
@@ -665,13 +681,18 @@ footer {
 .ref-none { color: var(--muted); margin-top: 1rem; }
 
 .sample-card header { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
-.open-sandbox { font: 0.78rem var(--mono); color: var(--muted); text-decoration: none; }
-.open-sandbox:hover { color: var(--hi); }
+/* "open in lab" on each sample card: the lab badge, as a link */
+.open-lab { text-decoration: none; transition: transform 0.2s, box-shadow 0.2s; }
+.open-lab:hover { color: var(--ls-deep); transform: translateY(-1px); box-shadow: 0 3px 10px rgba(6, 53, 44, 0.25); }
 
-/* ---------- Lab: the sandbox alone, filling the window ----------
-   The widget's editor and output join the .lab-main grid (display: contents), so the editor
-   spans the left column and the output sits above the framed reference on the right. */
-.lab .container { max-width: 1600px; height: 100vh; display: flex; flex-direction: column; gap: 0.7rem; padding: 0.7rem 1.5rem 1rem; }
+/* ---------- Lab: editor, run view and reference, filling the window ----------
+   Two pages share this: lab.html (under the site nav) and standalone_lab.html (for the paper,
+   with its own LevelScript header). The body is a full-height column, so the container takes
+   whatever the nav leaves. The widget's editor and output join the .lab-main grid
+   (display: contents), so the editor spans the left column and the output sits above the
+   framed reference on the right. */
+body.lab { height: 100vh; display: flex; flex-direction: column; }
+.lab .container { flex: 1; min-height: 0; width: 100%; max-width: 1600px; display: flex; flex-direction: column; gap: 0.7rem; padding: 0.7rem 1.5rem 1rem; }
 .lab-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.6rem; }
 .lab-head img { width: 26px; height: 26px; border-radius: 6px; }
 .lab-head h1 {
@@ -692,16 +713,16 @@ footer {
   white-space: nowrap;
 }
 .lab-badge i { margin-right: 0.15rem; }
-.lab-head .sb-saved { margin-right: auto; }
+.lab-head .lab-saved { margin-right: auto; }
 
 /* Ctrl/Cmd+S: the save icon blinks once; it keeps its space so nothing moves */
-.sb-saved { color: var(--ls-green); opacity: 0; font-size: 0.95rem; pointer-events: none; }
-.sb-saved.flash { animation: sb-saved 1.1s ease-out; }
-@keyframes sb-saved { 0% { opacity: 0; transform: scale(0.7); } 20% { opacity: 1; transform: scale(1.15); } 60% { opacity: 1; transform: scale(1); } 100% { opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .sb-saved.flash { animation: sb-saved-fade 1.1s; } }
-@keyframes sb-saved-fade { 0%, 60% { opacity: 1; } 100% { opacity: 0; } }
+.lab-saved { color: var(--ls-green); opacity: 0; font-size: 0.95rem; pointer-events: none; }
+.lab-saved.flash { animation: lab-saved 1.1s ease-out; }
+@keyframes lab-saved { 0% { opacity: 0; transform: scale(0.7); } 20% { opacity: 1; transform: scale(1.15); } 60% { opacity: 1; transform: scale(1); } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .lab-saved.flash { animation: lab-saved-fade 1.1s; } }
+@keyframes lab-saved-fade { 0%, 60% { opacity: 1; } 100% { opacity: 0; } }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.lab-head .sandbox-bar { margin: 0; }
+.lab-head .lab-bar { margin: 0; }
 .lab-main {
   flex: 1;
   min-height: 0;
@@ -737,13 +758,14 @@ footer {
 
 /* ---------- Responsive ---------- */
 @media (max-width: 860px) {
-  .hero-inner, .lvs-widget { grid-template-columns: 1fr; }
+  .hero-inner, .lvs-widget, .wide .lvs-widget { grid-template-columns: 1fr; }
   .hero h1 { font-size: 2.6rem; }
   .container { padding: 1.2rem; }
   .ref-row { grid-template-columns: 1fr auto; }
   .ref-row code { grid-column: 1 / -1; }
   .ref-sum { grid-column: 1; }
-  .lab .container { height: auto; padding: 0.7rem 1rem 1rem; }
+  body.lab { height: auto; }
+  .lab .container { flex: none; padding: 0.7rem 1rem 1rem; }
   .lab-main { display: flex; flex-direction: column; }
   .lab .editor { flex: none; height: 60vh; }
   .lab #reference { height: 70vh; }
@@ -793,10 +815,13 @@ nav .theme-toggle {
 nav .theme-toggle:hover { background: var(--nav-btn-hover); }
 .lab-head .theme-toggle { color: var(--text); background: var(--panel); border: 1px solid var(--line); padding: 0.4rem 0.7rem; }
 .lab-head .theme-toggle:hover { border-color: var(--ls-green); color: var(--hi); }
+.theme-label { display: inline-grid; }
+.theme-label > span { grid-area: 1 / 1; visibility: hidden; }
+.theme-label > span.on { visibility: visible; }
 :root[data-theme="light"] .hero-visual .canvas-wrap { box-shadow: 0 12px 32px rgba(6, 53, 44, 0.18); }
 
-/* sandbox toolbar: "your script" and "open as new script", each a framed group with a label */
-.sb-group {
+/* lab toolbar: "your script" and "open as new script", each a framed group with a label */
+.lab-group {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -806,7 +831,7 @@ nav .theme-toggle:hover { background: var(--nav-btn-hover); }
   border: 1px solid var(--line);
   border-radius: 9px;
 }
-.sb-label { font: 600 0.7rem var(--sans); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-right: 0.2rem; white-space: nowrap; }
-.sb-label i { color: var(--accent); margin-right: 0.15rem; }
-.sandbox-bar .sb-group button, .sandbox-bar .sb-group select, .sb-group .file-btn { background: var(--bg-2); }
-.sandbox-bar button.danger:hover:not(:disabled) { border-color: #ef476f; color: #ef476f; }
+.lab-label { font: 600 0.7rem var(--sans); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-right: 0.2rem; white-space: nowrap; }
+.lab-label i { color: var(--accent); margin-right: 0.15rem; }
+.lab-bar .lab-group button, .lab-bar .lab-group select, .lab-group .file-btn { background: var(--bg-2); }
+.lab-bar button.danger:hover:not(:disabled) { border-color: #ef476f; color: #ef476f; }

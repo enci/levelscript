@@ -3,7 +3,7 @@
 (function () {
   const KEY = 'ls-theme';
   const MODES = ['auto', 'light', 'dark'];
-  const ICON = { auto: 'fa-circle-half-stroke', light: 'fa-sun', dark: 'fa-moon' };
+  const ICON = { auto: 'ph-circle-half', light: 'ph-sun', dark: 'ph-moon' };
   const os = window.matchMedia('(prefers-color-scheme: light)');
   const read = () => { try { return localStorage.getItem(KEY) || 'auto'; } catch (e) { return 'auto'; } };
   const write = (m) => { try { m === 'auto' ? localStorage.removeItem(KEY) : localStorage.setItem(KEY, m); } catch (e) {} };
@@ -19,15 +19,19 @@
   os.addEventListener('change', () => { if (mode === 'auto') apply(); });
 
   const label = (m) => 'Theme: ' + m + ' (click to change)';
+  // All three labels share one grid cell and only the current one is visible, so the button
+  // is always as wide as the widest label and does not jump when cycling. Phosphor icons are all 1em square.
+  const paintButton = (b) => {
+    b.innerHTML = '<i class="ph ' + ICON[mode] + '"></i><span class="theme-label">' +
+      MODES.map((m) => '<span' + (m === mode ? ' class="on"' : '') + '>' + m + '</span>').join('') + '</span>';
+    b.title = label(mode);
+    b.setAttribute('aria-label', label(mode));
+  };
   function button() {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'theme-toggle';
-    const paint = () => {
-      b.innerHTML = '<i class="fas ' + ICON[mode] + '"></i> ' + mode;
-      b.title = label(mode);
-      b.setAttribute('aria-label', label(mode));
-    };
+    const paint = () => paintButton(b);
     b.addEventListener('click', () => {
       mode = MODES[(MODES.indexOf(mode) + 1) % MODES.length];
       write(mode);
@@ -45,8 +49,9 @@
       li.appendChild(button());
       links.appendChild(li);
     }
-    const bar = document.querySelector('.lab-head .sandbox-bar');
-    if (bar) bar.appendChild(button());
+    // standalone_lab.html has no nav: its toggle goes in the lab toolbar
+    const bar = document.querySelector('.lab-head .lab-bar');
+    if (bar && !links) bar.appendChild(button());
   });
 
   // another tab changed the choice
@@ -54,10 +59,6 @@
     if (e.key !== KEY) return;
     mode = MODES.includes(e.newValue) ? e.newValue : 'auto';
     apply();
-    document.querySelectorAll('.theme-toggle').forEach((b) => {
-      b.innerHTML = '<i class="fas ' + ICON[mode] + '"></i> ' + mode;
-      b.title = label(mode);
-      b.setAttribute('aria-label', label(mode));
-    });
+    document.querySelectorAll('.theme-toggle').forEach(paintButton);
   });
 })();

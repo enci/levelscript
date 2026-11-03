@@ -1,4 +1,4 @@
-// Runs one program off the main thread, so the sandbox can give up on a program that never
+// Runs one program off the main thread, so the lab can give up on a program that never
 // reaches its fixpoint (the page terminates this worker) instead of freezing the tab.
 
 importScripts('../wasm/ls_wasm.js');
@@ -13,7 +13,7 @@ function resolver(files, from) {
     parts.forEach(p => { if (p === '..') out.pop(); else if (p && p !== '.') out.push(p); });
     const name = out.join('/');
     if (name in files) return { name, source: files[name] };
-    // a sample opened in the sandbox (sandbox.lvs) still finds the files next to it
+    // a sample opened in the lab (lab.lvs) still finds the files next to it
     const near = Object.keys(files).filter(k => k.endsWith('/' + name));
     return near.length === 1 ? { name: near[0], source: files[near[0]] } : null;
   };

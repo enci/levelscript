@@ -104,7 +104,7 @@ def api_entries(md: str) -> list:
         name = plain(op)
         items = re.findall(r"`([^`]+)`", params)
         sig = name + "(" + ", ".join(items) + ")"
-        # what the sandbox inserts: required parameters only, as name=name when all are named
+        # what the lab inserts: required parameters only, as name=name when all are named
         named = "all named" in params
         req = [i.split(":")[0].strip() for i in items if ":" in i and "?" not in i]
         insert = name + "(" + ", ".join(f"{r}={r}" if named else r for r in req) + ")"

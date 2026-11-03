@@ -52,6 +52,33 @@
     el.innerHTML = highlight(el.textContent);
   });
 
+  // ---------- syntax highlighting for the C++ embedding snippets ----------
+  // Just enough C++ for short examples, painted with the same tk-* classes as .lvs.
+  const CPP_KW = new Set(('auto bool break case char class const constexpr continue default delete do double else enum ' +
+    'false float for if int long namespace new nullptr return short signed sizeof static std struct switch ' +
+    'template this true typename unsigned using void while').split(' '));
+  const CPP_TOKEN = /(\/\/[^\n]*|\/\*[\s\S]*?\*\/)|("(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*')|(\b\d[\w.]*)|([A-Za-z_]\w*)(?=\s*::)|([A-Za-z_]\w*)(?=\s*\()|([A-Za-z_]\w*)|([-+*\/%=<>!&|^~?:]+)/g;
+  function highlightCpp(src) {
+    let out = '', last = 0, m;
+    const span = (cls, s) => '<span class="' + cls + '">' + esc(s) + '</span>';
+    CPP_TOKEN.lastIndex = 0;
+    while ((m = CPP_TOKEN.exec(src))) {
+      out += esc(src.slice(last, m.index));
+      last = m.index + m[0].length;
+      if (m[1]) out += span('tk-cm', m[0]);
+      else if (m[2]) out += span('tk-str', m[0]);
+      else if (m[3]) out += span('tk-num', m[0]);
+      else if (m[4]) out += span('tk-ty', m[0]);                 // namespace: ls::
+      else if (m[5]) out += span(CPP_KW.has(m[0]) ? 'tk-kw' : 'tk-fn', m[0]);   // call (or `if (`)
+      else if (m[6]) out += CPP_KW.has(m[0]) ? span('tk-kw', m[0]) : esc(m[0]);
+      else out += span('tk-op', m[0]);
+    }
+    return out + esc(src.slice(last));
+  }
+  document.querySelectorAll('pre code.language-cpp').forEach(el => {
+    el.innerHTML = highlightCpp(el.textContent);
+  });
+
   // ---------- WASM runtime ----------
   let runtime = null;
   function loadRuntime() {
@@ -76,7 +103,7 @@
       parts.forEach(p => { if (p === '..') out.pop(); else if (p && p !== '.') out.push(p); });
       const name = out.join('/');
       if (name in files) return { name, source: files[name] };
-      // a sample opened in the sandbox (sandbox.lvs) still finds the files next to it
+      // a sample opened in the lab (lab.lvs) still finds the files next to it
       const near = Object.keys(files).filter(k => k.endsWith('/' + name));
       return near.length === 1 ? { name: near[0], source: files[near[0]] } : null;
     };
@@ -354,13 +381,13 @@
         '<div class="canvas-wrap"><canvas width="960" height="' + (opts.height || 600) + '"></canvas>' +
         '<div class="status"></div><div class="cell-tip" hidden></div></div>' +
         '<div class="controls">' +
-          '<button class="run"><i class="fas fa-play"></i> Run</button>' +
-          '<button class="step" title="Apply one rule application"><i class="fas fa-forward-step"></i> Step</button>' +
-          '<button class="stmt" title="Run to the end of the current statement"><i class="fas fa-angles-right"></i> Statement</button>' +
-          '<button class="play" title="Animate the generation"><i class="fas fa-film"></i> Play</button>' +
+          '<button class="run"><i class="ph ph-play"></i> Run</button>' +
+          '<button class="step" title="Apply one rule application"><i class="ph ph-skip-forward"></i> Step</button>' +
+          '<button class="stmt" title="Run to the end of the current statement"><i class="ph ph-caret-double-right"></i> Statement</button>' +
+          '<button class="play" title="Animate the generation"><i class="ph ph-film-strip"></i> Play</button>' +
           '<span class="spacer"></span>' +
-          '<label>seed <input class="seed" type="number" min="0" step="1"></label>' +
-          '<button class="dice" title="Random seed"><i class="fas fa-dice"></i></button>' +
+          '<span class="seed-group"><label>seed <input class="seed" type="number" min="0" step="1"></label>' +
+          '<button class="dice" title="Random seed"><i class="ph ph-dice-five"></i></button></span>' +
           '<span class="params"></span>' +
         '</div>' +
         '<div class="layer-chips"></div>' +
@@ -393,7 +420,7 @@
     const seedInput = $('.seed');
     seedInput.value = seed;
 
-    // params inputs; the sandbox rebuilds them from the source as it is edited, keeping the
+    // params inputs; the lab rebuilds them from the source as it is edited, keeping the
     // values of names that survive and dropping the rest
     const paramBox = $('.params');
     const paramInputs = {};
@@ -431,7 +458,7 @@
 
     function source() { return ed ? ed.value() : sample.source; }
     function showError(msg) { errBox.hidden = !msg; errBox.textContent = msg || ''; }
-    function stopPlay() { if (playTimer) { cancelAnimationFrame(playTimer); playTimer = null; } $('.play').innerHTML = '<i class="fas fa-film"></i> Play'; }
+    function stopPlay() { if (playTimer) { cancelAnimationFrame(playTimer); playTimer = null; } $('.play').innerHTML = '<i class="ph ph-film-strip"></i> Play'; }
     function endSession() { if (sessionId >= 0 && mod) { mod.run_end(sessionId); } sessionId = -1; }
 
     document.addEventListener('ls-themechange', () => {
@@ -730,7 +757,7 @@
       render(JSON.parse(mod.run_finish(sessionId)));
     }
 
-    // The sandbox runs programs in a worker. A program that never reaches its fixpoint
+    // The lab runs programs in a worker. A program that never reaches its fixpoint
     // (a `grow` or `settle` without a count) is cut off after RUN_LIMIT_MS rather than
     // freezing the page.
     const RUN_LIMIT_MS = 5000;
@@ -793,7 +820,7 @@
       clearTimeout(debounce);
       if (!begin()) return;
       render(JSON.parse(mod.run_state(sessionId)));
-      $('.play').innerHTML = '<i class="fas fa-pause"></i> Pause';
+      $('.play').innerHTML = '<i class="ph ph-pause"></i> Pause';
       play();
     }
     $('.play').onclick = () => { if (playTimer) stopPlay(); else startPlay(); };
@@ -834,7 +861,7 @@
 
     const api = {
       host, replay: () => $('.play').click(), restart: runAll, source,
-      // replace the whole program (sandbox): source, and optionally seed and param values
+      // replace the whole program (lab): source, and optionally seed and param values
       // fresh: another document (a different script), so undo cannot reach back into the old one
       setSource(src, newSeed, savedParams, fresh) {
         fileDirs = null;
@@ -922,11 +949,11 @@
       card.className = 'sample-card';
       card.id = s.name;
       card.innerHTML = '<header><h3>' + esc(s.name) + '.lvs</h3>' +
-        '<a class="open-sandbox" href="sandbox.html#sample=' + encodeURIComponent(s.name) + '">' +
-        '<i class="fas fa-up-right-from-square"></i> open in lab</a></header>' +
+        '<a class="open-lab lab-badge" title="Open this sample as a new script in the lab" href="lab.html#sample=' + encodeURIComponent(s.name) + '">' +
+        '<i class="ph ph-flask"></i> open in lab</a></header>' +
         (s.about ? '<p class="about">' + esc(s.about) + '</p>' : '') + '<div class="host"></div>';
       gallery.appendChild(card);
-      lazy(card, () => createWidget(card.querySelector('.host'), s, { height: 420, autoplay: true }));
+      lazy(card, () => createWidget(card.querySelector('.host'), s, { height: 560, autoplay: true }));
     });
     if (location.hash) {
       const t = document.getElementById(decodeURIComponent(location.hash.slice(1)));
@@ -935,16 +962,48 @@
   }
 
 
-  // ---------- sandbox: one editor, a draft kept in localStorage, a searchable reference ----------
-  const sandboxEl = document.getElementById('sandbox');
-  if (sandboxEl) {
+  // ---------- lab: one editor, a draft kept in localStorage, a searchable reference ----------
+  // lab.html (under the site nav) and standalone_lab.html (for the paper) hold only their own
+  // branding in <header class="lab-head"> and an empty <main id="lab">. Everything else is built
+  // here, once, so the two pages cannot drift apart. In the header: the badge, then the saved
+  // flash (its margin-right: auto pushes the toolbar to the right), then the toolbar.
+  const labRoot = document.getElementById('lab');
+  const labHead = document.querySelector('.lab-head');
+  if (labRoot && labHead) {
+    labHead.insertAdjacentHTML('beforeend',
+      '<span class="lab-badge" title="The LevelScript lab: write, run and keep scripts in your browser"><i class="ph ph-flask"></i> lab</span>' +
+      '<span id="lab-saved" class="lab-saved" role="status" title="Saved in this browser"><i class="ph ph-floppy-disk" aria-hidden="true"></i><span class="sr-only"></span></span>' +
+      '<div class="lab-bar">' +
+        '<div class="lab-group" role="group" aria-label="Your script">' +
+          '<span class="lab-label"><i class="ph ph-file-code"></i> script</span>' +
+          '<select id="lab-script" aria-label="Your scripts" title="Your scripts, kept in this browser as you type (Ctrl/Cmd+S saves at once)"></select>' +
+          '<button type="button" id="lab-new" title="Start a new script"><i class="ph ph-plus"></i> New</button>' +
+          '<button type="button" id="lab-rename" title="Rename this script"><i class="ph ph-pencil-simple"></i> Rename</button>' +
+          '<button type="button" id="lab-download" title="Save this script as a .lvs file (Ctrl/Cmd+Shift+S)"><i class="ph ph-download-simple"></i> Download</button>' +
+          '<button type="button" id="lab-delete" class="danger" title="Delete this script"><i class="ph ph-trash"></i> Delete</button>' +
+        '</div>' +
+        '<div class="lab-group" role="group" aria-label="Open as a new script">' +
+          '<span class="lab-label">open as new script</span>' +
+          '<select id="lab-sample" aria-label="Open a sample as a new script"><option value="">sample&hellip;</option></select>' +
+          '<label class="file-btn" title="Open a .lvs file from your computer as a new script"><i class="ph ph-folder-open"></i> File&hellip;<input type="file" id="lab-open" accept=".lvs,text/plain" hidden></label>' +
+        '</div>' +
+        '<span id="lab-note" role="status"></span>' +
+      '</div>');
+    labRoot.innerHTML =
+      '<div class="lab-host"></div>' +
+      '<section id="reference">' +
+        '<h2>Reference</h2>' +
+        '<input type="search" id="ref-q" placeholder="search: random, path, grow, ..." aria-label="Search the reference" autocomplete="off">' +
+        '<div class="layer-chips" id="ref-kinds"></div>' +
+        '<div id="ref-results"></div>' +
+      '</section>';
+    const labEl = labRoot.querySelector('.lab-host');
     // Your scripts, kept in localStorage under one key:
     //   { current: id, scripts: [{ id, name, source, seed, params, base, updated }] }
     // base: the sample a script was opened from (so an untouched copy is not opened twice).
     // Every change re-reads the stored library and edits only its own entry, so a second tab
-    // does not wipe scripts made in the first. The single draft of earlier versions
-    // (lvs.sandbox.v1, .prev) becomes the first script(s) on the first visit.
-    const LIB = 'lvs.scripts.v1', OLD = 'lvs.sandbox.v1', OLD_PREV = OLD + '.prev';
+    // does not wipe scripts made in the first.
+    const LIB = 'lvs.scripts.v1';
     const DEFAULT_SAMPLE = 'roguelike';
     const STARTER = [
       'tag terrain { wall, floor }',
@@ -965,7 +1024,7 @@
       '    everywhere fill',
       '}',
       ''].join('\n');
-    const note = document.getElementById('sb-note');
+    const note = document.getElementById('lab-note');
     const store = (() => { try { const st = window.localStorage; st.getItem(LIB); return st; } catch (e) { return null; } })();
     function say(msg) { note.textContent = msg || ''; }
     if (!store) say('Your scripts will not be kept: this browser is blocking local storage.');
@@ -1014,18 +1073,11 @@
     }
 
     lib = load();
-    if (!lib) {   // first visit with this version: bring the old draft (and its previous) along
+    if (!lib || !lib.scripts.length) {   // first visit: start with the default sample
       lib = { current: null, scripts: [] };
-      [readJson(OLD_PREV), readJson(OLD)].forEach((d, i) => {
-        if (!d || typeof d.source !== 'string' || !d.source.trim()) return;
-        const name = i === 0 ? 'previous draft' : (d.base || 'my draft');
-        lib.scripts.push(make(name, d));
-      });
-      if (!lib.scripts.length) {
-        const s = sampleByName(DEFAULT_SAMPLE) || (window.LVS_SAMPLES || [])[0];
-        lib.scripts.push(s ? make(s.name, fromSample(s)) : make('untitled', { source: STARTER, seed: 1 }));
-      }
-      lib.current = lib.scripts[lib.scripts.length - 1].id;
+      const s = sampleByName(DEFAULT_SAMPLE) || (window.LVS_SAMPLES || [])[0];
+      lib.scripts.push(s ? make(s.name, fromSample(s)) : make('untitled', { source: STARTER, seed: 1 }));
+      lib.current = lib.scripts[0].id;
       save();
     }
     if (!byId(lib.current)) lib.current = lib.scripts[0].id;
@@ -1077,18 +1129,18 @@
     }
     const start = byId(lib.current);
 
-    createWidget(sandboxEl, {
-      name: 'sandbox', source: start.source, seed: start.seed, params: parseParams(start.source)
+    createWidget(labEl, {
+      name: 'lab', source: start.source, seed: start.seed, params: parseParams(start.source)
     }, {
-      height: Number(sandboxEl.dataset.height) || 420, worker: true, dynamicParams: true, fileName: 'sandbox.lvs',
+      height: 640, worker: true, dynamicParams: true, fileName: 'lab.lvs',
       autoplay: true,
-      diagUnderEditor: 'diagUnderEditor' in sandboxEl.dataset,
+      diagUnderEditor: true,
       initial: { source: start.source, seed: start.seed, params: start.params },
-      onChange, onApi: api => { widget = api; window.LVS_sandbox = api; }
+      onChange, onApi: api => { widget = api; window.LVS_lab = api; }
     });
 
     // toolbar: the script picker, newest edit first
-    const picker = document.getElementById('sb-script');
+    const picker = document.getElementById('lab-script');
     function fillPicker() {
       if (!picker) return;
       picker.innerHTML = '';
@@ -1111,12 +1163,12 @@
       fillPicker();
     });
 
-    document.getElementById('sb-new').addEventListener('click', () => {
+    document.getElementById('lab-new').addEventListener('click', () => {
       const name = window.prompt('Name of the new script:', uniqueName('untitled'));
       if (name === null) return;
       add(name, { source: STARTER, seed: 1 });
     });
-    document.getElementById('sb-rename').addEventListener('click', () => {
+    document.getElementById('lab-rename').addEventListener('click', () => {
       const x = byId(lib.current);
       if (!x) return;
       const name = window.prompt('Rename "' + x.name + '" to:', x.name);
@@ -1125,7 +1177,7 @@
       const next = uniqueName(name);
       change(l => { const y = l.scripts.find(z => z.id === x.id); if (y) y.name = next; });
     });
-    document.getElementById('sb-delete').addEventListener('click', () => {
+    document.getElementById('lab-delete').addEventListener('click', () => {
       const x = byId(lib.current);
       if (!x || !window.confirm('Delete "' + x.name + '"? This cannot be undone.')) return;
       dirty = null;
@@ -1136,7 +1188,7 @@
     });
 
     // a sample or a file always opens as a new script: nothing is overwritten
-    const pick = document.getElementById('sb-sample');
+    const pick = document.getElementById('lab-sample');
     let optgroup = pick;
     (window.LVS_SAMPLES || []).forEach(s => {
       if (s.group && s.group !== optgroup.dataset.group) {
@@ -1167,31 +1219,31 @@
       }
       return undefined;
     }
-    document.getElementById('sb-open').addEventListener('change', e => {
+    document.getElementById('lab-open').addEventListener('change', e => {
       const f = e.target.files[0];
       e.target.value = '';
       if (!f) return;
       f.text().then(text => add(f.name.replace(/\.lvs$/i, ''), { source: text, seed: fileSeed(text) ?? 1 }));
     });
-    document.getElementById('sb-download').addEventListener('click', () => {
+    document.getElementById('lab-download').addEventListener('click', () => {
       flush();
       const x = byId(lib.current);
       const src = widget ? widget.source() : (x && x.source) || '';
       const url = URL.createObjectURL(new Blob([src], { type: 'text/plain' }));
       const a = document.createElement('a');
       a.href = url;
-      a.download = ((x && x.name) || 'sandbox').replace(/[\\/:*?"<>|]+/g, '_') + '.lvs';
+      a.download = ((x && x.name) || 'lab').replace(/[\\/:*?"<>|]+/g, '_') + '.lvs';
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     });
 
     // Ctrl/Cmd+S out of habit: every edit is kept already, so it saves at once and says so,
     // instead of the browser's "save page". With Shift it downloads the .lvs file.
-    const savedIcon = document.getElementById('sb-saved');
+    const savedIcon = document.getElementById('lab-saved');
     document.addEventListener('keydown', e => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== 's') return;
       e.preventDefault();
-      if (e.shiftKey) { document.getElementById('sb-download').click(); return; }
+      if (e.shiftKey) { document.getElementById('lab-download').click(); return; }
       flush();
       if (!store || !savedIcon) return;   // the note already says the scripts are not kept
       savedIcon.classList.remove('flash');

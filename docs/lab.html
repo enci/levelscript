@@ -3,47 +3,35 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LevelScript Lab</title>
+  <title>Lab - LevelScript</title>
   <meta name="description" content="Write a LevelScript program in your browser, run it, and look up the language.">
-  <meta name="robots" content="noindex">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <meta name="keywords" content="procedural generation, level generation, scripting language, pattern rewriting, roguelike, game development">
+  <link rel="stylesheet" href="css/icons.css">
   <link rel="stylesheet" href="css/style.css">
   <script src="js/theme.js"></script>
   <link rel="icon" type="image/png" href="img/levelscript.png">
 </head>
+<!-- The website lab. standalone_lab.html is the same lab for the paper, with its own LevelScript
+     logo and title instead of the site nav. Both are filled in by js/main.js. -->
 <body class="lab">
+  <nav>
+    <a href="index.html" class="nav-logo"><img src="img/levelscript.png" alt="LevelScript logo"></a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-navigation" aria-label="Open navigation">
+      <span></span><span></span><span></span>
+    </button>
+    <ul class="nav-links" id="site-navigation">
+      <li><a href="index.html"><i class="ph ph-stack"></i> levelscript</a></li>
+      <li><a href="samples.html"><i class="ph ph-squares-four"></i> samples</a></li>
+      <li><a href="lab.html"><i class="ph ph-flask"></i> lab</a></li>
+      <li><a href="https://github.com/enci/levelscript" target="_blank"><i class="ph ph-github-logo"></i> github</a></li>
+    </ul>
+  </nav>
   <div class="container">
     <header class="lab-head">
-      <img src="img/levelscript.png" alt="LevelScript logo">
-      <h1>LevelScript</h1>
-      <span class="lab-badge" title="The LevelScript lab: write, run and keep scripts in your browser"><i class="fas fa-flask"></i> lab</span>
-      <span id="sb-saved" class="sb-saved" role="status" title="Saved in this browser"><i class="fas fa-floppy-disk" aria-hidden="true"></i><span class="sr-only"></span></span>
-      <div class="sandbox-bar">
-        <div class="sb-group" role="group" aria-label="Your script">
-          <span class="sb-label"><i class="fas fa-file-code"></i> script</span>
-          <select id="sb-script" aria-label="Your scripts" title="Your scripts, kept in this browser as you type (Ctrl/Cmd+S saves at once)"></select>
-          <button type="button" id="sb-new" title="Start a new script"><i class="fas fa-plus"></i> New</button>
-          <button type="button" id="sb-rename" title="Rename this script"><i class="fas fa-pen"></i> Rename</button>
-          <button type="button" id="sb-download" title="Save this script as a .lvs file (Ctrl/Cmd+Shift+S)"><i class="fas fa-download"></i> Download</button>
-          <button type="button" id="sb-delete" class="danger" title="Delete this script"><i class="fas fa-trash"></i> Delete</button>
-        </div>
-        <div class="sb-group" role="group" aria-label="Open as a new script">
-          <span class="sb-label">open as new script</span>
-          <select id="sb-sample" aria-label="Open a sample as a new script"><option value="">sample&hellip;</option></select>
-          <label class="file-btn" title="Open a .lvs file from your computer as a new script"><i class="fas fa-folder-open"></i> File&hellip;<input type="file" id="sb-open" accept=".lvs,text/plain" hidden></label>
-        </div>
-        <span id="sb-note" role="status"></span>
-      </div>
+      <h1 class="sr-only">LevelScript Lab</h1>
     </header>
-    <main class="lab-main">
-      <div id="sandbox" data-height="640" data-diag-under-editor></div>
-      <section id="reference">
-        <h2>Reference</h2>
-        <input type="search" id="ref-q" placeholder="search: random, path, grow, ..." aria-label="Search the reference" autocomplete="off">
-        <div class="layer-chips" id="ref-kinds"></div>
-        <div id="ref-results"></div>
-      </section>
-    </main>
+    <!-- the toolbar, the editor and the reference are built by js/main.js (shared with standalone_lab.html) -->
+    <main class="lab-main" id="lab"></main>
   </div>
   <script src="wasm/ls_wasm.js"></script>
   <script src="js/samples-data.js"></script>

@@ -140,7 +140,7 @@ sequence main {
 
 // Exercise: write a rule that never settles - one cave rule that turns floor
 // into wall and wall into floor - and run it with a plain `settle`. The site
-// sandbox stops the run after a few seconds; the CLI keeps going until you
+// lab stops the run after a few seconds; the CLI keeps going until you
 // stop it.
 // Then compare `grow` without a count over a rule whose write leaves its own
 // match in place: the compiler warns about that one before the run starts.
