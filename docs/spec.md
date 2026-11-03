@@ -1,6 +1,6 @@
 # LevelScript
 
-**Status**: Draft 0.17.0
+**Status**: Draft 0.17.1
 **File extension**: `.lvs`
 **CLI**: `levelscript [--seed N] [--entry name] [--param name=value ...] <file.lvs>` (`--entry` defaults to `main` and `--seed` to the root file's `@seed` directive, both tool conventions; section 6, Appendix B)
 **Embedding**: namespace `ls::` (see Appendix A)
@@ -313,9 +313,9 @@ layers {
 
 **Node order.** Nodes are numbered from 0 in row-major order of each region's first cell. The order fixes node ids in the embedding API (Appendix A) and the candidate order of graph rules (section 5.13), and is otherwise unobservable.
 
-**Reading a graph.** Graph patterns (section 5.12), graph rules (section 5.13), the graph reads of expressions (section 5.12), and the embedding API read graphs. Each read sees the graph of the source as the reader sees it: a rule reads the graph of its pass's snapshot (section 7.1), a statement-scope expression the stack as its statement is reached, and the API the level's final grids. Extraction reads only the source and draws nothing.
+**Reading a graph.** Graph patterns (section 5.12), graph rules (section 5.13), the graph reads of expressions (section 5.12), `path` (section 6.6), and the embedding API read graphs. Each read sees the graph of the source as the reader sees it: a rule reads the graph of its pass's snapshot (section 7.1), a statement-scope expression the stack as its statement is reached, `path` the stack as it runs, and the API the level's final grids. Extraction reads only the source and draws nothing.
 
-**A graph is not a grid.** It has no cells, is not part of the stack, and has no place in the layer order (section 4). Geometric operations do not act on it: after `upscale` or `mirror`, the next read extracts from the transformed source. A graph name is a layer name (check 42) with four uses: heading a match-side graph pattern of a grid rule (`map[?n]`, section 5.12), naming the graph of a graph block (section 5.13), heading an attribute read at a cell (`map.size`, section 5.12), and as the argument of `nodes` and `edges` (section 5.12). Any other use - as the head of a write-side pattern or of a pattern in a graph pair, as a value in an expression, as a selector's grid, or where an operation expects a grid - is an error (check 51).
+**A graph is not a grid.** It has no cells, is not part of the stack, and has no place in the layer order (section 4). Geometric operations do not act on it: after `upscale` or `mirror`, the next read extracts from the transformed source. A graph name is a layer name (check 42) with five uses: heading a match-side graph pattern of a grid rule (`map[?n]`, section 5.12), naming the graph of a graph block (section 5.13), heading an attribute read at a cell (`map.size`, section 5.12), as the argument of `nodes` and `edges` (section 5.12), and as the `over` argument of `path` (section 6.6). Any other use - as the head of a write-side pattern or of a pattern in a graph pair, as a value in an expression, as a selector's grid, or where an operation expects a grid - is an error (check 51).
 
 ---
 
@@ -1080,12 +1080,13 @@ Each parameter has a **kind**, a **binding** (positional or named-only), and req
 |------|-----------|-------------|
 | `int` | a number expression, statement scope (section 5.8) | an integer, evaluated once when the statement is reached, before the operation runs |
 | `grid` | a name | a declared grid name (section 4) |
+| `graph` | a name | a declared graph layer (section 4.3) |
 | `pred` | a tag value or named mask, or a boolean expression, cell scope | a per-cell predicate (a tag or named mask means "cell overlaps this mask", section 6.6; an expression means its truth per cell) |
 | `value` | an expression typed by the target grid, cell scope | a cell value to write |
 | `expr` | a number expression, cell scope | a numeric expression evaluated per cell |
 | `enum{...}` | a name | one of a fixed set of words (validated per operation) |
 
-Every argument is written as an expression (section 6 grammar), and parentheses around it change nothing: `into=(tiles)` is `into=tiles`. Where a parameter takes a *name* - a `grid` or an `enum` - the argument must be a single `IDENT`. A `pred` that is a single `IDENT` is a tag value or named mask (section 6.6). A `value` is an expression in a cell of the target grid, so under section 5.8 a name resolves first as a tag value or named mask of that grid's tagset. Every other argument resolves under section 5.8.
+Every argument is written as an expression (section 6 grammar), and parentheses around it change nothing: `into=(tiles)` is `into=tiles`. Where a parameter takes a *name* - a `grid`, a `graph`, or an `enum` - the argument must be a single `IDENT`. A `pred` that is a single `IDENT` is a tag value or named mask (section 6.6). A `value` is an expression in a cell of the target grid, so under section 5.8 a name resolves first as a tag value or named mask of that grid's tagset. Every other argument resolves under section 5.8.
 
 **Operation table.**
 
@@ -1096,7 +1097,7 @@ Every argument is written as an expression (section 6 grammar), and parentheses 
 | `trim` | *(none)* | crop all layers to the content bounding box (section 6.3) |
 | `mirror` | `axis:enum{horizontal,vertical}` (positional) | fold one half onto the other, all layers (section 6.4) |
 | `pad` | `n:int` (positional) | uniform empty border of N on all sides (section 6.5) |
-| `path` | `from:pred`, `to:pred`, `into:grid`, `write:value`, `over:grid?`, `passable:pred?`, `connectivity:int?=4`, `cost:expr?=1` (**all named**) | write a shortest route between predicates into a grid (section 6.6) |
+| `path` | `from:pred`, `to:pred`, `into:grid`, `write:value`, `over:graph?`, `passable:pred?`, `connectivity:int?=4`, `cost:expr?=1` (**all named**) | write a shortest route between predicates into a grid, over the grid's cells or a graph's nodes (section 6.6) |
 | `bsp` | `into:grid`, `min:int`, `max:int?`, `split:int?=50` (**all named**) | split the grid into rectangular leaves, writing leaf ids into a number grid (section 6.11) |
 | `voronoi` | `sites:pred`, `into:grid`, `within:pred?`, `metric:enum{euclidean,manhattan,chebyshev}?=euclidean`, `cost:expr?` (**all named**) | partition the cells by nearest site, writing zone ids into a number grid (section 6.12) |
 | `noise` | `into:grid`, `lo:int`, `hi:int`, `scale:int`, `octaves:int?=1`, `persistence:int?=50`, `normalize:enum{rank,range}?=rank` (**all named**) | write gradient noise mapped onto `[lo, hi]` into a number grid (section 6.13) |
@@ -1167,19 +1168,42 @@ Adds `N` empty rows/columns on **all four sides**, across all layers, shifting e
 
 ### 6.6 `path(...)`
 
-Computes a shortest route from any `from` cell to the nearest reachable `to` cell over the traversable cells, and writes `write` into `into` along that route (endpoints included and overwritten). Other cells of `into` are left as they are. The first **structural** operation: the non-local work is one operation; downstream *rules* consume the result with ordinary same-position reads.
+Computes a shortest route from any `from` cell to the nearest reachable `to` cell over the traversable cells, and writes `write` into `into` along that route (endpoints included and overwritten). Over a graph (`over`, below), the route runs from a `from` node to the nearest reachable `to` node, and `write` is stamped over the regions of the nodes it passes. Other cells of `into` are left as they are. The first **structural** operation: the non-local work is one operation; downstream *rules* consume the result with ordinary same-position reads.
 
 Parameters (section 6.0):
 - `from : pred` (required) - start cell(s): a tag or union, or a boolean expression; multi-source allowed.
 - `to : pred` (required) - goal cell(s); the route ends at the nearest reachable one.
 - `into : grid` (required) - the grid the route is stamped into.
 - `write : value` (required) - the value stamped on each route cell (typed by `into`).
-- `over : grid?` (optional) - the **connectivity substrate**. Omitted, the route runs over the implicit grid adjacency of the coordinate space. This is the **seam** for routing over graph layers (section 4.3): a graph reference here will route over its edges - the same operation, one swapped input. That is not yet defined (section 9): `over` takes a grid only, and a graph name here is a kind error (check 35).
+- `over : graph?` (optional) - the **connectivity substrate**. Omitted, the route runs over the implicit grid adjacency of the coordinate space, cell to cell. Given a graph layer (section 4.3), it runs over the graph's edges, node to node (**Routing over a graph**, below). A grid here is a kind error (check 35): grid adjacency is the same for every grid, so which cells a route may use is `passable`'s job.
 - `passable : pred?` (optional, default: any non-empty cell) - traversable cells. `from`/`to` cells are always traversable.
 - `connectivity : int?` (optional, default `4`) - 4- or 8-neighbour grid adjacency; any other value is treated as `4`, with a runtime warning (section 7.4). Ignored when `over` is a graph.
-- `cost : expr?` (optional, default `1`) - per-step weight at the entered cell. Default 1 is breadth-first (uniform shortest path); a non-constant cost is weighted (Dijkstra). Non-positive cost is treated as 1.
+- `cost : expr?` (optional, default `1`) - per-step weight at the entered cell. Default 1 is breadth-first (uniform shortest path); a non-constant cost is weighted (Dijkstra). Non-positive cost is treated as 1. Over a graph every edge costs 1, and a `cost` argument is a kind error (check 35); weighted graph routes are deferred (section 9).
 
 Semantics: the route is the minimum-total-cost sequence of adjacent traversable cells from a `from` cell to the nearest `to` cell, **overwriting** `into` on the route cells. Ties break deterministically by seed (section 7.2). If no `to` is reachable (including an empty `from` or `to` set), `path` is a **no-op and emits a warning** (like `trim` on empty content, section 7.4), not an error. It writes only the route and exposes no distance field. Because a grid is an implicit graph, `path` also underlies connectivity guarantees, corridor carving, and room-linking; it generalizes to explicit graphs through `over`.
+
+**Routing over a graph.** With `over=g`, `path` routes over the nodes and edges of `g`, extracted from the stack as the statement runs (section 4.3):
+
+- **Node sets.** `from`, `to`, and `passable` stay cell predicates and evaluate exactly as for a grid route. A node is a `from`, `to`, or passable node iff at least one cell of its region satisfies the predicate, the rule a selector uses (section 5.12). `from` and `to` nodes are always passable; with the default `passable` every node is, since node cells are never empty.
+- **Route.** A sequence of nodes from a `from` node to the nearest reachable `to` node, each adjacent to the next, every intermediate node passable, with the fewest edges. That is the distance of `distance(n, t)` (section 5.12) restricted to passable nodes, so a route over an unrestricted graph has length `distance(start, goal)`. A node in both `from` and `to` is a route of one node.
+- **Stamping.** `write` is stamped over the region of each node on the route, start to goal, each region row-major. If `write` is an expression, it evaluates once per stamped cell in that order. Connector cells are not stamped: an edge has no cells of its own, and one connector region can join several pairs of nodes (section 4.3), so a door belongs to no single step of the route.
+- **Doors.** A shortest route has no shortcut, so two of its nodes are adjacent only if they are consecutive on it. A rule run after `path` can therefore mark the route's doors exactly: a door cell with route cells on both sides joins two consecutive nodes.
+- **`into`** may be any grid, the graph's source included; writing the source changes the graph that later statements extract.
+
+```ls
+// The critical path: one shortest route of rooms from the start to the exit.
+path(from=(rooms is Start), to=(rooms is Exit), over=map, into=marks, write=critical)
+
+// Its doors: a door with route cells on both sides joins consecutive rooms.
+rule route_doors(rotation=90) {
+    marks[critical * critical]
+    level[* door *]
+    =>
+    marks[* critical *]
+}
+```
+
+Under the draw contract below, a graph route is as reproducible as a grid route: nodes take the place of cells, and the search algorithm stays unobservable.
 
 **Predicate resolution.** A **bare tag** (or named mask) as a `pred` reads **the unique tag layer whose tagset declares that name**, among the grids its module sees (section 2.6), with pattern-cell overlap semantics (`(stored & mask) != 0`, section 4.1); if no seen layer's tagset declares it, or **more than one** seen layer could hold it, that is a compile error (section 7.3, check 35) - use the expression form and name the grid (e.g. `passable=(level is floor)`). An expression `pred` is any boolean expression over same-position reads, `x`/`y`/`width`/`height`, and params. The **default `passable`** - "any non-empty cell" - means non-empty in **at least one layer**, the same union-of-layers content notion `trim` uses (section 6.3). In the expression form, `is` (section 5.8) applies the same overlap test as the bare-tag form.
 
@@ -1189,6 +1213,8 @@ Semantics: the route is the minimum-total-cost sequence of adjacent traversable 
 2. `cost` evaluates **once per traversable cell**, row-major, clamped to >= 1; the search runs on those fixed weights. A `random(...)` cost draws once per traversable cell, reproducibly.
 3. Tie-breaking consumes **exactly one stream draw per `path` statement**. Per-cell tie keys are derived from that single draw `d` as `uniform_hash(d, i)`, with `i` the row-major cell index `y * W + x` (section 10.6) - there are **no per-discovery draws**, so the number of draws a `path` statement consumes never depends on grid content or search order.
 4. The route is a **pure function of the distance field** the fixed weights induce. The nearest goal is the reachable `to` cell minimizing (distance, tie key) lexicographically. The route is derived by walking backward from that goal, at each step choosing the minimum-tie-key predecessor among those on an optimal (shortest) path. The route is then stamped **start -> goal**: if `write` is an expression, it evaluates once per route cell in that order.
+
+**Over a graph**, items 1 to 4 hold with nodes in place of cells. The predicate passes are the same row-major passes over cells (item 1). There is no `cost` pass (item 2). The one draw `d` gives node `i` the tie key `uniform_hash(d, i)`, with `i` its node id (section 4.3) (item 3). The nearest goal is the reachable `to` node minimizing (distance, tie key), and the route walks back from it choosing the minimum-tie-key predecessor among those on a shortest route, then is stamped as above (item 4).
 
 Consequence, stated normatively: **the search algorithm is unobservable.** Any correct shortest-path implementation - BFS at uniform cost, Dijkstra, A* with an admissible heuristic - produces the identical distance field and hence the identical route, draw count, and output.
 
@@ -1483,7 +1509,7 @@ The compiler must reject:
 32. **Unknown operation.** An `op_call` (section 6.0) whose name is not in the operation table.
 33. **Operation argument arity/binding.** More positional arguments than the operation's positional parameters; a named-only parameter supplied positionally; a named argument preceding a positional one; or a parameter supplied both positionally and by name.
 34. **Missing required operation argument.** A required parameter not supplied.
-35. **Operation argument kind / enum.** An argument whose kind does not match the parameter (e.g. `grid` given a non-grid; a tag grid where an operation requires a number grid - the `into` of `bsp`, `voronoi`, and `noise`; `cost` given to `voronoi` under `metric=euclidean`; or an expression that is not a single name where a name is required); an `enum` value outside its set (`mirror` axis not in {horizontal, vertical}, `voronoi` metric, `noise` normalize); or an ambiguous bare-tag `pred` (no layer the module sees, or more than one, could hold the tag - section 6.6).
+35. **Operation argument kind / enum.** An argument whose kind does not match the parameter (e.g. `grid` given a non-grid; `graph` given a non-graph, such as a grid in `path`'s `over`; `cost` given to `path` with a graph `over`; a tag grid where an operation requires a number grid - the `into` of `bsp`, `voronoi`, and `noise`; `cost` given to `voronoi` under `metric=euclidean`; or an expression that is not a single name where a name is required); an `enum` value outside its set (`mirror` axis not in {horizontal, vertical}, `voronoi` metric, `noise` normalize); or an ambiguous bare-tag `pred` (no layer the module sees, or more than one, could hold the tag - section 6.6).
 36. **Operation value constraint.** Retired in 0.9.2: out-of-range `resize`, `upscale`, and `pad` values are handled at run time, with a warning (sections 6.1, 6.2, 6.5, 7.4).
 37. **Mode on a sequence.** `scatter`, `everywhere`, or `grow` applied to a sequence (section 6.10).
 38. **Sequence cycle.** A sequence that applies itself, directly or through other sequences.
@@ -1499,7 +1525,7 @@ The compiler must reject:
 48. **Graph source.** A graph layer whose `of` name does not resolve to a grid: a tagset, another graph, or an undeclared name (section 4.3).
 49. **Graph form.** A graph argument other than `nodes` or `edges`, or one given twice; `edges` without `nodes`; or `nodes`/`edges` on a graph whose source is a number grid (section 4.3).
 50. **Graph mask.** A `nodes` or `edges` mask naming a value outside the source grid's tagset; a mask that selects no value (e.g. `.`); or `nodes` and `edges` masks that share a value (section 4.3).
-51. **Graph misuse.** A graph name used other than to head a match-side graph pattern of a grid rule, name a graph block, head an attribute read at a cell, or be the argument of `nodes` or `edges`: as the head of a write-side pattern or of a pattern in a graph pair, as a value in an expression, as a selector's grid, or passed to an operation's `grid` parameter (also check 35) (sections 4.3 and 5.12).
+51. **Graph misuse.** A graph name used other than to head a match-side graph pattern of a grid rule, name a graph block, head an attribute read at a cell, be the argument of `nodes` or `edges`, or be the `over` argument of `path`: as the head of a write-side pattern or of a pattern in a graph pair, as a value in an expression, as a selector's grid, or passed to an operation's `grid` parameter (also check 35) (sections 4.3 and 5.12).
 52. **Graph-pattern cell.** A graph-pattern cell other than `*` or a binding variable (section 5.12).
 53. **Graph function arguments.** A call to `distance`, `neighbors`, `adjacent`, `reachable`, `farthest`, `some`, or two-argument `count` whose first argument is not a node; a target that is neither a node nor a selector; a selector argument of `some` or of `count` (either form) that is not a selector; an argument of `nodes` or `edges` that is not a graph name; a node target, or a `==`/`!=` operand, that is a node of a different graph; a selector anywhere but as a target or the selector argument of `some` or `count`; or a selector cell that does not fit its grid (a tag mask on a number grid other than `.` or `!.`, or an integer on a tag grid) (section 5.12).
 54. **Zero-weight `{ any }`.** An `{ any }` block whose items all have weight `0` (section 5.5).
@@ -1646,7 +1672,7 @@ carves the cheapest corridor; equal-cost routes vary by seed, reproducibly (sect
 
 Deferred, in rough priority order:
 
-**Graphs beyond views.** The reason for the language's forward-looking design (and its name making room for more than grids). Graph layers are read-only views extracted from grids (section 4.3), read through node variables and graph names (section 5.12). Graph rules (section 5.13) write node state. Deferred beyond that: rewriting the topology itself, adding or removing nodes and edges (mission graphs generated first and laid out after); edge state, which a connector region shared by several edges makes ambiguous to write; chained edge lines (`?a -- ?b -- ?c`); a bound on graph-block size, whose matching cost grows with it; boundary writes between two nodes, `between(a, b).g = c`, which would let a graph rule write the cells that separate two nodes (opening a wall between two rooms not yet connected); bindable edges, read like nodes (`e.level is door`); directed and labelled edges; and routing over a graph through `path`'s `over=` (the prepared seam, section 6.6). Selection by an extreme is limited to `farthest` (section 5.12), over a set given as a target; a set defined by a node condition, such as degree, is not yet an argument, and other extremes, such as the largest room, have no form yet.
+**Graphs beyond views.** The reason for the language's forward-looking design (and its name making room for more than grids). Graph layers are read-only views extracted from grids (section 4.3), read through node variables and graph names (section 5.12). Graph rules (section 5.13) write node state. Deferred beyond that: rewriting the topology itself, adding or removing nodes and edges (mission graphs generated first and laid out after); edge state, which a connector region shared by several edges makes ambiguous to write; chained edge lines (`?a -- ?b -- ?c`); a bound on graph-block size, whose matching cost grows with it; boundary writes between two nodes, `between(a, b).g = c`, which would let a graph rule write the cells that separate two nodes (opening a wall between two rooms not yet connected); bindable edges, read like nodes (`e.level is door`); directed and labelled edges; and weighted routing over a graph, a per-node `cost` for `path`'s `over=` (section 6.6). Selection by an extreme is limited to `farthest` (section 5.12), over a set given as a target; a set defined by a node condition, such as degree, is not yet an argument, and other extremes, such as the largest room, have no form yet.
 
 **The structural-operation family.** `path` was the first of a family conforming to the section 6.0 envelope (predicate/grid arguments in, result written into a grid, seeded, table-resolved); `bsp`, `voronoi`, and `noise` (sections 6.11-6.13) followed. Still deferred: flood-fill regions, MST/room-linking, and a full distance field. The graph-generalizable members - `path`, MST, distance - share the `over` seam; `bsp`, `voronoi`, and `noise` are grid-native. `noise` may gain a `kind` (simplex) once that algorithm is pinned as exactly as its gradient noise. Each is a table row plus an executor; none needs a grammar change.
 
@@ -1714,7 +1740,7 @@ A single PRNG stream (`mt19937_64` in the reference implementation), seeded from
 3. **Match-cell, `where`-cell, and rule-guard** expressions evaluate during the collection scan, in row-major anchor order and, within an anchor, in sub-rule/variant declaration order (for a graph rule, in assignment order, section 5.13). For each candidate, bare cells are tested first and draw nothing; only if all of them match do expression cells and rule guards evaluate, item by item in match-side order and row-major within each pattern as the variant lays it out, short-circuiting on the first that fails (section 5.11) - a `random` in a cell not reached does not draw.
 4. **Candidate ordering** draws next: the pass's seeded shuffle (batch modes and `settle` sweeps) or the single uniform pick (step modes), per section 10.4.
 5. **At application**: one draw per `{ any }` node on the resolved write path, outer before inner, earlier sibling first (a single-item `{ any }` still draws, section 5.2); then write-cell expressions, row-major per resolved leaf (over the region, for a graph write).
-6. **`path` statements** follow the section 6.6 draw contract: predicate passes (`from`, `to`, `passable`), per-cell `cost`, exactly one tie-key draw, then the start-to-goal `write` stamps.
+6. **`path` statements** follow the section 6.6 draw contract: predicate passes (`from`, `to`, `passable`), per-cell `cost` (grid routes only), exactly one tie-key draw, then the start-to-goal `write` stamps.
 7. **`bsp`, `voronoi`, and `noise` statements** follow their draw contracts (sections 6.11-6.13): `bsp`'s per-node draws in pre-order; `voronoi`'s predicate passes (`sites`, `within`), per-cell `cost` under a step metric, then one tie-key draw; `noise`'s one raw draw.
 
 A sequence application (section 6.10) adds no draw sites: its body statements draw per items 2-7 as each one is reached, and the stability check draws nothing.
@@ -1747,7 +1773,7 @@ The compiled artifact stays self-contained (section 10.1). It holds the merged c
 
 ### 10.9 Graph extraction
 
-A graph is a pure function of its source grid, so the reference runtime extracts it lazily and caches it. One flood fill over the source yields a node-id grid (each cell's node, or none), per-node cell counts, and the adjacency sets. Connector regions are filled in the same pass, and each adds an edge for every pair of nodes it touches. The cache is keyed by the source's write version, so every rule, attribute read, and global query that reads the graph between two writes to its source shares one extraction.
+A graph is a pure function of its source grid, so the reference runtime extracts it lazily and caches it. One flood fill over the source yields a node-id grid (each cell's node, or none), per-node cell counts, and the adjacency sets. Connector regions are filled in the same pass, and each adds an edge for every pair of nodes it touches. The cache is keyed by the source's write version, so every rule, attribute read, and global query that reads the graph between two writes to its source shares one extraction. `path` over a graph is one breadth-first search over the cached adjacency sets from the `from` nodes, and its stamps are the route nodes' regions, read from the node-id grid.
 
 Selector targets are cached per (graph, selector): `distance` to a selector is one multi-source breadth-first search over the adjacency sets from the selected nodes, and `neighbors` one scan of them, each producing a per-node array. Their key also includes the selector grid's write version: `distance(n, rooms[Start])` must be recomputed when `rooms` changes, even if the source did not. A node target is a single-source search, cached per (graph, node) the same way; `adjacent` with a node target is an adjacency-set lookup. An attribute read at a cell costs a node-id lookup, a node attribute an array read, and a call on a cached target an array read. `count(n, s)` is one scan of the selector's grid accumulating per-node counts, cached per (graph, selector) the same way, and `some` compares that count with zero. A region read evaluates its comparison over the node's cells and stops at the first that fails; `n.g is m` equals `count(n, g[m]) == n.size` and may use that cache. The complemented form does not reduce this way: complementing a cell's read is not overlapping `!m` on a cell that holds several values, so `!n.g is m` is evaluated per cell. A global query is cached per snapshot, since its selector and graph are static: `count(s)` is one scan keyed by the selector grid's write version, and under a step mode may instead be updated from each application's writes; `nodes(g)` and `edges(g)` come with the extraction. `farthest` reads `t`'s distance array and `u`'s selection, and caches the greatest distance over the reachable nodes of `u` per (graph, `t`, `u`) the same way.
 

@@ -258,7 +258,7 @@ struct compiled_op {
     int            within{-1};      // voronoi; -1 → every cell
     int            into_grid{-1};
     int            write{-1};       // expr arena index, typed by into_grid
-    int            over_grid{-1};   // the graph seam: validated, no effect yet
+    int            over_graph{-1};  // path: route over this graph's nodes; -1 → grid cells
     int            cost{-1};        // expr arena index; -1 → constant 1 (BFS)
 };
 

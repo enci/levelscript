@@ -45,7 +45,7 @@ export type CompletionContext =
 
 // Operation parameter schemas. The op names are checked against the compiler's
 // inspect `ops` list by scripts/check-completion.js.
-export type OpParamKind = 'int' | 'grid' | 'pred' | 'value' | 'expr' | 'enum';
+export type OpParamKind = 'int' | 'grid' | 'graph' | 'pred' | 'value' | 'expr' | 'enum';
 // `values`: the suggested words (an enum's whole set; an int's meaningful values)
 export interface OpParam { name: string; kind: OpParamKind; positional: boolean; required: boolean; values?: string[] }
 export const OPS: { name: string; params: OpParam[]; snippet: string }[] = [
@@ -65,7 +65,7 @@ export const OPS: { name: string; params: OpParam[]; snippet: string }[] = [
                { name: 'to', kind: 'pred', positional: false, required: true },
                { name: 'into', kind: 'grid', positional: false, required: true },
                { name: 'write', kind: 'value', positional: false, required: true },
-               { name: 'over', kind: 'grid', positional: false, required: false },
+               { name: 'over', kind: 'graph', positional: false, required: false },
                { name: 'passable', kind: 'pred', positional: false, required: false },
                { name: 'connectivity', kind: 'int', positional: false, required: false, values: ['4', '8'] },
                { name: 'cost', kind: 'expr', positional: false, required: false }] },
@@ -620,6 +620,7 @@ export function suggestions(ctx: CompletionContext, sym: CompletionSymbols | und
     case 'opValue': {
         const p = OPS.find(o => o.name === ctx.op)?.params.find(q => q.name === ctx.param);
         if (p?.kind === 'grid') grids();
+        else if (p?.kind === 'graph') graphs();
         else if (p?.kind === 'pred' || p?.kind === 'value') allTagValues();
         else p?.values?.forEach(v => word(v, 'enumMember'));
         break;

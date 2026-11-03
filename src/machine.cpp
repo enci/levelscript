@@ -1190,6 +1190,11 @@ void machine::run_path(compiled_op const& op, int ndirs) {
             pass[i] = p || is_from[i] || is_to[i];   // endpoints always traversable
         }
 
+    if (op.over_graph >= 0) {   // route over the graph's nodes instead (no cost pass)
+        run_graph_path(op, is_from, is_to, pass);
+        return;
+    }
+
     // per-cell entry cost: row-major over traversable cells, clamped >= 1
     std::vector<long long> costv(n, 1);
     if (op.cost >= 0)
@@ -1270,6 +1275,77 @@ void machine::run_path(compiled_op const& op, int ndirs) {
         long long v = eval(op.write, i % W, i / W);
         g.front[i] = v;
     }
+    g.back = g.front;
+    ++g.version;
+}
+
+// path(over=g): the same contract with nodes in place of cells. The cell
+// predicate sets lift to nodes (a node qualifies iff any of its cells does);
+// every edge costs 1, so the distance field is one BFS from the `from` nodes
+// over the cached adjacency. No cost pass; ONE draw keys node ids; the route
+// walks back from the min-(dist, key) goal via min-key predecessors and stamps
+// each route node's region, start to goal, row-major within a region.
+void machine::run_graph_path(compiled_op const& op, std::vector<char> const& cell_from,
+                             std::vector<char> const& cell_to, std::vector<char> const& cell_pass) {
+    graph_data const& gd = graph(op.over_graph);
+    int N = gd.node_count();
+    std::vector<char> is_from((size_t)N), is_to((size_t)N), pass((size_t)N);
+    for (size_t i = 0; i < gd.node_of.size() && i < cell_from.size(); ++i) {
+        int nd = gd.node_of[i];
+        if (nd < 0) continue;
+        is_from[(size_t)nd] |= cell_from[i];
+        is_to[(size_t)nd]   |= cell_to[i];
+        pass[(size_t)nd]    |= cell_pass[i];   // includes from / to cells
+    }
+
+    uint64_t tie_seed = rng_();
+    auto key = [tie_seed](int i) { return uniform_hash(tie_seed, (uint64_t)i); };
+
+    const int inf = std::numeric_limits<int>::max();
+    std::vector<int> dist((size_t)N, inf);
+    std::vector<int> queue;
+    for (int i = 0; i < N; ++i)
+        if (is_from[(size_t)i]) { dist[(size_t)i] = 0; queue.push_back(i); }
+    for (size_t h = 0; h < queue.size(); ++h) {
+        int c = queue[h];
+        for (int j : gd.adj[(size_t)c])
+            if (pass[(size_t)j] && dist[(size_t)j] == inf) {
+                dist[(size_t)j] = dist[(size_t)c] + 1;
+                queue.push_back(j);
+            }
+    }
+
+    int goal = -1;
+    for (int i = 0; i < N; ++i) {
+        if (!is_to[(size_t)i] || dist[(size_t)i] == inf) continue;
+        if (goal < 0 || dist[(size_t)i] < dist[(size_t)goal] ||
+            (dist[(size_t)i] == dist[(size_t)goal] && key(i) < key(goal)))
+            goal = i;
+    }
+    if (goal < 0) {
+        warn("path() found no route from 'from' to 'to' over graph '" +
+             prog_->graphs[(size_t)op.over_graph].name + "'; leaving grids unchanged");
+        return;
+    }
+
+    std::vector<int> route{goal};
+    for (int c = goal; dist[(size_t)c] != 0;) {
+        int best = -1;
+        for (int j : gd.adj[(size_t)c])
+            if (pass[(size_t)j] && dist[(size_t)j] != inf && dist[(size_t)j] + 1 == dist[(size_t)c] &&
+                (best < 0 || key(j) < key(best)))
+                best = j;
+        if (best < 0) break;   // unreachable in a well-formed field
+        route.push_back(best);
+        c = best;
+    }
+    std::reverse(route.begin(), route.end());   // stamp start -> goal
+
+    int W = gd.width;
+    grid_state& g = grids_[op.into_grid];
+    for (int nd : route)
+        for (int const* it = gd.region_begin(nd); it != gd.region_end(nd); ++it)
+            g.front[(size_t)*it] = eval(op.write, *it % W, *it / W);
     g.back = g.front;
     ++g.version;
 }

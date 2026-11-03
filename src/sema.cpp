@@ -2027,7 +2027,7 @@ struct analyzer {
     //    like expression built-ins. Adding an operation = a row here + an
     //    executor in the machine; no grammar or keyword change. ──────────────
 
-    enum class arg_kind { int_, grid, pred, value, expr, enum_ };
+    enum class arg_kind { int_, grid, graph, pred, value, expr, enum_ };
 
     struct op_param {
         char const* name;
@@ -2054,7 +2054,7 @@ struct analyzer {
                                            {"to",           arg_kind::pred,  false, true},
                                            {"into",         arg_kind::grid,  false, true},
                                            {"write",        arg_kind::value, false, true},
-                                           {"over",         arg_kind::grid,  false, false},
+                                           {"over",         arg_kind::graph, false, false},
                                            {"passable",     arg_kind::pred,  false, false},
                                            {"connectivity", arg_kind::int_,  false, false},
                                            {"cost",         arg_kind::expr,  false, false}}},
@@ -2083,7 +2083,7 @@ struct analyzer {
         return "'" + std::string(pn) + "=' of '" + op + "'";
     }
 
-    // A bare-identifier argument's name (a `grid` or `enum` value), else null.
+    // A bare-identifier argument's name (a `grid`, `graph`, or `enum` value), else null.
     static std::string const* bare_name(op_arg const& a) {
         return a.value->kind == expr_kind::ident ? &a.value->ident : nullptr;
     }
@@ -2117,6 +2117,24 @@ struct analyzer {
             error(a.loc, arg_ctx(op, pn) + ": '" + *name + "' is not a declared grid");
         else
             require_visible(a.loc, "grid", *name, layer_mod[(size_t)id]);
+        return id;
+    }
+
+    // A `graph` argument: a bare name of a declared graph layer.
+    int op_graph(op_arg const& a, char const* op, char const* pn) {
+        auto name = bare_name(a);
+        if (!name) {
+            error(a.loc, arg_ctx(op, pn) + " expects a graph name, got '" + arg_render(a) + "'");
+            return -1;
+        }
+        int id = out.graph_id(*name);
+        if (id < 0 && out.layer_id(*name) >= 0)
+            error(a.loc, arg_ctx(op, pn) + ": '" + *name + "' is a grid; it takes a graph layer "
+                  "(grid adjacency is the default; restrict cells with 'passable=')");
+        else if (id < 0)
+            error(a.loc, arg_ctx(op, pn) + ": '" + *name + "' is not a declared graph");
+        else
+            require_visible(a.loc, "graph", *name, graph_mod[(size_t)id]);
         return id;
     }
 
@@ -2275,9 +2293,16 @@ struct analyzer {
             op.to        = op_pred(*arg("to"), spec->name, "to");
             if (op.into_grid >= 0)
                 op.write = op_value(*arg("write"), spec->name, "write", op.into_grid);
-            if (arg("over"))     op.over_grid = op_grid(*arg("over"), spec->name, "over");
-            if (arg("passable")) op.passable  = op_pred(*arg("passable"), spec->name, "passable");
-            if (arg("cost"))     op.cost      = op_num(*arg("cost"), spec->name, "cost", false);
+            if (arg("over"))     op.over_graph = op_graph(*arg("over"), spec->name, "over");
+            if (arg("passable")) op.passable   = op_pred(*arg("passable"), spec->name, "passable");
+            if (auto a = arg("cost")) {
+                if (arg("over")) {   // graph routes count edges (check 35)
+                    error(a->loc, arg_ctx(spec->name, "cost") + " is not allowed with 'over=': "
+                          "a route over a graph counts edges, each costing 1");
+                    return false;
+                }
+                op.cost = op_num(*a, spec->name, "cost", false);
+            }
             assert(index("connectivity") == compiled_op::path_connectivity);
             if (!arg("connectivity"))   // the default, as an `int` argument
                 op.int_args.push_back({compiled_op::path_connectivity, num_lit(4)});

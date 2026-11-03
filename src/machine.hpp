@@ -169,6 +169,8 @@ private:
 
     void exec_op(compiled_op const& op);
     void run_path(compiled_op const& op, int ndirs);   // ndirs = 4 or 8
+    void run_graph_path(compiled_op const& op, std::vector<char> const& from,
+                        std::vector<char> const& to, std::vector<char> const& pass);
     void run_bsp(compiled_op const& op, long long min, long long max, long long split);
     void run_voronoi(compiled_op const& op);
     void grow_euclidean(int W, int H, uint64_t d, int nsites, std::vector<int> const& site_of,

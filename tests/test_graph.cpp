@@ -707,8 +707,15 @@ TEST_CASE("graph: misusing a graph name") {
     CHECK(rule_with("level[R] => map[*]").has_error("graph 'map' cannot be written"));
     CHECK(compile_result(dungeon + "sequence s { path(from=R, to=R, into=map, write=R) }")
               .has_error("'map' is a graph layer"));
-    CHECK(compile_result(dungeon + "sequence s { path(from=R, to=R, into=level, write=R, over=map) }")
-              .has_error("'map' is a graph layer"));
+    // 0.17.1: a graph is `path`'s `over`; a grid there is a kind error, and so is `cost`
+    CHECK_FALSE(compile_result(dungeon + "sequence s { path(from=R, to=R, into=level, write=R, over=map) }")
+                    .diags.has_errors());
+    CHECK(compile_result(dungeon + "sequence s { path(from=R, to=R, into=level, write=R, over=level) }")
+              .has_error("'level' is a grid; it takes a graph layer"));
+    CHECK(compile_result(dungeon + "sequence s { path(from=R, to=R, into=level, write=R, over=nope) }")
+              .has_error("'nope' is not a declared graph"));
+    CHECK(compile_result(dungeon + "sequence s { path(from=R, to=R, into=level, write=R, over=map, cost=2) }")
+              .has_error("not allowed with 'over='"));
 }
 
 TEST_CASE("graph: graph-pattern cells") {

@@ -235,3 +235,70 @@ TEST_CASE("graph reads: symmetry=none drops duplicates after the guards draw") {
               show(dedup.generate(dedup.sequence("main"), seed), "marks"));
     }
 }
+
+// ── path over a graph (0.17.1, section 6.6) ──────────────────────────────────
+
+namespace {
+// Start in one cell of A, Boss in one cell of C.
+const std::string start_boss = stamp("rooms", {". Start . . . . Boss", ". . . . . . ."});
+}  // namespace
+
+TEST_CASE("path over a graph: stamps the route's node regions, not the connectors") {
+    CHECK(run_abc(start_boss,
+                  "path(from=(rooms is Start), to=(rooms is Boss), over=map, into=marks, write=1)",
+                  "marks") == "11.11.1/11.11..");
+}
+
+TEST_CASE("path over a graph: node sets use selector semantics") {
+    // passable only where Dark is: B qualifies through its one Dark cell
+    std::string rooms = stamp("rooms", {". Start . . Dark . Boss", ". . . . . . ."});
+    CHECK(run_abc(rooms,
+                  "path(from=(rooms is Start), to=(rooms is Boss), over=map, into=marks, write=1, "
+                  "passable=(rooms is Dark))",
+                  "marks") == "11.11.1/11.11..");
+    // B has no Dark cell: no route, `into` is left as it is
+    CHECK(run_abc(start_boss,
+                  "path(from=(rooms is Start), to=(rooms is Boss), over=map, into=marks, write=1, "
+                  "passable=(rooms is Dark))",
+                  "marks") == "......./.......");
+}
+
+TEST_CASE("path over a graph: a node both from and to is a one-node route") {
+    CHECK(run_abc(stamp("rooms", {". . . Start Boss . .", ". . . . . . ."}),
+                  "path(from=(rooms is Start), to=(rooms is Boss), over=map, into=marks, write=1)",
+                  "marks") == "...11../...11..");
+}
+
+TEST_CASE("path over a graph: write evaluates per stamped cell; a later rule marks the doors") {
+    std::string decls = dungeon + R"(
+rule route_doors(rotation=90) {
+    marks[1 * 1]
+    level[* H *]
+    =>
+    marks[* 1 *]
+}
+)";
+    auto lv = generate(stamped(decls, "level", abc,
+                               start_boss + "\n    path(from=(rooms is Start), to=(rooms is Boss), "
+                                            "over=map, into=marks, write=1)\n    everywhere route_doors"));
+    CHECK(show(lv, "marks") == "1111111/11.11..");
+}
+
+TEST_CASE("path over a graph: ties break by seed, reproducibly, on a shortest route") {
+    // a ring of four rooms: S top-left, G bottom-right; two equal routes
+    std::vector<std::string> ring = {"R H R", "H . H", "R H R"};
+    std::string rooms = stamp("rooms", {"Start . .", ". . .", ". . Boss"});
+    std::string src = stamped(dungeon, "level", ring,
+                              rooms + "\n    path(from=(rooms is Start), to=(rooms is Boss), "
+                                      "over=map, into=marks, write=1)");
+    bool via_right = false, via_left = false;
+    for (uint64_t seed = 1; seed <= 32; ++seed) {
+        std::string m = show(generate(src, seed), "marks");
+        CHECK(m == show(generate(src, seed), "marks"));
+        CHECK((m == "1.1/.../..1" || m == "1../.../1.1"));
+        via_right |= m == "1.1/.../..1";
+        via_left  |= m == "1../.../1.1";
+    }
+    CHECK(via_right);
+    CHECK(via_left);
+}

@@ -8,4 +8,4 @@ layers {
     rooms: grid of room
     map:   graph of level(nodes=R, edges=H)
 }
-sequence main { resize(2, 2) path(from=R, to=R, into=level, write=H, over=map) }
+sequence main { resize(2, 2) path(from=R, to=R, into=map, write=H) }
