@@ -1,6 +1,6 @@
 {
   "cell_zoom": 1.9500000476837158,
-  "grid_bg_color": "340000",
+  "grid_bg_color": "aeacf3",
   "layers": [
     {
       "corner": "normal",
@@ -15,7 +15,15 @@
       "mode": "tile",
       "name": "tiles",
       "opacity": 1.0,
-      "tileset": "Tiles",
+      "tileset": "Desert",
+      "visible": true
+    },
+    {
+      "corner": "normal",
+      "mode": "tile",
+      "name": "props",
+      "opacity": 1.0,
+      "tileset": "Desert",
       "visible": true
     }
   ],
@@ -25,10 +33,10 @@
   },
   "tilesets": [
     {
-      "name": "Tiles",
-      "path": "../tiles/tilemap_packed_a.png",
-      "tile_h": 8,
-      "tile_w": 8
+      "name": "Desert",
+      "path": "../tiles/kenney_desert.png",
+      "tile_h": 16,
+      "tile_w": 16
     }
   ]
 }

@@ -11,12 +11,17 @@ tag algo {
     E  // @name=enemy
     N  // @name=nothing
     S  // @name=start
+
+    rock = W | N            // the plateau around the paths
+    ground = F | R | E | S  // anything walkable
 }
 
-// Everything in the algo grid 
+// Everything in the algo grid, painted as sand paths through a rocky plateau
+// (kenney_desert.png), with the props drawn over the ground
 layers {
     algo : grid of algo
-    tiles : grid of number  // @view=tiles @tileset=Tiles
+    tiles : grid of number  // @view=tiles @tileset=Desert
+    props : grid of number  // @view=tiles @tileset=Desert
 }
 
 params {
@@ -90,111 +95,129 @@ rule walls(rotation=all) { any
 
 
 ///////////////////////////////////////////////////////////////////////////////
-// Paint the tiles layer from the algo layer (tilemap_packed_f.png, 5x5 of 8x8).
-// Walls are drawn as lines joining wall neighbours, so the tile is picked by
-// which of the four sides (N E S W) are walls. Straight pieces come in two
-// variants (5/7 vertical, 1/11 horizontal) for a bit of texture.
-rule decorate { all
-    // lone pillar
+// Paint the level with kenney_desert.png (18 columns of 16x16 tiles, index =
+// row * 18 + column). The level is upscaled 2x first, so every path is two
+// cells wide and the rock at least two thick: a plain nine-slice then covers
+// every edge, picked by which of the four sides (N E S W) are ground, plus
+// the inner corners where only a diagonal is.
+///////////////////////////////////////////////////////////////////////////////
+
+// After the upscale each reward, enemy and start is a 2x2 block: keep it in
+// one random corner of the block, the rest becomes plain floor
+rule pick_spot { ordered
+    algo[R R, R R] where[(mod(x, 2) == 0 && mod(y, 2) == 0) *, * *] => { any
+        algo[R F, F F]  algo[F R, F F]  algo[F F, R F]  algo[F F, F R] }
+    algo[E E, E E] where[(mod(x, 2) == 0 && mod(y, 2) == 0) *, * *] => { any
+        algo[E F, F F]  algo[F E, F F]  algo[F F, E F]  algo[F F, F E] }
+    algo[S S, S S] where[(mod(x, 2) == 0 && mod(y, 2) == 0) *, * *] => { any
+        algo[S F, F F]  algo[F S, F F]  algo[F F, S F]  algo[F F, F S] }
+}
+
+rule paint_ground { ordered
+    algo[ground] => { any (weight=8) tiles[64] tiles[65] }
+    algo[rock] => { any (weight=8) tiles[109] tiles[129] }
+}
+
+rule paint_rock { all
+    // inner corners, all four sides rock but a diagonal open
     algo[
-        *    !W *
-        !W W    !W
-        *    !W * ] => tiles[* * *, * 13 *, * * *]
-    // dead end, vertical
+        rock   rock rock
+        rock   rock rock
+        rock   rock ground ] => tiles[* * *, * 93 *, * * *]
     algo[
-        *    W    *
-        !W W    !W
-        *    !W * ] => { any tiles[* * *, * 5 *, * * *] tiles[* * *, * 7 *, * * *] }
+        rock   rock rock
+        rock   rock rock
+        ground rock rock ] => tiles[* * *, * 94 *, * * *]
     algo[
-        *    !W *
-        !W W    !W
-        *    W    * ] => { any tiles[* * *, * 5 *, * * *] tiles[* * *, * 7 *, * * *] }
-    // dead end, horizontal
+        rock   rock rock
+        rock   rock rock
+        rock   rock rock ] => tiles[* * *, * * *, * * *]
     algo[
-        *    !W *
-        !W W    W 
-        *    !W * ] => { any tiles[* * *, * 1 *, * * *] tiles[* * *, * 11 *, * * *] }
+        rock   rock ground
+        rock   rock rock
+        rock   rock rock ] => tiles[* * *, * 111 *, * * *]
     algo[
-        *    !W *
-        W    W    !W
-        *    !W * ] => { any tiles[* * *, * 1 *, * * *] tiles[* * *, * 11 *, * * *] }
-    // straight runs
+        ground rock rock
+        rock   rock rock
+        rock   rock rock ] => tiles[* * *, * 112 *, * * *]
+    // edges
     algo[
-        *    W    *
-        !W W    !W
-        *    W    * ] => { any tiles[* * *, * 5 *, * * *] tiles[* * *, * 7 *, * * *] }
+        *    ground *
+        rock rock   rock
+        *    rock   * ] => tiles[* * *, * 91 *, * * *]
     algo[
-        *    !W *
-        W    W    W 
-        *    !W * ] => { any tiles[* * *, * 1 *, * * *] tiles[* * *, * 11 *, * * *] }
+        *    rock   *
+        rock rock   rock
+        *    ground * ] => tiles[* * *, * 127 *, * * *]
+    algo[
+        *      rock rock
+        ground rock rock
+        *      rock * ] => tiles[* * *, * 108 *, * * *]
+    algo[
+        *    rock *
+        rock rock ground
+        *    rock * ] => tiles[* * *, * 110 *, * * *]
     // corners
     algo[
-        *    !W *
-        !W W    W 
-        *    W    * ] => tiles[* * *, * 0 *, * * *]
+        *      ground *
+        ground rock   rock
+        *      rock   * ] => tiles[* * *, * 90 *, * * *]
     algo[
-        *    !W *
-        W    W    !W
-        *    W    * ] => tiles[* * *, * 2 *, * * *]
+        *    ground *
+        rock rock   ground
+        *    rock   * ] => tiles[* * *, * 92 *, * * *]
     algo[
-        *    W    *
-        !W W    W 
-        *    !W * ] => tiles[* * *, * 10 *, * * *]
+        *      rock   *
+        ground rock   rock
+        *      ground * ] => tiles[* * *, * 126 *, * * *]
     algo[
-        *    W    *
-        W    W    !W
-        *    !W * ] => tiles[* * *, * 12 *, * * *]
-    // tees
-    algo[
-        *    W    *
-        !W W    W 
-        *    W    * ] => tiles[* * *, * 3 *, * * *]
-    algo[
-        *    W    *
-        W    W    !W
-        *    W    * ] => tiles[* * *, * 4 *, * * *]
-    algo[
-        *    !W *
-        W    W    W 
-        *    W    * ] => tiles[* * *, * 8 *, * * *]
-    algo[
-        *    W    *
-        W    W    W 
-        *    !W * ] => tiles[* * *, * 9 *, * * *]
-    // cross
-    algo[
-        *    W    *
-        W    W    W 
-        *    W    * ] => tiles[* * *, * 6 *, * * *]
+        *    rock   *
+        rock rock   ground
+        *    ground * ] => tiles[* * *, * 128 *, * * *]
+}
 
-    // Start tile
-    algo[S] => tiles[25]
+rule paint_props { all
+    // The start is a portal
+    algo[S] => props[196]
 
-    // Floor is the sheet's blank tile, crates the yellow block,
-    // enemies one of the four critters
-    algo[F] => tiles[14]
-
-    // Reward sprites
+    // Rewards: weapon chests, ammo crates, batteries and medkits
     algo[R] => { any
-        (weight=3) tiles[33]
-        (weight=1) tiles[31]
-        (weight=1) tiles[35]
-        (weight=1) tiles[36]
-        (weight=1) tiles[38]
-        (weight=1) tiles[39]
-        (weight=1) tiles[40]
+        (weight=3) props[216]
+        (weight=1) props[218]
+        (weight=2) props[220]
+        (weight=1) props[225]
+        (weight=1) props[222]
     }
 
-    // Enemies
+    // The sheet has no critters, so enemies are hazards: toxic and
+    // explosive barrels
     algo[E] => { any
-        tiles[27]
-        tiles[28]
-        tiles[29]
-        tiles[30]
+        (weight=2) props[203]
+        (weight=1) props[202]
     }
+}
 
-    // Empty floor tile
-    algo[N] => tiles[14]
+// Scenery: cacti, shrubs and stones on the sand, crystals in the rock
+rule sand_scenery {
+    algo[F] props[.] => { any
+        (weight=2) props[58]
+        (weight=1) props[76]
+        (weight=2) props[63]
+        (weight=2) props[81]
+        (weight=2) props[44]
+        (weight=1) props[82]
+    }
+}
+
+rule rock_scenery {
+    algo[
+        rock rock rock
+        rock rock rock
+        rock rock rock ] => { any
+        (weight=3) props[* * *, * 39 *, * * *]
+        (weight=1) props[* * *, * 57 *, * * *]
+        (weight=1) props[* * *, * 75 *, * * *]
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -209,6 +232,13 @@ sequence main {
     everywhere walls // @play=5
     once { algo[E] => algo[S] }
     everywhere { algo[.] => algo[N] } // @play=10
-    everywhere decorate // @play=5
-}
 
+    // Painting
+    upscale(2, 2)
+    everywhere pick_spot
+    everywhere paint_ground     // @play=10
+    everywhere paint_rock       // @play=5
+    everywhere paint_props
+    scatter(12%) sand_scenery
+    scatter(3%) rock_scenery
+}

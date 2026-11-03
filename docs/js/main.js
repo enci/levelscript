@@ -1,8 +1,18 @@
-// LevelScript website - highlighting, live generator widget, gallery, spec viewer.
+// LevelScript website - highlighting, live generator widget, gallery, lab.
 // Programs run in the browser through the same WASM build the VS Code extension uses.
 
 (function () {
   'use strict';
+
+  // ---------- version ----------
+  // From src/version.hpp via tools/build_site_data.py. data-ls-version="language" shows
+  // MAJOR.MINOR (the spec version); empty shows the full MAJOR.MINOR.PATCH.
+  if (window.LVS_VERSION) {
+    document.querySelectorAll('[data-ls-version]').forEach(el => {
+      el.textContent = el.dataset.lsVersion === 'language'
+        ? window.LVS_VERSION.split('.').slice(0, 2).join('.') : window.LVS_VERSION;
+    });
+  }
 
   // ---------- nav ----------
   const here = location.pathname.split('/').pop() || 'index.html';
@@ -913,7 +923,7 @@
       card.id = s.name;
       card.innerHTML = '<header><h3>' + esc(s.name) + '.lvs</h3>' +
         '<a class="open-sandbox" href="sandbox.html#sample=' + encodeURIComponent(s.name) + '">' +
-        '<i class="fas fa-up-right-from-square"></i> open in sandbox</a></header>' +
+        '<i class="fas fa-up-right-from-square"></i> open in lab</a></header>' +
         (s.about ? '<p class="about">' + esc(s.about) + '</p>' : '') + '<div class="host"></div>';
       gallery.appendChild(card);
       lazy(card, () => createWidget(card.querySelector('.host'), s, { height: 420, autoplay: true }));
@@ -1213,7 +1223,7 @@
         const el = document.createElement('div');
         el.className = 'ref-row';
         el.innerHTML = '<code>' + esc(e.signature) + '</code><span class="ref-sum">' + esc(e.summary) + '</span>' +
-          '<a href="spec.html#' + e.anchor + '">spec</a><button type="button">insert</button>';
+          '<button type="button">insert</button>';
         el.querySelector('button').onclick = () => widget && widget.insert(e.insert);
         return el;
       }
@@ -1222,7 +1232,7 @@
         const hits = window.LVS_searchApi(entries, q.value, kind);
         if (!hits.length) {
           out.innerHTML = '<p class="ref-none">No results for <em>' + esc(q.value) +
-            '</em>. See the <a href="spec.html">full spec</a>.</p>';
+            '</em>.</p>';
           return;
         }
         let group = null;
@@ -1239,45 +1249,5 @@
       q.addEventListener('input', show);
       show();
     }
-  }
-
-  // ---------- spec viewer ----------
-  const specEl = document.getElementById('spec');
-  if (specEl) {
-    const tocEl = document.getElementById('toc');
-    fetch('spec.md').then(r => { if (!r.ok) throw new Error(r.status); return r.text(); }).then(md => {
-      specEl.innerHTML = window.marked.parse(md);
-      specEl.querySelectorAll('pre code').forEach(c => {
-        if (/language-(ls|lvs)\b/.test(c.className)) c.innerHTML = highlight(c.textContent);
-      });
-      const used = {};
-      specEl.querySelectorAll('h2, h3').forEach(h => {
-        let id = h.textContent.toLowerCase().replace(/[^\w]+/g, '-').replace(/^-|-$/g, '') || 'section';
-        if (used[id]) id += '-' + (++used[id]); else used[id] = 1;
-        h.id = id;
-        const a = document.createElement('a');
-        a.href = '#' + id;
-        a.textContent = h.textContent;
-        if (h.tagName === 'H3') a.className = 'sub';
-        tocEl.appendChild(a);
-      });
-      if (location.hash) {
-        const t = document.getElementById(decodeURIComponent(location.hash.slice(1)));
-        if (t) t.scrollIntoView();
-      }
-      const links = [...tocEl.querySelectorAll('a')];
-      const heads = links.map(a => document.getElementById(a.hash.slice(1)));
-      const onScroll = () => {
-        let cur = 0;
-        heads.forEach((h, i) => { if (h.getBoundingClientRect().top < 120) cur = i; });
-        links.forEach((a, i) => a.classList.toggle('active', i === cur));
-      };
-      document.addEventListener('scroll', onScroll, { passive: true });
-      onScroll();
-    }).catch(() => {
-      specEl.innerHTML = '<p class="note warn"><strong>Could not load the spec.</strong> ' +
-        'Serve this folder over HTTP (for example <code>python3 -m http.server</code> in <code>docs/</code>) ' +
-        'or read <a href="spec.md">spec.md</a> directly.</p>';
-    });
   }
 })();

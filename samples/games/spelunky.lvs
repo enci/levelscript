@@ -16,9 +16,9 @@ layers {
     open : grid of opening      // @view=corner
     fine : grid of fine         // @view=fill
     room_id : grid of number    // @view=border
-    // background tiles (tranquil_tunnels_transparent.png), and the foreground drawn over them
-    back : grid of number       // @view=tiles @tileset=Tunnels
-    tiles : grid of number      // @view=tiles @tileset=Tunnels
+    // background tiles (kenney_platformer.png), and the foreground drawn over them
+    back : grid of number       // @view=tiles @tileset=Platformer
+    tiles : grid of number      // @view=tiles @tileset=Platformer
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -173,151 +173,151 @@ rule fine_erode(rotation=all) { ordered
 ///////////////////////////////////////////////////////////////////////////////
 // Purely decration!
 //
-// Paint the tiles from the fine layer (tranquil_tunnels_transparent.png,
-// 128x128 tiles of 8x8, index = row * 128 + column). Like in the nuclear
-// sample, a solid tile is picked by which of its four sides (N E S W) are open.
+// Paint the tiles from the fine layer (kenney_platformer.png, 20 columns of
+// 18x18 tiles, index = row * 20 + column). The terrain is a nine-slice: grass
+// on the top-facing edges, dirt everywhere else, and a solid tile is picked by
+// which of its four sides (N E S W) are open. Rows 9-11 hold the backgrounds.
 ///////////////////////////////////////////////////////////////////////////////
-rule paint_back {
-    fine[*] => { any back[308] back[309] back[436] back[437] }
+rule paint_back { ordered
+    // sky above the first row of rooms, a skyline, and the deep underground
+    fine[*] where[(y < 4)] => back[(180 + mod(x, 4))]
+    fine[*] where[(y == 4)] => back[(200 + mod(x, 4))]
+    fine[*] => back[(220 + mod(x, 4))]
 }
 
 rule paint_fill {
-    fine[S] => { any
-        tiles[267]
-        tiles[268]
-        tiles[395]
-        tiles[396]
-    }
+    fine[S] => { any (weight=3) tiles[122] tiles[104] }
 }
 
 rule paint_walls { all
+    // inner corners, all four sides solid but a diagonal open
+    fine[
+        *  S  !S
+        S  S  S
+        *  S  * ] => tiles[* * *, * 24 *, * * *]
+    fine[
+        !S S  *
+        S  S  S
+        *  S  * ] => tiles[* * *, * 25 *, * * *]
+    fine[
+        *  S  *
+        S  S  S
+        *  S  !S ] => tiles[* * *, * 4 *, * * *]
+    fine[
+        *  S  *
+        S  S  S
+        !S S  * ] => tiles[* * *, * 5 *, * * *]
     // edges
     fine[
         *  !S *
         S  S  S
-        *  S  * ] => { any tiles[* * *, * 259 *, * * *] tiles[* * *, * 260 *, * * *] tiles[* * *, * 261 *, * * *] }
+        *  S  * ] => tiles[* * *, * 22 *, * * *]
     fine[
         *  S  *
         S  S  S
-        *  !S * ] => { any tiles[* * *, * 771 *, * * *] tiles[* * *, * 772 *, * * *] tiles[* * *, * 773 *, * * *] }
+        *  !S * ] => tiles[* * *, * 142 *, * * *]
     fine[
         *  S  *
         !S S  S
-        *  S  * ] => { any tiles[* * *, * 386 *, * * *] tiles[* * *, * 514 *, * * *] }
+        *  S  * ] => tiles[* * *, * 121 *, * * *]
     fine[
         *  S  *
         S  S  !S
-        *  S  * ] => { any tiles[* * *, * 390 *, * * *] tiles[* * *, * 518 *, * * *] }
+        *  S  * ] => tiles[* * *, * 123 *, * * *]
     // corners
     fine[
         *  !S *
         !S S  S
-        *  S  * ] => tiles[* * *, * 258 *, * * *]
+        *  S  * ] => tiles[* * *, * 21 *, * * *]
     fine[
         *  !S *
         S  S  !S
-        *  S  * ] => tiles[* * *, * 262 *, * * *]
+        *  S  * ] => tiles[* * *, * 23 *, * * *]
     fine[
         *  S  *
         !S S  S
-        *  !S * ] => tiles[* * *, * 770 *, * * *]
+        *  !S * ] => tiles[* * *, * 141 *, * * *]
     fine[
         *  S  *
         S  S  !S
-        *  !S * ] => tiles[* * *, * 774 *, * * *]
+        *  !S * ] => tiles[* * *, * 143 *, * * *]
     // one tile thick, horizontal
     fine[
         *  !S *
         S  S  S
-        *  !S * ] => tiles[* * *, * 271 *, * * *]
+        *  !S * ] => tiles[* * *, * 2 *, * * *]
     fine[
         *  !S *
         !S S  S
-        *  !S * ] => tiles[* * *, * 270 *, * * *]
+        *  !S * ] => tiles[* * *, * 1 *, * * *]
     fine[
         *  !S *
         S  S  !S
-        *  !S * ] => tiles[* * *, * 272 *, * * *]
+        *  !S * ] => tiles[* * *, * 3 *, * * *]
     // one tile thick, vertical
     fine[
         *  S  *
         !S S  !S
-        *  S  * ] => tiles[* * *, * 654 *, * * *]
+        *  S  * ] => tiles[* * *, * 120 *, * * *]
     fine[
         *  !S *
         !S S  !S
-        *  S  * ] => tiles[* * *, * 526 *, * * *]
+        *  S  * ] => tiles[* * *, * 20 *, * * *]
     fine[
         *  S  *
         !S S  !S
-        *  !S * ] => tiles[* * *, * 782 *, * * *]
+        *  !S * ] => tiles[* * *, * 140 *, * * *]
     // lone block
     fine[
         *  !S *
         !S S  !S
-        *  !S * ] => tiles[* * *, * 528 *, * * *]
+        *  !S * ] => tiles[* * *, * 0 *, * * *]
 }
 
-// A gem stuck in the rock, only deep inside solid areas
+// A gold block stuck in the rock, only deep inside solid areas
 rule paint_ore {
     fine[
-        S S S S 
-        S S S S 
-        S S S S 
-        S S S S ]
+        S S S
+        S S S
+        S S S ]
     => tiles[
-        * *   *   * 
-        * 648 649 * 
-        * 776 777 * 
-        * *   *   * ]
+        * * *
+        * 9 *
+        * * * ]
 }
 
-// Grass, flowers and gems on the floors, roots hanging from the ceilings
-rule paint_props { all
+// Grass, plants, mushrooms, coins and gems on the floors, spikes now and then
+rule paint_props {
     fine[!S, S] tiles[., *] => { any
         (weight=16) tiles[*, *]
-        (weight=2) tiles[285, *]
-        (weight=2) tiles[287, *]
-        (weight=2) tiles[413, *]
-        (weight=2) tiles[415, *]
-        (weight=2) tiles[541, *]
-        (weight=2) tiles[543, *]
-        (weight=1) tiles[10730, *]
-        (weight=1) tiles[10986, *]
-        (weight=1) tiles[11242, *]
-        (weight=1) tiles[10735, *]
-        (weight=1) tiles[11119, *]
-        (weight=1) tiles[11247, *]
-    }
-    fine[S, !S] tiles[*, .] => { any
-        (weight=6) tiles[*, *]
-        (weight=1) tiles[*, 797]
-        (weight=1) tiles[*, 799]
-        (weight=1) tiles[*, 800]
-        (weight=1) tiles[*, 925]
-        (weight=1) tiles[*, 927]
-        (weight=1) tiles[*, 929]
+        (weight=3) tiles[124, *]
+        (weight=2) tiles[125, *]
+        (weight=1) tiles[126, *]
+        (weight=1) tiles[128, *]
+        (weight=2) tiles[151, *]
+        (weight=1) tiles[67, *]
+        (weight=1) tiles[68, *]
     }
 }
 
-// The cave mouth (3x2) marks the start and the exit rooms, ideally on a
-// flat floor, but a ledge (or thin air) will do
+// A flag marks the start, a door the exit, ideally on a flat floor, but a
+// ledge (or thin air) will do
 rule paint_start { ordered
     coarse[start] fine[!S !S !S, !S !S !S, S S S]
-    => tiles[11138 11139 11140, 11266 11267 11268, * * *]
+    => tiles[* 111 *, * 131 *, * * *]
     coarse[start] fine[!S !S !S, !S !S !S, * S *]
-    => tiles[11138 11139 11140, 11266 11267 11268, * * *]
+    => tiles[* 111 *, * 131 *, * * *]
     coarse[start] fine[!S !S !S, !S !S !S]
-    => tiles[11138 11139 11140, 11266 11267 11268]
+    => tiles[* 111 *, * 131 *]
 }
 
 rule paint_exit { ordered
     coarse[exit] fine[!S !S !S, !S !S !S, S S S]
-    => tiles[11138 11139 11140, 11266 11267 11268, * * *]
+    => tiles[* 130 *, * 150 *, * * *]
     coarse[exit] fine[!S !S !S, !S !S !S, * S *]
-    => tiles[11138 11139 11140, 11266 11267 11268, * * *]
+    => tiles[* 130 *, * 150 *, * * *]
     coarse[exit] fine[!S !S !S, !S !S !S]
-    => tiles[11138 11139 11140, 11266 11267 11268]
+    => tiles[* 130 *, * 150 *]
 }
 
 ///////////////////////////////////////////////////////////////////////////////

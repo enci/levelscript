@@ -39,7 +39,7 @@
       "mode": "tile",
       "name": "back",
       "opacity": 1.0,
-      "tileset": "Tunnels",
+      "tileset": "Platformer",
       "visible": true
     },
     {
@@ -47,7 +47,7 @@
       "mode": "tile",
       "name": "tiles",
       "opacity": 1.0,
-      "tileset": "Tunnels",
+      "tileset": "Platformer",
       "visible": true
     }
   ],
@@ -59,10 +59,10 @@
   },
   "tilesets": [
     {
-      "name": "Tunnels",
-      "path": "../tiles/tranquil_tunnels_transparent.png",
-      "tile_h": 8,
-      "tile_w": 8
+      "name": "Platformer",
+      "path": "../tiles/kenney_platformer.png",
+      "tile_h": 18,
+      "tile_w": 18
     }
   ]
 }
