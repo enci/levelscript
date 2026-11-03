@@ -6,34 +6,35 @@
   <title>Samples - LevelScript</title>
   <meta name="description" content="Real LevelScript programs with their generated output.">
   <meta name="keywords" content="procedural generation, level generation, scripting language, pattern rewriting, roguelike, game development">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="css/icons.css">
   <link rel="stylesheet" href="css/style.css">
   <script src="js/theme.js"></script>
   <link rel="icon" type="image/png" href="img/levelscript.png">
 </head>
-<body>
+<body class="wide">
   <nav>
     <a href="index.html" class="nav-logo"><img src="img/levelscript.png" alt="LevelScript logo"></a>
     <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-navigation" aria-label="Open navigation">
       <span></span><span></span><span></span>
     </button>
     <ul class="nav-links" id="site-navigation">
-      <li><a href="index.html"><i class="fas fa-layer-group"></i> levelscript</a></li>
-      <li><a href="getting-started.html"><i class="fas fa-rocket"></i> getting started</a></li>
-      <li><a href="samples.html"><i class="fas fa-border-all"></i> samples</a></li>
-      <li><a href="sandbox.html"><i class="fas fa-flask"></i> sandbox</a></li>
-      <li><a href="spec.html"><i class="fas fa-book"></i> language spec</a></li>
-      <li><a href="https://github.com/enci/levelscript/releases/latest" target="_blank"><i class="fas fa-download"></i> download</a></li>
-      <li><a href="https://github.com/enci/levelscript" target="_blank"><i class="fab fa-github"></i> github</a></li>
+      <li><a href="index.html"><i class="ph ph-stack"></i> levelscript</a></li>
+      <li><a href="samples.html"><i class="ph ph-squares-four"></i> samples</a></li>
+      <li><a href="lab.html"><i class="ph ph-flask"></i> lab</a></li>
+      <li><a href="https://github.com/enci/levelscript" target="_blank"><i class="ph ph-github-logo"></i> github</a></li>
     </ul>
   </nav>
   <div class="container">
     <h1 style="font-size:2.4rem;margin-bottom:.5rem">Samples</h1>
-    <p class="lead">Every card is a real program from the repository's <code>tests/golden/programs/</code> folder. Each one runs live in your browser through WebAssembly: edit the source, change the seed or params, press Run, or step through the generation one rule application at a time (yellow outlines are matched cells, green are written).</p>
+    <p class="lead">Every card is a real program from the repository's <code>samples/</code> folder: a tutorial to read in order, techniques that stand on their own, and generators modelled on real games. Each one runs live in your browser through WebAssembly: edit the source, change the seed or params, press Run, or step through the generation one rule application at a time (yellow outlines are matched cells, green are written).</p>
     <div class="sample-grid" id="sample-grid"></div>
   </div>
   <footer>
-    LevelScript is MIT licensed &middot; <a href="https://github.com/enci/levelscript">github.com/enci/levelscript</a>
+    <span>LevelScript is MIT licensed &middot; <a href="https://github.com/enci/levelscript">github.com/enci/levelscript</a></span>
+    <span class="footer-logos">
+      <a href="https://www.buas.nl" target="_blank" title="Breda University of Applied Sciences"><img src="img/buas.svg" alt="Breda University of Applied Sciences"></a>
+      <a href="https://www.tudelft.nl" target="_blank" title="TU Delft"><img src="img/delft.svg" alt="TU Delft"></a>
+    </span>
   </footer>
   <script src="wasm/ls_wasm.js"></script>
   <script src="js/samples-data.js"></script>

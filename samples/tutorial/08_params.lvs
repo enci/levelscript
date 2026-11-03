@@ -1,0 +1,62 @@
+// @seed=6
+// Step 8 - parameters. A `params` block declares numbers a run can be given
+// from outside, with defaults, and values derived from them. Statements read
+// them in counts, arguments and `when` guards; `random` draws a value.
+// @expect grid level count(water) >= 6
+
+tag geometry {
+    wall
+    floor
+    water
+}
+
+// `name: number = default` is an input: the CLI sets it with
+// `--param room_min=8`, the debugger and the site show it as a field. Without
+// the annotation, `name = expr` is derived: computed once at the start of the
+// run from the params above it, and never set from outside.
+params {
+    room_min: number = 6
+    flooded: number = 1             // 1: flood one room, 0: don't
+    room_max = room_min * 2
+    flood_zone = random(0, 4) * 3 + 1   // one of 1, 4, 7, 10, 13
+}
+
+layers {
+    zones: grid of number     // @view=border
+    level: grid of geometry   // @view=fill
+}
+
+rule carve_zones {
+    level[.]
+    where[ (mod(zones, 3) != 0 && x > 0 && y > 0 && x < width - 1 && y < height - 1) ]
+    =>
+    level[floor]
+}
+
+rule fill_rest {
+    level[.]
+    =>
+    level[wall]
+}
+
+// Params are read in expressions like any name.
+rule flood {
+    level[floor]
+    where[ (zones == flood_zone) ]
+    =>
+    level[water]
+}
+
+// A `when` after a statement decides whether the statement runs at all. It is
+// checked once, when the statement is reached.
+sequence main {
+    resize(40, 30)
+    bsp(into=zones, min=room_min, max=room_max)     // @hold=10
+    everywhere carve_zones
+    everywhere fill_rest                            // @hold=10
+    everywhere flood        when (flooded == 1)
+}
+
+// Exercise: add an input param `difficulty: number = 1`, and flood the room
+// only when `difficulty > 2`. Run with `--param difficulty=3`, or change the
+// field in the debugger or on the site.

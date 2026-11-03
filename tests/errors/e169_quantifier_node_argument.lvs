@@ -8,5 +8,5 @@ layers {
     light: grid of lit
     plan:  graph of rooms
 }
-rule r { plan { ?a ?b -- ?a } when (every(?a, ?b)) => light(?a)[on] }
+rule r { plan { ?a ?b -- ?a } when (some(a, b)) => a.light = on }
 sequence main { resize(2, 2) everywhere r }

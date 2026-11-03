@@ -42,31 +42,31 @@ TEST_CASE("graph rules: the spec's examples compile") {
     ok(world + R"(
 rule treasure_room {
     plan { ?n }
-    when (degree(?n) == 1 && distance(?n, rooms[Start]) > 3)
+    when (n.degree == 1 && distance(n, rooms[Start]) > 3)
     =>
-    rooms(?n)[Treasure]
+    n.rooms = Treasure
 }
 rule market_hub {
     plan {
-        ?hub[Hall]
-        ?a[Shop]
+        ?hub
+        ?a
         ?hub -- ?a
         ?hub -- ?b
         ?hub -- ?c
-    }
-    when (degree(?hub) == 4)
+    } when (hub.rooms is Hall) when (a.rooms is Shop)
+    when (hub.degree == 4)
     =>
     { all
-        rooms(?hub)[Market]
-        decor(?a)[stall]
+        hub.rooms = Market
+        a.decor = stall
     }
 }
 )");
 }
 
 TEST_CASE("graph rules: the compiled pair") {
-    compile_result r = rule_with("plan {\n ?a -- ?b\n ?c\n ?b[Hall|Inn]\n ?c -- ?a\n}"
-                                 " when (?a != ?c) => { all rooms(?a)[Shop] decor(?b)[stall] }");
+    compile_result r = rule_with("plan {\n ?a -- ?b\n ?c\n ?b\n ?c -- ?a\n} when (b.rooms is Hall|Inn)"
+                                 " when (a != c) => { all a.rooms = Shop b.decor = stall }");
     INFO(r.diags.format_all());
     REQUIRE(r.ok);
     REQUIRE(r.prog.rules[0].pairs.size() == 1);   // no variants
@@ -74,16 +74,13 @@ TEST_CASE("graph rules: the compiled pair") {
     CHECK(p.graph == r.prog.graph_id("plan"));
     CHECK(p.lhs.empty());
     // slots in order of first appearance: the enumeration order
-    CHECK(p.var_names == std::vector<std::string>{"?a", "?b", "?c"});
+    CHECK(p.var_names == std::vector<std::string>{"a", "b", "c"});
     REQUIRE(p.node_edges.size() == 2);
     CHECK((p.node_edges[0].a == 0 && p.node_edges[0].b == 1));
     CHECK((p.node_edges[1].a == 2 && p.node_edges[1].b == 0));
-    REQUIRE(p.node_tests.size() == 1);
-    CHECK(p.node_tests[0].slot == 1);
-    int room = r.prog.tag_id("room");
-    CHECK(p.node_tests[0].val == (r.prog.mask_of(room, "Hall") | r.prog.mask_of(room, "Inn")));
-    REQUIRE(p.guards.size() == 1);
+    REQUIRE(p.guards.size() == 2);   // a node test is a rule guard
     CHECK(p.guards[0].after == 0);
+    CHECK(p.symmetries.empty());     // no symmetry=none
     std::vector<ls::compiled_pattern const*> leaves;
     ls::collect_write_leaves(p.rhs, leaves);
     REQUIRE(leaves.size() == 2);
@@ -93,105 +90,109 @@ TEST_CASE("graph rules: the compiled pair") {
     CHECK(leaves[1]->grid_id == r.prog.layer_id("decor"));
 }
 
-TEST_CASE("graph rules: writes and tests on number-grid sources") {
-    ok(world + "rule r { areas { ?z[3] ?w } when (adjacent(?z, ?w)) => zones(?z)[(value(?w) + 1)] }\n");
+TEST_CASE("graph rules: writes and guards on number-grid sources") {
+    ok(world + "rule r { areas { ?z ?w } when (z.zones == 3) when (adjacent(z, w)) => z.zones = (w.value + 1) }\n");
     // writes may target any grid, the source included, and read the cell
-    ok(world + "rule r { plan { ?n } => { all rooms(?n)[(if(x > y, Hall, Inn))] zones(?n)[(size(?n))] } }\n");
+    ok(world + "rule r { plan { ?n } => { all n.rooms = (if(x > y, Hall, Inn)) n.zones = (n.size) } }\n");
     // sub-rules may name different graphs
-    ok(world + "rule r { ordered\n plan { ?n[Hall] } => rooms(?n)[Inn]\n areas { ?z } => zones(?z)[0]\n}\n");
+    ok(world + "rule r { ordered\n plan { ?n } when (n.rooms is Hall) => n.rooms = Inn\n areas { ?z } => z.zones = 0\n}\n");
 }
 
-TEST_CASE("graph rules: value()") {
+TEST_CASE("graph rules: the value attribute") {
     // a tag mask of the source's tagset, or a number
-    ok(world + "rule r { plan { ?n } when (value(?n) == Hall) => rooms(?n)[Inn] }\n");
-    ok(world + "rule r { areas { ?z } when (value(?z) > 2) => zones(?z)[0] }\n");
+    ok(world + "rule r { plan { ?n } when (n.value == Hall) => n.rooms = Inn }\n");
+    ok(world + "rule r { areas { ?z } when (z.value > 2) => z.zones = 0 }\n");
     // in a grid rule, through a graph pattern
-    ok(world + "rule r { areas[?z] when (value(?z) > 2) => zones[ (value(?z) - 1) ] }\n");
-    CHECK(rule_with("areas { ?z } when (value(?z) == Hall) => zones(?z)[0]").has_error("'==' / '!=' require"));
-    CHECK(rule_with("plan { ?n } when (value(?n) > 2) => rooms(?n)[Inn]").has_error("relational operator"));
-    CHECK(rule_with("plan { ?n } when (value(?n, ?n) == Hall) => rooms(?n)[Inn]").has_error("'value' takes a node, e.g."));
-    CHECK(rule_with("rooms[?t] when (value(?t) == Hall) => rooms[Inn]").has_error("takes a node first"));
-    // not reserved: a grid may be called `value`
-    ok("tag t { a }\nlayers { value: grid of t\n g: graph of value }\n"
-       "rule r { g { ?n } when (value(?n) == a) => value(?n)[a] }\n");
+    ok(world + "rule r { areas[?z] when (z.value > 2) => zones[ (z.value - 1) ] }\n");
+    CHECK(rule_with("areas { ?z } when (z.value == Hall) => z.zones = 0").has_error("'==' / '!=' require"));
+    CHECK(rule_with("plan { ?n } when (n.value > 2) => n.rooms = Inn").has_error("relational operator"));
+    CHECK(rule_with("plan { ?n } when (value(n) == Hall) => n.rooms = Inn").has_error("read the node attribute n.value"));
+    CHECK(rule_with("rooms[?t] when (t.value == Hall) => rooms[Inn]").has_error("'t' holds a value, not a node"));
+    // check 12: the attributes are reserved as grid and graph names
+    CHECK(compile_result("tag t { a }\nlayers { value: grid of t\n g: graph of value }\n")
+              .has_error("collides with the node attribute 'value'"));
 }
 
-TEST_CASE("graph rules: node extents") {
+TEST_CASE("graph rules: graph writes") {
     // check 57
-    CHECK(rule_with("rooms(?n)[Hall] => rooms[Inn]").has_error("appears only on the write side of a graph rule"));
-    CHECK(rule_with("plan[?n] => rooms(?n)[Inn]").has_error("appears only on the write side of a graph rule"));
-    CHECK(rule_with("plan { ?n } => rooms(?m)[Inn]").has_error("'?m' is not declared in the graph block"));
-    CHECK(rule_with("plan { ?n } => rooms(?n)[Inn Hall]").has_error("writes a single cell over its node"));
-    CHECK(rule_with("plan { ?n } => rooms(?n)[Inn, Hall]").has_error("writes a single cell over its node"));
-    CHECK(rule_with("plan { ?n } => rooms[Inn]").has_error("every write of a graph rule is a node extent"));
-    CHECK(rule_with("plan { ?n } => rooms(2, 2)[Inn]").has_error("every write of a graph rule is a node extent"));
-    CHECK(rule_with("plan { ?n } => { any rooms(?n)[Inn] rooms[Hall] }")
-              .has_error("every write of a graph rule is a node extent"));
-    // the usual write-side checks still hold
-    CHECK(rule_with("plan { ?n } => plan(?n)[Inn]").has_error("graph 'plan' cannot be written"));
-    CHECK(rule_with("plan { ?n } => where(?n)[(x > 0)]").has_error("'where' is a match-side pseudo-layer"));
-    CHECK(rule_with("plan { ?n } => nope(?n)[Inn]").has_error("undeclared grid 'nope'"));
-    CHECK(rule_with("plan { ?n } => rooms(?n)[?n]").has_error("holds a node of graph 'plan' value"));
-    CHECK(rule_with("plan { ?n } => rooms(?n)[!Inn]").has_error("is not allowed on the write side"));
-    CHECK(rule_with("plan { ?n } => zones(?n)[Inn]").has_error("expected an integer or wildcard"));
+    CHECK(rule_with("rooms[Hall] => n.rooms = Inn").has_error("is a write of a graph rule only"));
+    CHECK(rule_with("plan[?n] => n.rooms = Inn").has_error("is a write of a graph rule only"));
+    CHECK(rule_with("plan { ?n } => m.rooms = Inn").has_error("'m' is not a variable of this rule's graph block"));
+    CHECK(rule_with("plan { ?n } => rooms[Inn]").has_error("every write of a graph rule is a graph write"));
+    CHECK(rule_with("plan { ?n } => { any n.rooms = Inn rooms[Hall] }")
+              .has_error("every write of a graph rule is a graph write"));
+    CHECK(rule_with("plan { ?n } => n.plan = Inn").has_error("graph 'plan' is read-only"));
+    CHECK(rule_with("plan { ?n } => n.size = 3").has_error("is a node attribute, which is read-only"));
+    CHECK(rule_with("plan { ?n } => n.nope = Inn").has_error("undeclared grid 'nope'"));
+    // the value is a cell of the written grid (checks 14, 15, 45, 47)
+    CHECK(rule_with("plan { ?n } => n.rooms = (n)").has_error("holds a node of graph 'plan' but is written"));
+    CHECK(rule_with("plan { ?n } => n.rooms = !Inn").has_error("is not allowed on the write side"));
+    CHECK(rule_with("plan { ?n } => n.zones = Inn").has_error("expected an integer or wildcard"));
+    CHECK(rule_with("plan { ?n } => n.rooms = ?n").has_error("write a variable's value as an expression"));
+    CHECK(rule_with("plan { ?n } => n.rooms = *").has_error("'*' writes nothing"));
+    // removed in 0.17
+    CHECK(rule_with("plan { ?n } => rooms(?n)[Inn]").has_error("node extents were removed"));
 }
 
 TEST_CASE("graph rules: block variables") {
     // check 44: a variable is declared by its block
-    CHECK(rule_with("plan { ?n } when (?m != ?n) => rooms(?n)[Inn]").has_error("'?m' is not declared in the graph block"));
-    CHECK(rule_with("plan { ?n } => rooms(?n)[(if(size(?m) > 1, Inn, Hall))]")
-              .has_error("'?m' is not declared in the graph block"));
+    CHECK(rule_with("plan { ?n } when (m != n) => n.rooms = Inn")
+              .has_error("'m' is not a variable of this rule's graph block"));
+    CHECK(rule_with("plan { ?n } => n.rooms = (if(m.size > 1, Inn, Hall))")
+              .has_error("'m' is not a variable of this rule's graph block"));
     // check 56: guards stay candidate-scope
-    CHECK(rule_with("plan { ?n } when (rooms == Hall) => rooms(?n)[Inn]").has_error("cannot be read here"));
-    CHECK(rule_with("plan { ?n } when (x > 0) => rooms(?n)[Inn]").has_error("cannot be read here"));
-    CHECK(rule_with("plan { ?n } when (size(?n)) => rooms(?n)[Inn]").has_error("a rule guard must be a boolean"));
+    CHECK(rule_with("plan { ?n } when (rooms == Hall) => n.rooms = Inn").has_error("cannot be read here"));
+    CHECK(rule_with("plan { ?n } when (x > 0) => n.rooms = Inn").has_error("cannot be read here"));
+    CHECK(rule_with("plan { ?n } when (n.size) => n.rooms = Inn").has_error("a rule guard must be a boolean"));
+    CHECK(rule_with("plan { ?n } when (plan.size > 1) => n.rooms = Inn").has_error("there is no cell here"));
+    // check 60: a variable has a name of its own
+    CHECK(rule_with("plan { ?Hall } => Hall.rooms = Inn").has_error("named like a tag value 'Hall'"));
+    CHECK(rule_with("plan { ?rooms } => rooms.decor = stall").has_error("named like a grid 'rooms'"));
     // variables are nodes of the block's graph
-    CHECK(rule_with("plan { ?n } areas { ?z } => rooms(?n)[Inn]").has_error("does not conjoin"));
+    CHECK(rule_with("plan { ?n } areas { ?z } => n.rooms = Inn").has_error("does not conjoin"));
 }
 
 TEST_CASE("graph rules: block form") {
     // check 58
-    CHECK(rule_with("rooms { ?n } => rooms(?n)[Inn]").has_error("'rooms' is a grid; a graph block names a graph layer"));
-    CHECK(rule_with("nope { ?n } => rooms(?n)[Inn]").has_error("undeclared graph 'nope'"));
-    CHECK(rule_with("plan { ?n[Hall] ?n[Inn] } => rooms(?n)[Inn]").has_error("already has a test line"));
-    CHECK(rule_with("plan { ?n -- ?n } => rooms(?n)[Inn]").has_error("cannot be joined to itself"));
-    CHECK(rule_with("plan { ?n[3] } => rooms(?n)[Inn]").has_error("a tag-grid source; a node test is a tag mask"));
-    CHECK(rule_with("areas { ?z[Hall] } => zones(?z)[0]").has_error("a number-grid source; a node test is an integer"));
-    CHECK(rule_with("areas { ?z[.] } => zones(?z)[0]").has_error("a number-grid source; a node test is an integer"));
-    for (char const* t : {".", "!.", "Hall|."}) {
-        INFO(t);
-        CHECK(rule_with(std::string("plan { ?n[") + t + "] } => rooms(?n)[Inn]").has_error("a node is never empty"));
-    }
-    CHECK(rule_with("plan { ?n[Nope] } => rooms(?n)[Inn]").has_error("unknown tag value 'Nope'"));
+    CHECK(rule_with("rooms { ?n } => n.rooms = Inn").has_error("'rooms' is a grid; a graph block names a graph layer"));
+    CHECK(rule_with("nope { ?n } => n.rooms = Inn").has_error("undeclared graph 'nope'"));
+    CHECK(rule_with("plan { ?n -- ?n } => n.rooms = Inn").has_error("cannot be joined to itself"));
+    // a block is topology only: node tests were removed in 0.17
+    CHECK(rule_with("plan { ?n[Hall] } => n.rooms = Inn").has_error("node tests were removed"));
+    // a region read types its comparison by its grid
+    CHECK(rule_with("plan { ?n } when (n.rooms == 3) => n.rooms = Inn").has_error("compared with a tag value"));
+    CHECK(rule_with("areas { ?z } when (z.zones is Hall) => z.zones = 0").has_error("'is' takes tag operands"));
+    CHECK(rule_with("plan { ?n } when (n.rooms is Nope) => n.rooms = Inn").has_error("unknown tag value 'Nope'"));
     // a complement is a fine test: any value but the ones named
-    ok(world + "rule r { plan { ?n[!Hall] } => rooms(?n)[Inn] }\n");
-    // no shape, no variants
-    CHECK(compile_result(world + "rule r(rotation=all) { plan { ?n } => rooms(?n)[Inn] }\n")
-              .has_error("a graph rule takes no 'symmetry' or 'rotation'"));
-    CHECK(compile_result(world + "rule r(symmetry=horizontal) { plan { ?n } => rooms(?n)[Inn] }\n")
-              .has_error("a graph rule takes no 'symmetry' or 'rotation'"));
-    CHECK(compile_result(world + "sequence s { once (rotation=90) { plan { ?n } => rooms(?n)[Inn] } }\n")
-              .has_error("a graph rule takes no 'symmetry' or 'rotation'"));
+    ok(world + "rule r { plan { ?n } when (n.rooms is !Hall) => n.rooms = Inn }\n");
+    // no shape, no variants; symmetry=none de-duplicates
+    CHECK(compile_result(world + "rule r(rotation=all) { plan { ?n } => n.rooms = Inn }\n")
+              .has_error("takes no 'rotation' and no 'symmetry' but 'none'"));
+    CHECK(compile_result(world + "rule r(symmetry=horizontal) { plan { ?n } => n.rooms = Inn }\n")
+              .has_error("takes no 'rotation' and no 'symmetry' but 'none'"));
+    CHECK(compile_result(world + "sequence s { once (rotation=90) { plan { ?n } => n.rooms = Inn } }\n")
+              .has_error("takes no 'rotation' and no 'symmetry' but 'none'"));
+    ok(world + "rule r(symmetry=none) { plan { ?a -- ?b } => a.rooms = Inn }\n");
     // one body, one kind of sub-rule
-    CHECK(rule_with("all\n plan { ?n } => rooms(?n)[Inn]\n rooms[Hall] => rooms[Inn]")
+    CHECK(rule_with("all\n plan { ?n } => n.rooms = Inn\n rooms[Hall] => rooms[Inn]")
               .has_error("cannot mix graph and grid sub-rules"));
-    CHECK(rule_with("all\n rooms[Hall] => rooms[Inn]\n plan { ?n } => rooms(?n)[Inn]")
+    CHECK(rule_with("all\n rooms[Hall] => rooms[Inn]\n plan { ?n } => n.rooms = Inn")
               .has_error("cannot mix graph and grid sub-rules"));
 }
 
 TEST_CASE("graph rules: same-grid simultaneous writes") {
     // check 31: one grid over one node, twice
-    CHECK(rule_with("plan { ?n } => { all rooms(?n)[Inn] rooms(?n)[Hall] }")
-              .has_error("is written twice over node '?n'"));
-    CHECK(rule_with("plan { ?n } => { all rooms(?n)[Inn] { any rooms(?n)[Hall] decor(?n)[stall] } }")
-              .has_error("is written twice over node '?n'"));
+    CHECK(rule_with("plan { ?n } => { all n.rooms = Inn n.rooms = Hall }")
+              .has_error("is written twice over node 'n'"));
+    CHECK(rule_with("plan { ?n } => { all n.rooms = Inn { any n.rooms = Hall n.decor = stall } }")
+              .has_error("is written twice over node 'n'"));
     // distinct variables are distinct nodes; distinct grids never conflict
-    ok(world + "rule r { plan { ?a ?b } => { all rooms(?a)[Inn] rooms(?b)[Hall] decor(?a)[stall] } }\n");
+    ok(world + "rule r { plan { ?a ?b } => { all a.rooms = Inn b.rooms = Hall a.decor = stall } }\n");
 }
 
 TEST_CASE("graph rules: grow never warns") {
     // section 6.9: a graph rule is uncertain, so the reductivity check is silent
-    compile_result r(world + "sequence main { grow { plan { ?n } => rooms(?n)[Inn] } }\n");
+    compile_result r(world + "sequence main { grow { plan { ?n } => n.rooms = Inn } }\n");
     INFO(r.diags.format_all());
     REQUIRE(r.ok);
     for (auto const& d : r.diags.all) CHECK(d.is_error);
@@ -231,13 +232,13 @@ const std::vector<std::string> chain = {"R H R H R"};
 
 }  // namespace
 
-TEST_CASE("graph rules: a node extent writes the whole region") {
+TEST_CASE("graph rules: a graph write writes the whole region") {
     auto lv = generate(ts::stamped(dungeon, "level", abc,
-        "everywhere { map { ?n } when (degree(?n) == 1) => rooms(?n)[DeadEnd] }"));
+        "everywhere { map { ?n } when (n.degree == 1) => n.rooms = DeadEnd }"));
     CHECK(ts::show(lv, "rooms") == "DD....D/DD.....");
     // a write cell evaluates per cell of the region, with x/y that cell
     auto ids = generate(ts::stamped(dungeon, "level", abc,
-        "everywhere { map { ?n } => ids(?n)[ (x + 10 * y) ] }"));
+        "everywhere { map { ?n } => n.ids = (x + 10 * y) }"));
     CHECK(ts::show(ids, "ids") == "01.34.6/1011.1314..");
 }
 
@@ -251,7 +252,7 @@ TEST_CASE("graph rules: once chooses uniformly among nodes, whatever their size"
             n += !gen.generate(gen.sequence("main"), seed)["rooms"].is_empty(6, 0);
         return n;
     };
-    int by_node = picks_c("once { map { ?n } => rooms(?n)[Boss] }");
+    int by_node = picks_c("once { map { ?n } => n.rooms = Boss }");
     int by_cell = picks_c("once { map[?n] => rooms[Boss] }");
     CHECK(by_node > 70);    // ~100 of 300
     CHECK(by_node < 130);
@@ -261,7 +262,7 @@ TEST_CASE("graph rules: once chooses uniformly among nodes, whatever their size"
 TEST_CASE("graph rules: assignments are collected in lexicographic node order") {
     // `?a -- ?b` on the chain: (0,1) (1,0) (1,2) (2,1) - every edge twice. A
     // step pick is the item at uniform(4), after the stamp's one uniform(1).
-    std::string rule = "once { map { ?a -- ?b } => { all rooms(?a)[Start] items(?b)[chest] } }";
+    std::string rule = "once { map { ?a -- ?b } => { all a.rooms = Start b.items = chest } }";
     int const want[4][2] = {{0, 1}, {1, 0}, {1, 2}, {2, 1}};
     auto gen = ts::make(ts::stamped(dungeon, "level", chain, rule));
     REQUIRE(static_cast<bool>(gen));
@@ -285,18 +286,18 @@ TEST_CASE("graph rules: assignments are collected in lexicographic node order") 
     CHECK(seen.size() == 4);
 }
 
-TEST_CASE("graph rules: tests and edges filter assignments") {
-    // a test reads the node's value in the source; an edge line needs adjacency
+TEST_CASE("graph rules: guards and edges filter assignments") {
+    // a guard reads the node's region in the source; an edge line needs adjacency
     auto chests = generate(ts::stamped(dungeon, "level", {"R H R H W"},
-        "everywhere { layout { ?n[R] ?m[H] ?n -- ?m } => items(?n)[chest] }"));
+        "everywhere { layout { ?n ?m ?n -- ?m } when (n.level is R) when (m.level is H) => n.items = chest }"));
     CHECK(ts::show(chests, "items") == "c.c..");
     // non-induced: unlisted edges are fine; `!adjacent` excludes them
     auto pairs = generate(ts::stamped(dungeon, "level", chain,
-        "everywhere { map { ?a ?b } when (!adjacent(?a, ?b) && ?a != ?b) => rooms(?a)[Boss] }"));
+        "everywhere { map { ?a ?b } when (!adjacent(a, b) && a != b) => a.rooms = Boss }"));
     CHECK(ts::show(pairs, "rooms") == "B...B");
     // more variables than nodes: no candidates
     auto none = generate(ts::stamped(dungeon, "level", {"R H R"},
-        "everywhere { map { ?a ?b ?c } => rooms(?a)[Boss] }"));
+        "everywhere { map { ?a ?b ?c } => a.rooms = Boss }"));
     CHECK(ts::show(none, "rooms") == "...");
 }
 
@@ -310,44 +311,44 @@ TEST_CASE("graph rules: the write mask works on regions") {
         while (run.step()) ++n;
         return n;
     };
-    int base = steps("everywhere { map { ?n } when (size(?n) > 1) => rooms(?n)[Start] }");
+    int base = steps("everywhere { map { ?n } when (n.size > 1) => n.rooms = Start }");
     // as ?a, nodes 0 and 2 have one assignment each and node 1 two, which
     // conflict on rooms over node 1: three applications
-    CHECK(steps("everywhere { map { ?a -- ?b } => rooms(?a)[Start] }") - base == 3);
+    CHECK(steps("everywhere { map { ?a -- ?b } => a.rooms = Start }") - base == 3);
     // with a second grid, (0,1) and (2,1) also share items over node 1:
     // whatever the shuffle, two applications
-    CHECK(steps("everywhere { map { ?a -- ?b } => { all rooms(?a)[Start] items(?b)[chest] } }") - base == 2);
+    CHECK(steps("everywhere { map { ?a -- ?b } => { all a.rooms = Start b.items = chest } }") - base == 2);
     // a one-variable rule never conflicts with itself
-    CHECK(steps("everywhere { map { ?n } => rooms(?n)[Start] }") - base == 3);
+    CHECK(steps("everywhere { map { ?n } => n.rooms = Start }") - base == 3);
 }
 
 TEST_CASE("graph rules: writing the source changes the next extraction") {
     // the hall becomes room: A, the hall, and B merge into one region
     auto lv = generate(ts::stamped(dungeon, "level", {"R R H R"},
-        "once { layout { ?n[H] } => level(?n)[R] }"));
+        "once { layout { ?n } when (n.level is H) => n.level = R }"));
     CHECK(ts::show(lv, "level") == "RRRR");
     CHECK(lv.graph("layout").node_count() == 1);
     // a step mode re-extracts after every application: prune to one room
     auto pruned = generate(ts::stamped(dungeon, "level", {"R H R H R H R H R"},
-        "grow { map { ?n } when (degree(?n) == 1) => level(?n)[W] }"));
+        "grow { map { ?n } when (n.degree == 1) => n.level = W }"));
     CHECK(pruned.graph("map").node_count() == 1);
     // a batch sees one snapshot: only the two ends
     auto once = generate(ts::stamped(dungeon, "level", {"R H R H R H R H R"},
-        "everywhere { map { ?n } when (degree(?n) == 1) => level(?n)[W] }"));
+        "everywhere { map { ?n } when (n.degree == 1) => n.level = W }"));
     CHECK(ts::show(once, "level") == "WHRHRHRHW");
 }
 
-TEST_CASE("graph rules: number-grid sources and value()") {
+TEST_CASE("graph rules: number-grid sources and the value attribute") {
     std::vector<std::string> zones = {"1 1 2 2 3", "1 1 2 2 3"};
     auto lv = generate(ts::stamped(dungeon, "ids", zones,
-        "everywhere { areas { ?z } => ids(?z)[ (value(?z) * 10) ] }"));
+        "everywhere { areas { ?z } => z.ids = (z.value * 10) }"));
     CHECK(ts::show(lv, "ids") == "1010202030/1010202030");
     auto tested = generate(ts::stamped(dungeon, "ids", zones,
-        "everywhere { areas { ?z[2] ?w -- ?z } when (value(?w) > 2) => items(?w)[chest] }"));
+        "everywhere { areas { ?z ?w -- ?z } when (z.ids == 2) when (w.value > 2) => w.items = chest }"));
     CHECK(ts::show(tested, "items") == "....c/....c");
     // in a grid rule too, through a graph pattern
     auto grid = generate(ts::stamped(dungeon, "ids", zones,
-        "everywhere { areas[?z] when (value(?z) == 2) => rooms[Boss] }"));
+        "everywhere { areas[?z] when (z.value == 2) => rooms[Boss] }"));
     CHECK(ts::show(grid, "rooms") == "..BB./..BB.");
 }
 
@@ -355,8 +356,8 @@ TEST_CASE("graph rules: ordered sub-rules on different graphs") {
     // step modes take the highest-priority sub-rule while it has candidates
     auto lv = generate(ts::stamped(dungeon, "level", {"R H R"},
         "grow(3) { ordered\n"
-        "    map { ?n } when (size(?n) == 1) => level(?n)[W]\n"
-        "    layout { ?n[H] } => rooms(?n)[Boss]\n"
+        "    map { ?n } when (n.size == 1) => n.level = W\n"
+        "    layout { ?n } when (n.level is H) => n.rooms = Boss\n"
         "}"));
     CHECK(ts::show(lv, "level") == "WHW");
     CHECK(ts::show(lv, "rooms") == ".B.");
@@ -364,7 +365,7 @@ TEST_CASE("graph rules: ordered sub-rules on different graphs") {
 
 TEST_CASE("graph rules: highlights name the assigned regions and their writes") {
     auto gen = ts::make(ts::stamped(dungeon, "level", {"R R H R"},
-        "once { map { ?n } when (size(?n) == 2) => items(?n)[chest] }"));
+        "once { map { ?n } when (n.size == 2) => n.items = chest }"));
     REQUIRE(static_cast<bool>(gen));
     auto run = gen.run(gen.sequence("main"), 1, ls::step_mode::application, ls::observe::on);
     REQUIRE(run.step());   // resize
@@ -387,29 +388,29 @@ TEST_CASE("graph rules: highlights name the assigned regions and their writes") 
 
 TEST_CASE("graph rules: farthest arguments") {
     // check 53: a node, then a target, then optionally a second target
-    CHECK(rule_with("plan { ?n } when (farthest(rooms[Start], rooms[Start], rooms[Hall])) => decor(?n)[stall]")
+    CHECK(rule_with("plan { ?n } when (farthest(rooms[Start], rooms[Start], rooms[Hall])) => n.decor = stall")
               .has_error("takes a node first"));
-    CHECK(rule_with("plan { ?n } when (farthest(rooms[Start], rooms[Start])) => decor(?n)[stall]")
+    CHECK(rule_with("plan { ?n } when (farthest(rooms[Start], rooms[Start])) => n.decor = stall")
               .has_error("takes a node first"));
     // check 19: two or three arguments
-    CHECK(rule_with("plan { ?n } when (farthest(?n)) => decor(?n)[stall]")
+    CHECK(rule_with("plan { ?n } when (farthest(n)) => n.decor = stall")
               .has_error("'farthest' takes a node, a target, and optionally a second target"));
-    CHECK(rule_with("plan { ?n } when (farthest(?n, rooms[Start], rooms[Hall], rooms[Hall])) => decor(?n)[stall]")
+    CHECK(rule_with("plan { ?n } when (farthest(n, rooms[Start], rooms[Hall], rooms[Hall])) => n.decor = stall")
               .has_error("'farthest' takes a node, a target, and optionally a second target"));
-    CHECK(rule_with("plan { ?n } when (farthest(?n, rooms[Start], 3)) => decor(?n)[stall]")
+    CHECK(rule_with("plan { ?n } when (farthest(n, rooms[Start], 3)) => n.decor = stall")
               .has_error("is a node or a selector"));
-    CHECK(rule_with("plan { ?n } when (farthest(?n, rooms[Start], zones[Hall])) => decor(?n)[stall]")
+    CHECK(rule_with("plan { ?n } when (farthest(n, rooms[Start], zones[Hall])) => n.decor = stall")
               .has_error("is an integer, '.', or '!.'"));
-    CHECK(rule_with("plan[?n] areas[?z] when (farthest(?n, rooms[Start], ?z)) => decor[stall]")
+    CHECK(rule_with("plan[?n] areas[?z] when (farthest(n, rooms[Start], z)) => decor[stall]")
               .has_error("a node of a different graph"));
-    CHECK(rule_with("plan { ?n } when (farthest(?n, rooms[Start], rooms[Hall]) > 0) => decor(?n)[stall]")
+    CHECK(rule_with("plan { ?n } when (farthest(n, rooms[Start], rooms[Hall]) > 0) => n.decor = stall")
               .has_error("relational operator"));
     for (char const* body : {
-             "plan { ?n } when (farthest(?n, rooms[Start], decor[stall])) => decor(?n)[stall]",
-             "plan { ?n } when (farthest(?n, rooms[Start])) => decor(?n)[stall]",
-             "plan { ?s ?n } when (farthest(?n, ?s)) => decor(?n)[stall]",
-             "plan { ?s ?n } when (farthest(?n, ?s, zones[!.])) => decor(?n)[stall]",
-             "plan { ?n ?u } when (farthest(?n, rooms[Start], ?u) || farthest(?u, ?n, ?n)) => decor(?n)[stall]",
+             "plan { ?n } when (farthest(n, rooms[Start], decor[stall])) => n.decor = stall",
+             "plan { ?n } when (farthest(n, rooms[Start])) => n.decor = stall",
+             "plan { ?s ?n } when (farthest(n, s)) => n.decor = stall",
+             "plan { ?s ?n } when (farthest(n, s, zones[!.])) => n.decor = stall",
+             "plan { ?n ?u } when (farthest(n, rooms[Start], u) || farthest(u, n, n)) => n.decor = stall",
          }) {
         INFO(body);
         compile_result r = rule_with(body);
@@ -425,10 +426,10 @@ TEST_CASE("graph rules: farthest picks the nodes of u farthest from t") {
         return ts::show(generate(ts::stamped(dungeon, "level", split,
             (rooms.empty() ? "" : ts::stamp("rooms", {rooms}) + "\n    ") +
             (items.empty() ? "" : ts::stamp("items", {items}) + "\n    ") +
-            "everywhere { map { ?n } when (" + guard + ") => ids(?n)[1] }")), "ids");
+            "everywhere { map { ?n } when (" + guard + ") => n.ids = 1 }")), "ids");
     };
     std::string const start = "Start . . . . . . . .";
-    std::string const far   = "farthest(?n, rooms[Start], items[chest])";
+    std::string const far   = "farthest(n, rooms[Start], items[chest])";
     // a unique maximum; node 1, not in u, is never farthest
     CHECK(mark(start, ". . chest . chest . . . .", far) == "....1....");
     CHECK(mark(start, ". . chest . . . . . .", far) == "..1......");
@@ -436,14 +437,14 @@ TEST_CASE("graph rules: farthest picks the nodes of u farthest from t") {
     CHECK(mark(start, ". . chest . . . . . chest", far) == "..1......");
     CHECK(mark(start, ". . . . . . chest . chest", far) == ".........");
     // u as the source selector: every node; ties all match
-    CHECK(mark(". . Start . . . . . .", "", "farthest(?n, rooms[Start], level[R])") == "1...1....");
+    CHECK(mark(". . Start . . . . . .", "", "farthest(n, rooms[Start], level[R])") == "1...1....");
     // t or u empty
     CHECK(mark("", ". . chest . . . . . .", far) == ".........");
     CHECK(mark(start, "", far) == ".........");
     // n in t: true only when every reachable node of u is in t
-    CHECK(mark(start, "", "farthest(?n, rooms[Start], rooms[Start])") == "1........");
-    CHECK(mark(start, "", "farthest(?n, rooms[Start], level[R])") == "....1....");
-    CHECK(mark("", "", "farthest(?n, level[R], level[R])") == "1.1.1.1.1");
+    CHECK(mark(start, "", "farthest(n, rooms[Start], rooms[Start])") == "1........");
+    CHECK(mark(start, "", "farthest(n, rooms[Start], level[R])") == "....1....");
+    CHECK(mark("", "", "farthest(n, level[R], level[R])") == "1.1.1.1.1");
 }
 
 TEST_CASE("graph rules: farthest without u compares against every node") {
@@ -451,21 +452,21 @@ TEST_CASE("graph rules: farthest without u compares against every node") {
     auto mark = [&](std::string const& rooms, std::string const& guard) {
         return ts::show(generate(ts::stamped(dungeon, "level", split,
             (rooms.empty() ? "" : ts::stamp("rooms", {rooms}) + "\n    ") +
-            "everywhere { map { ?n } when (" + guard + ") => ids(?n)[1] }")), "ids");
+            "everywhere { map { ?n } when (" + guard + ") => n.ids = 1 }")), "ids");
     };
     // the two-argument form is the three-argument form with u = the source's nodes
     for (std::string const rooms : {"Start . . . . . . . .", ". . Start . . . . . .",
                                     ". . . . . . Start . .", "Start . . . . . Start . .", ""}) {
         INFO(rooms);
-        CHECK(mark(rooms, "farthest(?n, rooms[Start])") ==
-              mark(rooms, "farthest(?n, rooms[Start], level[!.])"));
+        CHECK(mark(rooms, "farthest(n, rooms[Start])") ==
+              mark(rooms, "farthest(n, rooms[Start], level[!.])"));
     }
     // a unique maximum; unreachable nodes never win; ties all match; t empty
-    CHECK(mark("Start . . . . . . . .", "farthest(?n, rooms[Start])") == "....1....");
-    CHECK(mark(". . Start . . . . . .", "farthest(?n, rooms[Start])") == "1...1....");
-    CHECK(mark("", "farthest(?n, rooms[Start])") == ".........");
+    CHECK(mark("Start . . . . . . . .", "farthest(n, rooms[Start])") == "....1....");
+    CHECK(mark(". . Start . . . . . .", "farthest(n, rooms[Start])") == "1...1....");
+    CHECK(mark("", "farthest(n, rooms[Start])") == ".........");
     // n in t, with t every node
-    CHECK(mark("", "farthest(?n, level[R])") == "1.1.1.1.1");
+    CHECK(mark("", "farthest(n, level[R])") == "1.1.1.1.1");
 }
 
 TEST_CASE("graph rules: farthest with node targets") {
@@ -473,19 +474,19 @@ TEST_CASE("graph rules: farthest with node targets") {
     // t a node: the room farthest from the start room
     auto lv = generate(ts::stamped(dungeon, "level", split,
         ts::stamp("rooms", {"Start . . . . . . . ."}) +
-        "\n    once { map { ?s[R] ?n } when (some(?s, rooms[Start]) && farthest(?n, ?s, level[R])) "
-        "=> ids(?n)[7] }"));
+        "\n    once { map { ?s ?n } when (s.level is R) when (some(s, rooms[Start]) && farthest(n, s, level[R])) "
+        "=> n.ids = 7 }"));
     CHECK(ts::show(lv, "ids") == "....7....");
     // u a node: farthest(n, t, n) is reachable(n, t)
     auto self = generate(ts::stamped(dungeon, "level", split,
         ts::stamp("rooms", {"Start . . . . . . . ."}) +
-        "\n    everywhere { map[?n] when (farthest(?n, rooms[Start], ?n)) => ids[1] }"));
+        "\n    everywhere { map[?n] when (farthest(n, rooms[Start], n)) => ids[1] }"));
     CHECK(ts::show(self, "ids") == "1.1.1....");
     // t a node, u omitted
     auto all = generate(ts::stamped(dungeon, "level", split,
         ts::stamp("rooms", {". . . . . . . . Start"}) +
-        "\n    once { map { ?s[R] ?n } when (some(?s, rooms[Start]) && farthest(?n, ?s)) "
-        "=> ids(?n)[7] }"));
+        "\n    once { map { ?s ?n } when (s.level is R) when (some(s, rooms[Start]) && farthest(n, s)) "
+        "=> n.ids = 7 }"));
     CHECK(ts::show(all, "ids") == "......7..");
 }
 
@@ -493,7 +494,7 @@ TEST_CASE("graph rules: farthest ties are separate candidates under once") {
     // Start in the middle of the chain: nodes 0 and 2 tie at distance 1
     auto gen = ts::make(ts::stamped(dungeon, "level", chain,
         ts::stamp("rooms", {". . Start . ."}) +
-        "\n    once { map { ?n } when (farthest(?n, rooms[Start], level[R])) => items(?n)[chest] }"));
+        "\n    once { map { ?n } when (farthest(n, rooms[Start], level[R])) => n.items = chest }"));
     REQUIRE(static_cast<bool>(gen));
     int left = 0, right = 0;
     for (uint64_t seed = 1; seed <= 200; ++seed) {
@@ -509,8 +510,8 @@ TEST_CASE("graph rules: farthest ties are separate candidates under once") {
 
 TEST_CASE("graph rules: farthest sees a selector grid written mid-sequence") {
     // one rule, so one cached maximum, which must key on u's grid version
-    std::string const far = "rule far { map { ?n } when (farthest(?n, rooms[Start], items[chest])) "
-                            "=> ids(?n)[ (x) ] }\n";
+    std::string const far = "rule far { map { ?n } when (farthest(n, rooms[Start], items[chest])) "
+                            "=> n.ids = (x) }\n";
     auto lv = generate(ts::stamped(dungeon + far, "level", chain,
         ts::stamp("rooms", {"Start . . . ."}) + "\n    " +
         ts::stamp("items", {". . chest . ."}) + "\n    everywhere far\n    " +

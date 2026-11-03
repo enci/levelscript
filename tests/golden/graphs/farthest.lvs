@@ -31,7 +31,7 @@ sequence main {
     once { rooms[* * * * * * * * *, * * * * * * * * *, * * * * * * * * *, * * * * * * * * *, * * * * * * * * *] =>
            rooms[. . Start . . . . . ., . . . . . . . . ., . . . . . . . . ., . . . . . . . . ., . . . . . . . . .] }
     // the dead ends, then the one farthest from Start
-    everywhere { map { ?n } when (degree(?n) == 1) => marks(?n)[leaf] }
-    once { map { ?n } when (farthest(?n, rooms[Start], marks[leaf])) => rooms(?n)[Exit] }
-    everywhere { map { ?n } when (farthest(?n, rooms[Start])) => ends(?n)[far] }
+    everywhere { map { ?n } when (n.degree == 1) => n.marks = leaf }
+    once { map { ?n } when (farthest(n, rooms[Start], marks[leaf])) => n.rooms = Exit }
+    everywhere { map { ?n } when (farthest(n, rooms[Start])) => n.ends = far }
 }

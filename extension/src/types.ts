@@ -47,14 +47,14 @@ export interface OutlineSymbol {
 
 // A tool directive (`// @key=value`, spec Appendix B), attached to its target.
 export interface Directive {
-    key: 'seed' | 'name' | 'play' | 'hold' | 'expect' | 'param' | string;
+    key: 'seed' | 'name' | 'play' | 'hold' | 'view' | 'tileset' | 'expect' | 'param' | string;
     value: string;   // as written
     loc: Location;
     target: {
-        kind: 'file' | 'tag_value' | 'statement';
+        kind: 'file' | 'tag_value' | 'statement' | 'layer';
         range?: SourceRange;
         owner?: string;   // tag_value: the tagset; statement: the sequence
-        name?: string;    // tag_value: the value; @param: the param
+        name?: string;    // tag_value: the value; layer: the grid; @param: the param
         index?: number;   // statement: its position in the sequence body
     };
 }
@@ -79,5 +79,6 @@ export interface InspectionResult {
         ops: string[];
         builtins: string[];
         graph_functions?: string[];   // built-ins on node variables, in rules only
+        node_attributes?: string[];   // `n.degree`, `n.size`, `n.value`
     };
 }

@@ -17,6 +17,6 @@ layers {
 sequence main {
     resize(6, 2)
     once { zones[* * * * * *, * * * * * *] => zones[1 1 2 . 2 3, 1 . 2 . 2 3] }
-    everywhere { areas[?z] => sizes[ (size(?z)) ] }
-    everywhere { areas[?z] => vals[ (value(?z) * 10 + degree(?z)) ] }
+    everywhere { areas[?z] => sizes[ (z.size) ] }
+    everywhere { areas[?z] => vals[ (z.value * 10 + z.degree) ] }
 }

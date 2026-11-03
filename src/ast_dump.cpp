@@ -61,6 +61,7 @@ struct printer {
         case expr_kind::variable:  return e.ident;
         default: break;
         }
+        if (e.kind == expr_kind::attr) return "(attr " + e.ident + " " + e.member + at(e.loc) + ")";
         std::string s = "(";
         s += e.kind == expr_kind::call     ? "call " + e.ident
            : e.kind == expr_kind::selector ? "selector " + e.ident
@@ -70,11 +71,12 @@ struct printer {
     }
 
     void pattern(ls::pattern const& p) {
+        if (!p.node.text.empty()) {   // a graph write `n.g = c`
+            line("(graph-write " + p.node.text + " " + p.grid.text + " " +
+                 expr_str(*p.cells[0][0]) + at(p.loc) + ")");
+            return;
+        }
         open(p.is_where ? std::string("where") : "pattern " + p.grid.text, &p.loc);
-        if (p.sized)
-            line("(size " + std::to_string(p.size_cols) + " " + std::to_string(p.size_rows) +
-                 at(p.size_loc) + ")");
-        if (!p.extent.text.empty()) line("(extent " + p.extent.text + at(p.size_loc) + ")");
         for (auto const& row : p.cells) {
             std::string s = "(row";
             for (auto const& c : row) s += " " + expr_str(*c);
@@ -115,9 +117,6 @@ struct printer {
                     case graph_item::kind::node: line("(node " + it.a.text + at(it.loc) + ")"); break;
                     case graph_item::kind::edge:
                         line("(edge " + it.a.text + " " + it.b.text + at(it.loc) + ")");
-                        break;
-                    case graph_item::kind::test:
-                        line("(test " + it.a.text + " " + expr_str(*it.test) + at(it.loc) + ")");
                         break;
                     }
                 }
@@ -242,6 +241,7 @@ std::string expr_source(expr const& e) {
     case expr_kind::ident:
     case expr_kind::variable:  return e.ident;
     case expr_kind::paren:     return "(" + expr_source(*e.args[0]) + ")";
+    case expr_kind::attr:      return e.ident + "." + e.member;
     case expr_kind::neg:       return "-" + operand(*e.args[0], 9);
     case expr_kind::not_:      return "!" + operand(*e.args[0], 9);
     case expr_kind::call:
@@ -261,17 +261,11 @@ std::string expr_source(expr const& e) {
 }
 
 std::string graph_block_source(graph_block const& b) {
-    // a test is a whitespace-free mask: `Hall|Inn`, not the infix `Hall | Inn`
-    auto mask = [](auto& self, expr const& e) -> std::string {
-        if (e.kind == expr_kind::bit_or) return self(self, *e.args[0]) + "|" + self(self, *e.args[1]);
-        return expr_source(e);
-    };
     std::string s = b.graph.text + " {";
-    for (size_t i = 0; i < b.items.size(); ++i) {
+    for (size_t i = 0; i < b.items.size(); ++i) {   // names are kept without their '?'
         auto const& it = b.items[i];
-        s += (i ? ", " : " ") + it.a.text;
-        if (it.what == graph_item::kind::edge) s += " -- " + it.b.text;
-        if (it.what == graph_item::kind::test) s += "[" + mask(mask, *it.test) + "]";
+        s += (i ? ", ?" : " ?") + it.a.text;
+        if (it.what == graph_item::kind::edge) s += " -- ?" + it.b.text;
     }
     return s + " }";
 }

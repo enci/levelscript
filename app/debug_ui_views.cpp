@@ -325,15 +325,20 @@ struct cell_view {
     std::string glyph;
 };
 
+// A variable cell reads as its source: `?a` binds on the match side, and
+// `(a)` writes the bound value on the write side.
 static cell_view pattern_cell_view(compiled const& meta, compiled_pattern const& pat,
-                                   compiled_cell const& cc, palette const& pal) {
+                                   compiled_cell const& cc, palette const& pal,
+                                   std::vector<std::string> const& names, bool rhs) {
     switch (cc.what) {
         case compiled_cell::kind::wildcard:
             return { IM_COL32(50, 50, 50, 255), "*" };
         case compiled_cell::kind::expr:
             return { IM_COL32(70, 70, 95, 255), "()" };
-        case compiled_cell::kind::variable:
-            return { IM_COL32(70, 95, 70, 255), "?" };
+        case compiled_cell::kind::variable: {
+            std::string name = cc.var >= 0 && cc.var < (int)names.size() ? names[(size_t)cc.var] : "";
+            return { IM_COL32(70, 95, 70, 255), rhs ? "(" + name + ")" : "?" + name };
+        }
         case compiled_cell::kind::value:
             break;
     }
@@ -369,7 +374,8 @@ static cell_view pattern_cell_view(compiled const& meta, compiled_pattern const&
 }
 
 static void draw_pattern(compiled const& meta, compiled_pattern const& pat,
-                         float px, project_config const& cfg) {
+                         float px, project_config const& cfg,
+                         std::vector<std::string> const& names, bool rhs) {
     palette pal = layer_palette(meta, cfg, pat.grid_id);
 
     float stride   = px + 1.f;
@@ -378,7 +384,7 @@ static void draw_pattern(compiled const& meta, compiled_pattern const& pat,
     ImVec2 origin  = ImGui::GetCursorScreenPos();
     for (int r = 0; r < pat.rows; ++r) {
         for (int c = 0; c < pat.cols; ++c) {
-            cell_view cv = pattern_cell_view(meta, pat, pat.at(r, c), pal);
+            cell_view cv = pattern_cell_view(meta, pat, pat.at(r, c), pal, names, rhs);
             ImVec2 p0 = { origin.x + c * stride, origin.y + r * stride };
             dl->AddRectFilled(p0, { p0.x + px, p0.y + px }, cv.bg, rounding);
             draw_centered_text(dl, p0, px, contrast_text_color(cv.bg),
@@ -388,16 +394,17 @@ static void draw_pattern(compiled const& meta, compiled_pattern const& pat,
     ImGui::Dummy({ pat.cols * stride - 1.f, pat.rows * stride - 1.f });
 }
 
-// Total height (name label + mini-grid) that draw_pattern's group occupies.
-// The label over a mini-grid: its grid's name, or `rooms(?n)` for a node
-// extent, which writes its one cell over the node's region.
+// The label over a mini-grid: its grid's name, or `n.rooms` for a graph
+// write, which writes its one cell over the node's region.
 static std::string pattern_label(compiled const& meta, compiled_pair const& pair,
                                  compiled_pattern const& pat) {
     std::string name = pattern_grid_name(meta, pat);
     if (pat.extent >= 0 && pat.extent < (int)pair.var_names.size())
-        name += "(" + pair.var_names[(size_t)pat.extent] + ")";
+        return pair.var_names[(size_t)pat.extent] + "." + name + " =";
     return name;
 }
+
+// Total height (name label + mini-grid) that draw_pattern's group occupies.
 
 static float pattern_group_height(compiled_pattern const& pat, float mini_px) {
     return ImGui::GetTextLineHeightWithSpacing() + pat.rows * (mini_px + 1.f) - 1.f;
@@ -405,10 +412,11 @@ static float pattern_group_height(compiled_pattern const& pat, float mini_px) {
 
 static void draw_pattern_group(compiled const& meta, compiled_pattern const& pat,
                                std::string const& label, float mini_px,
-                               project_config const& cfg) {
+                               project_config const& cfg,
+                               std::vector<std::string> const& names, bool rhs) {
     ImGui::BeginGroup();
     ImGui::TextDisabled("%s", label.c_str());
-    draw_pattern(meta, pat, mini_px, cfg);
+    draw_pattern(meta, pat, mini_px, cfg, names, rhs);
     ImGui::EndGroup();
 }
 
@@ -448,14 +456,15 @@ static void draw_rule_variant(compiled const& meta, compiled_pair const& pair,
         piece_kind kind; compiled_pattern const* pat; float w, h, gap;
         std::string const* text{nullptr};   // block, guard
         std::string label{};                // pattern
+        bool rhs{false};                    // pattern: a write leaf
     };
     std::vector<piece> pieces;
     float icon_w = ImGui::CalcTextSize(phosphor::PH_ARROW_RIGHT).x;
     float icon_h = ImGui::GetTextLineHeight();
-    auto add_pat = [&](compiled_pattern const& p, float gap) {
+    auto add_pat = [&](compiled_pattern const& p, float gap, bool rhs) {
         std::string label = pattern_label(meta, pair, p);
         pieces.push_back({piece_kind::pattern, &p, pattern_group_width(p, label, mini_px),
-                          pattern_group_height(p, mini_px), gap, nullptr, std::move(label)});
+                          pattern_group_height(p, mini_px), gap, nullptr, std::move(label), rhs});
     };
     size_t gi = 0;
     if (!block.empty()) {
@@ -468,7 +477,7 @@ static void draw_rule_variant(compiled const& meta, compiled_pair const& pair,
                                   &guards[gi]});
     }
     for (size_t k = 0; k < pair.lhs.size(); ++k) {
-        add_pat(pair.lhs[k], k ? 8.f : 0.f);
+        add_pat(pair.lhs[k], k ? 8.f : 0.f, false);
         for (; gi < pair.guards.size() && pair.guards[gi].after == (int)k + 1; ++gi)
             if (gi < guards.size())
                 pieces.push_back({piece_kind::guard, nullptr,
@@ -478,7 +487,7 @@ static void draw_rule_variant(compiled const& meta, compiled_pair const& pair,
     pieces.push_back({piece_kind::arrow, nullptr, icon_w, icon_h, 20.f});
     for (size_t k = 0; k < rhs_leaves.size(); ++k) {
         if (k) pieces.push_back({piece_kind::alt, nullptr, icon_w, icon_h, 10.f});
-        add_pat(*rhs_leaves[k], k ? 10.f : 20.f);
+        add_pat(*rhs_leaves[k], k ? 10.f : 20.f, true);
     }
 
     // pass 1: pack into lines
@@ -515,7 +524,7 @@ static void draw_rule_variant(compiled const& meta, compiled_pair const& pair,
             ImGui::BeginGroup();
             if (line_h > pc.h) ImGui::Dummy({0.f, (line_h - pc.h) * 0.5f});
             if (pc.kind == piece_kind::pattern) {
-                draw_pattern_group(meta, *pc.pat, pc.label, mini_px, cfg);
+                draw_pattern_group(meta, *pc.pat, pc.label, mini_px, cfg, pair.var_names, pc.rhs);
             } else if (pc.kind == piece_kind::block) {
                 ImGui::TextUnformatted(pc.text->c_str());
             } else if (pc.kind == piece_kind::guard) {
@@ -620,7 +629,9 @@ void draw_rule_window(script const& sc, debug_run const& run, float mini_px,
     if (decl) {
         auto const& rd = *decl;
         std::string attrs;
-        if (rd.symmetry != "none") attrs += " sym=" + rd.symmetry;
+        // on a graph rule, an explicit symmetry=none drops duplicate assignments
+        bool graph_rule = !rd.pairs.empty() && rd.pairs[0].is_graph;
+        if (rd.symmetry != "none" || (graph_rule && rd.symmetry_given)) attrs += " sym=" + rd.symmetry;
         if (!rd.rotation_angles.empty()) {
             attrs += " rot={";
             for (size_t i = 0; i < rd.rotation_angles.size(); ++i) {

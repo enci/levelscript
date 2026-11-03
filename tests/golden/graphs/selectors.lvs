@@ -25,8 +25,8 @@ sequence main {
     resize(11, 1)
     once { level[* * * * * * * * * * *] => level[R H R H R H R H R . R] }
     once { marks[* * * * * * * * * * *] => marks[. . . . Boss . . . . . .] }
-    everywhere { map[?n] => dist[ (min(distance(?n, marks[Boss]), 9)) ] }
-    everywhere { map[?n] => near[ (neighbors(?n, marks[Boss])) ] }
+    everywhere { map[?n] => dist[ (min(distance(n, marks[Boss]), 9)) ] }
+    everywhere { map[?n] => near[ (neighbors(n, marks[Boss])) ] }
     // two rooms two edges apart, through a node target
-    everywhere (rotation=all) { map[?a * * * ?b] when (distance(?a, ?b) == 2) => pairs[* * * * 2] }
+    everywhere (rotation=all) { map[?a * * * ?b] when (distance(a, b) == 2) => pairs[* * * * 2] }
 }

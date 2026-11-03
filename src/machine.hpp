@@ -169,6 +169,8 @@ private:
 
     void exec_op(compiled_op const& op);
     void run_path(compiled_op const& op, int ndirs);   // ndirs = 4 or 8
+    void run_graph_path(compiled_op const& op, std::vector<char> const& from,
+                        std::vector<char> const& to, std::vector<char> const& pass);
     void run_bsp(compiled_op const& op, long long min, long long max, long long split);
     void run_voronoi(compiled_op const& op);
     void grow_euclidean(int W, int H, uint64_t d, int nsites, std::vector<int> const& site_of,
@@ -265,6 +267,11 @@ private:
     static constexpr long long every_node_key = LLONG_MIN;
     int farthest_from(int id, long long t_key, long long u_key);
     long long eval_graph(compiled_expr const& e, int x, int y);
+    // The graph reads that are not functions of a node argument: an
+    // attribute at a cell, a region read, and the global queries.
+    long long eval_cell_attr(compiled_expr const& e, int x, int y);
+    long long eval_region(compiled_expr const& e, int x, int y);
+    long long eval_count(int sel);
 
     static uint64_t mask_key(int grid_id, int flat) {
         return ((uint64_t)grid_id << 40) | (uint64_t)flat;
@@ -289,6 +296,9 @@ private:
         std::vector<int> per_node;
     };
     std::vector<selection_cache>    selections_;   // indexed by selector id
+    // count(s), per selector: valid while its grid keeps the version counted
+    struct count_cache { uint64_t version{~0ull}; long long count{0}; };
+    std::vector<count_cache>        counts_;       // indexed by selector id
     // The stack's dimensions - kept apart from the layers so a layer-less
     // program still has a size (width/height, stability, the level).
     int                             rows_{0}, cols_{0};

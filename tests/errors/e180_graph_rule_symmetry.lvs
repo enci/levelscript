@@ -1,0 +1,16 @@
+// E180 (0.17, check 58): on a graph rule, symmetry takes only `none`.
+// @expect error
+// @expect stderr-contains no 'symmetry' but 'none'
+tag algo { R, H }
+tag room { Hall, Inn }
+tag loot { coin }
+layers {
+    level: grid of algo
+    rooms: grid of room
+    items: grid of loot
+    depth: grid of number
+    map:   graph of level(nodes=R, edges=H)
+    plan:  graph of rooms
+}
+rule r(symmetry=all) { plan { ?a -- ?b } => a.rooms = Inn }
+sequence main { resize(2, 2) everywhere r }

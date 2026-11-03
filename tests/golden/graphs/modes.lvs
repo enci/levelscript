@@ -25,11 +25,11 @@ layers {
 sequence main {
     resize(13, 1)
     once { level[* * * * * * * * * * * * *] => level[R H R H R R H R H R H R R] }
-    once { map { ?n } => m_once(?n)[on] }
-    scatter(2) { map { ?n } => m_scatter(?n)[on] }
-    everywhere { map { ?n } when (size(?n) == 1) => m_every(?n)[on] }
-    once { map[?n *] when (degree(?n) == 1) => m_grow[on *] }
-    grow(2) { map { ?n } when (distance(?n, m_grow[on]) == 1) => m_grow(?n)[on] }
-    once { map[?n *] when (degree(?n) == 1) => m_settle[on *] }
-    settle { map { ?n } when (distance(?n, m_settle[on]) == 1) => m_settle(?n)[on] }
+    once { map { ?n } => n.m_once = on }
+    scatter(2) { map { ?n } => n.m_scatter = on }
+    everywhere { map { ?n } when (n.size == 1) => n.m_every = on }
+    once { map[?n *] when (n.degree == 1) => m_grow[on *] }
+    grow(2) { map { ?n } when (distance(n, m_grow[on]) == 1) => n.m_grow = on }
+    once { map[?n *] when (n.degree == 1) => m_settle[on *] }
+    settle { map { ?n } when (distance(n, m_settle[on]) == 1) => n.m_settle = on }
 }

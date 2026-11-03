@@ -11,7 +11,7 @@ import {
     EditorView, Decoration, DecorationSet, ViewPlugin, ViewUpdate, keymap, lineNumbers,
     highlightActiveLineGutter, highlightActiveLine, drawSelection, hoverTooltip, Tooltip,
 } from '@codemirror/view';
-import { defaultKeymap, history, historyKeymap, indentWithTab, toggleLineComment } from '@codemirror/commands';
+import { defaultKeymap, history, historyKeymap, insertTab, indentLess, toggleLineComment } from '@codemirror/commands';
 import { indentUnit, bracketMatching, indentOnInput } from '@codemirror/language';
 import {
     autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap, snippetCompletion,
@@ -19,7 +19,7 @@ import {
 } from '@codemirror/autocomplete';
 import { setDiagnostics, lintGutter, Diagnostic } from '@codemirror/lint';
 import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
-import { completionContext, OPS } from '../../extension/src/completion';
+import { completionContext, suggestions, SuggestionKind, attributeAt, ATTRIBUTE_DETAIL } from '../../extension/src/completion';
 
 type Insp = any;   // inspect_json output (extension/src/types.ts InspectionResult)
 
@@ -139,7 +139,10 @@ function hoverHtml(state: EditorState, pos: number): string | null {
             '<code>tag ' + esc(tag.name) + ' { ' + list + ' }</code>';
     }
     const ref = tokenAt(insp.refs, line, col);
-    if (!ref) return null;
+    if (!ref) {   // a node attribute: `size` in `n.size` / `map.size`
+        const attr = attributeAt(state.doc.toString(), pos);
+        return attr ? '<b>' + attr + '</b> — ' + esc(ATTRIBUTE_DETAIL[attr]) : null;
+    }
     if (ref.kind === 'layer') {
         const l = sym.layers.find((x: any) => x.name === ref.target);
         return l ? '<b>' + esc(l.name) + '</b>: grid of <code>' + esc(l.type) + '</code>' : null;
@@ -158,126 +161,29 @@ function cmSnippet(body: string) {
     return body.replace(/\$\{(\d+)\|([^,|}]*)[^}]*\|\}/g, '${$1:$2}').replace(/\$(\d+)/g, '${$1}');
 }
 
+// The shared suggestions (extension/src/completion.ts), as CodeMirror completions.
+const CM_TYPES: Record<SuggestionKind, string> = {
+    keyword: 'keyword', function: 'function', enum: 'enum', enumMember: 'enum', class: 'class',
+    interface: 'interface', variable: 'variable', constant: 'constant', property: 'property',
+    method: 'method', module: 'namespace', type: 'type',
+};
+
 function completionsAt(state: EditorState, pos: number): Completion[] | null {
-    const ctx: any = completionContext(state.doc.toString(), pos);
+    const ctx = completionContext(state.doc.toString(), pos);
     if (ctx.kind === 'none') return null;
     const sym = state.field(inspField)?.symbols;
-    const items: Completion[] = [];
-    const word = (label: string, type: string, detail?: string) => { items.push({ label, type, detail }); };
-    const snippet = (label: string, body: string, type = 'keyword', detail?: string) => {
-        items.push(snippetCompletion(cmSnippet(body), { label, type, detail }));
-    };
-    const tagOf = (grid: string) => {
-        const layer = sym?.layers.find((l: any) => l.name === grid);
-        return layer ? sym?.tags.find((t: any) => t.name === layer.type) : undefined;
-    };
-    const tagValues = (tag: any) => {
-        tag?.values.forEach((v: any) => word(v.name, 'enum', tag.name));
-        tag?.masks.forEach((u: any) => word(u.name, 'enum', 'named mask in ' + tag.name));
-    };
-    const allTagValues = () => sym?.tags.forEach((t: any) => tagValues(t));
-    const grids = () => sym?.layers.forEach((l: any) => word(l.name, 'class', 'grid of ' + l.type));
-    const graphs = () => sym?.graphs?.forEach((g: any) => word(g.name, 'interface', 'graph of ' + g.source));
-
-    switch (ctx.kind) {
-    case 'top':
-        snippet('use', 'use "${1:module.lvs}"', 'keyword', 'use another module (head of the file)');
-        snippet('tag', 'tag ${1:name} { ${0} }');
-        snippet('layers', 'layers {\n\t$0\n}');
-        snippet('params', 'params {\n\t$0\n}');
-        snippet('rule', 'rule ${1:name} {\n\t$0\n}');
-        snippet('sequence', 'sequence ${1:name} {\n\t$0\n}');
-        break;
-    case 'maskMember': {
-        const tag = sym?.tags.find((t: any) => t.name === ctx.tag);
-        tag?.values.forEach((v: any) => word(v.name, 'enum'));
-        tag?.masks.forEach((m: any) => word(m.name, 'enum', 'named mask in ' + tag.name));
-        break;
-    }
-    case 'gridOf':
-        snippet('grid of', 'grid of ${1}');
-        snippet('graph of', 'graph of ${1}', 'keyword', 'a read-only view of a grid');
-        break;
-    case 'graphSource': grids(); break;
-    case 'graphArg':
-        snippet('nodes', 'nodes=${1}', 'property', 'tag mask of the node cells');
-        snippet('edges', 'edges=${1}', 'property', 'tag mask of the connector cells');
-        break;
-    case 'of': word('of', 'keyword'); break;
-    case 'gridType':
-        sym?.tags.forEach((t: any) => word(t.name, 'type', 'tag'));
-        word('number', 'keyword');
-        break;
-    case 'paramType': snippet('number', 'number = ${1:0}'); break;
-    case 'expr':
-        sym?.builtins.forEach((b: string) => snippet(b, b + '(${1})', 'function', 'built-in'));
-        if (ctx.nodes) sym?.graph_functions?.forEach((b: string) => snippet(b, b + '(${1})', 'function', 'graph function'));
-        sym?.params.forEach((p: any) => word(p.name, 'variable', p.derived ? 'derived param' : 'param'));
-        if (ctx.grids) grids();
-        if (ctx.pos) ['x', 'y', 'width', 'height'].forEach(n => word(n, 'constant', 'position'));
-        allTagValues();
-        break;
-    case 'ruleAttr':
-        snippet('symmetry', 'symmetry=${1|horizontal,vertical,all,none|}', 'property');
-        snippet('rotation', 'rotation=${1|all,90,180,270,none|}', 'property');
-        break;
-    case 'attrValue':
-        if (ctx.attr === 'symmetry') ['horizontal', 'vertical', 'all', 'none'].forEach(v => word(v, 'enum'));
-        if (ctx.attr === 'rotation') ['all', '90', '180', '270', 'none'].forEach(v => word(v, 'enum'));
-        break;
-    case 'ruleBody':
-        if (ctx.start) {
-            word('any', 'keyword', 'pick one sub-rule per match');
-            word('all', 'keyword', 'apply every sub-rule');
-            word('ordered', 'keyword', 'sub-rules in priority order');
-        }
-        grids();
-        graphs();
-        word('where', 'keyword', 'position pseudo-layer');
-        if (ctx.guard) snippet('when', 'when (${1})', 'keyword', 'rule guard: once per candidate');
-        break;
-    case 'combinator': word('all', 'keyword'); word('any', 'keyword'); break;
-    case 'weight': snippet('weight', 'weight=${1:1}', 'property'); break;
-    case 'cell': tagValues(tagOf(ctx.grid)); break;
-    case 'statement':
-        snippet('once', 'once ${1:rule}', 'keyword', 'one application, or one iteration');
-        snippet('scatter', 'scatter(${1:N}) ${2:rule}', 'keyword', 'up to N (or P%) of one batch');
-        snippet('everywhere', 'everywhere ${1:rule}', 'keyword', 'every match of one batch');
-        snippet('grow', 'grow ${1:rule}', 'keyword', 'steps, each seeing the last; grow(N) for N');
-        snippet('settle', 'settle ${1:rule}', 'keyword', 'repeat until nothing changes; settle(N) for at most N');
-        OPS.forEach(op => snippet(op.name, op.snippet, 'function', 'operation'));
-        if (ctx.guard) snippet('when', 'when (${1})', 'keyword', 'guard');
-        break;
-    case 'ruleName':
-        sym?.rules.forEach((r: any) => word(r.name, 'method', 'rule'));
-        sym?.sequences?.forEach((s: any) => word(s.name, 'namespace', 'sequence'));
-        break;
-    case 'opArg': {
-        const op = OPS.find(o => o.name === ctx.op);
-        if (!op) break;
-        const positional = op.params.filter(p => p.positional);
-        const next = ctx.used.length === 0 ? positional[ctx.index] : undefined;
-        next?.values?.forEach(v => word(v, 'enum'));
-        for (const p of op.params)
-            if (!p.positional && !ctx.used.includes(p.name))
-                snippet(p.name, p.name + '=${1}', 'property', p.required ? p.kind : p.kind + ', optional');
-        break;
-    }
-    case 'opValue': {
-        const p = OPS.find(o => o.name === ctx.op)?.params.find(q => q.name === ctx.param);
-        if (p?.kind === 'grid') grids();
-        else if (p?.kind === 'pred' || p?.kind === 'value') allTagValues();
-        else p?.values?.forEach(v => word(v, 'enum'));
-        break;
-    }
-    }
-    return items;
+    return suggestions(ctx, sym).map(s => {
+        const info = { label: s.label, type: CM_TYPES[s.kind], detail: s.detail };
+        return s.snippet ? snippetCompletion(cmSnippet(s.snippet), info) : info;
+    });
 }
 
 function lvsCompletion(context: CMContext): CompletionResult | null {
     const w = context.matchBefore(/\w*/);
-    // only on a word being typed, or when asked (Ctrl-Space): never on a bare space or newline
-    if (!w || (w.from === w.to && !context.explicit)) return null;
+    // only on a word being typed, right after `n.`, or when asked (Ctrl-Space):
+    // never on a bare space or newline
+    const member = /\w\.$/.test(context.state.sliceDoc(Math.max(0, context.pos - 2), context.pos));
+    if (!w || (w.from === w.to && !context.explicit && !member)) return null;
     const options = completionsAt(context.state, context.pos);
     if (!options || !options.length) return null;
     return { from: w.from, options, validFor: /^\w*$/ };
@@ -332,7 +238,8 @@ function create(o: EditorOptions) {
             ...closeBracketsKeymap, ...completionKeymap, ...searchKeymap, ...historyKeymap,
             { key: 'Mod-/', run: toggleLineComment },
             { key: 'F12', run: v => gotoDefinition(v.state.selection.main.head) },
-            indentWithTab,
+            // Tab inserts a tab at the caret, as in most editors; with a selection it indents the lines
+            { key: 'Tab', run: insertTab, shift: indentLess },
             ...defaultKeymap,
         ]),
         // Cmd/Ctrl-click: go to the definition

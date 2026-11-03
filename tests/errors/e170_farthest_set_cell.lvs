@@ -7,5 +7,5 @@ layers {
     depth: grid of number
     plan:  graph of rooms
 }
-rule r { plan { ?n } when (farthest(?n, rooms[Hall], depth[Exit])) => rooms(?n)[Exit] }
+rule r { plan { ?n } when (farthest(n, rooms[Hall], depth[Exit])) => n.rooms = Exit }
 sequence main { resize(2, 2) once r }

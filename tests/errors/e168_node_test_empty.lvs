@@ -1,10 +1,11 @@
-// E168 (0.15, check 58): a node is never empty, so a node test has no '.' atom.
+// E168 (0.17, 5.13): a graph block is topology only; node tests were removed, and
+// a rule guard tests what a node holds.
 // @expect error
-// @expect stderr-contains a node is never empty
+// @expect stderr-contains node tests were removed
 tag room { Hall, Inn }
 layers {
     rooms: grid of room
     plan:  graph of rooms
 }
-rule r { plan { ?n[Hall|.] } => rooms(?n)[Inn] }
+rule r { plan { ?n[Hall] } => n.rooms = Inn }
 sequence main { resize(2, 2) everywhere r }

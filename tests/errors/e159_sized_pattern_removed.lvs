@@ -1,0 +1,8 @@
+// E159 (0.17, section 5.4): sized patterns were removed; a 1x1 pattern is
+// uplifted to the size of its pair, which a pattern written in full sets.
+// @expect error
+// @expect stderr-contains sized patterns were removed
+tag t { a }
+layers { g: grid of t }
+rule r { g(2, 2)[.] => g[a a, a a] }
+sequence main { }

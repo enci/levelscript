@@ -1,0 +1,9 @@
+// E183 (0.17.1, check 35): a route over a graph counts edges; `cost` is a kind error.
+// @expect error
+// @expect stderr-contains not allowed with 'over='
+tag algo { R, H }
+layers {
+    level: grid of algo
+    map:   graph of level(nodes=R, edges=H)
+}
+sequence main { resize(2, 2) path(from=R, to=R, into=level, write=H, over=map, cost=2) }

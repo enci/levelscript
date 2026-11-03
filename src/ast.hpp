@@ -28,8 +28,9 @@ enum class expr_kind {
     int_lit,       // integer literal
     empty_lit,     // '.' — polymorphic empty value (typed from context)
     ident,         // grid read / param / x,y,width,height / tag value or named mask
-    variable,      // '?name' pattern variable; ident holds '?name'
+    variable,      // '?name' binding cell; ident holds '?name' (elsewhere an error)
     call,          // built-in function call
+    attr,          // 'a.b' attribute or region read: ident = a, member = b
     neg, not_,
     add, sub, mul, div_,
     lt, le, gt, ge, eq, ne,
@@ -50,7 +51,9 @@ struct expr {
     expr_kind             kind;
     source_loc            loc;
     long long             int_val{0};   // int_lit
-    std::string           ident;        // ident / call name
+    std::string           ident;        // ident / call name / attr head
+    std::string           member;       // attr: the name after the '.'
+    source_loc            member_loc;   // attr: where `member` is written
     std::vector<expr_ptr> args;         // unary [a]; binary [a,b]; call args
 };
 
@@ -103,10 +106,10 @@ struct param_decl {
 
 // A pattern cell is an expression:
 //   *            wildcard
-//   .  3  ?v     empty_lit, int_lit, variable
+//   .  3  ?v     empty_lit, int_lit, variable (a binding cell, match side only)
 //   wall|!door   ident, bit_or, not_ - a whitespace-free mask, where '!' is the
 //                complement within the grid's tagset, not boolean not
-//   (expr)       paren - a computed cell; `(?v)` reads a variable, `?v` binds it
+//   (expr)       paren - a computed cell; `(v)` reads variable v, `?v` binds it
 
 struct pattern {
     source_loc                         loc;
@@ -114,14 +117,9 @@ struct pattern {
     bool                               is_where{false};
     int                                rows{0}, cols{0};
     std::vector<std::vector<expr_ptr>> cells;      // [row][col]; row widths checked in sema
-    // A sized pattern `g(W, H)[c]` repeats its one body cell over W x H.
-    // rows/cols above are the body as written; these are the declared shape.
-    bool                               sized{false};
-    source_loc                         size_loc;
-    long long                          size_cols{0}, size_rows{0};
-    // A node extent `g(?n)[c]` writes its one body cell over node ?n's
-    // region; `extent` holds '?n' ("" when none), `size_loc` its span.
-    ident                              extent;
+    // A graph write `n.g = c` (graph pairs' write side): `node` is n, `grid`
+    // g, and the one cell c, written over n's region. "" for a pattern.
+    ident                              node;
 };
 
 // A recursive write-side term: a leaf pattern, an `{ all }` block
@@ -145,12 +143,11 @@ struct rule_guard {
 };
 
 // One line of a graph block: `?n` declares a node variable, `?a -- ?b` two
-// joined by an edge, `?n[m]` one whose node's value overlaps (or equals) `m`.
+// joined by an edge. Names are kept without the '?'.
 struct graph_item {
-    enum class kind { node, edge, test } what{kind::node};
+    enum class kind { node, edge } what{kind::node};
     source_loc loc;
     ident      a, b;   // b: edge only
-    expr_ptr   test;   // test only: an int_lit or a whitespace-free tag mask
 };
 
 // The match side of a graph pair: `plan { ... }`, structure only.
@@ -163,7 +160,7 @@ struct graph_block {
 // One match-write sub-rule: LHS patterns (conjoined across grids at one
 // anchor; consecutive patterns before `=>`) and rule guards => a write tree.
 // A graph pair matches a graph block instead of patterns (`lhs` is empty and
-// every guard's `after` is 0), and writes node extents.
+// every guard's `after` is 0), and its write leaves are graph writes.
 struct rule_pair {
     source_loc              loc;
     std::vector<pattern>    lhs;
@@ -192,6 +189,7 @@ struct rule_decl {
     source_loc             loc;
     ident                  name;               // "" for an inline rule
     std::string            symmetry{"none"};   // validated in sema
+    bool                   symmetry_given{false};   // written: on a graph rule, `none` de-duplicates
     std::vector<long long> rotation_angles;    // besides identity; validated in sema
     body_combinator        body{body_combinator::none};
     std::vector<rule_pair> pairs;

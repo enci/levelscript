@@ -14,7 +14,7 @@ layers {
 }
 rule border(rotation=all) {
     zones[?a *]
-    where[* (zones != ?a)]
+    where[* (zones != a)]
     =>
     level[* wall]
 }

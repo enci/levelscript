@@ -125,7 +125,7 @@
     (match
       (pattern regions
         (row ?a ?b))
-      (when (!= ?a ?b)))
+      (when (!= a b)))
     (write
       (pattern level
         (row * wall)))))
@@ -135,7 +135,7 @@
     (match
       (pattern g
         (row ?a))
-      (when (> ?a k))
+      (when (> a k))
       (pattern h
         (row .))
       (when (== (call random 0 1) 0)))

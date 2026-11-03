@@ -24,7 +24,7 @@ rule drop {
 rule fall {
     items[?v, .]
     =>
-    items[., ?v]
+    items[., (v)]
 }
 
 sequence main {

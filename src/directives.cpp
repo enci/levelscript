@@ -1,4 +1,5 @@
 #include "directives.hpp"
+#include <algorithm>
 #include <map>
 #include <tuple>
 
@@ -25,9 +26,15 @@ key_spec const keys[] = {
     {"name",    directive_target::tag_value, value_kind::ident,   "tag value", "tag values"},
     {"play",    directive_target::statement, value_kind::integer, "statement", "statements"},
     {"hold",    directive_target::statement, value_kind::integer, "statement", "statements"},
+    {"view",    directive_target::layer,     value_kind::ident,   "grid", "grids"},
+    {"tileset", directive_target::layer,     value_kind::ident,   "grid", "grids"},
     {"expect",  directive_target::file,      value_kind::text,    "the file", ""},
     {"param",   directive_target::file,      value_kind::text,    "the file", ""},
 };
+
+// The @view values (B.8)
+std::string_view const views[] = {"fill", "shape", "corner", "text", "border", "ramp", "tiles",
+                                  "hidden"};
 
 key_spec const* find_key(std::string_view k) {
     for (auto const& s : keys)
@@ -201,7 +208,7 @@ directive_set read_directives(module_closure const& mods) {
     ast_file const& ast = mods.merged;
 
     // Where each target kind's items start
-    std::map<line_key, std::vector<item>> starts[3];
+    std::map<line_key, std::vector<item>> starts[4];
     auto add = [&](directive_target k, item it) {
         starts[(int)k][{it.loc.mod, it.loc.line}].push_back(std::move(it));
     };
@@ -210,6 +217,12 @@ directive_set read_directives(module_closure const& mods) {
     for (auto const& sq : ast.sequences)
         for (int i = 0; i < (int)sq.stmts.size(); ++i)
             add(directive_target::statement, {sq.stmts[(size_t)i].loc, sq.name.text, "", i});
+    std::map<std::string, bool> number_grid;   // grid -> whether it is a grid of number
+    for (auto const& l : ast.layers.layers) {
+        if (l.is_graph) continue;
+        add(directive_target::layer, {l.name.loc, "", l.name.text});
+        number_grid[l.name.text] = l.type == "number";
+    }
 
     // (key, target identity) -> index into out.all, for "the last one applies"
     std::map<std::tuple<std::string, int, std::string, std::string, int>, size_t> seen;
@@ -264,6 +277,12 @@ directive_set read_directives(module_closure const& mods) {
             } else if (spec->value == value_kind::ident) {
                 if (!ident_start(r.value[0])) {
                     warn(at + " takes a name, got '" + r.value + "'; ignored");
+                    continue;
+                }
+                if (r.key == "view" &&
+                    std::find(std::begin(views), std::end(views), r.value) == std::end(views)) {
+                    warn(at + " takes fill, shape, corner, text, border, ramp, tiles or hidden, got '" +
+                         r.value + "'; ignored");
                     continue;
                 }
             } else {
@@ -333,6 +352,20 @@ directive_set read_directives(module_closure const& mods) {
     for (size_t i = 0; i < out.all.size(); ++i)
         if (!dropped[i]) kept.push_back(std::move(out.all[i]));
     out.all = std::move(kept);
+
+    // A view that does not suit its grid. The tools draw it as `fill`.
+    for (auto const& d : out.all) {
+        if (d.key != "view") continue;
+        auto warn = [&](std::string msg) {
+            out.warnings.warning(mods.names[(size_t)d.loc.mod], d.loc.line, d.loc.col,
+                                 d.loc.end_line, d.loc.end_col, std::move(msg));
+        };
+        if (d.value == "ramp" && !number_grid[d.name])
+            warn("'@view=ramp' is for a grid of number, and '" + d.name +
+                 "' holds tags; it is drawn as fill");
+        if (d.value == "tiles" && !out.find("tileset", directive_target::layer, "", d.name))
+            warn("'@view=tiles' needs a '@tileset' on '" + d.name + "'; it is drawn as fill");
+    }
 
     // Two values of one tagset with the same display name
     std::map<std::pair<std::string, std::string>, directive const*> names;

@@ -1,0 +1,16 @@
+// E181 (0.17, check 57): a graph write names a grid; node attributes are read-only.
+// @expect error
+// @expect stderr-contains is a node attribute, which is read-only
+tag algo { R, H }
+tag room { Hall, Inn }
+tag loot { coin }
+layers {
+    level: grid of algo
+    rooms: grid of room
+    items: grid of loot
+    depth: grid of number
+    map:   graph of level(nodes=R, edges=H)
+    plan:  graph of rooms
+}
+rule r { plan { ?n } => n.size = 3 }
+sequence main { resize(2, 2) everywhere r }

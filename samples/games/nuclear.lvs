@@ -1,0 +1,244 @@
+// Nuclear throne level script that tries to mimic the procedural generation style of the game
+// It's a random walk style level generator, with 2:1 preference for straight paths and it
+// places either rewards or enemies whenever a paths terminates.
+
+tag algo {
+    T  // @name=tail
+    H  // @name=head
+    W  // @name=wall
+    F  // @name=floor
+    R  // @name=reward
+    E  // @name=enemy
+    N  // @name=nothing
+    S  // @name=start
+
+    rock = W | N            // the plateau around the paths
+    ground = F | R | E | S  // anything walkable
+}
+
+// Everything in the algo grid, painted as sand paths through a rocky plateau
+// (kenney_desert.png), with the props drawn over the ground
+layers {
+    algo : grid of algo
+    tiles : grid of number  // @view=tiles @tileset=Desert
+    props : grid of number  // @view=tiles @tileset=Desert
+}
+
+params {
+    min_length : number = 4
+    max_length : number = 7
+}
+
+// The very start of the level
+rule start {
+    algo[
+        . . . 
+        . . . 
+        . . . 
+    ] => algo[
+        . . . 
+        . F . 
+        . . . 
+    ]
+}
+
+// Pick from the floor to start carving
+rule seed(rotation=all) {
+    algo[F F . ]  => algo[T H . ]
+}
+
+// Carve out the paths from the seed
+// symmetry=all makes sure we can turn both left and right (relative)
+// rotation=all makes sure we can match the pattern in all orientations
+rule step(rotation=all, symmetry=all) { ordered
+    // Carve out the paths from the seed in all directions
+    // While 3:2 preferring to carve straight paths (in one rule)
+    algo[
+        T H . 
+        * . * 
+     ] => { any
+        (weight=3) algo[
+            F T H 
+            * * * ]
+        (weight=2) algo[
+            F T * 
+            * H * ]
+    }
+
+    // Fallback rule to continue carving straight paths
+    algo[T H . ] => algo[F T H ]    
+}
+
+rule finish { all
+    algo[H] => { any
+        (weight=1) algo[R]
+        (weight=2) algo[E]
+    }
+    algo[T] =>  algo[F]
+}
+
+sequence carve {
+    once seed
+    grow(random(min_length, max_length)) step
+    everywhere finish
+}
+
+rule walls(rotation=all) { any
+    algo[!W . ] => algo[* W]
+    algo[
+        !W * 
+        *  . ] =>
+    algo[
+        * * 
+        * W ]
+}
+
+
+///////////////////////////////////////////////////////////////////////////////
+// Paint the level with kenney_desert.png (18 columns of 16x16 tiles, index =
+// row * 18 + column). The level is upscaled 2x first, so every path is two
+// cells wide and the rock at least two thick: a plain nine-slice then covers
+// every edge, picked by which of the four sides (N E S W) are ground, plus
+// the inner corners where only a diagonal is.
+///////////////////////////////////////////////////////////////////////////////
+
+// After the upscale each reward, enemy and start is a 2x2 block: keep it in
+// one random corner of the block, the rest becomes plain floor
+rule pick_spot { ordered
+    algo[R R, R R] where[(mod(x, 2) == 0 && mod(y, 2) == 0) *, * *] => { any
+        algo[R F, F F]  algo[F R, F F]  algo[F F, R F]  algo[F F, F R] }
+    algo[E E, E E] where[(mod(x, 2) == 0 && mod(y, 2) == 0) *, * *] => { any
+        algo[E F, F F]  algo[F E, F F]  algo[F F, E F]  algo[F F, F E] }
+    algo[S S, S S] where[(mod(x, 2) == 0 && mod(y, 2) == 0) *, * *] => { any
+        algo[S F, F F]  algo[F S, F F]  algo[F F, S F]  algo[F F, F S] }
+}
+
+rule paint_ground { ordered
+    algo[ground] => { any (weight=8) tiles[64] tiles[65] }
+    algo[rock] => { any (weight=8) tiles[109] tiles[129] }
+}
+
+rule paint_rock { all
+    // inner corners, all four sides rock but a diagonal open
+    algo[
+        rock   rock rock
+        rock   rock rock
+        rock   rock ground ] => tiles[* * *, * 93 *, * * *]
+    algo[
+        rock   rock rock
+        rock   rock rock
+        ground rock rock ] => tiles[* * *, * 94 *, * * *]
+    algo[
+        rock   rock rock
+        rock   rock rock
+        rock   rock rock ] => tiles[* * *, * * *, * * *]
+    algo[
+        rock   rock ground
+        rock   rock rock
+        rock   rock rock ] => tiles[* * *, * 111 *, * * *]
+    algo[
+        ground rock rock
+        rock   rock rock
+        rock   rock rock ] => tiles[* * *, * 112 *, * * *]
+    // edges
+    algo[
+        *    ground *
+        rock rock   rock
+        *    rock   * ] => tiles[* * *, * 91 *, * * *]
+    algo[
+        *    rock   *
+        rock rock   rock
+        *    ground * ] => tiles[* * *, * 127 *, * * *]
+    algo[
+        *      rock rock
+        ground rock rock
+        *      rock * ] => tiles[* * *, * 108 *, * * *]
+    algo[
+        *    rock *
+        rock rock ground
+        *    rock * ] => tiles[* * *, * 110 *, * * *]
+    // corners
+    algo[
+        *      ground *
+        ground rock   rock
+        *      rock   * ] => tiles[* * *, * 90 *, * * *]
+    algo[
+        *    ground *
+        rock rock   ground
+        *    rock   * ] => tiles[* * *, * 92 *, * * *]
+    algo[
+        *      rock   *
+        ground rock   rock
+        *      ground * ] => tiles[* * *, * 126 *, * * *]
+    algo[
+        *    rock   *
+        rock rock   ground
+        *    ground * ] => tiles[* * *, * 128 *, * * *]
+}
+
+rule paint_props { all
+    // The start is a portal
+    algo[S] => props[196]
+
+    // Rewards: weapon chests, ammo crates, batteries and medkits
+    algo[R] => { any
+        (weight=3) props[216]
+        (weight=1) props[218]
+        (weight=2) props[220]
+        (weight=1) props[225]
+        (weight=1) props[222]
+    }
+
+    // The sheet has no critters, so enemies are hazards: toxic and
+    // explosive barrels
+    algo[E] => { any
+        (weight=2) props[203]
+        (weight=1) props[202]
+    }
+}
+
+// Scenery: cacti, shrubs and stones on the sand, crystals in the rock
+rule sand_scenery {
+    algo[F] props[.] => { any
+        (weight=2) props[58]
+        (weight=1) props[76]
+        (weight=2) props[63]
+        (weight=2) props[81]
+        (weight=2) props[44]
+        (weight=1) props[82]
+    }
+}
+
+rule rock_scenery {
+    algo[
+        rock rock rock
+        rock rock rock
+        rock rock rock ] => { any
+        (weight=3) props[* * *, * 39 *, * * *]
+        (weight=1) props[* * *, * 57 *, * * *]
+        (weight=1) props[* * *, * 75 *, * * *]
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+sequence main {
+    resize(4, 4)    
+    once start
+    upscale(3, 3)
+    pad(2)
+    settle(10) carve
+    trim()
+    pad(2)    
+    everywhere walls // @play=5
+    once { algo[E] => algo[S] }
+    everywhere { algo[.] => algo[N] } // @play=10
+
+    // Painting
+    upscale(2, 2)
+    everywhere pick_spot
+    everywhere paint_ground     // @play=10
+    everywhere paint_rock       // @play=5
+    everywhere paint_props
+    scatter(12%) sand_scenery
+    scatter(3%) rock_scenery
+}

@@ -23,28 +23,28 @@ rule lattice { level[.] where[ (x - x / 4 * 4 < 3 && y - y / 4 * 4 < 3) ] => lev
 rule hall_across { level[.] where[ (x - x / 4 * 4 == 3 && y - y / 4 * 4 == 1) ] => level[hall] }
 rule hall_down   { level[.] where[ (y - y / 4 * 4 == 3 && x - x / 4 * 4 == 1) ] => level[hall] }
 
-rule pick_start { map { ?n } when (degree(?n) == 1) => roles(?n)[start] }
-rule guards { map { ?s ?g -- ?s } when (distance(?s, roles[start]) == 0) => roles(?g)[guard] }
+rule pick_start { map { ?n } when (n.degree == 1) => n.roles = start }
+rule guards { map { ?s ?g -- ?s } when (distance(s, roles[start]) == 0) => g.roles = guard }
 rule far_treasure {
     map { ?n }
-    when (degree(?n) == 1 && distance(?n, roles[start]) > 2)
+    when (n.degree == 1 && distance(n, roles[start]) > 2)
     =>
-    roles(?n)[treasure]
+    n.roles = treasure
 }
 // A hub and one of its neighbours, the pair chosen with a coin per assignment.
 rule hub_vendor {
     map {
-        ?hub
-        ?hub -- ?a
+        ?h
+        ?h -- ?a
     }
-    when (degree(?hub) >= 3 && random(0, 1) == 1)
+    when (h.degree >= 3 && random(0, 1) == 1)
     =>
     { all
-        roles(?hub)[hub]
-        { any (weight=3) roles(?a)[vendor] roles(?a)[inn] }
+        h.roles = hub
+        { any (weight=3) a.roles = vendor a.roles = inn }
     }
 }
-rule depths { map { ?n } => depth(?n)[ (min(distance(?n, roles[start]), 9)) ] }
+rule depths { map { ?n } => n.depth = (min(distance(n, roles[start]), 9)) }
 
 sequence main {
     resize(15, 11)

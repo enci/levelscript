@@ -5,8 +5,11 @@
   "patterns": [
     { "include": "#comment" },
     { "include": "#string" },
+    { "include": "#builtin" },
     { "include": "#keyword" },
     { "include": "#pattern-body" },
+    { "include": "#variable" },
+    { "include": "#attribute" },
     { "include": "#operator" },
     { "include": "#number" },
     { "include": "#identifier" }
@@ -66,6 +69,7 @@
       "endCaptures":   { "0": { "name": "punctuation.definition.pattern.end.levelscript" } },
       "patterns": [
         { "include": "#comment" },
+        { "include": "#attribute" },
         { "include": "#wildcard" },
         { "include": "#variable" },
         { "include": "#builtin" },
@@ -75,12 +79,23 @@
       ]
     },
     "variable": {
+      "comment": "a binding position: a bare match-side cell, or a graph-block item",
       "name": "variable.other.pattern.levelscript",
       "match": "\\?[A-Za-z_][A-Za-z0-9_]*"
     },
+    "attribute": {
+      "comment": "a.b with no whitespace around the '.': n.size, map.degree (an attribute), n.rooms (a region read, or a graph write's grid)",
+      "match": "\\b([A-Za-z_][A-Za-z0-9_]*)(\\.)(?:(degree|size|value)|([A-Za-z_][A-Za-z0-9_]*))\\b",
+      "captures": {
+        "1": { "name": "variable.other.object.levelscript" },
+        "2": { "name": "punctuation.accessor.levelscript" },
+        "3": { "name": "variable.other.property.levelscript" },
+        "4": { "name": "entity.name.levelscript" }
+      }
+    },
     "builtin": {
       "name": "support.function.builtin.levelscript",
-      "match": "\\b(if|min|max|abs|clamp|mod|random|degree|size|distance|neighbors|adjacent|reachable|value|some|every|count|farthest|resize|upscale|trim|mirror|pad|path|bsp|voronoi|noise)\\b(?=\\s*\\()"
+      "match": "\\b(if|min|max|abs|clamp|mod|random|distance|neighbors|adjacent|reachable|some|count|farthest|nodes|edges|resize|upscale|trim|mirror|pad|path|bsp|voronoi|noise)\\b(?=\\s*\\()"
     },
     "wildcard": {
       "patterns": [

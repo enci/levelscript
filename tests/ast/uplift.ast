@@ -1,0 +1,25 @@
+(rule rooms
+  (pair
+    (match
+      (pattern room
+        (row ?r))
+      (where
+        (row (paren (&& (!= path .) (== path 0)))))
+      (pattern map
+        (row ?n))
+      (when (> (attr n degree) 1)))
+    (write
+      (pattern fine
+        (row W W)
+        (row W W)))))
+(rule mixed
+  (pair
+    (match
+      (pattern g
+        (row .)))
+    (write
+      (any
+        (pattern g
+          (row a b))
+        (pattern g
+          (row c))))))

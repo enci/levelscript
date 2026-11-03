@@ -1,0 +1,58 @@
+// Step 1 - The LevelScript script.
+// <- The two slashes start a code comment. Everyting that follows
+// in the line is ignored.  
+
+// A level script always has the same parts:
+//  - A set of tag that name the values a grid may hold
+//  - The layers block declares the grid
+//  - Some rules that do matching and replacement on the grid
+//  - Sequences the run those rules
+
+// The values a cell the 'level' grid can have. Every cell starts empty
+tag letters {
+     E D W R L H O
+}
+	
+// A the output in LevelScript is a set of layers (a level).
+// We start with one grid, with the creative name of 'level'
+// Any cell can only hold one of the letters above
+layers {
+    level: grid of letters			// @view=text
+//  ^-name         ^-type(tag or num)  ^- this is special comment for the editor
+}
+
+// A rule is a pattern to match, `=>`, and what to write. This one matches an
+// three empty cell and writes two lettes and an empty cell in the middle.
+rule start {
+    level[. . . ] => level[H . W ]
+//	^-match this     ^-replace it with this
+}
+
+// Find the H (we placed with the rule above) with HELLO to the left
+rule hello {
+    level[. . . . H ] => level[H E L L O ]
+}
+
+// Find the W (we placed with the rule above) with WORLD to the right
+rule world {
+	level[W . . . . ] => level[W O R L D]
+}
+
+// The tools run the sequence named `main`. Statements run top to bottom.
+// `once` picks one of all the places that a rule matches (at random) and
+// applies it
+sequence main {
+	// Grids are 0x0 size at start, so we need to resize it
+    resize(5, 3)	// @hold=50 
+    //				^-this will hold the grid on screen 50 "frames"
+    
+    // Run the start rule
+    once start		// @hold=50
+
+    // Expand the grid 5 cells in all directions
+    pad(5)			// @hold=50
+
+    // Run the rules above (once each)
+    once hello		// @hold=50    
+    once world		// @hold=50
+}

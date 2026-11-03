@@ -43,8 +43,9 @@ export async function activate(ctx: vscode.ExtensionContext) {
     vscode.languages.registerCompletionItemProvider(
       { language: LS_LANG },
       completionProvider,
-      // never ' ' or '\n': Enter would open a list and the next Enter accept it
-      '[', '(', '=', ',', '|'
+      // never ' ' or '\n': Enter would open a list and the next Enter accept it;
+      // '.' only opens one after a name (an attribute access), see the provider
+      '[', '(', '=', ',', '|', '.'
     ),
     vscode.languages.registerDocumentSymbolProvider({ language: LS_LANG }, documentSymbolProvider),
     vscode.languages.registerFoldingRangeProvider({ language: LS_LANG }, foldingRangeProvider),

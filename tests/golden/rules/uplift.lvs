@@ -1,0 +1,49 @@
+// @seed=5
+// Uplift (0.17, section 5.4): a 1x1 pattern in a larger pair stands for the
+// pair-sized pattern of its one cell. A room id written before `upscale` is
+// the same over each 4x3 room and differs from every neighbour, so `room[?r]`
+// in a 4x3 pair matches exactly once per room, lined up with it. Each pair
+// takes its size from a pattern written in full. `ordered` gives each room
+// the first template that applies.
+// @expect grid fine count(D) == 1
+// @expect grid fine count(.) > 0
+
+tag geo { W, D }
+tag kind { start }
+
+layers {
+    room: grid of number
+    mark: grid of kind
+    fine: grid of geo
+}
+
+rule ids { room[.] => room[(y * width + x)] }
+rule pick { mark[.] where[(x == 0 && y == 0)] => mark[start] }
+
+rule rooms { ordered
+    room[?r] mark[start]
+    => fine[
+        W W W W
+        W D . .
+        W W W W ]
+
+    room[?r] where[ (r == 4) ]
+    => fine[
+        W W W W
+        W W W W
+        W W W W ]
+
+    room[?r]
+    => fine[
+        W W W W
+        . . . .
+        W W W W ]
+}
+
+sequence main {
+    resize(3, 2)
+    everywhere ids
+    once pick
+    upscale(4, 3)
+    everywhere rooms
+}

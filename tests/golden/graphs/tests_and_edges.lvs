@@ -1,6 +1,7 @@
-// Graph rules (v0.15.0, section 5.13): test lines, edge lines, non-induced matching.
+// Graph rules (v0.15.0, section 5.13; 0.17 guards): node values, edge lines,
+// non-induced matching.
 //
-// `layout` makes rooms, halls, and X cells all nodes. A test line filters a
+// `layout` makes rooms, halls, and X cells all nodes. A rule guard filters a
 // variable's node by its value (a complement too); an edge line needs the
 // two nodes adjacent. Matching is non-induced: `?a -- ?b -- ?c` also matches
 // a triangle, so "the ends are not adjacent" is a rule guard. The X patch
@@ -25,9 +26,9 @@ sequence main {
     resize(7, 2)
     once { level[* * * * * * *, * * * * * * *] => level[R H R X R H R, X X . . . . .] }
     // rooms next to a hall
-    everywhere { layout { ?r[R] ?h[H] ?r -- ?h } => m1(?r)[a] }
+    everywhere { layout { ?r ?h ?r -- ?h } when (r.level is R) when (h.level is H) => r.m1 = a }
     // anything but a room, next to a room on both sides
-    everywhere { layout { ?n[!R] ?l -- ?n ?n -- ?r } when (?l != ?r) => m2(?n)[b] }
+    everywhere { layout { ?n ?l -- ?n ?n -- ?r } when (n.level is !R) when (l != r) => n.m2 = b }
     // the middle of a path whose ends are not adjacent
-    everywhere { layout { ?a -- ?b ?b -- ?c } when (?a != ?c && !adjacent(?a, ?c)) => m3(?b)[c] }
+    everywhere { layout { ?p -- ?q ?q -- ?s } when (p != s && !adjacent(p, s)) => q.m3 = c }
 }

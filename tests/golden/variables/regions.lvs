@@ -20,12 +20,12 @@ rule seed { regions[.] => regions[ (random(1, 99)) ] }
 rule spread(rotation=all) {
     regions[?r .]
     =>
-    regions[?r ?r]
+    regions[(r) (r)]
 }
 
 rule wall_between(rotation=all) {
     regions[?a *]
-    where[* (regions != ?a)]
+    where[* (regions != a)]
     =>
     level[* wall]
 }

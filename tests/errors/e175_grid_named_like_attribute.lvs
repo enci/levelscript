@@ -1,0 +1,10 @@
+// E175 (0.17, check 12): degree, size, and value follow a '.', so no grid or
+// graph is named like them.
+// @expect error
+// @expect stderr-contains collides with the node attribute 'size'
+tag t { a }
+layers {
+    g:    grid of t
+    size: grid of number
+}
+sequence main { }

@@ -29,11 +29,11 @@ rule d(rotation={90, 270}) { g[.] => g[x] }
 
 rule guarded(rotation=all) {
     regions[?a ?b]
-    when (?a != ?b)
+    when (a != b)
     =>
     level[* wall]
 }
 rule guarded_group { all
-    { g[?a] when (?a > k) h[.] when (random(0, 1) == 0) } => h[x]
+    { g[?a] when (a > k) h[.] when (random(0, 1) == 0) } => h[x]
     g[.] => g[x]
 }

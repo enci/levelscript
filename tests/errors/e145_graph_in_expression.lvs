@@ -1,6 +1,6 @@
-// E145 (0.10, check 51): a graph name only heads a match-side pattern.
+// E145 (0.10, check 51): a graph name is not a value.
 // @expect error
-// @expect stderr-contains cannot be read in an expression
+// @expect stderr-contains cannot be read as a value
 tag algo { R, H }
 tag room { Start }
 layers {

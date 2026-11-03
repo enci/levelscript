@@ -1,0 +1,16 @@
+// E173 (0.17, check 61): a region read quantifies a comparison; it is not a value.
+// @expect error
+// @expect stderr-contains is not a value
+tag algo { R, H }
+tag room { Hall, Inn }
+tag loot { coin }
+layers {
+    level: grid of algo
+    rooms: grid of room
+    items: grid of loot
+    depth: grid of number
+    map:   graph of level(nodes=R, edges=H)
+    plan:  graph of rooms
+}
+rule r { plan { ?n } => n.depth = (n.depth + 1) }
+sequence main { resize(2, 2) everywhere r }

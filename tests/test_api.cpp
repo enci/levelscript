@@ -1110,7 +1110,7 @@ layers {
 rule split { regions[.] => regions[ (if(x < 3, 7, 40)) ] }
 rule wall_between(rotation=all) {
     regions[?a *]
-    where[* (regions != ?a)]
+    where[* (regions != a)]
     =>
     level[* wall]
 }
@@ -1138,7 +1138,7 @@ rule seed_gem { items[.] where[ (x == 1 && y == 1) ] => items[gem] }
 rule fall {
     items[?v, .]
     =>
-    items[., ?v]
+    items[., (v)]
 }
 sequence main {
     resize(3, 4)
@@ -1192,7 +1192,7 @@ layers {
 }
 rule paint { level[.] => level[ (if(x == 2, wall, wall | floor)) ] }
 rule pair { level[?a ?a] => marks[1 *] }
-rule dup { level[?a] => copy[?a] }
+rule dup { level[?a] => copy[(a)] }
 sequence main {
     resize(4, 1)
     everywhere paint
@@ -1217,7 +1217,7 @@ layers {
 }
 rule zero { tiles[.] where[ (x == 1) ] => tiles[0] }
 rule five { tiles[.] where[ (x == 2) ] => tiles[5] }
-rule seen { tiles[?v] => marks[ (?v + 10) ] }
+rule seen { tiles[?v] => marks[ (v + 10) ] }
 sequence main {
     resize(4, 1)
     everywhere zero
@@ -1243,7 +1243,7 @@ layers {
 rule ramp { regions[.] => regions[ (10 - x) ] }
 rule step(rotation=all) {
     regions[?a *]
-    where[* (regions == ?a + 1)]
+    where[* (regions == a + 1)]
     =>
     marks[* 1]
 }

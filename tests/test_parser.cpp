@@ -63,16 +63,16 @@ TEST_CASE("parser: match-side braces hold patterns and do not nest") {
 }
 
 TEST_CASE("parser: rule guards follow a pattern on the match side") {
-    auto a = parse_ok("rule r { g[?a] h[?b] when (?a != ?b) => g[c] }");
+    auto a = parse_ok("rule r { g[?a] h[?b] when (a != b) => g[c] }");
     REQUIRE(a.rules[0].pairs[0].guards.size() == 1);
     CHECK(a.rules[0].pairs[0].guards[0].after == 2);
-    auto b = parse_ok("rule r { { g[?a] when (?a > 1) h[.] when (k > 0) } => g[c] }");
+    auto b = parse_ok("rule r { { g[?a] when (a > 1) h[.] when (k > 0) } => g[c] }");
     auto const& pb = b.rules[0].pairs[0];
     CHECK(pb.lhs.size() == 2);
     REQUIRE(pb.guards.size() == 2);
     CHECK(pb.guards[0].after == 1);
     CHECK(pb.guards[1].after == 2);
-    auto c = parse_ok("rule r { all\n g[?a] when (?a > 1) => g[c]\n g[.] => g[d]\n}");
+    auto c = parse_ok("rule r { all\n g[?a] when (a > 1) => g[c]\n g[.] => g[d]\n}");
     CHECK(c.rules[0].pairs.size() == 2);
     // a match side begins with a pattern
     CHECK(parse_fails("rule r { when (k > 0) g[a] => g[c] }"));
@@ -84,38 +84,41 @@ TEST_CASE("parser: rule guards follow a pattern on the match side") {
 }
 
 TEST_CASE("parser: a graph block is a whole match side") {
-    auto a = parse_ok("rule r { plan {\n ?a -- ?b\n ?a[Hall]\n} when (?a != ?b) => g(?a)[c] }");
+    auto a = parse_ok("rule r { plan {\n ?a -- ?b\n ?a\n} when (a.rooms is Hall) when (a != b) => a.g = c }");
     auto const& pa = a.rules[0].pairs[0];
     CHECK(pa.is_graph);
     CHECK(pa.lhs.empty());
     CHECK(pa.block.graph == "plan");
     REQUIRE(pa.block.items.size() == 2);
     CHECK(pa.block.items[0].what == graph_item::kind::edge);
-    CHECK(pa.block.items[1].what == graph_item::kind::test);
-    REQUIRE(pa.guards.size() == 1);
+    CHECK(pa.block.items[0].a == "a");   // names are kept without their '?'
+    CHECK(pa.block.items[1].what == graph_item::kind::node);
+    REQUIRE(pa.guards.size() == 2);
     CHECK(pa.guards[0].after == 0);
-    CHECK(pa.rhs.pat.extent == "?a");
-    // a grid named like a built-in still takes an extent
-    CHECK(parse_ok("rule r { plan { ?n } => size(?n)[c] }").rules[0].pairs[0].rhs.pat.extent == "?n");
+    CHECK(pa.rhs.pat.node == "a");
+    CHECK(pa.rhs.pat.grid == "g");
+    // a graph write parses whatever its names; sema checks them
+    CHECK(parse_ok("rule r { plan { ?n } => n.size = c }").rules[0].pairs[0].rhs.pat.node == "n");
     // no grouping, no conjoining with patterns
-    CHECK(parse_fails("rule r { { plan { ?n } } => g(?n)[c] }"));
-    CHECK(parse_fails("rule r { plan { ?n } g[a] => g(?n)[c] }"));
+    CHECK(parse_fails("rule r { { plan { ?n } } => n.g = c }"));
+    CHECK(parse_fails("rule r { plan { ?n } g[a] => n.g = c }"));
     CHECK(parse_fails("rule r { g[a] plan { ?n } => g[c] }"));
-    CHECK(parse_fails("rule r { plan { ?n } when (k > 0) g[a] => g(?n)[c] }"));
+    CHECK(parse_fails("rule r { plan { ?n } when (k > 0) g[a] => n.g = c }"));
     // block items
     CHECK(parse_fails("rule r { plan { } => g[c] }"));
     CHECK(parse_fails("rule r { plan { n } => g[c] }"));
-    CHECK(parse_fails("rule r { plan { ?a - ?b } => g(?a)[c] }"));
-    CHECK(parse_fails("rule r { plan { ?a - - ?b } => g(?a)[c] }"));
-    CHECK(parse_fails("rule r { plan { ?a -- ?b -- ?c } => g(?a)[c] }"));
-    CHECK(parse_fails("rule r { plan { ?a[Hall } => g(?a)[c] }"));
-    CHECK(parse_fails("rule r { plan { ?a[(1 + 2)] } => g(?a)[c] }"));
+    CHECK(parse_fails("rule r { plan { ?a - ?b } => a.g = c }"));
+    CHECK(parse_fails("rule r { plan { ?a - - ?b } => a.g = c }"));
+    CHECK(parse_fails("rule r { plan { ?a -- ?b -- ?c } => a.g = c }"));
+    CHECK(parse_fails("rule r { plan { ?a[Hall } => a.g = c }"));
+    // node tests were removed in 0.17
+    CHECK(parse_fails("rule r { plan { ?a[Hall] } => a.g = c }"));
     CHECK(parse_fails("rule r { plan { ?n } => g(?n[c] }"));
 }
 
 TEST_CASE("parser: expressions print back as source") {
     for (char const* src : {
-             "?a != ?b && k > 0",
+             "a != b && k > 0",
              "(a || b) && !c",
              "a - (b - c) * 2",
              "-(x + 1) / width",

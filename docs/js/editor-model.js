@@ -8,7 +8,9 @@
 (function (root) {
   'use strict';
 
-  const LEX = ['', 'tk-cm', 'tk-str', 'tk-num', 'tk-kw', 'tk-fn', 'tk-op', 'tk-var', 'tk-dir'];
+  const LEX = ['', 'tk-cm', 'tk-str', 'tk-num', 'tk-kw', 'tk-fn', 'tk-op', 'tk-var', 'tk-dir', 'tk-ty'];
+  // node attributes (spec 5.12): `n.size`, `map.degree` - a name after '.' with no whitespace
+  const ATTRIBUTES = new Set(['degree', 'size', 'value']);
   const SEVERITY = { warning: 1, error: 2 };
 
   // ---------- positions ----------
@@ -66,6 +68,8 @@
         // the grammar's lookahead is (?=\s*\(): whitespace before the paren is allowed
         if (kw.has(m[6])) runs.push({ from, to, cls: 'tk-kw' });
         else if (fn.has(m[6]) && /^\s*\(/.test(src.slice(to, to + 64))) runs.push({ from, to, cls: 'tk-fn' });
+        else if (ATTRIBUTES.has(m[6]) && src[from - 1] === '.' && /\w/.test(src[from - 2] || ''))
+          runs.push({ from, to, cls: 'tk-ty' });
       } else {
         const c = m[7];
         if (c === '[') brackets++;
@@ -98,7 +102,7 @@
   // row reads as a solid strip even when columns are aligned with several spaces. The last cell
   // of a row covers just the one whitespace character after it, never a `]` or a comment.
   // Port of applyDecorations/cellLen in extension/src/decorations.ts.
-  // colorFor (optional): { name } for a tag value or { number } for a number cell -> a CSS colour,
+  // colorFor (optional): { name, tag } for a tag value (tag: its tagset) or { number } for a number cell -> a CSS colour,
   // or nothing for the palette colour. Named masks, `*` and `.` always use the palette.
   function cellRanges(src, insp, editor, fileName, colorFor) {
     const tags = (insp.symbols && insp.symbols.tags) || [];
@@ -113,7 +117,7 @@
       else if (t.tag === -3) color = hook({ number: t.value }) || paletteColor(t.value);
       else {
         const v = tags[t.tag] && tags[t.tag].values[t.value];
-        color = (v && hook({ name: v.name })) || paletteColor(t.value + t.tag * 12);
+        color = (v && hook({ name: v.name, tag: tags[t.tag].name })) || paletteColor(t.value + t.tag * 12);
       }
       const from = offsetOf(ix, t.line, t.col - 1);
       const end = offsetOf(ix, t.line, t.col - 1 + t.len);
@@ -129,13 +133,13 @@
 
     // the tag declarations are the legend: same palette slots, only the ones in this file
     const here = loc => !!loc && (!loc.module || loc.module === fileName);
-    const legend = (loc, slot, name) => {
+    const legend = (loc, slot, name, tag) => {
       const from = offsetOf(ix, loc.line, loc.col - 1);
       const to = offsetOf(ix, loc.line, loc.col - 1 + loc.len);
-      if (to > from) out.push({ from, to, color: (name && hook({ name })) || paletteColor(slot) });
+      if (to > from) out.push({ from, to, color: (name && hook({ name, tag })) || paletteColor(slot) });
     };
     tags.forEach((tag, ti) => {
-      tag.values.forEach((v, vi) => { if (here(v.loc)) legend(v.loc, vi + ti * 12, v.name); });
+      tag.values.forEach((v, vi) => { if (here(v.loc)) legend(v.loc, vi + ti * 12, v.name, tag.name); });
       tag.masks.forEach((u, ui) => { if (here(u.loc)) legend(u.loc, tag.values.length + ui + ti * 12); });
     });
     return out;

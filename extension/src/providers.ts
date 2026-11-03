@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { getCached } from './cache';
-import { completionContext, OPS } from './completion';
+import { completionContext, suggestions, SuggestionKind, attributeAt, ATTRIBUTE_DETAIL } from './completion';
 import { InspectionResult } from './types';
 
 function findTokenAt(tokens: any[], line: number, col: number) {
@@ -118,153 +118,40 @@ export const hoverProvider: vscode.HoverProvider = {
             }
         }
 
+        // a node attribute: `size` in `n.size` / `map.size`
+        const attr = attributeAt(doc.getText(), doc.offsetAt(pos));
+        if (attr) return new vscode.Hover(new vscode.MarkdownString(`**${attr}** — ${ATTRIBUTE_DETAIL[attr]}`));
+
         return null;
     }
 };
 
 // Context-aware completion: only what the grammar allows at the cursor
-// (see completion.ts). Nothing at all where a name is being declared or the
-// context is unclear - Enter must never land on a stray suggestion.
+// (see completion.ts, which also decides what to offer). Nothing at all where
+// a name is being declared or the context is unclear - Enter must never land
+// on a stray suggestion.
+const KINDS: Record<SuggestionKind, vscode.CompletionItemKind> = {
+    keyword: vscode.CompletionItemKind.Keyword, function: vscode.CompletionItemKind.Function,
+    enum: vscode.CompletionItemKind.Enum, enumMember: vscode.CompletionItemKind.EnumMember,
+    class: vscode.CompletionItemKind.Class, interface: vscode.CompletionItemKind.Interface,
+    variable: vscode.CompletionItemKind.Variable, constant: vscode.CompletionItemKind.Constant,
+    property: vscode.CompletionItemKind.Property, method: vscode.CompletionItemKind.Method,
+    module: vscode.CompletionItemKind.Module, type: vscode.CompletionItemKind.Enum,
+};
+
 export const completionProvider: vscode.CompletionItemProvider = {
-    provideCompletionItems(doc, pos) {
+    provideCompletionItems(doc, pos, _token, context) {
         const ctx = completionContext(doc.getText(), doc.offsetAt(pos));
         if (ctx.kind === 'none') return undefined;
+        // a typed '.' is the empty cell unless it follows a name: `n.`, `map.`
+        if (context.triggerCharacter === '.' && ctx.kind !== 'member') return undefined;
         // best-effort symbols: a mid-edit file still has its tables
         const sym = getCached(doc.uri.toString())?.symbols;
-        const K = vscode.CompletionItemKind;
-        const items: vscode.CompletionItem[] = [];
-
-        const word = (label: string, kind: vscode.CompletionItemKind, detail?: string) => {
-            const it = new vscode.CompletionItem(label, kind);
-            if (detail) it.detail = detail;
-            items.push(it);
+        return suggestions(ctx, sym).map(s => {
+            const it = new vscode.CompletionItem(s.label, KINDS[s.kind]);
+            if (s.detail) it.detail = s.detail;
+            if (s.snippet) it.insertText = new vscode.SnippetString(s.snippet);
             return it;
-        };
-        const snippet = (label: string, body: string, kind = K.Snippet, detail?: string) => {
-            const it = word(label, kind, detail);
-            it.insertText = new vscode.SnippetString(body);
-            return it;
-        };
-        const tagOf = (grid: string) => {
-            const layer = sym?.layers.find(l => l.name === grid);
-            return layer ? sym?.tags.find(t => t.name === layer.type) : undefined;
-        };
-        const tagValues = (tag: InspectionResult['symbols']['tags'][number] | undefined) => {
-            tag?.values.forEach(v => word(v.name, K.EnumMember, tag.name));
-            tag?.masks.forEach(u => word(u.name, K.Enum, `named mask in ${tag.name}`));
-        };
-        const allTagValues = () => sym?.tags.forEach(t => tagValues(t));
-        const grids = () => sym?.layers.forEach(l => word(l.name, K.Class, `grid of ${l.type}`));
-        const graphs = () => sym?.graphs?.forEach(g => word(g.name, K.Interface, `graph of ${g.source}`));
-
-        switch (ctx.kind) {
-        case 'top':
-            snippet('use', 'use "${1:module.lvs}"', K.Keyword, 'use another module (head of the file)');
-            snippet('tag', 'tag ${1:name} { ${0} }', K.Keyword);
-            snippet('layers', 'layers {\n\t$0\n}', K.Keyword);
-            snippet('params', 'params {\n\t$0\n}', K.Keyword);
-            snippet('rule', 'rule ${1:name} {\n\t$0\n}', K.Keyword);
-            snippet('sequence', 'sequence ${1:name} {\n\t$0\n}', K.Keyword);
-            break;
-        case 'maskMember': {   // a value or a named mask of the same tagset
-            const tag = sym?.tags.find(t => t.name === ctx.tag);
-            tag?.values.forEach(v => word(v.name, K.EnumMember));
-            tag?.masks.forEach(m => word(m.name, K.Enum, `named mask in ${tag.name}`));
-            break;
-        }
-        case 'gridOf':
-            snippet('grid of', 'grid of ${1}', K.Keyword);
-            snippet('graph of', 'graph of ${1}', K.Keyword, 'a read-only view of a grid');
-            break;
-        case 'graphSource':
-            grids();
-            break;
-        case 'graphArg':
-            snippet('nodes', 'nodes=${1}', K.Property, 'tag mask of the node cells');
-            snippet('edges', 'edges=${1}', K.Property, 'tag mask of the connector cells');
-            break;
-        case 'of':
-            word('of', K.Keyword);
-            break;
-        case 'gridType':
-            sym?.tags.forEach(t => word(t.name, K.Enum, 'tag'));
-            word('number', K.Keyword);
-            break;
-        case 'paramType':
-            snippet('number', 'number = ${1:0}', K.Keyword);
-            break;
-        case 'expr': {
-            // in a rule, the graph functions take a node variable bound by a
-            // graph pattern, and a target: a node or a selector naming a grid
-            sym?.builtins.forEach(b => snippet(b, `${b}(\${1})`, K.Function, 'built-in'));
-            if (ctx.nodes) sym?.graph_functions?.forEach(b => snippet(b, `${b}(\${1})`, K.Function, 'graph function'));
-            sym?.params.forEach(p => word(p.name, K.Variable, p.derived ? 'derived param' : 'param'));
-            if (ctx.grids) grids();
-            if (ctx.pos) ['x', 'y', 'width', 'height'].forEach(n => word(n, K.Constant, 'position'));
-            allTagValues();
-            break;
-        }
-        case 'ruleAttr':
-            snippet('symmetry', 'symmetry=${1|horizontal,vertical,all,none|}', K.Property);
-            snippet('rotation', 'rotation=${1|all,90,180,270,none|}', K.Property);
-            break;
-        case 'attrValue':
-            if (ctx.attr === 'symmetry') ['horizontal', 'vertical', 'all', 'none'].forEach(v => word(v, K.EnumMember));
-            if (ctx.attr === 'rotation') ['all', '90', '180', '270', 'none'].forEach(v => word(v, K.EnumMember));
-            break;
-        case 'ruleBody':
-            if (ctx.start) {
-                word('any', K.Keyword, 'pick one sub-rule per match');
-                word('all', K.Keyword, 'apply every sub-rule');
-                word('ordered', K.Keyword, 'sub-rules in priority order');
-            }
-            grids();
-            graphs();
-            word('where', K.Keyword, 'position pseudo-layer');
-            if (ctx.guard) snippet('when', 'when (${1})', K.Keyword, 'rule guard: once per candidate');
-            break;
-        case 'combinator':
-            word('all', K.Keyword);
-            word('any', K.Keyword);
-            break;
-        case 'weight':
-            snippet('weight', 'weight=${1:1}', K.Property);
-            break;
-        case 'cell':
-            tagValues(tagOf(ctx.grid));
-            break;
-        case 'statement':
-            snippet('once', 'once ${1:rule}', K.Keyword, 'one application, or one iteration');
-            snippet('scatter', 'scatter(${1:N}) ${2:rule}', K.Keyword, 'up to N (or P%) of one batch');
-            snippet('everywhere', 'everywhere ${1:rule}', K.Keyword, 'every match of one batch');
-            snippet('grow', 'grow ${1:rule}', K.Keyword, 'steps, each seeing the last; grow(N) for N');
-            snippet('settle', 'settle ${1:rule}', K.Keyword, 'repeat until nothing changes; settle(N) for at most N');
-            OPS.forEach(op => snippet(op.name, op.snippet, K.Function, 'operation'));
-            if (ctx.guard) snippet('when', 'when (${1})', K.Keyword, 'guard');
-            break;
-        case 'ruleName':
-            sym?.rules.forEach(r => word(r.name, K.Method, 'rule'));
-            sym?.sequences?.forEach(s => word(s.name, K.Module, 'sequence'));
-            break;
-        case 'opArg': {
-            const op = OPS.find(o => o.name === ctx.op);
-            if (!op) break;
-            const positional = op.params.filter(p => p.positional);
-            const next = ctx.used.length === 0 ? positional[ctx.index] : undefined;
-            next?.values?.forEach(v => word(v, K.EnumMember));
-            for (const p of op.params)
-                if (!p.positional && !ctx.used.includes(p.name))
-                    snippet(p.name, `${p.name}=\${1}`, K.Property, p.required ? p.kind : `${p.kind}, optional`);
-            break;
-        }
-        case 'opValue': {
-            const p = OPS.find(o => o.name === ctx.op)?.params.find(q => q.name === ctx.param);
-            if (p?.kind === 'grid') grids();
-            else if (p?.kind === 'pred' || p?.kind === 'value') allTagValues();
-            else p?.values?.forEach(v => word(v, K.EnumMember));
-            break;
-        }
-        }
-        return items;
+        });
     }
 };

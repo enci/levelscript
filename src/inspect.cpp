@@ -101,16 +101,6 @@ void emit_pattern_tokens(std::string& o, comma_list& cl,
         for (auto const& c : row) emit_cell_tokens(o, cl, prog, tid, *c);
 }
 
-// A graph block's test cells, painted in the graph's source tagset.
-void emit_block_tokens(std::string& o, comma_list& cl, compiled const& prog,
-                       graph_block const& b) {
-    int graph = prog.graph_id(b.graph.text);
-    if (graph < 0) return;
-    int tid = prog.layers[(size_t)prog.graphs[(size_t)graph].source].tag_id;
-    for (auto const& it : b.items)
-        if (it.test) emit_cell_tokens(o, cl, prog, tid, *it.test);
-}
-
 // A pattern head as a hover/definition reference: a grid ("layer") or a graph.
 void emit_pattern_refs(std::string& o, comma_list& cl, compiled const& prog, pattern const& p) {
     if (p.is_where) return;
@@ -133,6 +123,40 @@ void emit_loc(std::string& o, module_closure const& mods, ident const& name) {
 
 // Every sub-rule of the root module's rules: declared rules, then those
 // written inline in its sequences' statements.
+// References inside an expression: a grid read by name, a selector's grid, an
+// attribute read's graph head (`map.size`), and a region read's grid
+// (`n.rooms`). A node variable before '.' is no reference.
+void emit_expr_refs(std::string& o, comma_list& cl, compiled const& prog, expr const& e) {
+    auto ref = [&](source_loc at, std::string const& name, char const* kind) {
+        cl.next();
+        o += "{" + span_json(at) + ",\"kind\":\"" + kind + "\",\"target\":";
+        js(o, name);
+        o += "}";
+    };
+    auto head = [&](std::string const& name) {   // the name at the start of e.loc
+        source_loc at = e.loc;
+        at.end_line = at.line;
+        at.end_col = at.col + (int)name.size();
+        return at;
+    };
+    switch (e.kind) {
+    case expr_kind::ident:
+        if (prog.layer_id(e.ident) >= 0) ref(e.loc, e.ident, "layer");
+        else if (prog.graph_id(e.ident) >= 0) ref(e.loc, e.ident, "graph");
+        break;
+    case expr_kind::selector:
+        if (prog.layer_id(e.ident) >= 0) ref(head(e.ident), e.ident, "layer");
+        break;
+    case expr_kind::attr:
+        if (prog.graph_id(e.ident) >= 0) ref(head(e.ident), e.ident, "graph");
+        if (prog.layer_id(e.member) >= 0) ref(e.member_loc, e.member, "layer");
+        break;
+    default:
+        break;
+    }
+    for (auto const& a : e.args) emit_expr_refs(o, cl, prog, *a);
+}
+
 template <class F>
 void for_each_root_pair(ast_file const& ast, int root, F&& f) {
     auto rule = [&](rule_decl const& r) {
@@ -259,7 +283,7 @@ std::string inspect_json(std::string const& source, std::string const& name,
     {
         comma_list cl{o};
         for (auto const& d : dirs.all) {
-            static char const* const targets[] = {"file", "tag_value", "statement"};
+            static char const* const targets[] = {"file", "tag_value", "statement", "layer"};
             cl.next();
             o += "{\"key\":";
             js(o, d.key);
@@ -295,7 +319,6 @@ std::string inspect_json(std::string const& source, std::string const& name,
     {
         comma_list cl{o};
         for_each_root_pair(*ast, mods.root, [&](rule_pair const& pr) {
-            if (pr.is_graph) emit_block_tokens(o, cl, prog, pr.block);
             for_each_pattern(pr, [&](pattern const& p) { emit_pattern_tokens(o, cl, prog, p); });
         });
     }
@@ -328,7 +351,12 @@ std::string inspect_json(std::string const& source, std::string const& name,
                 js(o, pr.block.graph.text);
                 o += "}";
             }
-            for_each_pattern(pr, [&](pattern const& p) { emit_pattern_refs(o, cl, prog, p); });
+            for_each_pattern(pr, [&](pattern const& p) {
+                emit_pattern_refs(o, cl, prog, p);
+                for (auto const& row : p.cells)
+                    for (auto const& c : row) emit_expr_refs(o, cl, prog, *c);
+            });
+            for (auto const& g : pr.guards) emit_expr_refs(o, cl, prog, *g.expr);
         });
     }
     o += "]";
@@ -516,8 +544,9 @@ std::string inspect_json(std::string const& source, std::string const& name,
     // completion vocabulary — kept in sync with the sema tables by the tests
     o += "],\"ops\":[\"resize\",\"upscale\",\"trim\",\"mirror\",\"pad\",\"path\",\"bsp\",\"voronoi\",\"noise\"]";
     o += ",\"builtins\":[\"if\",\"min\",\"max\",\"abs\",\"clamp\",\"mod\",\"random\"]";
-    o += ",\"graph_functions\":[\"degree\",\"size\",\"distance\",\"neighbors\","
-         "\"adjacent\",\"reachable\",\"value\",\"some\",\"every\",\"count\",\"farthest\"]";
+    o += ",\"graph_functions\":[\"distance\",\"neighbors\",\"adjacent\",\"reachable\","
+         "\"some\",\"count\",\"farthest\",\"nodes\",\"edges\"]";
+    o += ",\"node_attributes\":[\"degree\",\"size\",\"value\"]";
     o += "}}";
     return o;
 }

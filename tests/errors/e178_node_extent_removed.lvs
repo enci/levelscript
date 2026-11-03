@@ -1,0 +1,17 @@
+// E178 (0.17, 5.13): node extents were removed; a graph rule writes a region
+// with a graph write.
+// @expect error
+// @expect stderr-contains node extents were removed
+tag algo { R, H }
+tag room { Hall, Inn }
+tag loot { coin }
+layers {
+    level: grid of algo
+    rooms: grid of room
+    items: grid of loot
+    depth: grid of number
+    map:   graph of level(nodes=R, edges=H)
+    plan:  graph of rooms
+}
+rule r { plan { ?n } => rooms(?n)[Inn] }
+sequence main { resize(2, 2) everywhere r }

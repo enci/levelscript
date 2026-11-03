@@ -69,18 +69,26 @@ enum class ce_kind {
     is_empty, is_not_empty,   // ref = grid id; val = 1 when a number grid
     has,           // ref = tag grid id, val = mask: the cell overlaps it (a bare-tag pred)
     var_read,      // ref = the pair's variable slot; a node variable reads its node id
+    // node attributes `n.degree`, `n.size`, `n.value`: ref = graph id, a = the node
+    degree_, size_, value_,
+    // `map.size` at a cell: the attribute (val: 0 degree, 1 size, 2 value) of
+    // the node of graph ref covering (x, y); an uncovered cell reads 0, or
+    // empty for value
+    cell_attr_,
+    // a region read in a comparison, `n.g op b`: true iff it holds at every
+    // cell of node a's region (graph ref) in grid c2; val = region_op | flags
+    region_,
+    // global queries: count(s) (val = selector id), nodes(g) / edges(g) (ref = graph)
+    gcount_, gnodes_, gedges_,
     // graph functions: ref = graph id, a = the node; the targeted ones take
     // a selector (val = selector id) or a node (b = its expr; val = -1)
-    degree_, size_,
     distance_,     // unreachable is graph_unreachable
     neighbors_,
     adjacent_,     // neighbors > 0
     reachable_,    // distance < graph_unreachable
-    value_,        // the value every cell of the node's region holds in the source
     // quantifiers: val = selector id, tested against the node's own cells
     count_,        // cells of the region the selector matches
     some_,         // count > 0
-    every_,        // count == size
     // farthest(n, t, u): t as for distance; u a selector (c2 = its id), a
     // node (c = its expr), or omitted (c2 = farthest_every_node)
     farthest_,
@@ -92,6 +100,14 @@ constexpr long long graph_unreachable = 1ll << 30;
 
 // farthest's c2 when u is omitted: u is every node of the graph.
 constexpr int farthest_every_node = -2;
+
+// A region read's comparison, the region on the left (`3 < n.g` is stored as
+// `n.g > 3`), and its flags.
+enum region_op : long long { region_is, region_eq, region_ne, region_lt, region_le,
+                             region_gt, region_ge };
+constexpr long long region_op_bits   = 0xf;
+constexpr long long region_complement = 1 << 4;   // `!n.g`: complement each cell's read
+constexpr long long region_raw        = 1 << 5;   // `n.g == .` on a number grid: compare raw
 
 struct compiled_expr {
     ce_kind   kind{ce_kind::int_lit};
@@ -131,7 +147,7 @@ struct compiled_pattern {
     bool is_where{false};
     int  rows{0}, cols{0};
     std::vector<compiled_cell> cells;   // flat, row-major
-    // A node extent `g(?n)[c]` (graph pairs' writes only): the slot of the
+    // A graph write `n.g = c` (graph pairs' writes only): the slot of the
     // node whose region its one cell covers; -1 = an ordinary pattern.
     int  extent{-1};
 
@@ -178,7 +194,7 @@ struct compiled_pair {
     std::vector<guard>            guards;
     compiled_write_term           rhs;
     int                           sub_rule_idx{0};
-    std::vector<std::string>      var_names;   // by slot, '?' included
+    std::vector<std::string>      var_names;   // by slot, without the '?'
     // Filled per variant: each variable's first binding cell (its site, which
     // also supplies its value) and every other binding cell, which must
     // equal the site. Offsets are from the anchor.
@@ -198,13 +214,14 @@ struct compiled_pair {
     // A graph pair (graph >= 0) has no patterns and no anchor: a candidate
     // assigns one distinct node of `graph` to each variable slot, in
     // lexicographic node-id order over the slots (declaration order), such
-    // that every test and edge line holds. Its write leaves are node extents.
+    // that every edge line holds. Its write leaves are graph writes.
     int                           graph{-1};
-    // `?n[m]`: the node's value overlaps `val` (tag source) or equals it (number).
-    struct node_test { int slot{0}; int64_t val{0}; };
     struct node_edge { int a{0}, b{0}; };   // `?a -- ?b`: slots of adjacent nodes
-    std::vector<node_test>        node_tests;
     std::vector<node_edge>        node_edges;
+    // Under `symmetry=none`: the permutations of the slots, other than the
+    // identity, that map the pair onto itself (section 5.13). A matching
+    // assignment is dropped when one of them maps it onto an earlier one.
+    std::vector<std::vector<int>> symmetries;
 };
 
 struct compiled_rule {
@@ -241,7 +258,7 @@ struct compiled_op {
     int            within{-1};      // voronoi; -1 → every cell
     int            into_grid{-1};
     int            write{-1};       // expr arena index, typed by into_grid
-    int            over_grid{-1};   // the graph seam: validated, no effect yet
+    int            over_graph{-1};  // path: route over this graph's nodes; -1 → grid cells
     int            cost{-1};        // expr arena index; -1 → constant 1 (BFS)
 };
 

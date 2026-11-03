@@ -1,0 +1,72 @@
+// Step 4 - multiple layers. The walk now only sketches the cave in an `algo`
+// grid; a second grid, `level`, holds the result. A rule can match in one
+// grid and write another.
+
+// Only what is needed for carving
+// Short names makes it easier to read bigger patterns
+tag algo {							
+	F								// @name=floor
+    H								// @name=head
+    //								   ^- names for the visuelizer
+}				
+tag geometry { floor wall moss }	// geometry as a seperate tag
+
+// Two different grid defined on different tags
+layers {
+	algo: grid of algo				// @view=corner
+    level: grid of geometry			// @view=fill
+}
+
+rule place_head {
+    algo[ 	. . . 
+    		. . . 
+        	. . . ]
+    =>
+    algo[	* * * 
+			* H * 
+            * * * ]
+}
+
+rule walk(rotation=all) {
+    algo[H * *] => algo[F H * ]
+}
+
+rule fill_level {
+// Combine to tags with '|' reads as floor or head
+	algo[F|H] => level[floor]
+//  ^-reading algo       ^-writing into level
+}
+
+rule wall_side(rotation=all) {
+    level[floor . ] => level[* wall]
+}
+
+rule wall_corner(rotation=all) {
+    level[
+        floor wall 
+        wall  .    ]
+    =>
+    level[
+    	* * 
+    	* wall ]
+}
+
+// Grow moss on the north and west walls
+rule grow_moss(rotation=270) {
+//			   ^-rotate this grid 270 deg as well
+    level[	wall
+    		floor]
+    =>
+    level[	* 
+    		moss]
+}
+
+sequence main {
+    resize(40, 30)
+    once place_head
+    grow(200) walk          // @play=8 @hold=10
+    everywhere fill_level	// Bridge the layers with this rule
+    everywhere wall_side    // @hold=10
+    everywhere wall_corner  // @hold=10
+    scatter(40%) grow_moss	// @hold=10
+}

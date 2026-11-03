@@ -1,0 +1,113 @@
+// @seed=11
+// Step 5 - tag masks. A named mask such as `solid = wall | rock` stands for
+// several values at once, `!` takes the complement, and `!.` matches any value.
+// Enemies are first written as the union `enemy` and refined into bats and
+// rats later.
+// @expect grid level count(rock) == 10
+// @expect grid mobs count(bat) >= 1
+// @expect grid mobs count(rat) >= 1
+
+tag algo {
+    floor
+    head
+    wall
+}
+
+// `solid` names a mask over the tagset's values. It takes no value of its own
+// and can be used wherever a value can.
+tag geometry {
+    wall
+    rock
+    floor
+    solid = wall | rock
+}
+
+// `enemy` is a union of two values. Written into a cell, it stores both, and
+// says "some enemy, not yet decided".
+tag mobs {
+    bat
+    rat
+    enemy = bat | rat
+}
+
+layers {
+    algo:  grid of algo       // @view=corner
+    level: grid of geometry   // @view=fill
+    mobs:  grid of mobs
+}
+
+rule place_head {
+    algo[
+        . . .
+        . . .
+        . . . ]
+    =>
+    algo[
+        * * *
+        * head *
+        * * * ]
+}
+
+rule walk(rotation=all) {
+    algo[head .|floor *]
+    =>
+    algo[floor head *]
+}
+
+// `!.` matches any non-empty cell: here, anything the walk left behind. Both
+// sub-rules match against the same snapshot, so walls written by one never
+// make the other match.
+rule walls(rotation=all) { all
+    algo[!. .] => algo[* wall]
+    algo[
+        !. .
+        .  . ]
+    =>
+    algo[
+        * *
+        * wall ]
+}
+
+rule build { all
+    algo[floor|head] => level[floor]
+    algo[wall]       => level[wall]
+}
+
+// A cell matches a mask when it holds any of the mask's values, so `solid`
+// matches walls and rocks alike: rocks pile up against walls, and against
+// rocks placed earlier in the same run.
+rule loose_rock(rotation=all) {
+    level[solid floor]
+    =>
+    level[* rock]
+}
+
+rule place_enemy {
+    level[floor]
+    mobs[.]
+    =>
+    mobs[enemy]
+}
+
+// The refinement. A cell holding `enemy` holds `bat` and `rat`, so it matches
+// either; a refined cell holds one value only. Bats hang below anything solid.
+// `!solid` is the complement: every value `solid` lacks, empty included.
+rule refine { all
+    level[solid, floor]  mobs[*, enemy] => mobs[*, bat]
+    level[!solid, floor] mobs[*, enemy] => mobs[*, rat]
+}
+
+sequence main {
+    resize(40, 30)
+    once place_head
+    grow(600) walk          // @play=8
+    everywhere walls
+    everywhere build        // @hold=10
+    grow(10) loose_rock     // @play=1
+    scatter(8) place_enemy  // @hold=15
+    everywhere refine
+}
+
+// Exercise: add a value `spider` to `mobs`, and to the `enemy` mask. Which
+// rules pick it up without any change? Then refine enemies next to a rock into
+// spiders.

@@ -1,0 +1,57 @@
+// @seed=6
+// Step 7 - conditions. Inside parentheses a cell holds an expression, and the
+// `where` pseudo-grid matches wherever its expression is true. Expressions
+// read `x` and `y`, the grid's `width` and `height`, other grids at the same
+// position, and built-in functions such as `mod` and `abs`.
+// @expect grid level count(floor) >= 200
+// @expect grid level count(wall) >= 200
+
+tag geometry {
+    wall
+    floor
+}
+
+layers {
+    zones: grid of number     // @view=border
+    level: grid of geometry   // @view=fill
+}
+
+// `where` is not a grid you declare: its cells are conditions. A rule with a
+// `where` pattern matches only where every condition holds. Here: zones whose
+// id leaves a remainder when divided by 3 (`mod` is the remainder), and never
+// on the outermost ring of the map.
+rule carve_zones {
+    level[.]
+    where[ (mod(zones, 3) != 0 && x > 0 && y > 0 && x < width - 1 && y < height - 1) ]
+    =>
+    level[floor]
+}
+
+// A diamond-shaped hall in the middle of the map. `abs(x - width / 2)` is how
+// far a cell is from the middle column; numbers are integers, and `/` drops
+// the remainder.
+rule carve_hall {
+    level[.]
+    where[ (abs(x - width / 2) + abs(y - height / 2) < 7) ]
+    =>
+    level[floor]
+}
+
+// Zones that touch merge into larger rooms here; step 9 puts walls between
+// them.
+rule fill_rest {
+    level[.]
+    =>
+    level[wall]
+}
+
+sequence main {
+    resize(40, 30)
+    bsp(into=zones, min=6, max=14)      // @hold=10
+    everywhere carve_zones              // @hold=10
+    everywhere carve_hall               // @hold=10
+    everywhere fill_rest
+}
+
+// Exercise: carve only the zones in the left half of the map, by adding a
+// condition on `x` to `carve_zones`.

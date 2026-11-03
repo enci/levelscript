@@ -1,0 +1,9 @@
+// E182 (0.17.1, check 35): path's `over` takes a graph layer, not a grid.
+// @expect error
+// @expect stderr-contains it takes a graph layer
+tag algo { R, H }
+layers {
+    level: grid of algo
+    map:   graph of level(nodes=R, edges=H)
+}
+sequence main { resize(2, 2) path(from=R, to=R, into=level, write=H, over=level) }

@@ -1,4 +1,5 @@
 #include "sema.hpp"
+#include "lexer.hpp"
 #include "modules.hpp"
 #include <algorithm>
 #include <cassert>
@@ -9,10 +10,6 @@
 namespace ls {
 
 namespace {
-
-// The largest side of a sized pattern `g(W, H)[c]`; a written-out pattern has
-// no cap, but a size is one token and could otherwise ask for billions of cells.
-constexpr int max_pattern_side = 256;
 
 // ── pattern transforms ───────────────────────────────────────────────────────
 //
@@ -227,18 +224,27 @@ static const axis_row noise_normalizations[] = {{"rank", 1}, {"range", 0}};
 // permissive; statement exprs and param exprs are restricted.
 struct scope {
     bool allow_grids{true};
-    bool allow_pos{true};      // x / y
+    bool allow_pos{true};      // x / y, and attributes at a cell (`map.size`)
     int  param_limit{-1};      // -1 = any param; else only ids < limit
     bool allow_dims{true};     // width / height
+    bool allow_global{true};   // global queries: count(s), nodes(g), edges(g)
 };
-// Statement scope (guards, counts, `int` arguments): params and width/height -
-// a statement has no cell to read grids or positions from, but the stack has
-// the dimensions it starts from.
-constexpr scope stmt_scope{false, false, -1, true};
+// Statement scope (guards, counts, `int` arguments): params, width/height,
+// and global queries - a statement has no cell to read grids or positions
+// from, but the stack has the dimensions it starts from.
+constexpr scope stmt_scope{false, false, -1, true, true};
 // Candidate scope (rule guards): the same reads plus the pair's pattern
 // variables, which resolve through the bound pair - no cell, and the anchor
 // is a different pattern cell in each variant, so still no x/y.
-constexpr scope cand_scope{false, false, -1, true};
+constexpr scope cand_scope{false, false, -1, true, true};
+// The node attributes, which follow a '.' and so are reserved as grid and
+// graph names (check 12).
+static constexpr char const* node_attributes[] = {"degree", "size", "value"};
+static int attribute_id(std::string const& name) {
+    for (int i = 0; i < 3; ++i)
+        if (name == node_attributes[i]) return i;
+    return -1;
+}
 
 struct analyzer {
     ast_file const&       ast;   // the closure's merged declarations
@@ -252,13 +258,13 @@ struct analyzer {
 
     scope scope_{};
 
-    // Pattern variables (`?name`) of the pair being compiled; null outside
-    // a pattern pair, where using one is an error. A slot's type is the
-    // binding cells' layer type: a tag id, -1 for number, or node_type(g)
-    // for a node of graph g.
+    // Pattern variables of the pair being compiled, by their bare name (the
+    // `?` marks only binding positions); null outside a pattern pair. A
+    // slot's type is the binding cells' layer type: a tag id, -1 for
+    // number, or node_type(g) for a node of graph g.
     struct pair_vars {
         struct var {
-            std::string name;          // '?name'
+            std::string name;          // without the '?'
             int         type{-1};
             bool        bound{false};  // has a binding cell (a bare match-side cell)
             bool        reported{false};
@@ -270,6 +276,11 @@ struct analyzer {
             vars.push_back({name});
             return (int)vars.size() - 1;
         }
+        // The slot of a bound variable named `name`, or -1.
+        int bound(std::string const& name) const {
+            int i = index_of(vars, name, &var::name);
+            return i >= 0 && vars[(size_t)i].bound ? i : -1;
+        }
     };
     pair_vars* vars_{nullptr};
     // Compiling a write-side expression (a write-side cell or a `value`
@@ -280,7 +291,7 @@ struct analyzer {
     // The tagset of each tag-constant expression, by arena index.
     std::unordered_map<int, int> lit_tag_{};
     // The pair being compiled is a graph pair: its variables are declared by
-    // its graph block, and its writes are node extents.
+    // its graph block, and its writes are graph writes.
     bool graph_pair_{false};
 
     static int  node_type(int graph) { return -2 - graph; }
@@ -311,25 +322,28 @@ struct analyzer {
         return found;
     }
 
-    // A use of `name` in an expression or a write: its slot, or -1 after
-    // reporting it (outside a pattern pair, or never bound).
-    int use_variable(std::string const& name, source_loc loc) {
-        if (!vars_) {
-            error(loc, "pattern variable '" + name + "' outside a pattern; variables "
-                  "exist only in pattern and 'where' cells and rule guards");
-            return -1;
-        }
-        int s = vars_->slot(name);
-        auto& v = vars_->vars[(size_t)s];
-        if (v.bound) return s;
-        if (!v.reported)
-            error(loc, graph_pair_
-                  ? "node variable '" + name + "' is not declared in the graph block; "
-                    "declare it on a line of its own, e.g. '" + name + "'"
-                  : "pattern variable '" + name + "' is never bound; it needs a "
-                    "bare '" + name + "' cell on the match side");
-        v.reported = true;
-        return -1;
+    // The message for a bare name of a pair that is bound nowhere (check 44).
+    std::string unbound_message(std::string const& name) const {
+        return graph_pair_
+            ? "'" + name + "' is not a variable of this rule's graph block, nor any other "
+              "name; declare it in the block, e.g. ?" + name
+            : "'" + name + "' is not bound in this pair, nor any other name; bind it with "
+              "a bare ?" + name + " cell on the match side";
+    }
+
+    // A variable may not share a name with anything its pair could resolve
+    // (check 60), so a bare name in a pair always means one thing.
+    void check_variable_name(std::string const& name, source_loc loc) {
+        std::string what = is_keyword_text(name)                ? "the reserved keyword"
+                         : is_reserved_ident(name)              ? "the reserved identifier"
+                         : out.param_id(name) >= 0              ? "a param"
+                         : out.layer_id(name) >= 0              ? "a grid"
+                         : out.graph_id(name) >= 0              ? "a graph"
+                         : !tagsets_declaring(name, loc.mod).empty() ? "a tag value"
+                                                                : "";
+        if (!what.empty())
+            error(loc, "pattern variable '" + name + "' is named like " + what + " '" + name +
+                  "'; a variable is read by its bare name, so it needs a name of its own");
     }
 
     std::string const& label(source_loc loc) const { return mods.names[(size_t)loc.mod]; }
@@ -405,6 +419,8 @@ struct analyzer {
         }
         case ce_kind::value_:
             return out.layers[(size_t)out.graphs[(size_t)e.ref].source].tag_id;
+        case ce_kind::cell_attr_:
+            return e.val == 2 ? out.layers[(size_t)out.graphs[(size_t)e.ref].source].tag_id : -1;
         case ce_kind::if_:
         case ce_kind::bit_or:
         case ce_kind::compl_: {
@@ -505,24 +521,24 @@ struct analyzer {
         {"clamp",     ce_kind::clamp_,     3, false},
         {"mod",       ce_kind::mod_,       2, false},
         {"random",    ce_kind::random_,    2, false},
-        // graph functions: a node, then a target (a node or a selector), if any
-        {"degree",    ce_kind::degree_,    1, true},
-        {"size",      ce_kind::size_,      1, true},
+        // graph functions: a node, then a target (a node or a selector)
         {"distance",  ce_kind::distance_,  2, true},
         {"neighbors", ce_kind::neighbors_, 2, true},
         {"adjacent",  ce_kind::adjacent_,  2, true},
         {"reachable", ce_kind::reachable_, 2, true},
-        {"value",     ce_kind::value_,     1, true},
-        // quantifiers: a node, then a selector tested against its own cells
+        // quantifiers: a node, then a selector tested against its own cells;
+        // `count` with the selector alone is a global query
         {"some",      ce_kind::some_,      2, true},
-        {"every",     ce_kind::every_,     2, true},
         {"count",     ce_kind::count_,     2, true},
         // a node, then two targets: the start, and the set to pick from,
         // which may be omitted (every node of the graph)
         {"farthest",  ce_kind::farthest_,  3, true},
+        // global queries over a graph
+        {"nodes",     ce_kind::gnodes_,    1, false},
+        {"edges",     ce_kind::gedges_,    1, false},
     };
     static bool is_quantifier(ce_kind k) {
-        return k == ce_kind::some_ || k == ce_kind::every_ || k == ce_kind::count_;
+        return k == ce_kind::some_ || k == ce_kind::count_;
     }
 
     // Resolve a bare identifier, first match wins: x/y/width/height → param → tag
@@ -530,6 +546,12 @@ struct analyzer {
     // or named mask of the one tagset that declares it.
     int compile_ident(expr const& e, int ctx_tag, val_type& t) {
         auto const& name = e.ident;
+        // a variable bound by the enclosing pair; check 60 keeps it from
+        // shadowing anything below
+        if (int s = vars_ ? vars_->bound(name) : -1; s >= 0) {
+            t = value_type(vars_->vars[(size_t)s].type);
+            return add_expr({ce_kind::var_read, 0, s, -1, -1, -1});
+        }
         if (is_reserved_ident(name)) {
             bool dim = name == "width" || name == "height";
             if (!(dim ? scope_.allow_dims : scope_.allow_pos))
@@ -567,8 +589,9 @@ struct analyzer {
         }
         if (int grid = out.graph_id(name); grid >= 0) {
             require_visible(e.loc, "graph", name, graph_mod[(size_t)grid]);
-            return poison(e.loc, "graph '" + name + "' cannot be read in an expression; "
-                          "a graph heads a match-side pattern that binds its nodes, e.g. " + name + "[?n]", t);
+            return poison(e.loc, "graph '" + name + "' cannot be read as a value; read the node "
+                          "at a cell, e.g. " + name + ".size, or bind it with a graph pattern, "
+                          "e.g. " + name + "[?n]", t);
         }
         // a tag value or named mask of the one tagset this module sees that declares it
         auto tagsets = tagsets_declaring(name, e.loc.mod);
@@ -582,23 +605,46 @@ struct analyzer {
             return poison(e.loc, "tag value '" + name + "' is ambiguous: it is declared by " +
                           "tagsets " + list + "; compare it in a cell of the grid it belongs to", t);
         }
+        if (vars_) {   // check 44; typed as its cell wants, so nothing cascades
+            if (ctx_tag >= 0) {   // most likely a mistyped value of the cell's tagset
+                int c = poison(e.loc, "unknown tag value '" + name + "' for tagset '" +
+                               out.tag_names[(size_t)ctx_tag] + "'; '" + name +
+                               "' is not bound in this pair either", t);
+                t = val_type::mask;
+                return c;
+            }
+            return poison(e.loc, unbound_message(name), t);
+        }
         return poison(e.loc, "unknown identifier '" + name + "' in expression", t);
     }
 
     int compile_call(expr const& e, int ctx_tag, val_type& t, int hint) {
-        auto spec = lookup(builtins, e.ident);
         auto fail = [&](std::string msg) { return poison(e.loc, std::move(msg), t); };
+        // removed in 0.17: the unary graph functions are node attributes, and
+        // `every` is a region read
+        if (attribute_id(e.ident) >= 0)
+            return fail("'" + e.ident + "(n)' was removed in 0.17; read the node attribute n." +
+                        e.ident);
+        if (e.ident == "every")
+            return fail("'every(n, g[m])' was removed in 0.17; write the region read n.g is m, "
+                        "which holds when every cell of n's region in g does");
+        auto spec = lookup(builtins, e.ident);
         if (!spec) return fail("unknown function '" + e.ident + "'");
+        bool global = spec->kind == ce_kind::gnodes_ || spec->kind == ce_kind::gedges_ ||
+                      (spec->kind == ce_kind::count_ && e.args.size() == 1);
+        if (global) return compile_global(e, *spec, t);
         // farthest's third argument is the one optional argument
         bool optional_u = spec->kind == ce_kind::farthest_ && e.args.size() == 2;
         if ((int)e.args.size() != spec->arity && spec->graph && !optional_u)
             return fail("'" + e.ident + "' takes a node" +
-                        (is_quantifier(spec->kind) ? " and a selector, e.g. " + e.ident + "(?n, light[.])"
+                        (spec->kind == ce_kind::count_
+                             ? " and a selector, e.g. count(n, light[.]), or a selector alone, "
+                               "e.g. count(level[floor])"
+                         : is_quantifier(spec->kind) ? " and a selector, e.g. " + e.ident + "(n, light[.])"
                          : spec->arity == 3 ? ", a target, and optionally a second target, e.g. " +
-                                              e.ident + "(?n, rooms[Start]) or " +
-                                              e.ident + "(?n, rooms[Start], marks[leaf])"
-                         : spec->arity == 2 ? " and a target, e.g. " + e.ident + "(?n, rooms[Start])"
-                                            : ", e.g. " + e.ident + "(?n)"));
+                                              e.ident + "(n, rooms[Start]) or " +
+                                              e.ident + "(n, rooms[Start], marks[leaf])"
+                                            : " and a target, e.g. " + e.ident + "(n, rooms[Start])"));
         if ((int)e.args.size() != spec->arity && !optional_u)
             return fail("built-in '" + e.ident + "' takes " +
                         std::to_string(spec->arity) + " argument(s), got " +
@@ -642,15 +688,162 @@ struct analyzer {
         return add_expr({spec->kind, 0, -1, a[0], a[1], a[2]});
     }
 
+    // A global query (section 5.12): `count(s)` over a selector, or
+    // `nodes(g)` / `edges(g)` over a graph. It reads the whole stack, which a
+    // param expression cannot (checks 23, 26).
+    int compile_global(expr const& e, builtin_spec const& spec, val_type& t) {
+        auto fail = [&](std::string msg) { return poison(e.loc, std::move(msg), t); };
+        if (e.args.size() != 1)
+            return fail("'" + e.ident + "' takes one argument, got " + std::to_string(e.args.size()));
+        if (!scope_.allow_global)
+            return fail("'" + e.ident + "' reads the level, which a param expression cannot: "
+                        "params are bound before the first statement runs");
+        t = val_type::num;
+        expr const& a = *e.args[0];
+        if (spec.kind == ce_kind::count_) {
+            if (a.kind != expr_kind::selector)
+                return fail("'count' with one argument counts the cells a selector matches, "
+                            "e.g. count(level[floor])");
+            return add_expr({ce_kind::gcount_, compile_selector(a), -1, -1, -1, -1});
+        }
+        int graph = a.kind == expr_kind::ident ? out.graph_id(a.ident) : -1;
+        if (graph < 0)   // check 53
+            return fail("'" + e.ident + "' takes a graph name, e.g. " + e.ident + "(map)");
+        require_visible(a.loc, "graph", a.ident, graph_mod[(size_t)graph]);
+        return add_expr({spec.kind, 0, graph, -1, -1, -1});
+    }
+
+    // The type of a node's `value`: its graph source's.
+    val_type source_type(int graph) const {
+        return out.layers[(size_t)out.graphs[(size_t)graph].source].tag_id < 0 ? val_type::num
+                                                                              : val_type::mask;
+    }
+
+    // `a.b` as a value (section 5.12): an attribute of a node variable, or of
+    // the node covering the current cell when `a` is a graph. A region read
+    // `n.g` is not a value, so here it is misplaced (check 61).
+    int compile_attr(expr const& e, val_type& t) {
+        auto fail = [&](std::string msg) { return poison(e.loc, std::move(msg), t); };
+        int attr = attribute_id(e.member);
+        std::string text = e.ident + "." + e.member;
+        if (int s = vars_ ? vars_->bound(e.ident) : -1; s >= 0) {
+            int type = vars_->vars[(size_t)s].type;
+            if (!is_node_type(type))
+                return fail("'" + e.ident + "' holds a value, not a node; '.' reads the "
+                            "attributes and regions of a node");
+            int graph = -2 - type;
+            if (attr < 0) {
+                if (out.layer_id(e.member) >= 0)
+                    return fail("the region read " + text + " is not a value; it is an operand "
+                                "of a comparison, which then holds when every cell of the "
+                                "region does, e.g. " + text + " is m");
+                return fail("'" + e.member + "' is neither a node attribute (degree, size, "
+                            "value) nor a grid");
+            }
+            int node = add_expr({ce_kind::var_read, 0, s, -1, -1, -1});
+            t = attr == 2 ? source_type(graph) : val_type::num;
+            static constexpr ce_kind kinds[] = {ce_kind::degree_, ce_kind::size_, ce_kind::value_};
+            return add_expr({kinds[attr], 0, graph, node, -1, -1});
+        }
+        if (int graph = out.graph_id(e.ident); graph >= 0) {
+            require_visible(e.loc, "graph", e.ident, graph_mod[(size_t)graph]);
+            if (attr < 0)
+                return fail("after a graph name, '.' reads an attribute of the node at the "
+                            "cell (degree, size, value); '" + e.member + "' is none, and a "
+                            "region read needs a node variable");
+            if (!scope_.allow_pos)
+                return fail("'" + text + "' reads the node at the current cell, and there is no "
+                            "cell here; bind the node with a graph pattern, e.g. " + e.ident +
+                            "[?n], and read n." + e.member);
+            t = attr == 2 ? source_type(graph) : val_type::num;
+            return add_expr({ce_kind::cell_attr_, attr, graph, -1, -1, -1});
+        }
+        if (vars_ && out.layer_id(e.ident) < 0 && tagsets_declaring(e.ident, e.loc.mod).empty() &&
+            out.param_id(e.ident) < 0 && !is_reserved_ident(e.ident))
+            return fail(unbound_message(e.ident));
+        return fail("'" + e.ident + "' before '.' is neither a node variable nor a graph");
+    }
+
+    // `n.g` with n a node variable and g a grid, or its complement `!n.g`.
+    bool region_operand(expr const& e) const {
+        expr const& a = e.kind == expr_kind::not_ ? *e.args[0] : e;
+        if (a.kind != expr_kind::attr || attribute_id(a.member) >= 0) return false;
+        int s = vars_ ? vars_->bound(a.ident) : -1;
+        return s >= 0 && is_node_type(vars_->vars[(size_t)s].type) && out.layer_id(a.member) >= 0;
+    }
+    bool contains_region(expr const& e) const {
+        if (region_operand(e)) return true;
+        for (auto const& a : e.args)
+            if (contains_region(*a)) return true;
+        return false;
+    }
+    static bool is_comparison(expr_kind k) {
+        return k == expr_kind::is_ || k == expr_kind::eq || k == expr_kind::ne ||
+               k == expr_kind::lt || k == expr_kind::le || k == expr_kind::gt || k == expr_kind::ge;
+    }
+
+    // A comparison with a region read as operand `side` (section 5.12): true
+    // iff it holds at every cell of the node's region. The other operand
+    // contains no region read (check 61) and is evaluated once.
+    int compile_region_cmp(expr const& e, int side, int ctx_tag, val_type& t) {
+        t = val_type::boolean;
+        expr const& rexp  = *e.args[(size_t)side];
+        expr const& other = *e.args[(size_t)(1 - side)];
+        bool complement = rexp.kind == expr_kind::not_;
+        expr const& a = complement ? *rexp.args[0] : rexp;
+        if (contains_region(other)) {
+            error(e.loc, "a comparison takes one region read; its other operand contains "
+                  "one too");
+            return num_lit();
+        }
+        int s = vars_->bound(a.ident);
+        int graph = -2 - vars_->vars[(size_t)s].type;
+        int gid = out.layer_id(a.member);
+        require_visible(a.member_loc, "grid", a.member, layer_mod[(size_t)gid]);
+        int tag = out.layers[(size_t)gid].tag_id;
+        bool number = tag < 0;
+        if (complement && number)
+            error(rexp.loc, "'!' complements a tag read; '" + a.member + "' is a number grid");
+        long long op = region_eq;
+        switch (e.kind) {
+        case expr_kind::is_: op = region_is; break;
+        case expr_kind::eq:  op = region_eq; break;
+        case expr_kind::ne:  op = region_ne; break;
+        case expr_kind::lt:  op = side == 0 ? region_lt : region_gt; break;   // the region
+        case expr_kind::le:  op = side == 0 ? region_le : region_ge; break;   // goes left
+        case expr_kind::gt:  op = side == 0 ? region_gt : region_lt; break;
+        case expr_kind::ge:  op = side == 0 ? region_ge : region_le; break;
+        default: break;
+        }
+        bool relational = op >= region_lt;
+        if (op == region_is && number)
+            error(e.loc, "'is' takes tag operands; '" + a.member + "' is a number grid, so "
+                  "compare it with '==' or '!='");
+        if (relational && !number)
+            error(e.loc, "relational operator requires numeric operands; '" + a.member +
+                  "' is a tag grid");
+        if (op == region_is) ++is_depth_;   // a complement in an `is` operand is tested
+        val_type to;
+        int oc = compile_expr(other, tag >= 0 ? tag : ctx_tag, to,
+                              number ? (int)val_type::num : (int)val_type::mask);
+        if (op == region_is) --is_depth_;
+        if (to != (number ? val_type::num : val_type::mask))
+            error(other.loc, "the region read " + a.ident + "." + a.member + " is compared "
+                  "with " + (number ? "a number" : "a tag value") + " of its grid");
+        long long flags = (complement ? region_complement : 0) |
+                          (number && other.kind == expr_kind::empty_lit ? region_raw : 0);
+        int node = add_expr({ce_kind::var_read, 0, s, -1, -1, -1});
+        return add_expr({ce_kind::region_, op | flags, graph, node, oc, -1, gid});
+    }
+
     // A graph function: its node first, then, for the targeted ones, its
     // targets (a node of the same graph, or a selector). Valid wherever a node is.
     int compile_graph_call(expr const& e, builtin_spec const& spec, val_type& t, int ctx_tag) {
         auto fail = [&](std::string msg) { return poison(e.loc, std::move(msg), t); };
-        bool targeted = spec.arity >= 2;
         bool quant = is_quantifier(spec.kind);
-        std::string usage = e.ident + (quant ? "(?n, light[.])"
-                                     : spec.arity == 3 ? "(?n, rooms[Start], marks[leaf])"
-                                     : targeted ? "(?n, rooms[Start])" : "(?n)");
+        std::string usage = e.ident + (quant ? "(n, light[.])"
+                                     : spec.arity == 3 ? "(n, rooms[Start], marks[leaf])"
+                                                       : "(n, rooms[Start])");
         if (e.args[0]->kind == expr_kind::selector)
             return fail("'" + e.ident + "' takes a node first, e.g. " + usage);
         val_type tn;
@@ -658,7 +851,7 @@ struct analyzer {
         int graph = node_graph(node);
         if (tn != val_type::node || graph < 0)
             return fail("'" + e.ident + "' takes a node first, a variable bound by a graph "
-                        "pattern, e.g. " + usage);
+                        "pattern or a graph block, e.g. " + usage);
         // a target: a selector (sel = its id) or a node (target = its expr);
         // -1, or the poisoned result after reporting an error
         auto compile_target = [&](expr const& a, int& sel, int& target) {
@@ -684,12 +877,8 @@ struct analyzer {
                 bad >= 0)
                 return bad;
         bool pred = spec.kind == ce_kind::adjacent_ || spec.kind == ce_kind::reachable_ ||
-                    spec.kind == ce_kind::some_ || spec.kind == ce_kind::every_ ||
-                    spec.kind == ce_kind::farthest_;
+                    spec.kind == ce_kind::some_ || spec.kind == ce_kind::farthest_;
         t = pred ? val_type::boolean : val_type::num;
-        if (spec.kind == ce_kind::value_)   // the source's type: a tag mask or a number
-            t = out.layers[(size_t)out.graphs[(size_t)graph].source].tag_id < 0 ? val_type::num
-                                                                                : val_type::mask;
         if (spec.kind == ce_kind::farthest_ && e.args.size() == 2)
             set_sel = farthest_every_node;
         return add_expr({spec.kind, sel, graph, node, target, set_node, set_sel});
@@ -752,23 +941,33 @@ struct analyzer {
             return typed_empty(val_type::num);
         case expr_kind::ident:
             return compile_ident(e, ctx_tag, t);
-        case expr_kind::variable: {   // `?name`: what its binding cell matched
-            int s = use_variable(e.ident, e.loc);
-            if (s < 0) {   // reported; type it as wanted so nothing cascades
-                t = hint == (int)val_type::mask ? val_type::mask : val_type::num;
-                return typed_empty(t);
+        case expr_kind::variable: {   // `?name` outside a binding position (check 46)
+            std::string name = e.ident.substr(1);
+            error(e.loc, "'" + e.ident + "' marks a binding position (a bare match-side "
+                  "cell, or a graph-block item); everywhere else a variable is its bare "
+                  "name, '" + name + "'");
+            if (int s = vars_ ? vars_->bound(name) : -1; s >= 0) {   // go on as if bare
+                t = value_type(vars_->vars[(size_t)s].type);
+                return add_expr({ce_kind::var_read, 0, s, -1, -1, -1});
             }
-            t = value_type(vars_->vars[(size_t)s].type);
-            return add_expr({ce_kind::var_read, 0, s, -1, -1, -1});
+            t = hint == (int)val_type::mask ? val_type::mask : val_type::num;
+            return typed_empty(t);
         }
+        case expr_kind::attr:
+            return compile_attr(e, t);
         case expr_kind::call:
             return compile_call(e, ctx_tag, t, hint);
         case expr_kind::selector:
             return poison(e.loc, "a selector is valid only as the target of 'distance', "
-                          "'neighbors', 'adjacent', 'reachable', or 'farthest', or the second "
-                          "argument of 'some', 'every', or 'count'", t);
+                          "'neighbors', 'adjacent', 'reachable', or 'farthest', or the selector "
+                          "argument of 'some' or 'count'", t);
         default:
             break;
+        }
+
+        if (is_comparison(e.kind)) {
+            bool ra = region_operand(*e.args[0]), rb = region_operand(*e.args[1]);
+            if (ra || rb) return compile_region_cmp(e, ra ? 0 : 1, ctx_tag, t);
         }
 
         // `g == .` / `g != .` — the emptiness tests, before generic binary
@@ -831,6 +1030,13 @@ struct analyzer {
             error(loc, kind + " '" + name + "' collides with a reserved "
                   "expression identifier (x, y, width, height)");
     }
+    // A grid or graph may not be named like a node attribute, so `n.size`
+    // never names both an attribute and a region read (check 12).
+    void check_layer_name(source_loc loc, std::string const& kind, std::string const& name) {
+        if (attribute_id(name) >= 0)
+            error(loc, kind + " '" + name + "' collides with the node attribute '" + name +
+                  "' (degree, size, and value are reserved as grid and graph names)");
+    }
 
     // ── symbol tables ────────────────────────────────────────────────────────
 
@@ -880,6 +1086,7 @@ struct analyzer {
             if (l.is_graph) continue;   // after every grid: a source may come later
             auto const& [name, loc] = l.name;
             check_name(loc, "grid", name);
+            check_layer_name(loc, "grid", name);
             if (out.layer_id(name) >= 0) {   // across every module in the closure
                 error(loc, "duplicate grid '" + name + "'");
                 continue;
@@ -993,6 +1200,7 @@ struct analyzer {
     void add_graph(layer_decl const& l) {
         auto const& [name, loc] = l.name;
         check_name(loc, "graph", name);
+        check_layer_name(loc, "graph", name);
         if (out.layer_id(name) >= 0 || out.graph_id(name) >= 0) {
             error(loc, "duplicate layer '" + name + "': a grid or graph of that name is "
                   "already declared");
@@ -1073,18 +1281,19 @@ struct analyzer {
             if (!p.value) continue;   // missing default already reported
             int e = compile_as(*p.value, val_type::num, p.name.loc,
                                std::string(p.is_derived ? "derived param '" : "default for param '")
-                               + p.name.text + "' must evaluate to a number", scope{false, false, i, false});
+                               + p.name.text + "' must evaluate to a number", scope{false, false, i, false, false});
             out.startup_exprs.push_back({i, e, !p.is_derived});
         }
     }
 
     // ── rules ────────────────────────────────────────────────────────────────
 
-    // Compile one pattern; `exp_rows/exp_cols` enforce the shape constraint
-    // (every pattern of a pair has one shape, recursively over the write tree) —
-    // 0 means "sets the reference".
-    compiled_pattern compile_pattern(pattern const& p, int exp_rows, int exp_cols,
-                                     bool is_rhs) {
+    // Compile one pattern of a pair of size `rows` x `cols` (section 5.4). A
+    // 1x1 pattern in a larger pair is uplifted: its one cell stands for every
+    // cell of the pair. Shape mismatches are reported by pair_size; a
+    // pattern that does not fit is compiled at its own size.
+    compiled_pattern compile_pattern(pattern const& p, int rows, int cols, bool is_rhs) {
+        if (!p.node.text.empty()) return compile_graph_write(p);
         compiled_pattern cp;
         int tag = -1;
         if (p.is_where) {
@@ -1097,9 +1306,13 @@ struct analyzer {
             require_visible(p.grid.loc, "graph", p.grid.text, graph_mod[(size_t)gid]);
             cp.graph_id = gid;
             cp.grid_id  = out.graphs[(size_t)gid].source;
-            if (is_rhs) {
+            if (is_rhs) {   // check 51
                 error(p.grid.loc, "graph '" + p.grid.text + "' cannot be written; a graph "
                       "changes only through writes to its source grid");
+                cp.grid_id = -1;
+            } else if (graph_pair_) {
+                error(p.grid.loc, "a graph rule's match side is its graph block; graph '" +
+                      p.grid.text + "' heads a pattern only in a grid rule");
                 cp.grid_id = -1;
             }
         } else {
@@ -1112,67 +1325,14 @@ struct analyzer {
             tag = out.layers[cp.grid_id].tag_id;
             cp.is_number = tag < 0;
         }
-        // A node extent writes its one cell over a node's region: only on the
-        // write side of a graph pair, whose every write is one.
-        if (!p.extent.text.empty()) {
-            if (!is_rhs || !graph_pair_) {
-                error(p.size_loc, "a node extent writes a node's region; it appears only "
-                      "on the write side of a graph rule, e.g. plan { ?n } => " +
-                      (p.is_where ? std::string("rooms") : p.grid.text) + "(?n)[...]");
-                return cp;
-            }
-            if (cp.grid_id < 0 || cp.is_where) return cp;   // reported above
-            cp.extent = use_variable(p.extent.text, p.extent.loc);
-            if (p.rows != 1 || p.cells[0].size() != 1) {
-                error(p.loc, "a node extent writes a single cell over its node, but this "
-                      "body has " + std::to_string(p.rows) + " row(s) of " +
-                      std::to_string(p.cols) + " cell(s)");
-                return cp;
-            }
-            cp.rows = cp.cols = 1;
-            cp.cells.assign(1, compile_cell(*p.cells[0][0], tag, cp.is_number, false, true));
+        if (is_rhs && graph_pair_) {   // check 57
+            error(p.loc, "every write of a graph rule is a graph write naming a block "
+                  "variable, e.g. n." + (p.is_where ? std::string("rooms") : p.grid.text) +
+                  " = c");
             return cp;
         }
-        if (is_rhs && graph_pair_) {
-            error(p.loc, "every write of a graph rule is a node extent naming a block "
-                  "variable, e.g. " + (p.is_where ? std::string("rooms") : p.grid.text) +
-                  "(?n)[...]");
-            return cp;
-        }
-        // A sized pattern's shape is its declared size, not its body's.
-        bool size_ok = !p.sized ||
-                       (p.size_cols >= 1 && p.size_cols <= max_pattern_side &&
-                        p.size_rows >= 1 && p.size_rows <= max_pattern_side);
-        if (!size_ok)
-            error(p.size_loc, "a pattern size must be between 1 and " +
-                  std::to_string(max_pattern_side) + " on each side");
-        int rows = p.sized ? (int)p.size_rows : p.rows;
-        int cols = p.sized ? (int)p.size_cols : p.cols;
-
-        if (size_ok && exp_rows > 0 && (rows != exp_rows || cols != exp_cols))
-            error(p.loc, "pattern dimension mismatch: expected " +
-                  std::to_string(exp_rows) + "x" + std::to_string(exp_cols) +
-                  ", got " + std::to_string(rows) + "x" + std::to_string(cols));
-
         if (p.rows == 0 || p.cols == 0) {
             error(p.loc, "empty pattern body");
-            return cp;
-        }
-        if (!size_ok) return cp;
-        if (p.sized) {   // one cell, compiled once and repeated over the shape
-            if (p.rows != 1 || p.cols != 1 || p.cells[0].size() != 1) {
-                error(p.loc, "a sized pattern repeats a single cell, but this body has " +
-                      std::to_string(p.rows) + " row(s) of " + std::to_string(p.cols) +
-                      " cell(s)");
-                return cp;
-            }
-            expr const& in = *p.cells[0][0];
-            compiled_cell cell = cp.graph_id >= 0
-                ? compile_graph_cell(in)
-                : compile_cell(in, tag, cp.is_number, p.is_where, is_rhs);
-            cp.rows = rows;
-            cp.cols = cols;
-            cp.cells.assign((size_t)rows * cols, cell);
             return cp;
         }
         for (int r = 0; r < p.rows; ++r)
@@ -1181,18 +1341,91 @@ struct analyzer {
                       std::to_string(r + 1) + " has " +
                       std::to_string(p.cells[r].size()) + " cells, expected " +
                       std::to_string(p.cols));
-
+        auto compile_one = [&](expr const& in) {
+            return cp.graph_id >= 0 ? compile_graph_cell(in)
+                                    : compile_cell(in, tag, cp.is_number, p.is_where, is_rhs);
+        };
+        bool one = p.rows == 1 && p.cols == 1;
+        if (one && rows * cols > 1) {   // uplift: one cell over the pair
+            compiled_cell cell = compile_one(*p.cells[0][0]);
+            if (cell.expr >= 0 && reads_position(cell.expr))   // warning 3
+                warning(p.cells[0][0]->loc, "evaluated at every cell of the pair, not at the "
+                        "anchor: this 1x1 pattern is uplifted to the pair's " +
+                        std::to_string(cols) + "x" + std::to_string(rows) + ", so its '" +
+                        "x'/'y' read must hold at all of its cells; write the pattern at "
+                        "full size to test one cell");
+            cp.rows = rows;
+            cp.cols = cols;
+            cp.cells.assign((size_t)rows * cols, cell);
+            return cp;
+        }
         cp.rows = p.rows;
         cp.cols = p.cols;
         cp.cells.assign((size_t)p.rows * p.cols, {});
         for (int r = 0; r < p.rows; ++r) {
             int w = (int)p.cells[r].size() < p.cols ? (int)p.cells[r].size() : p.cols;
             for (int c = 0; c < w; ++c)
-                cp.cells[r * cp.cols + c] =
-                    cp.graph_id >= 0 ? compile_graph_cell(*p.cells[r][c])
-                                     : compile_cell(*p.cells[r][c], tag, cp.is_number,
-                                                    p.is_where, is_rhs);
+                cp.cells[r * cp.cols + c] = compile_one(*p.cells[r][c]);
         }
+        return cp;
+    }
+
+    // Whether arena expression `idx` reads `x` or `y`.
+    bool reads_position(int idx) const {
+        if (idx < 0) return false;
+        auto const& e = out.exprs[(size_t)idx];
+        if (e.kind == ce_kind::pos_x || e.kind == ce_kind::pos_y) return true;
+        return reads_position(e.a) || reads_position(e.b) || reads_position(e.c);
+    }
+
+    // A pair's size (section 5.4): the dimensions of its patterns that are
+    // not 1x1, which must all agree (check 3); 1x1 when every pattern is.
+    std::pair<int, int> pair_size(rule_pair const& pr) {
+        int rows = 0, cols = 0;
+        source_loc first;
+        for_each_pattern(pr, [&](pattern const& p) {
+            if (!p.node.text.empty() || p.rows == 0 || p.cols == 0) return;
+            if (p.rows == 1 && p.cols == 1) return;
+            if (rows == 0) { rows = p.rows; cols = p.cols; first = p.loc; return; }
+            if (p.rows != rows || p.cols != cols)
+                error(p.loc, "pattern dimension mismatch: expected " + std::to_string(rows) +
+                      "x" + std::to_string(cols) + ", set by the pattern at line " +
+                      std::to_string(first.line) + ", got " + std::to_string(p.rows) + "x" +
+                      std::to_string(p.cols) + " (a 1x1 pattern is uplifted to the pair's size)");
+        });
+        return rows == 0 ? std::pair{1, 1} : std::pair{rows, cols};
+    }
+
+    // A graph write `n.g = c` (section 5.13): `c` written as a cell of grid
+    // `g` over the region of block variable `n` (check 57).
+    compiled_pattern compile_graph_write(pattern const& p) {
+        compiled_pattern cp;
+        std::string const& n = p.node.text;
+        std::string const& g = p.grid.text;
+        if (!graph_pair_) {
+            error(p.loc, "a graph write '" + n + "." + g + " = ...' writes a node's region; it "
+                  "is a write of a graph rule only, whose match side is a graph block");
+            return cp;
+        }
+        cp.extent = vars_->bound(n);
+        if (cp.extent < 0) {
+            error(p.node.loc, "'" + n + "' is not a variable of this rule's graph block");
+            return cp;
+        }
+        cp.grid_id = out.layer_id(g);
+        if (cp.grid_id < 0) {
+            error(p.grid.loc, attribute_id(g) >= 0
+                  ? "'" + g + "' is a node attribute, which is read-only; a graph write names a grid"
+                  : out.graph_id(g) >= 0
+                  ? "graph '" + g + "' is read-only; a graph write names a grid, such as its source"
+                  : "undeclared grid '" + g + "'");
+            return cp;
+        }
+        require_visible(p.grid.loc, "grid", g, layer_mod[(size_t)cp.grid_id]);
+        int tag = out.layers[(size_t)cp.grid_id].tag_id;
+        cp.is_number = tag < 0;
+        cp.rows = cp.cols = 1;
+        cp.cells.assign(1, compile_cell(*p.cells[0][0], tag, cp.is_number, false, true));
         return cp;
     }
 
@@ -1223,9 +1456,9 @@ struct analyzer {
                 return cc;
             }
             cc.what = compiled_cell::kind::expr;
-            if (in.kind == expr_kind::variable) {
-                error(in.loc, "a 'where' cell cannot be a bare pattern variable; "
-                      "'where' cells are boolean expressions, e.g. (" + in.ident + " > 0)");
+            if (in.kind == expr_kind::variable) {   // check 46
+                error(in.loc, "a 'where' cell cannot be a binding cell; 'where' cells are "
+                      "boolean expressions, e.g. (" + in.ident.substr(1) + " > 0)");
                 cc.expr = num_lit(1);
             } else if (in.kind != expr_kind::paren) {
                 error(in.loc, "'where' cells must be '*' or a parenthesized boolean expression");
@@ -1249,19 +1482,35 @@ struct analyzer {
                 error(in.loc, "integer cell in a tag grid");
             cc.val = in.int_val;
             return cc;
-        case expr_kind::variable: {   // bound and typed by bind_variables
-            int s = is_rhs ? use_variable(in.ident, in.loc) : vars_->slot(in.ident);
-            if (s < 0) { cc.what = compiled_cell::kind::wildcard; return cc; }
-            int type = vars_->vars[(size_t)s].type;
-            if (is_rhs && type != tag)
-                error(in.loc, "pattern variable '" + in.ident + "' holds a " +
-                      type_name(type) + " value but is written into a " +
-                      type_name(tag) + " grid");
+        case expr_kind::variable: {   // a binding cell, bound and typed by bind_variables
+            std::string name = in.ident.substr(1);
+            if (is_rhs) {   // check 46
+                error(in.loc, "'" + in.ident + "' binds on the match side only; write the "
+                      "variable's value as an expression cell, (" + name + ")");
+                cc.what = compiled_cell::kind::wildcard;
+                return cc;
+            }
             cc.what = compiled_cell::kind::variable;
-            cc.var = s;
+            cc.var = vars_->slot(name);
             return cc;
         }
         case expr_kind::paren: {
+            // `(v)` on the write side writes v's value, which must have the
+            // grid's type (check 45); a node is never written
+            if (is_rhs && in.args[0]->kind == expr_kind::ident)
+                if (int s = vars_ ? vars_->bound(in.args[0]->ident) : -1; s >= 0) {
+                    int type = vars_->vars[(size_t)s].type;
+                    if (type != tag) {
+                        error(in.loc, "pattern variable '" + in.args[0]->ident + "' holds a " +
+                              type_name(type) + (is_node_type(type) ? "" : " value") +
+                              " but is written into a " + type_name(tag) + " grid");
+                        cc.what = compiled_cell::kind::wildcard;
+                        return cc;
+                    }
+                    cc.what = compiled_cell::kind::variable;
+                    cc.var = s;
+                    return cc;
+                }
             write_side_ = is_rhs;
             int e = compile_as(*in.args[0], is_number ? val_type::num : val_type::mask, in.loc,
                                is_number ? "expression in a 'number' grid cell must evaluate to a number"
@@ -1327,18 +1576,18 @@ struct analyzer {
     }
 
     // A graph-pattern cell: '*', or a binding variable, which binds the node
-    // covering the cell (typed by bind_variables).
+    // covering the cell (typed by bind_variables). Anything else is check 52.
     compiled_cell compile_graph_cell(expr const& in) {
         compiled_cell cc;
         cc.what = compiled_cell::kind::wildcard;
         if (in.kind == expr_kind::wildcard) return cc;
         if (in.kind == expr_kind::variable) {
             cc.what = compiled_cell::kind::variable;
-            cc.var  = vars_->slot(in.ident);
+            cc.var  = vars_->slot(in.ident.substr(1));
             return cc;
         }
         error(in.loc, "graph-pattern cells must be '*' or a binding variable: bind the "
-              "node, e.g. map[?n], and test it in a rule guard, e.g. when (degree(?n) == 1)");
+              "node, e.g. map[?n], and test it in a rule guard, e.g. when (n.degree == 1)");
         return cc;
     }
 
@@ -1426,10 +1675,16 @@ struct analyzer {
             for (auto const& row : p.cells)
                 for (auto const& c : row) {
                     if (c->kind != expr_kind::variable) continue;
-                    auto& v = pv.vars[(size_t)pv.slot(c->ident)];
-                    if (!v.bound) { v.bound = true; v.type = type; continue; }
-                    if (v.type != type && !v.reported) {
-                        error(c->loc, "pattern variable '" + c->ident + "' binds a " +
+                    std::string name = c->ident.substr(1);
+                    auto& v = pv.vars[(size_t)pv.slot(name)];
+                    if (!v.bound) {
+                        v.bound = true;
+                        v.type = type;
+                        check_variable_name(name, c->loc);   // check 60
+                        continue;
+                    }
+                    if (v.type != type && !v.reported) {   // check 45
+                        error(c->loc, "pattern variable '" + name + "' binds a " +
                               type_name(type) + " cell here but a " +
                               type_name(v.type) + " cell elsewhere");
                         v.reported = true;
@@ -1444,11 +1699,9 @@ struct analyzer {
         pair_vars* outer = vars_;
         vars_ = &pv;
         bind_variables(pr, pv);
-        int rows = 0, cols = 0;
-        for (auto const& p : pr.lhs) {
+        auto [rows, cols] = pair_size(pr);
+        for (auto const& p : pr.lhs)
             cp.lhs.push_back(compile_pattern(p, rows, cols, /*is_rhs=*/false));
-            if (rows == 0) { rows = cp.lhs.back().rows; cols = cp.lhs.back().cols; }
-        }
         for (auto const& g : pr.guards)
             cp.guards.push_back({compile_as(*g.expr, val_type::boolean, g.loc,
                                             "a rule guard must be a boolean expression",
@@ -1461,8 +1714,8 @@ struct analyzer {
     }
 
     // A graph pair: its block declares node variables (slots in order of first
-    // appearance, the order assignments enumerate in), edge lines, and tests;
-    // rule guards and node-extent writes follow as in any pair.
+    // appearance, the order assignments enumerate in) and edge lines; rule
+    // guards and graph writes follow as in any pair.
     compiled_pair compile_graph_pair(rule_pair const& pr) {
         compiled_pair cp;
         auto const& b = pr.block;
@@ -1474,7 +1727,6 @@ struct analyzer {
             return cp;   // its variables have no type to check anything against
         }
         require_visible(b.graph.loc, "graph", b.graph.text, graph_mod[(size_t)cp.graph]);
-        int src_tag = out.layers[(size_t)out.graphs[(size_t)cp.graph].source].tag_id;
 
         pair_vars pv;
         pair_vars* outer = vars_;
@@ -1482,6 +1734,7 @@ struct analyzer {
         graph_pair_ = true;
         auto declare = [&](ident const& v) {
             int s = pv.slot(v.text);
+            if (!pv.vars[(size_t)s].bound) check_variable_name(v.text, v.loc);   // check 60
             pv.vars[(size_t)s].bound = true;
             pv.vars[(size_t)s].type  = node_type(cp.graph);
             return s;
@@ -1494,15 +1747,6 @@ struct analyzer {
                           "' cannot be joined to itself");
                 else
                     cp.node_edges.push_back({a, declare(it.b)});
-            } else if (it.what == graph_item::kind::test) {
-                if (std::any_of(cp.node_tests.begin(), cp.node_tests.end(),
-                                [&](auto const& t) { return t.slot == a; })) {
-                    error(it.loc, "'" + it.a.text + "' already has a test line; a variable "
-                          "takes at most one, so combine them in one mask");
-                    continue;
-                }
-                auto test = compile_node_test(*it.test, src_tag, b.graph.text);
-                if (test) cp.node_tests.push_back({a, *test});
             }
         }
         for (auto const& g : pr.guards)
@@ -1517,31 +1761,137 @@ struct analyzer {
         return cp;
     }
 
-    // A test line's cell `?n[m]`, against the graph's source: an integer for a
-    // number grid, a tag mask without '.' for a tag grid (a node is never
-    // empty). Empty after reporting an error.
-    std::optional<int64_t> compile_node_test(expr const& cell, int src_tag, std::string const& graph) {
-        bool is_int = cell.kind == expr_kind::int_lit;
-        if (src_tag < 0) {
-            if (is_int) return cell.int_val;
-            error(cell.loc, "graph '" + graph + "' has a number-grid source; a node test "
-                  "is an integer");
-            return std::nullopt;
+    // ── symmetry=none (section 5.13): the permutations of a graph pair's
+    //    block variables that map the pair onto itself, compared up to order
+    //    wherever order cannot change what a candidate means ──────────────
+
+    // Canonical text of arena expression `idx`, its variable slots renamed by
+    // `perm`: the operands of commutative operators sorted, `&&` / `||`
+    // chains flattened, `>` / `>=` as `<` / `<=`, and the node-symmetric
+    // graph functions with their two nodes sorted.
+    std::string canon(int idx, std::vector<int> const& perm) const {
+        if (idx < 0) return "-";
+        auto const& e = out.exprs[(size_t)idx];
+        auto node = [&](ce_kind k, std::string const& a, std::string const& b) {
+            return std::to_string((int)k) + "(" + std::to_string(e.val) + "," +
+                   std::to_string(e.ref) + "," + std::to_string(e.c2) + ";" + a + "," + b +
+                   "," + canon(e.c, perm) + ")";
+        };
+        auto sorted = [&](std::vector<std::string> parts) {
+            std::sort(parts.begin(), parts.end());
+            std::string s = std::to_string((int)e.kind) + "#" + std::to_string(e.ref) + "{";
+            for (auto const& p : parts) s += p + ";";
+            return s + "}";
+        };
+        switch (e.kind) {
+        case ce_kind::var_read:
+            return "v" + std::to_string(perm[(size_t)e.ref]);
+        case ce_kind::and_:
+        case ce_kind::or_: {
+            std::vector<std::string> parts;
+            conjuncts(idx, e.kind, perm, parts);
+            return sorted(std::move(parts));
         }
-        if (is_int) {
-            error(cell.loc, "graph '" + graph + "' has a tag-grid source; a node test is a "
-                  "tag mask, not an integer");
-            return std::nullopt;
+        case ce_kind::eq: case ce_kind::ne: case ce_kind::is_: case ce_kind::bit_or:
+        case ce_kind::add: case ce_kind::mul: case ce_kind::min_: case ce_kind::max_:
+            return sorted({canon(e.a, perm), canon(e.b, perm)});
+        case ce_kind::gt: return node(ce_kind::lt, canon(e.b, perm), canon(e.a, perm));
+        case ce_kind::ge: return node(ce_kind::le, canon(e.b, perm), canon(e.a, perm));
+        case ce_kind::distance_: case ce_kind::neighbors_:
+        case ce_kind::adjacent_: case ce_kind::reachable_:
+            if (e.b >= 0) return sorted({canon(e.a, perm), canon(e.b, perm)});   // node target
+            break;
+        default:
+            break;
         }
-        std::vector<mask_atom> atoms;
-        mask_atoms(cell, atoms);
-        for (auto const& at : atoms)
-            if (auto nm = out.named(src_tag, at.name); at.name == "." || (nm && nm->dot)) {
-                error(at.loc, "a node is never empty; a node test has no '.' (test "
-                      "non-emptiness with no test at all)");
-                return std::nullopt;
+        return node(e.kind, canon(e.a, perm), canon(e.b, perm));
+    }
+    // The operands of a chain of `kind` (`&&` or `||`) rooted at `idx`.
+    void conjuncts(int idx, ce_kind kind, std::vector<int> const& perm,
+                   std::vector<std::string>& out_parts) const {
+        auto const& e = out.exprs[(size_t)idx];
+        if (e.kind != kind) { out_parts.push_back(canon(idx, perm)); return; }
+        conjuncts(e.a, kind, perm, out_parts);
+        conjuncts(e.b, kind, perm, out_parts);
+    }
+    // A write tree's canonical text: `{ all }` items and `{ any }`
+    // alternatives (with their weights) unordered.
+    std::string canon_write(compiled_write_term const& t, std::vector<int> const& perm) const {
+        if (t.what == compiled_write_term::kind::leaf) {
+            auto const& p = t.pattern;
+            std::string s = "w" + std::to_string(p.grid_id) + ":" +
+                            (p.extent >= 0 ? std::to_string(perm[(size_t)p.extent]) : "-");
+            for (auto const& c : p.cells)
+                s += ":" + std::to_string((int)c.what) + "," + std::to_string(c.val) + "," +
+                     std::to_string(c.ne) + "," + canon(c.expr, perm);
+            return s;
+        }
+        std::vector<std::string> parts;
+        for (auto const& it : t.items)
+            parts.push_back((t.what == compiled_write_term::kind::any
+                                 ? std::to_string(it.weight) + "*" : std::string()) +
+                            canon_write(it, perm));
+        std::sort(parts.begin(), parts.end());
+        std::string s = t.what == compiled_write_term::kind::all ? "A{" : "Y{";
+        for (auto const& p : parts) s += p + ";";
+        return s + "}";
+    }
+    // The whole pair: edge lines as unordered pairs, rule guards as a set of
+    // conjuncts, and the write tree.
+    std::string canon_pair(compiled_pair const& cp, std::vector<int> const& perm) const {
+        std::vector<std::pair<int, int>> edges;
+        for (auto const& e : cp.node_edges)
+            edges.push_back(std::minmax(perm[(size_t)e.a], perm[(size_t)e.b]));
+        std::sort(edges.begin(), edges.end());
+        edges.erase(std::unique(edges.begin(), edges.end()), edges.end());
+        std::string s;
+        for (auto [a, b] : edges) s += std::to_string(a) + "-" + std::to_string(b) + ",";
+        std::vector<std::string> parts;
+        for (auto const& g : cp.guards) conjuncts(g.expr, ce_kind::and_, perm, parts);
+        std::sort(parts.begin(), parts.end());
+        s += "|";
+        for (auto const& p : parts) s += p + "&";
+        return s + "|" + canon_write(cp.rhs, perm);
+    }
+    // Every permutation of the block variables, other than the identity,
+    // under which the canonical pair is unchanged. Only permutations that
+    // preserve the block's edge set (its automorphisms) are compared.
+    std::vector<std::vector<int>> pair_symmetries(compiled_pair const& cp) const {
+        int k = (int)cp.var_names.size();
+        std::vector<std::vector<int>> found;
+        if (k < 2 || cp.graph < 0) return found;
+        std::vector<std::vector<int>> adj((size_t)k);
+        for (auto const& e : cp.node_edges) {
+            adj[(size_t)e.a].push_back(e.b);
+            adj[(size_t)e.b].push_back(e.a);
+        }
+        auto joined = [&](int a, int b) {
+            return std::find(adj[(size_t)a].begin(), adj[(size_t)a].end(), b) != adj[(size_t)a].end();
+        };
+        std::vector<int> identity((size_t)k), perm((size_t)k, -1);
+        for (int i = 0; i < k; ++i) identity[(size_t)i] = i;
+        std::string original = canon_pair(cp, identity);
+        std::vector<char> used((size_t)k, 0);
+        auto search = [&](auto& self, int s) -> void {
+            if (s == k) {
+                if (perm != identity && canon_pair(cp, perm) == original) found.push_back(perm);
+                return;
             }
-        return tag_mask(cell, src_tag, "for the source of graph '" + graph + "'");
+            for (int img = 0; img < k; ++img) {
+                if (used[(size_t)img] || adj[(size_t)img].size() != adj[(size_t)s].size()) continue;
+                bool ok = true;   // every edge to an earlier slot maps to an edge
+                for (int t : adj[(size_t)s])
+                    if (t < s && !joined(img, perm[(size_t)t])) { ok = false; break; }
+                if (!ok) continue;
+                perm[(size_t)s] = img;
+                used[(size_t)img] = 1;
+                self(self, s + 1);
+                used[(size_t)img] = 0;
+            }
+            perm[(size_t)s] = -1;
+        };
+        search(search, 0);
+        return found;
     }
 
     void compile_rules() {
@@ -1569,11 +1919,14 @@ struct analyzer {
         compiled_rule cr;
         cr.body = r.body;
         // A graph rule has no shape to transform, and its candidates are
-        // assignments, not anchors: its body is graph pairs only.
+        // assignments, not anchors: its body is graph pairs only. Its one
+        // attribute is `symmetry=none`, which drops duplicate assignments.
         if (r.pairs.size() > 0 && r.pairs[0].is_graph) {
-            if (r.symmetry != "none" || !r.rotation_angles.empty())
-                error(r.name.loc, "a graph rule takes no 'symmetry' or 'rotation': a graph "
-                      "pair has no shape to transform");
+            if (r.symmetry != "none" || !r.rotation_angles.empty())   // check 58
+                error(r.name.loc, "a graph rule takes no 'rotation' and no 'symmetry' but "
+                      "'none': a graph pair has no shape to transform, and symmetry=none "
+                      "makes duplicate assignments one candidate");
+            bool dedup = r.symmetry_given && r.symmetry == "none";
             for (int bi = 0; bi < (int)r.pairs.size(); ++bi) {
                 if (!r.pairs[bi].is_graph) {
                     error(r.pairs[bi].loc, "a rule body cannot mix graph and grid sub-rules; "
@@ -1582,6 +1935,7 @@ struct analyzer {
                 }
                 compiled_pair cp = compile_graph_pair(r.pairs[bi]);
                 cp.sub_rule_idx = bi;
+                if (dedup) cp.symmetries = pair_symmetries(cp);
                 cr.pairs.push_back(std::move(cp));
             }
             return cr;
@@ -1673,7 +2027,7 @@ struct analyzer {
     //    like expression built-ins. Adding an operation = a row here + an
     //    executor in the machine; no grammar or keyword change. ──────────────
 
-    enum class arg_kind { int_, grid, pred, value, expr, enum_ };
+    enum class arg_kind { int_, grid, graph, pred, value, expr, enum_ };
 
     struct op_param {
         char const* name;
@@ -1700,7 +2054,7 @@ struct analyzer {
                                            {"to",           arg_kind::pred,  false, true},
                                            {"into",         arg_kind::grid,  false, true},
                                            {"write",        arg_kind::value, false, true},
-                                           {"over",         arg_kind::grid,  false, false},
+                                           {"over",         arg_kind::graph, false, false},
                                            {"passable",     arg_kind::pred,  false, false},
                                            {"connectivity", arg_kind::int_,  false, false},
                                            {"cost",         arg_kind::expr,  false, false}}},
@@ -1729,7 +2083,7 @@ struct analyzer {
         return "'" + std::string(pn) + "=' of '" + op + "'";
     }
 
-    // A bare-identifier argument's name (a `grid` or `enum` value), else null.
+    // A bare-identifier argument's name (a `grid`, `graph`, or `enum` value), else null.
     static std::string const* bare_name(op_arg const& a) {
         return a.value->kind == expr_kind::ident ? &a.value->ident : nullptr;
     }
@@ -1763,6 +2117,24 @@ struct analyzer {
             error(a.loc, arg_ctx(op, pn) + ": '" + *name + "' is not a declared grid");
         else
             require_visible(a.loc, "grid", *name, layer_mod[(size_t)id]);
+        return id;
+    }
+
+    // A `graph` argument: a bare name of a declared graph layer.
+    int op_graph(op_arg const& a, char const* op, char const* pn) {
+        auto name = bare_name(a);
+        if (!name) {
+            error(a.loc, arg_ctx(op, pn) + " expects a graph name, got '" + arg_render(a) + "'");
+            return -1;
+        }
+        int id = out.graph_id(*name);
+        if (id < 0 && out.layer_id(*name) >= 0)
+            error(a.loc, arg_ctx(op, pn) + ": '" + *name + "' is a grid; it takes a graph layer "
+                  "(grid adjacency is the default; restrict cells with 'passable=')");
+        else if (id < 0)
+            error(a.loc, arg_ctx(op, pn) + ": '" + *name + "' is not a declared graph");
+        else
+            require_visible(a.loc, "graph", *name, graph_mod[(size_t)id]);
         return id;
     }
 
@@ -1921,9 +2293,16 @@ struct analyzer {
             op.to        = op_pred(*arg("to"), spec->name, "to");
             if (op.into_grid >= 0)
                 op.write = op_value(*arg("write"), spec->name, "write", op.into_grid);
-            if (arg("over"))     op.over_grid = op_grid(*arg("over"), spec->name, "over");
-            if (arg("passable")) op.passable  = op_pred(*arg("passable"), spec->name, "passable");
-            if (arg("cost"))     op.cost      = op_num(*arg("cost"), spec->name, "cost", false);
+            if (arg("over"))     op.over_graph = op_graph(*arg("over"), spec->name, "over");
+            if (arg("passable")) op.passable   = op_pred(*arg("passable"), spec->name, "passable");
+            if (auto a = arg("cost")) {
+                if (arg("over")) {   // graph routes count edges (check 35)
+                    error(a->loc, arg_ctx(spec->name, "cost") + " is not allowed with 'over=': "
+                          "a route over a graph counts edges, each costing 1");
+                    return false;
+                }
+                op.cost = op_num(*a, spec->name, "cost", false);
+            }
             assert(index("connectivity") == compiled_op::path_connectivity);
             if (!arg("connectivity"))   // the default, as an `int` argument
                 op.int_args.push_back({compiled_op::path_connectivity, num_lit(4)});

@@ -1,14 +1,15 @@
-// E24: alternatives inside { any } have different dimensions.
+// E24 (check 3): alternatives inside { any } have different dimensions; a 1x1
+// pattern would be uplifted, so both differ from the pair's size.
 // @expect error
 // @expect stderr-contains dimension mismatch
 tag t { a, b, c }
 layers { g: grid of t }
 rule bad {
-    g[a]
+    g[a a]
     =>
     { any
-      g[b]
-      g[ b c ]
+      g[b b]
+      g[ b c c ]
     }
 }
-sequence main { resize(2,1) }
+sequence main { resize(3,1) }
