@@ -32,11 +32,11 @@ rule place_head(rotation=all) {
 // As written, the walker steps right: onto an empty cell, or back over floor
 // it already carved. 'rotation=all' adds the same rule turned by 90, 180 and
 // 270 degrees, so every step picks among the four directions. The third
-// cell, '*', matches anything, but must exist. Thehe walker never carve
+// cell, '*', matches anything, but must exist. The walker never carves
 // onto the outer rim of the grid.
 rule walk(rotation=all) {
     algo[H .|F * ]
-    //      ^- The union opertor '|' lets us combine tags, empty or floor
+    //      ^- The union operator '|' lets us combine tags, empty or floor
     //		In this case that is same as just '*'. You can test that :)
     // The spaces separate the tags
     =>
