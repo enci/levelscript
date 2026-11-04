@@ -1,8 +1,8 @@
 // Showcase (v0.9.0): pattern variables move whatever is there.
 //
-// `?v` binds the falling item and writes it one cell lower, so a single
-// `fall` rule moves boxes and gems alike. A binding cell never matches
-// empty, so `grow fall` stops once nothing has empty space below it.
+// '?v' binds the falling item and writes it one cell lower, so a single
+// 'fall' rule moves boxes and gems alike. A binding cell never matches
+// empty, so 'grow fall' stops once nothing has empty space below it.
 //
 // @seed=5
 // @expect run-ok

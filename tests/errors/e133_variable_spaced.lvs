@@ -1,4 +1,4 @@
-// E133 (0.9, 2.3): no whitespace between `?` and the name.
+// E133 (0.9, 2.3): no whitespace between '?' and the name.
 // @expect error
 // @expect stderr-contains right after
 tag t { a }

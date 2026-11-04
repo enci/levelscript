@@ -1,4 +1,4 @@
-// E182 (0.17.1, check 35): path's `over` takes a graph layer, not a grid.
+// E182 (0.17.1, check 35): path's 'over' takes a graph layer, not a grid.
 // @expect error
 // @expect stderr-contains it takes a graph layer
 tag algo { R, H }

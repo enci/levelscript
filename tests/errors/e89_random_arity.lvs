@@ -1,4 +1,4 @@
-// E-rand-1: `random` is binary.
+// E-rand-1: 'random' is binary.
 // @expect error
 // @expect stderr-contains takes
 layers { tiles: grid of number }

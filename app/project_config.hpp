@@ -1,12 +1,16 @@
 #pragma once
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace ls {
 
-enum class layer_mode { text, color, tile, heatmap, shape, corner };
+struct directive_set;
+
+enum class layer_mode { text, color, tile, heatmap, shape, corner, border };
 
 // Marker shape a tag value can be given (used by the shape layer mode).
 // Persisted by name, so the enum can grow without breaking old sidecars.
@@ -29,6 +33,21 @@ struct layer_config {
     // reference - re-pick it there if that happens.
     std::string tileset;
     corner_size corner{corner_size::normal};   // Corner mode only
+    // The grid's @view (spec B.8) that mode and visible were chosen under ("":
+    // none); nullopt until known. When the script's @view changes, mode and
+    // visible go back to what it gives (apply_views).
+    std::optional<std::string> view;
+    // The mode and visibility the script's @view gives; only what differs is saved.
+    layer_mode  base_mode{layer_mode::text};
+    bool        base_visible{true};
+};
+
+// A grid's starting view, from its @view or the default (spec B.8).
+struct layer_view {
+    std::string name;
+    std::string view;      // the @view as written; "": none
+    layer_mode  mode{layer_mode::text};
+    bool        visible{true};
 };
 
 struct tileset_config {
@@ -70,6 +89,16 @@ struct project_config {
     // Rebuild the layer list in the script's declared order, preserving
     // per-layer settings by name; dropped layers vanish, new ones default.
     void sync_layers(std::vector<std::string> const& layer_names);
+
+    // Record each layer's starting view; a layer whose mode and visibility
+    // were chosen under another @view (or never) takes it.
+    void apply_views(std::vector<layer_view> const& views);
+
+    // Each grid's starting view from the script's directives: its @view, else
+    // fill for the first grid and shape for the rest. `grids`: name and
+    // whether it is a grid of number, in script order.
+    static std::vector<layer_view> views_of(directive_set const& dirs,
+        std::vector<std::pair<std::string, bool>> const& grids);
 
     tileset_config const* find_tileset(std::string const& name) const;
 

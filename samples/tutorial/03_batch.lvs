@@ -28,6 +28,7 @@ rule wall_side(rotation=all) {
     algo[floor .] => algo[* wall]
 }
 
+// This rule is made to run after wall_side, to close the corners
 rule wall_corner(rotation=all) {
     algo[
         floor wall 
@@ -38,16 +39,17 @@ rule wall_corner(rotation=all) {
     	* wall ]
 }
 
-// Two matches of one pass may want to write the same cell: both floors left
-// and right of an empty cell match 'wall_side'. The first match applied marks
-// the cells it writes, and a later match that would write a marked cell is
-// skipped. That is the write-protection mask; here both would write the same
-// wall, so nothing is lost.
-rule grow_moss {
-    algo[floor]
+
+// Grow moss on the north and west walls
+rule grow_moss(rotation=270) {
+//			   ^-rotate this grid 270 deg as well
+    algo[	wall
+    		floor]
     =>
-    algo[moss]
+    algo[	* 
+    		moss]
 }
+
 
 // 'everywhere' applies every match it can; 'scatter(N)' applies at most N of
 // them, chosen at random from the same kind of pass.
@@ -59,6 +61,6 @@ sequence main {
     everywhere wall_side    // @hold=10
     everywhere wall_corner  // @hold=10
     scatter(15%) grow_moss	// In scatter we can also supply count but also
-    						// percetange. This fill first match all and then place
+    						// percentage. This fill first match all and then place
                             // the first % percent (match is randomized anyhow)
 }

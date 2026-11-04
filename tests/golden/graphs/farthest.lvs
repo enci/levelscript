@@ -1,13 +1,13 @@
-// Graph rules (v0.15.3, section 5.12): `farthest`.
+// Graph rules (v0.15.3, section 5.12): 'farthest'.
 //
 // One corridor of nine one-cell rooms runs from the bottom left, up the left
 // edge, along the top row, and down to the bottom middle; a separate pair of
 // rooms on the right edge is cut off from it. Start is the second room of the
 // top row. The corridor's two ends are both four rooms from Start, so they
-// tie and `once` picks one of them; the pair's rooms are dead ends too, but
-// unreachable from Start, so they are never farthest. Among all rooms (`u`
+// tie and 'once' picks one of them; the pair's rooms are dead ends too, but
+// unreachable from Start, so they are never farthest. Among all rooms ('u'
 // omitted), the farthest from Start are the same two corridor ends, marked
-// `far`.
+// 'far'.
 //
 // @seed=1
 // @expect run-ok

@@ -1,5 +1,5 @@
 // Module (section 2.6): rules and a sequence over the schema's grid. It uses
-// schema.lvs directly, so it sees `level` and `algo`.
+// schema.lvs directly, so it sees 'level' and 'algo'.
 use "schema.lvs"
 
 rule wall_all { level[.] => level[W] }

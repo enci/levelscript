@@ -1,9 +1,9 @@
 // @seed=5
 // Uplift (0.17, section 5.4): a 1x1 pattern in a larger pair stands for the
-// pair-sized pattern of its one cell. A room id written before `upscale` is
-// the same over each 4x3 room and differs from every neighbour, so `room[?r]`
+// pair-sized pattern of its one cell. A room id written before 'upscale' is
+// the same over each 4x3 room and differs from every neighbour, so 'room[?r]'
 // in a 4x3 pair matches exactly once per room, lined up with it. Each pair
-// takes its size from a pattern written in full. `ordered` gives each room
+// takes its size from a pattern written in full. 'ordered' gives each room
 // the first template that applies.
 // @expect grid fine count(D) == 1
 // @expect grid fine count(.) > 0

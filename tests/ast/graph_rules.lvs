@@ -1,5 +1,5 @@
 // Graph rules (5.13): a graph block of node variables and edges, then rule
-// guards (attributes and region reads); the write side is graph writes `n.g = c`.
+// guards (attributes and region reads); the write side is graph writes 'n.g = c'.
 rule treasure_room {
     plan { ?n }
     when (n.degree == 1 && distance(n, rooms[Start]) > 3)

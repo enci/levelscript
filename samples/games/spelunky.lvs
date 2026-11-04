@@ -52,7 +52,7 @@ rule coarse_carve  { any
         open[right (o|left)]    // Mark the exits for the rooms
     }
 
-    // Expand downward (`,` is a row break without a new line)
+    // Expand downward (',' is a row break without a new line)
     {
         coarse[head, . ]
         open[?o, *]
@@ -77,7 +77,7 @@ sequence coarse_off_path {
 // Room carving
 ///////////////////////////////////////////////////////////////////////////////
 rule fine_fill_rooms {
-    // The one-cell patterns are uplifted to the 8x6 of the `fine` write: every
+    // The one-cell patterns are uplifted to the 8x6 of the 'fine' write: every
     // cell is coarse-non-empty, and every cell holds the same room id ?r
     coarse[!.]
     room_id[?r]  

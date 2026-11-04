@@ -1,7 +1,7 @@
 // Draw site (v0.10.0, section 10.6 item 1): param draws come first.
 //
-// The default of `k` and the derived `j` draw at startup, in declaration
-// order, before any statement. Supplying `k` skips its draw (tested in C++).
+// The default of 'k' and the derived 'j' draw at startup, in declaration
+// order, before any statement. Supplying 'k' skips its draw (tested in C++).
 //
 // @seed=3
 // @expect run-ok

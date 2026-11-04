@@ -1,6 +1,6 @@
 // Draw site (v0.10.0, sections 5.10 and 10.6 item 5): an eager if draws twice.
 //
-// Both branches of `if` evaluate, so each cell draws two numbers and keeps
+// Both branches of 'if' evaluate, so each cell draws two numbers and keeps
 // one; the next cell starts two draws later.
 //
 // @seed=4

@@ -1,9 +1,9 @@
 // Graph rules (v0.15.0, section 5.13; 0.17 guards): node values, edge lines,
 // non-induced matching.
 //
-// `layout` makes rooms, halls, and X cells all nodes. A rule guard filters a
+// 'layout' makes rooms, halls, and X cells all nodes. A rule guard filters a
 // variable's node by its value (a complement too); an edge line needs the
-// two nodes adjacent. Matching is non-induced: `?a -- ?b -- ?c` also matches
+// two nodes adjacent. Matching is non-induced: '?a -- ?b -- ?c' also matches
 // a triangle, so "the ends are not adjacent" is a rule guard. The X patch
 // under the first room and hall closes a triangle; only the middles of
 // paths that are not triangles get marked c. Each statement marks its own grid.

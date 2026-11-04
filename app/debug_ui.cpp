@@ -269,6 +269,13 @@ static int play_hold(script const& sc, std::vector<stmt_frame> const& left,
     return (int)std::min<uint64_t>(hold, INT_MAX);
 }
 
+// Each grid's starting view (spec B.8), from the script's @view directives.
+static std::vector<layer_view> layer_views(script const& sc) {
+    std::vector<std::pair<std::string, bool>> grids;
+    for (auto const& l : sc.meta.layers) grids.emplace_back(l.name, l.tag_id < 0);
+    return project_config::views_of(sc.dirs, grids);
+}
+
 // ── entry point ───────────────────────────────────────────────────────────────
 
 int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_seed,
@@ -286,6 +293,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
 
     project_config cfg = path.empty() ? project_config{}
                                       : project_config::load(path, sc.layer_names());
+    cfg.apply_views(layer_views(sc));
     auto window_title = [&] {
         return path.empty() ? std::string("LevelScript") : "LevelScript - " + path;
     };
@@ -316,7 +324,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
     int win_w = 1600, win_h = 960;
     std::optional<int> win_x, win_y;
     std::string theme_str        = "light";
-    float       pref_play_fps    = 4.f;
+    float       pref_play_fps    = 30.f;
     uint64_t    pref_seed        = 0;
     bool        pref_seed_locked = false;
     {
@@ -335,7 +343,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
                 theme_str     = gets("theme", "light");
                 win_w         = (int)getn("win_w", 1600);
                 win_h         = (int)getn("win_h", 960);
-                pref_play_fps = (float)getn("play_fps", 4.0);
+                pref_play_fps = (float)getn("play_fps", 30.0);
                 pref_seed     = (uint64_t)getn("seed", 0.0);
                 if (auto it = j.find("seed_locked"); it != j.end() && it->is_boolean())
                     pref_seed_locked = *it;
@@ -491,7 +499,10 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
         // Reload from disk so edits made in an external editor are picked up;
         // on failure the previous compile stays live and the status bar shows
         // the first diagnostic.
-        if (load_script(sc)) cfg.sync_layers(sc.layer_names());
+        if (load_script(sc)) {   // an edited @view resets that grid's view
+            cfg.sync_layers(sc.layer_names());
+            cfg.apply_views(layer_views(sc));
+        }
         if (!seed_locked) seed = make_seed();   // after the reload: an edited @seed
         run.restart(sc.gen, sc.entry, seed, sc.run_params());
     };
@@ -525,6 +536,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
         sc.entry_name = entry;
         load_script(sc);
         cfg = project_config::load(path, sc.layer_names());
+        cfg.apply_views(layer_views(sc));
         if (!seed_locked) seed = make_seed();
         run.restart(sc.gen, sc.entry, seed, sc.run_params());
         playing = false;

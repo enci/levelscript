@@ -1,4 +1,4 @@
-// E131 (0.9, check 46): `?v` marks a binding position; a statement guard has none.
+// E131 (0.9, check 46): '?v' marks a binding position; a statement guard has none.
 // @expect error
 // @expect stderr-contains marks a binding position
 tag t { a }

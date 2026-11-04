@@ -1,4 +1,4 @@
-// E127 (0.9, check 44): `(v)` is an expression cell; it binds nothing.
+// E127 (0.9, check 44): '(v)' is an expression cell; it binds nothing.
 // @expect error
 // @expect stderr-contains not bound in this pair
 tag t { a }

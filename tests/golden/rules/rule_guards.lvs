@@ -1,8 +1,8 @@
 // @seed=7
-// 0.13.0: rule guards - `when (expr)` on the match side, once per candidate.
-// Two vertical bands of regions (1 | 2); `wall_between` relates the two
+// 0.13.0: rule guards - 'when (expr)' on the match side, once per candidate.
+// Two vertical bands of regions (1 | 2); 'wall_between' relates the two
 // pattern variables, so a wall goes on both sides of the band edge and
-// nowhere else. `limit` reads a param and the width; `coin` draws in its
+// nowhere else. 'limit' reads a param and the width; 'coin' draws in its
 // guard, after the bare cells match, so only floor cells draw.
 // @expect grid level count(wall) == 10
 // @expect grid level count(gem) == 0

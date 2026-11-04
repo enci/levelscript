@@ -1,8 +1,8 @@
 // Graphs (v0.15.0, section 4.3): the three graph forms read one grid.
 //
-// `whole` sees every non-empty cell as a node cell, so each 4-connected
-// patch of one value is a node and touching patches are adjacent. `rooms`
-// keeps only R cells, so the halls separate. `halls` joins rooms through
+// 'whole' sees every non-empty cell as a node cell, so each 4-connected
+// patch of one value is a node and touching patches are adjacent. 'rooms'
+// keeps only R cells, so the halls separate. 'halls' joins rooms through
 // connector regions; the H region in the middle touches four rooms and
 // joins every pair of them, and the lone H on the right joins two. Each cell shows its node's degree.
 //

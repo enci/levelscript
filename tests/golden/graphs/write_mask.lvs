@@ -1,7 +1,7 @@
 // Graph rules (v0.15.0, sections 5.13 and 6.8): the write mask over regions.
 //
 // Under a batch, two assignments conflict iff they write one grid over a
-// node they share. On a star - a hub with four arms - `?h -- ?a`
+// node they share. On a star - a hub with four arms - '?h -- ?a'
 // writing the hub conflicts with every other assignment, so one arm wins
 // the shuffle; writing only the arm, all four apply. A one-variable rule
 // never conflicts with itself.

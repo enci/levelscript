@@ -1,4 +1,5 @@
 #include "project_config.hpp"
+#include "directives.hpp"
 #include <nlohmann/json.hpp>
 #include <cstdio>
 #include <cstdlib>
@@ -39,6 +40,7 @@ static std::string mode_str(layer_mode m) {
         case layer_mode::heatmap: return "heatmap";
         case layer_mode::shape:   return "shape";
         case layer_mode::corner:  return "corner";
+        case layer_mode::border:  return "border";
     }
     return "text";
 }
@@ -63,6 +65,7 @@ static layer_mode mode_from_str(std::string const& s) {
     if (s == "heatmap") return layer_mode::heatmap;
     if (s == "shape")   return layer_mode::shape;
     if (s == "corner")  return layer_mode::corner;
+    if (s == "border")  return layer_mode::border;
     return layer_mode::text;
 }
 
@@ -123,6 +126,46 @@ void project_config::sync_layers(std::vector<std::string> const& layer_names) {
     layers = std::move(reordered);
 }
 
+// `tiles` is the Tile mode with the tileset the user picks (@tileset is not
+// read yet); `ramp` and `tiles` suit only a grid of number, and are drawn as
+// fill elsewhere (spec B.8); `hidden` starts the grid hidden.
+std::vector<layer_view> project_config::views_of(directive_set const& dirs,
+        std::vector<std::pair<std::string, bool>> const& grids) {
+    std::vector<layer_view> out;
+    for (size_t i = 0; i < grids.size(); ++i) {
+        auto const& [name, number] = grids[i];
+        layer_view v{ name, "", i == 0 ? layer_mode::color : layer_mode::shape, true };
+        if (auto d = dirs.find("view", directive_target::layer, "", name)) {
+            v.view = d->value;
+            if      (v.view == "fill")   v.mode = layer_mode::color;
+            else if (v.view == "shape")  v.mode = layer_mode::shape;
+            else if (v.view == "corner") v.mode = layer_mode::corner;
+            else if (v.view == "text")   v.mode = layer_mode::text;
+            else if (v.view == "border") v.mode = layer_mode::border;
+            else if (v.view == "ramp")   v.mode = number ? layer_mode::heatmap : layer_mode::color;
+            else if (v.view == "tiles")  v.mode = number ? layer_mode::tile : layer_mode::color;
+            else if (v.view == "hidden") v.visible = false;
+        }
+        out.push_back(std::move(v));
+    }
+    return out;
+}
+
+void project_config::apply_views(std::vector<layer_view> const& views) {
+    for (auto& lc : layers)
+        for (auto const& v : views) {
+            if (v.name != lc.name) continue;
+            lc.base_mode    = v.mode;
+            lc.base_visible = v.visible;
+            if (lc.view != v.view) {
+                lc.mode    = v.mode;
+                lc.visible = v.visible;
+                lc.view    = v.view;
+            }
+            break;
+        }
+}
+
 project_config project_config::load(std::string const& ls_path,
                                     std::vector<std::string> const& layer_names) {
     project_config cfg;
@@ -172,14 +215,16 @@ project_config project_config::load(std::string const& ls_path,
             if (j.contains("layers") && j["layers"].is_array()) {
                 for (auto const& jl : j["layers"]) {
                     if (!jl.is_object()) continue;
-                    cfg.layers.push_back({
-                        jget(jl, "name", std::string{}),
-                        jget(jl, "visible", true),
-                        jget(jl, "opacity", 1.0f),
-                        mode_from_str(jget(jl, "mode", std::string{"text"})),
-                        jget(jl, "tileset", std::string{}),
-                        corner_from_str(jget(jl, "corner", std::string{"normal"})),
-                    });
+                    layer_config lc;
+                    lc.name    = jget(jl, "name", std::string{});
+                    lc.visible = jget(jl, "visible", true);
+                    lc.opacity = jget(jl, "opacity", 1.0f);
+                    lc.mode    = mode_from_str(jget(jl, "mode", std::string{"text"}));
+                    lc.tileset = jget(jl, "tileset", std::string{});
+                    lc.corner  = corner_from_str(jget(jl, "corner", std::string{"normal"}));
+                    if (auto it = jl.find("view"); it != jl.end() && it->is_string())
+                        lc.view = it->get<std::string>();
+                    cfg.layers.push_back(std::move(lc));
                 }
             }
             if (migrate_tile_layers) {
@@ -218,12 +263,20 @@ project_config project_config::load(std::string const& ls_path,
     return cfg;
 }
 
+// Only what differs from the defaults is written: a layer is matched by name
+// and rebuilt in script order on load, so an all-default layer is left out,
+// and a config that is all defaults has no sidecar (an old one is removed).
+// A layer's mode and visibility count as default when they are what its @view
+// gives; a chosen one is saved with that @view, and applies only while the
+// script keeps it (apply_views). An entry without a view (an older sidecar)
+// so never overrides the script.
 void project_config::save(std::string const& ls_path) const {
-    json j;
-    j["cell_zoom"]     = cell_zoom;
-    j["mini_px"]       = mini_px;
-    j["grid_bg_color"] = color_to_hex(grid_bg_color);
-    j["tilesets"] = json::array();
+    project_config const def;
+    layer_config const   def_layer;
+    json j = json::object();
+    if (cell_zoom != def.cell_zoom)         j["cell_zoom"]     = cell_zoom;
+    if (mini_px != def.mini_px)             j["mini_px"]       = mini_px;
+    if (grid_bg_color != def.grid_bg_color) j["grid_bg_color"] = color_to_hex(grid_bg_color);
     for (auto const& ts : tilesets) {
         j["tilesets"].push_back({
             {"name", ts.name},
@@ -232,34 +285,35 @@ void project_config::save(std::string const& ls_path) const {
             {"tile_h", ts.tile_h},
         });
     }
-    j["layers"] = json::array();
     for (auto const& lc : layers) {
-        j["layers"].push_back({
-            {"name", lc.name},
-            {"visible", lc.visible},
-            {"opacity", lc.opacity},
-            {"mode", mode_str(lc.mode)},
-            {"tileset", lc.tileset},
-            {"corner", corner_str(lc.corner)},
-        });
+        json jl;
+        // a chosen view, with the @view it was chosen under
+        if (lc.mode != lc.base_mode || lc.visible != lc.base_visible) {
+            jl["mode"]    = mode_str(lc.mode);
+            jl["visible"] = lc.visible;
+            jl["view"]    = lc.view.value_or("");
+        }
+        if (lc.opacity != def_layer.opacity) jl["opacity"] = lc.opacity;
+        if (lc.tileset != def_layer.tileset) jl["tileset"] = lc.tileset;
+        if (lc.corner  != def_layer.corner)  jl["corner"]  = corner_str(lc.corner);
+        if (jl.empty()) continue;
+        jl["name"] = lc.name;
+        j["layers"].push_back(jl);
     }
     if (!shown_graphs.empty()) j["graphs"] = shown_graphs;
-    if (!tag_colors.empty()) {
-        json jtc;
-        for (auto const& [tname, vmap] : tag_colors) {
-            json jvc;
-            for (auto const& [vid, col] : vmap)
-                jvc[std::to_string(vid)] = color_to_hex(col);
-            jtc[tname] = jvc;
-        }
-        j["tag_colors"] = jtc;
-    }
-    json jts;
+    for (auto const& [tname, vmap] : tag_colors)
+        for (auto const& [vid, col] : vmap)
+            j["tag_colors"][tname][std::to_string(vid)] = color_to_hex(col);
     for (auto const& [tname, vmap] : tag_shapes)
         for (auto const& [vid, sh] : vmap)
-            if (sh != tag_shape::none) jts[tname][std::to_string(vid)] = shape_name(sh);
-    if (!jts.empty()) j["tag_shapes"] = jts;
-    std::ofstream f(json_path(ls_path));
+            if (sh != tag_shape::none) j["tag_shapes"][tname][std::to_string(vid)] = shape_name(sh);
+
+    std::string const file = json_path(ls_path);
+    if (j.empty()) {
+        std::remove(file.c_str());   // all defaults: no sidecar
+        return;
+    }
+    std::ofstream f(file);
     f << j.dump(2) << '\n';
 }
 

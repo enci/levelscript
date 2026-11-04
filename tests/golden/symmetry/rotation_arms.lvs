@@ -1,7 +1,7 @@
 // @seed=42
-// Showcase (v0.3.1): explicit rotation angles and the set form `rotation={..}`.
+// Showcase (v0.3.1): explicit rotation angles and the set form 'rotation={..}'.
 //
-// A single `core` is placed at the grid centre, then `extend` extends an arm into
+// A single 'core' is placed at the grid centre, then 'extend' extends an arm into
 // the empty cell "ahead of" it. The rotation attribute decides which directions
 // the arm grows:
 //
@@ -10,11 +10,11 @@
 //   rotation={90, 270}  → 3 arms (right, down, up)         — identity + 90 + 270,
 //                         but NOT left, because 180 is excluded from the set
 //
-// This file uses the set form. `{ }` is the set delimiter (as in tag value
-// sets), never `[ ]` (which is pattern-body only). Identity is always included,
+// This file uses the set form. '{ }' is the set delimiter (as in tag value
+// sets), never '[ ]' (which is pattern-body only). Identity is always included,
 // so {90, 270} yields three orientations.
 //
-// The RHS keeps the core with `*` (preserve) so only the arm cells are written —
+// The RHS keeps the core with '*' (preserve) so only the arm cells are written —
 // that way the four rotated variants never conflict on the shared core cell.
 //
 // @expect run-ok
@@ -27,7 +27,7 @@ layers {
     g: grid of t
 }
 
-// Place a single core at the centre via `where` position guards.
+// Place a single core at the centre via 'where' position guards.
 rule seed {
     g[.]
     where[ (x == width / 2 && y == height / 2) ]

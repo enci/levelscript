@@ -1,6 +1,6 @@
 // @seed=10
-// Step 10 - choice and weights. A write side `{ any ... }` picks one of its
-// alternatives, by weight; `{ all ... }` writes all of them; the two nest.
+// Step 10 - choice and weights. A write side '{ any ... }' picks one of its
+// alternatives, by weight; '{ all ... }' writes all of them; the two nest.
 // Every room gets a role - hub, reward or challenge - and its contents are
 // drawn by role.
 // @expect grid roles count(.) >= 1
@@ -46,7 +46,7 @@ rule fill_wall  { level[.] => level[wall] }
 // with wall above, to the left, and diagonally: its top-left corner. The
 // corner draws the room's role. A weight biases the pick: out of every 6
 // rooms, about 3 are hubs, 2 challenges and 1 a reward room. An alternative
-// without a weight counts as `(weight=1)`.
+// without a weight counts as '(weight=1)'.
 rule pick_role {
     level[
         wall wall
@@ -60,7 +60,7 @@ rule pick_role {
 }
 
 // From the corner, the role spreads over the room's floor: a captured role
-// `?r` is copied into the next floor cell. Walls stop it at the room's edge.
+// '?r' is copied into the next floor cell. Walls stop it at the room's edge.
 rule spread_role(rotation=all) {
     level[floor floor]
     roles[?r .]
@@ -68,11 +68,11 @@ rule spread_role(rotation=all) {
     roles[* (r)]
 }
 
-// Contents by role. `{ all }` inside `{ any }` makes one alternative write
+// Contents by role. '{ all }' inside '{ any }' makes one alternative write
 // several things at once: a hub cell is now and then a pillar, which changes
 // the floor into wall and keeps the cell free of items.
 //
-// Each `{ any }` the write passes through draws once, outer before inner, so
+// Each '{ any }' the write passes through draws once, outer before inner, so
 // the same seed always picks the same contents.
 rule contents { any
     roles[challenge] level[floor] items[.]
@@ -129,5 +129,5 @@ sequence main {
     scatter(16) door
 }
 
-// Exercise: make reward rooms rarer, by lowering the weight of `reward` in
-// `pick_role` against the other two. Then give challenge rooms a rare chest.
+// Exercise: make reward rooms rarer, by lowering the weight of 'reward' in
+// 'pick_role' against the other two. Then give challenge rooms a rare chest.

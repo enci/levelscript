@@ -4,7 +4,7 @@
 // neighbour's value merges the two at the next extraction. A batch sees one
 // snapshot, so every small zone joins a larger neighbour at once - the
 // shuffle picks which, since two assignments writing one small zone
-// conflict - and `settle` sweeps until no zone has a larger neighbour.
+// conflict - and 'settle' sweeps until no zone has a larger neighbour.
 //
 // @seed=1
 // @expect run-ok

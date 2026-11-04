@@ -1,5 +1,5 @@
 // @seed=12
-// Step 12 - priority. An `ordered` rule body tries its sub-rules in order: a
+// Step 12 - priority. An 'ordered' rule body tries its sub-rules in order: a
 // later one is used only where no earlier one applies. The dungeon gets a
 // few wide double doors first, and plain doors after that.
 // @expect grid level count(door) >= 16
@@ -26,10 +26,10 @@ rule fill_floor { level[.] => level[floor] }
 rule fill_wall  { level[.] => level[wall] }
 
 // The first sub-rule makes a double door, the second a single one. The guard
-// on the first reads the whole level: `count(level[door])` is the number of
+// on the first reads the whole level: 'count(level[door])' is the number of
 // door cells so far, so double doors stop after three of them.
 //
-// Under a step mode (`once`, `grow`) every step collects the matches again
+// Under a step mode ('once', 'grow') every step collects the matches again
 // and takes one from the highest sub-rule that has any. So the doors start
 // out double, and turn single once the guard stops the first sub-rule.
 rule doorway(rotation=90) { ordered
@@ -67,8 +67,8 @@ rule doorway(rotation=90) { ordered
         * *    * ]
 }
 
-// Under a batch mode (`scatter`, `everywhere`) all matches come from one
-// snapshot. `ordered` then sorts them: the first sub-rule's matches claim
+// Under a batch mode ('scatter', 'everywhere') all matches come from one
+// snapshot. 'ordered' then sorts them: the first sub-rule's matches claim
 // their cells first, the next fill what is left. The guard is checked against
 // the snapshot too, so it would not stop the double doors part way.
 sequence main {
@@ -82,5 +82,5 @@ sequence main {
 }
 
 // Exercise: swap the two sub-rules and run again: the single door is always
-// available, so no double door is ever made. Then try `scatter(16) doorway`
+// available, so no double door is ever made. Then try 'scatter(16) doorway'
 // with the original order, and count the double doors.

@@ -1,4 +1,4 @@
-// The worked example of spec section 8, verbatim: a dungeon sketched in `algo`
+// The worked example of spec section 8, verbatim: a dungeon sketched in 'algo'
 // by a drunkard's walk, upscaled, then converted into geometry, rewards,
 // enemies, and tile indices. Keep it in sync with the spec.
 // @expect run-ok

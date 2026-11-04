@@ -1,6 +1,6 @@
-// v0.6.3 — `pad` frames a generated region with an empty border.
+// v0.6.3 — 'pad' frames a generated region with an empty border.
 //
-// `pad(N)` is the one geometric verb that is NOT top-left anchored: it adds N
+// 'pad(N)' is the one geometric verb that is NOT top-left anchored: it adds N
 // empty rows/columns on every side and shifts existing content inward to
 // (N, N). Here a filled 3×3 becomes a 5×5 with a one-cell empty margin — handy
 // for guaranteeing a walkable edge around a generated interior.

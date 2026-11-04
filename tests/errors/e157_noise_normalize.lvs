@@ -1,4 +1,4 @@
-// E157 (0.11, check 35): `normalize` of `noise` is an enum in {rank, range}.
+// E157 (0.11, check 35): 'normalize' of 'noise' is an enum in {rank, range}.
 // @expect error
 // @expect stderr-contains invalid noise normalize 'sorted'
 layers { h: grid of number }

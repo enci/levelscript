@@ -21,7 +21,7 @@ layers {
 //  ^-name         ^-type(tag or num)  ^- this is special comment for the editor
 }
 
-// A rule is a pattern to match, `=>`, and what to write. This one matches an
+// A rule is a pattern to match, '=>', and what to write. This one matches an
 // three empty cell and writes two lettes and an empty cell in the middle.
 rule start {
     level[. . . ] => level[H . W ]
@@ -38,8 +38,8 @@ rule world {
 	level[W . . . . ] => level[W O R L D]
 }
 
-// The tools run the sequence named `main`. Statements run top to bottom.
-// `once` picks one of all the places that a rule matches (at random) and
+// The tools run the sequence named 'main'. Statements run top to bottom.
+// 'once' picks one of all the places that a rule matches (at random) and
 // applies it
 sequence main {
 	// Grids are 0x0 size at start, so we need to resize it

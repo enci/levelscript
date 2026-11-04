@@ -1,4 +1,4 @@
-// E136 (0.9.1, check 47): a number grid has no masks beyond `.` and `!.`.
+// E136 (0.9.1, check 47): a number grid has no masks beyond '.' and '!.'.
 // @expect error
 // @expect stderr-contains has no masks
 layers { n: grid of number }

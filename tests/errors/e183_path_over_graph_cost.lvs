@@ -1,4 +1,4 @@
-// E183 (0.17.1, check 35): a route over a graph counts edges; `cost` is a kind error.
+// E183 (0.17.1, check 35): a route over a graph counts edges; 'cost' is a kind error.
 // @expect error
 // @expect stderr-contains not allowed with 'over='
 tag algo { R, H }

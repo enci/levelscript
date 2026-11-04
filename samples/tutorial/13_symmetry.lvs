@@ -1,8 +1,8 @@
 // @seed=13
 // Step 13 - symmetry and framing. A walk carves one quarter of an arena;
-// `trim`, `resize` and two `mirror`s turn it into the whole arena, `upscale`
-// doubles it, and `pad` adds a border. The `symmetry` attribute flips a
-// rule's pattern the way `rotation` turns it.
+// 'trim', 'resize' and two 'mirror's turn it into the whole arena, 'upscale'
+// doubles it, and 'pad' adds a border. The 'symmetry' attribute flips a
+// rule's pattern the way 'rotation' turns it.
 // @expect grid arena count(floor) >= 200
 // @expect grid arena count(pillar) >= 4
 
@@ -44,7 +44,7 @@ rule walls(rotation=all) { all
 }
 
 // A pillar in a corner of the floor. As written the pattern only finds
-// corners open to the bottom right. `symmetry=all` adds its mirror images
+// corners open to the bottom right. 'symmetry=all' adds its mirror images
 // left-right, top-bottom and both, so it finds all four kinds of corner.
 rule corner_pillar(symmetry=all) {
     arena[
@@ -83,6 +83,6 @@ sequence main {
     everywhere frame
 }
 
-// Exercise: drop `mirror(vertical)` and the arena is mirrored left-right only.
-// Then move `upscale(2, 2)` up, before `pad(1)`, and compare how thick the
+// Exercise: drop 'mirror(vertical)' and the arena is mirrored left-right only.
+// Then move 'upscale(2, 2)' up, before 'pad(1)', and compare how thick the
 // walls come out.

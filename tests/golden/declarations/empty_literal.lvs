@@ -1,6 +1,6 @@
-// Showcase (v0.6.1): the `.` empty literal in expressions.
+// Showcase (v0.6.1): the '.' empty literal in expressions.
 //
-// `.` names the empty value inside ( ) — so you can test empty / non-empty and
+// '.' names the empty value inside ( ) — so you can test empty / non-empty and
 // conditionally clear a cell. It is polymorphic: typed from the grid or the
 // operand it is compared against.
 //

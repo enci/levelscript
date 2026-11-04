@@ -1,10 +1,10 @@
 // Showcase (v0.15.0): graph rules (section 5.13) on the graph_rooms lattice.
 //
-// A graph block chooses rooms as units: `once` picks the start uniformly
+// A graph block chooses rooms as units: 'once' picks the start uniformly
 // among dead-end rooms, whatever their size, and a node extent writes the
 // whole room at once, so no spreading pass is needed. Edge lines match two
 // rooms joined by a hall, a rule guard draws on each assignment in node-id
-// order, and an `{ any }` write draws once per application.
+// order, and an '{ any }' write draws once per application.
 //
 // @seed=2
 // @expect run-ok

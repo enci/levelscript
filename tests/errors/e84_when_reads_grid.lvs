@@ -1,4 +1,4 @@
-// E-when-1: a `when` guard may read params only, not grids.
+// E-when-1: a 'when' guard may read params only, not grids.
 // @expect error
 // @expect stderr-contains cannot be read here
 tag t { a }

@@ -1,8 +1,8 @@
-// Graph rules (v0.15.1, section 5.12): `some`, `every`, and `count`.
+// Graph rules (v0.15.1, section 5.12): 'some', 'every', and 'count'.
 //
 // Four rooms in a row. Lamps light some cells and items lie on others.
-// `n.light is .` finds the fully dark rooms, `some` the rooms with
-// any lamp, and `count` sorts rooms by how many items they hold. The last
+// 'n.light is .' finds the fully dark rooms, 'some' the rooms with
+// any lamp, and 'count' sorts rooms by how many items they hold. The last
 // rule lights a whole dark room only if a lit neighbour holds at least
 // two items: quantifiers and graph functions in one guard.
 //

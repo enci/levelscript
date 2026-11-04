@@ -1,4 +1,4 @@
-// E130 (0.9, check 46): `where` cells are boolean expressions, never a bare variable.
+// E130 (0.9, check 46): 'where' cells are boolean expressions, never a bare variable.
 // @expect error
 // @expect stderr-contains cannot be a binding cell
 layers { n: grid of number }

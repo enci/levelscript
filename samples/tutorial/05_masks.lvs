@@ -1,7 +1,7 @@
 // @seed=11
-// Step 5 - tag masks. A named mask such as `solid = wall | rock` stands for
-// several values at once, `!` takes the complement, and `!.` matches any value.
-// Enemies are first written as the union `enemy` and refined into bats and
+// Step 5 - tag masks. A named mask such as 'solid = wall | rock' stands for
+// several values at once, '!' takes the complement, and '!.' matches any value.
+// Enemies are first written as the union 'enemy' and refined into bats and
 // rats later.
 // @expect grid level count(rock) == 10
 // @expect grid mobs count(bat) >= 1
@@ -13,7 +13,7 @@ tag algo {
     wall
 }
 
-// `solid` names a mask over the tagset's values. It takes no value of its own
+// 'solid' names a mask over the tagset's values. It takes no value of its own
 // and can be used wherever a value can.
 tag geometry {
     wall
@@ -22,7 +22,7 @@ tag geometry {
     solid = wall | rock
 }
 
-// `enemy` is a union of two values. Written into a cell, it stores both, and
+// 'enemy' is a union of two values. Written into a cell, it stores both, and
 // says "some enemy, not yet decided".
 tag mobs {
     bat
@@ -54,7 +54,7 @@ rule walk(rotation=all) {
     algo[floor head *]
 }
 
-// `!.` matches any non-empty cell: here, anything the walk left behind. Both
+// '!.' matches any non-empty cell: here, anything the walk left behind. Both
 // sub-rules match against the same snapshot, so walls written by one never
 // make the other match.
 rule walls(rotation=all) { all
@@ -73,7 +73,7 @@ rule build { all
     algo[wall]       => level[wall]
 }
 
-// A cell matches a mask when it holds any of the mask's values, so `solid`
+// A cell matches a mask when it holds any of the mask's values, so 'solid'
 // matches walls and rocks alike: rocks pile up against walls, and against
 // rocks placed earlier in the same run.
 rule loose_rock(rotation=all) {
@@ -89,9 +89,9 @@ rule place_enemy {
     mobs[enemy]
 }
 
-// The refinement. A cell holding `enemy` holds `bat` and `rat`, so it matches
+// The refinement. A cell holding 'enemy' holds 'bat' and 'rat', so it matches
 // either; a refined cell holds one value only. Bats hang below anything solid.
-// `!solid` is the complement: every value `solid` lacks, empty included.
+// '!solid' is the complement: every value 'solid' lacks, empty included.
 rule refine { all
     level[solid, floor]  mobs[*, enemy] => mobs[*, bat]
     level[!solid, floor] mobs[*, enemy] => mobs[*, rat]
@@ -108,6 +108,6 @@ sequence main {
     everywhere refine
 }
 
-// Exercise: add a value `spider` to `mobs`, and to the `enemy` mask. Which
+// Exercise: add a value 'spider' to 'mobs', and to the 'enemy' mask. Which
 // rules pick it up without any change? Then refine enemies next to a rock into
 // spiders.

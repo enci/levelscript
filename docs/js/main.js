@@ -590,6 +590,8 @@
     // once the edit has settled for SETTLE_MS, and the program reruns then too.
     let shown = null, view = null, settleTimer = null;
     const SETTLE_MS = 500;
+    // The playback clock that @hold counts in (spec B.6): ticks per second.
+    const PLAY_FPS = 30;
     // From the tool directives (spec Appendix B): value -> its @name, and
     // "sequence#index" -> the statement's @play and @hold.
     let displayNames = {}, plays = {}, holds = {};
@@ -831,12 +833,13 @@
     });
 
     // Animate: steps per frame accelerate so long generations still finish in a few seconds.
-    // A finished statement's @hold keeps its result for that many frames first.
+    // A finished statement's @hold keeps its result for that many ticks of the playback clock
+    // first (spec B.6), PLAY_FPS ticks a second; the hold does not count toward the speed-up.
     function play() {
-      const t0 = performance.now();
-      let hold = 0;
+      let t0 = performance.now(), holdUntil = 0;
       const frame = () => {
-        if (hold > 0) { hold--; playTimer = requestAnimationFrame(frame); return; }
+        if (performance.now() < holdUntil) { playTimer = requestAnimationFrame(frame); return; }
+        let hold = 0;
         // the statement's @play steps per frame (0: all of it), else a pace that speeds up
         const pace = last ? paceOf(last) : undefined;
         const perFrame = pace !== undefined ? (pace || Infinity)
@@ -852,6 +855,7 @@
         }
         render(state);
         if (state.done) { playTimer = null; stopPlay(); opts.onFinish && opts.onFinish(); return; }
+        if (hold > 0) { const ms = hold * 1000 / PLAY_FPS; holdUntil = performance.now() + ms; t0 += ms; }
         playTimer = requestAnimationFrame(frame);
       };
       playTimer = requestAnimationFrame(frame);

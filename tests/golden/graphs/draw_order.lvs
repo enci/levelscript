@@ -1,6 +1,6 @@
 // Graph rules (v0.15.0, sections 5.13 and 10.6): guards draw in assignment order.
 //
-// `?a -- ?b` on a chain of four rooms has six assignments, every edge in
+// '?a -- ?b' on a chain of four rooms has six assignments, every edge in
 // both directions, collected in lexicographic node order:
 // (0,1) (1,0) (1,2) (2,1) (2,3) (3,2). The guard draws once for each, in
 // that order, and the batch shuffle draws after them. Each application

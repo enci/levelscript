@@ -1,9 +1,9 @@
 // Showcase (v0.9.0): pattern variables relate cells by value.
 //
-// `?r` binds whatever a cell holds, so one rule grows every region outward
-// without listing region numbers. `wall_between` then marks each cell next
-// to a different region: `?a` binds the first cell, the `where` cell tests
-// its neighbour against it, and `*` leaves that column unconstrained.
+// '?r' binds whatever a cell holds, so one rule grows every region outward
+// without listing region numbers. 'wall_between' then marks each cell next
+// to a different region: '?a' binds the first cell, the 'where' cell tests
+// its neighbour against it, and '*' leaves that column unconstrained.
 //
 // @seed=3
 // @expect run-ok

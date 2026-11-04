@@ -311,7 +311,11 @@ int main(int argc, char* argv[]) {
     if (profile) return profile_run(source, name, gen, entry, s, params);
     ls::level lv = gen.generate(entry, s, params);
     if (!png_path.empty()) {
-        std::string err = ls::render_png(lv, name, png_path, png_scale);
+        std::vector<std::pair<std::string, bool>> grids;
+        for (int i = 0; i < lv.layer_count(); ++i)
+            grids.emplace_back(lv.layer_name(i), lv.layer(i).is_number());
+        std::string err = ls::render_png(lv, name, png_path, png_scale,
+                                         ls::project_config::views_of(dirs, grids));
         if (!err.empty()) {
             std::cerr << name << ": error: " << err << '\n';
             return 1;

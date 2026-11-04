@@ -21,20 +21,22 @@ namespace ls {
 // Same 12-color cycle as the VS Code extension's decorations.ts, so a tag
 // value painted in the editor and one drawn here read as the same color.
 // Indexed as (value_id + tag_id * 12) % 12, matching tagColor() there.
+// Ordered so neighbouring entries differ in hue: a tag's first few values
+// stand apart.
 static constexpr ImU32 k_palette_dark[12] = {
-    IM_COL32(133,  50,  50, 255), IM_COL32(133,  91,  50, 255),
-    IM_COL32(133, 133,  50, 255), IM_COL32( 67, 133,  50, 255),
-    IM_COL32( 50, 133,  91, 255), IM_COL32( 50, 133, 133, 255),
-    IM_COL32( 50,  91, 133, 255), IM_COL32( 50,  50, 133, 255),
-    IM_COL32( 91,  50, 133, 255), IM_COL32(133,  50, 133, 255),
+    IM_COL32( 67, 133,  50, 255), IM_COL32( 50,  91, 133, 255),
+    IM_COL32(133,  91,  50, 255), IM_COL32( 91,  50, 133, 255),
+    IM_COL32(133, 133,  50, 255), IM_COL32(133,  50,  50, 255),
+    IM_COL32( 50, 133, 133, 255), IM_COL32(133,  50, 133, 255),
+    IM_COL32( 50, 133,  91, 255), IM_COL32( 50,  50, 133, 255),
     IM_COL32(133,  50,  91, 255), IM_COL32(102,  77,  59, 255),
 };
 static constexpr ImU32 k_palette_light[12] = {
-    IM_COL32(255, 173, 173, 255), IM_COL32(255, 214, 173, 255),
-    IM_COL32(255, 255, 173, 255), IM_COL32(190, 255, 173, 255),
-    IM_COL32(173, 255, 214, 255), IM_COL32(173, 255, 255, 255),
-    IM_COL32(173, 214, 255, 255), IM_COL32(173, 173, 255, 255),
-    IM_COL32(214, 173, 255, 255), IM_COL32(255, 173, 255, 255),
+    IM_COL32(190, 255, 173, 255), IM_COL32(173, 214, 255, 255),
+    IM_COL32(255, 214, 173, 255), IM_COL32(214, 173, 255, 255),
+    IM_COL32(255, 255, 173, 255), IM_COL32(255, 173, 173, 255),
+    IM_COL32(173, 255, 255, 255), IM_COL32(255, 173, 255, 255),
+    IM_COL32(173, 255, 214, 255), IM_COL32(173, 173, 255, 255),
     IM_COL32(255, 173, 214, 255), IM_COL32(255, 209, 158, 255),
 };
 
@@ -1118,20 +1120,31 @@ void draw_shape(ImDrawList* dl, ImVec2 c, float r, tag_shape shape, ImU32 col) {
     }
 }
 
-// A small button showing the current shape; click opens a grid of all shapes.
-static bool shape_picker(tag_shape& shape, ImU32 col) {
+// The shape of a value with none chosen: the next in a cycle by its position,
+// in the web tool's order, so a tag's values tell apart without setup.
+static tag_shape default_shape(int slot) {
+    static constexpr tag_shape k_cycle[] = {
+        tag_shape::circle, tag_shape::square, tag_shape::diamond,
+        tag_shape::triangle, tag_shape::ring, tag_shape::cross,
+    };
+    constexpr int n = (int)(sizeof(k_cycle) / sizeof(k_cycle[0]));
+    return k_cycle[((slot % n) + n) % n];
+}
+
+// A small button showing the current shape (none: the default one, `def`);
+// click opens a grid of all shapes.
+static bool shape_picker(tag_shape& shape, tag_shape def, ImU32 col) {
     bool changed = false;
     float const box = ImGui::GetFrameHeight();
     if (ImGui::Button("##shape", { box * 1.4f, box })) ImGui::OpenPopup("##shape_pop");
     ImVec2 lo = ImGui::GetItemRectMin(), hi = ImGui::GetItemRectMax();
     ImVec2 mid = { (lo.x + hi.x) * 0.5f, (lo.y + hi.y) * 0.5f };
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    if (shape == tag_shape::none)
-        dl->AddLine({ mid.x - 4.f, mid.y }, { mid.x + 4.f, mid.y },
-                    ImGui::GetColorU32(ImGuiCol_TextDisabled), 1.5f);
-    else
-        draw_shape(dl, mid, box * 0.32f, shape, col);
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Shape: %s", shape_name(shape));
+    draw_shape(dl, mid, box * 0.32f, shape == tag_shape::none ? def : shape, col);
+    if (ImGui::IsItemHovered()) {
+        if (shape == tag_shape::none) ImGui::SetTooltip("Shape: %s (default)", shape_name(def));
+        else                          ImGui::SetTooltip("Shape: %s", shape_name(shape));
+    }
 
     if (ImGui::BeginPopup("##shape_pop")) {
         for (int i = 0; i < k_tag_shape_count; ++i) {
@@ -1150,7 +1163,10 @@ static bool shape_picker(tag_shape& shape, ImU32 col) {
                     ImGui::GetColorU32(ImGuiCol_TextDisabled), 1.5f);
             else
                 draw_shape(ImGui::GetWindowDrawList(), m, 8.f, (tag_shape)i, col);
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", shape_name((tag_shape)i));
+            if (ImGui::IsItemHovered()) {
+                if (i == 0) ImGui::SetTooltip("default (%s)", shape_name(def));
+                else        ImGui::SetTooltip("%s", shape_name((tag_shape)i));
+            }
             ImGui::PopID();
         }
         ImGui::EndPopup();
@@ -1178,7 +1194,7 @@ void draw_tags_window(script const& sc, project_config& cfg) {
         // Shape row helper: preview uses the value's current color.
         auto shape_cell = [&](int slot, ImU32 col) {
             tag_shape sh = smap.count(slot) ? smap.at(slot) : tag_shape::none;
-            if (shape_picker(sh, col)) set_shape(smap, slot, sh);
+            if (shape_picker(sh, default_shape(slot), col)) set_shape(smap, slot, sh);
             ImGui::SameLine();
         };
 
@@ -1610,8 +1626,27 @@ void draw_grid_composite(script const& sc, debug_run const& run,
     for (size_t li = 0, n = 0; li < cfg.layers.size(); ++li)
         if (cfg.layers[li].mode == layer_mode::corner) corner_slot[li] = (int)(n++ % 4);
 
-    // ── per layer: content -> highlights, stacked in composite order ─────────
-    for (size_t li = 0; li < cfg.layers.size(); ++li) {
+    // Draw order (spec B.8): the views that colour whole cells, then the marks,
+    // then the border lines, so a mark is never covered by a square; each
+    // group in declaration order.
+    auto rank = [](layer_mode m) {
+        switch (m) {
+            case layer_mode::color: case layer_mode::heatmap: case layer_mode::tile: return 0;
+            case layer_mode::border: return 2;
+            default: return 1;
+        }
+    };
+    std::vector<size_t> order(cfg.layers.size());
+    for (size_t li = 0; li < order.size(); ++li) order[li] = li;
+    std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+        return rank(cfg.layers[a].mode) < rank(cfg.layers[b].mode);
+    });
+    // Border lines contrast with the grid background.
+    ImU32 border_col = contrast_text_color(cfg.grid_bg_color);
+    float border_w   = std::max(1.f, std::round(cell_px / 6.f));
+
+    // ── per layer: content -> highlights, stacked in draw order ──────────────
+    for (size_t li : order) {
         auto const& lc = cfg.layers[li];
         if (!lc.visible || lc.opacity <= 0.f) continue;
 
@@ -1635,7 +1670,7 @@ void draw_grid_composite(script const& sc, debug_run const& run,
         float tile_uv_h     = (tile_id && ts)
                               ? (float)ts->tile_h / tex->height : 0.f;
 
-        // Shape mode: this tag's per-value shapes (sparse; unset -> circle).
+        // Shape mode: this tag's per-value shapes (sparse; unset -> default_shape).
         std::unordered_map<int, tag_shape> const* shapes = nullptr;
         if (lc.mode == layer_mode::shape && pal.tag_id >= 0) {
             auto sit = cfg.tag_shapes.find(sc.meta.tag_names[(size_t)pal.tag_id]);
@@ -1648,6 +1683,17 @@ void draw_grid_composite(script const& sc, debug_run const& run,
         for (int y = 0; y < rows; ++y) {
             for (int x = 0; x < cols; ++x) {
                 int v = g.at(x, y);
+                if (lc.mode == layer_mode::border) {
+                    // a line on each side shared with a cell of another value
+                    // (empty counts as a value)
+                    ImU32 col = with_alpha(border_col, lc.opacity);
+                    float bx = origin.x + (x + 1) * cell_px, by = origin.y + (y + 1) * cell_px;
+                    if (x + 1 < cols && g.at(x + 1, y) != v)
+                        dl->AddLine({ bx, by - cell_px }, { bx, by }, col, border_w);
+                    if (y + 1 < rows && g.at(x, y + 1) != v)
+                        dl->AddLine({ bx - cell_px, by }, { bx, by }, col, border_w);
+                    continue;
+                }
                 if (v == -1) continue;   // empty (public API sentinel)
                 // tag_color()/cell_glyph() key by 0-based value id; v is a
                 // mask for a tag layer but the real number as-is
@@ -1689,7 +1735,7 @@ void draw_grid_composite(script const& sc, debug_run const& run,
                     }
 
                     case layer_mode::shape: {
-                        tag_shape sh = tag_shape::circle;
+                        tag_shape sh = default_shape(vid);
                         if (shapes) {
                             auto f = shapes->find(vid);
                             if (f != shapes->end()) sh = f->second;
@@ -1832,7 +1878,8 @@ void draw_grid_composite(script const& sc, debug_run const& run,
 // ── layer strip (a small container per layer, under the grid) ────────────────
 
 // Viz-type combo -- mutually exclusive, so a dropdown rather than toggle
-// buttons. Tile mode is only offered for numeric grids.
+// buttons. Tile mode is only offered for numeric grids; a number grid's
+// shapes and corners take each value's own colour, as its fill does.
 static void draw_mode_combo(layer_mode& mode, bool numeric) {
     struct mode_item { layer_mode mode; char const* icon; char const* name; };
     static const mode_item k_items[] = {
@@ -1842,10 +1889,9 @@ static void draw_mode_combo(layer_mode& mode, bool numeric) {
         { layer_mode::heatmap, phosphor::PH_THERMOMETER, "Heatmap" },
         { layer_mode::shape,   phosphor::PH_SHAPES,      "Shape"   },
         { layer_mode::corner,  phosphor::PH_CORNERS_OUT, "Corner"  },
+        { layer_mode::border,  phosphor::PH_GRID_FOUR,   "Border"  },
     };
     if (!numeric && mode == layer_mode::tile)  mode = layer_mode::color;
-    if (numeric  && (mode == layer_mode::shape || mode == layer_mode::corner))
-        mode = layer_mode::color;   // both need a tag layer
 
     mode_item const* current = &k_items[0];
     for (auto const& mi : k_items)
@@ -1858,8 +1904,6 @@ static void draw_mode_combo(layer_mode& mode, bool numeric) {
     if (open) {
         for (auto const& mi : k_items) {
             if (!numeric && mi.mode == layer_mode::tile)  continue;
-            if (numeric  && (mi.mode == layer_mode::shape || mi.mode == layer_mode::corner))
-                continue;
             bool selected = (mi.mode == mode);
             if (ImGui::Selectable(mi.icon, selected)) mode = mi.mode;
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", mi.name);

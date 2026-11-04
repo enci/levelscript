@@ -1,8 +1,8 @@
 // Graph rules (v0.15.0, sections 5.2, 5.13 and 10.6): draws in node-extent writes.
 //
-// Each application draws once per `{ any }` node on its resolved path; then
+// Each application draws once per '{ any }' node on its resolved path; then
 // each write cell evaluates once per cell of its node's region, row-major,
-// so a `random` cell gives every cell of a room its own draw.
+// so a 'random' cell gives every cell of a room its own draw.
 //
 // @seed=2
 // @expect run-ok

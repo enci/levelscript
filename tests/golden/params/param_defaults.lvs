@@ -1,9 +1,9 @@
 // Showcase (v0.5.3): param defaults — this generator runs seed-only.
 //
-// An input param may carry a default (`difficulty: number = 3`), evaluated once
+// An input param may carry a default ('difficulty: number = 3'), evaluated once
 // at startup only when the runtime doesn't supply it. A later param's default
 // may read an earlier one (same scope discipline as a derived param). Supply
-// `--param difficulty=N` to override; otherwise the defaults drive the run.
+// '--param difficulty=N' to override; otherwise the defaults drive the run.
 //
 // Run it:  levelscript --seed 1 tests/golden/params/param_defaults.lvs
 //     or:  levelscript --seed 1 --param difficulty=5 tests/golden/params/param_defaults.lvs

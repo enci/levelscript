@@ -1,8 +1,8 @@
-// Graph rules (v0.15.0, sections 5.2 and 5.13): `ordered` across two graphs.
+// Graph rules (v0.15.0, sections 5.2 and 5.13): 'ordered' across two graphs.
 //
-// Sub-rules may name different graphs. Under `grow`, the first sub-rule
-// fires while it has assignments (closing one-cell rooms, which `rooms`
-// sees); only then does the second (marking unmarked halls, which `layout`
+// Sub-rules may name different graphs. Under 'grow', the first sub-rule
+// fires while it has assignments (closing one-cell rooms, which 'rooms'
+// sees); only then does the second (marking unmarked halls, which 'layout'
 // sees). Four steps: two rooms closed, then two of the three halls marked.
 // Each sub-rule's assignments are collected in turn.
 //

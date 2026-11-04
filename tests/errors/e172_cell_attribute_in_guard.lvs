@@ -1,4 +1,4 @@
-// E172 (0.17, check 61): `map.size` reads the node at the current cell; a rule
+// E172 (0.17, check 61): 'map.size' reads the node at the current cell; a rule
 // guard has no cell, so it binds the node and reads n.size.
 // @expect error
 // @expect stderr-contains there is no cell here

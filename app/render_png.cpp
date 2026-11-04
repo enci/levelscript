@@ -19,9 +19,9 @@ struct rgba { uint8_t r, g, b, a; };
 
 // The debugger's dark-theme cycle (debug_ui_views.cpp), indexed by value id.
 constexpr rgba k_palette[12] = {
-    {133,  50,  50, 255}, {133,  91,  50, 255}, {133, 133,  50, 255}, { 67, 133,  50, 255},
-    { 50, 133,  91, 255}, { 50, 133, 133, 255}, { 50,  91, 133, 255}, { 50,  50, 133, 255},
-    { 91,  50, 133, 255}, {133,  50, 133, 255}, {133,  50,  91, 255}, {102,  77,  59, 255},
+    { 67, 133,  50, 255}, { 50,  91, 133, 255}, {133,  91,  50, 255}, { 91,  50, 133, 255},
+    {133, 133,  50, 255}, {133,  50,  50, 255}, { 50, 133, 133, 255}, {133,  50, 133, 255},
+    { 50, 133,  91, 255}, { 50,  50, 133, 255}, {133,  50,  91, 255}, {102,  77,  59, 255},
 };
 
 rgba from_abgr(uint32_t c) {
@@ -70,15 +70,20 @@ struct sheet {
 }  // namespace
 
 std::string render_png(level const& lv, std::string const& ls_path,
-                       std::string const& out_path, int scale) {
+                       std::string const& out_path, int scale,
+                       std::vector<layer_view> const& views) {
     std::vector<std::string> names;
     for (int i = 0; i < lv.layer_count(); ++i) names.push_back(lv.layer_name(i));
 
     bool has_sidecar = std::filesystem::exists(project_config::json_path(ls_path));
     project_config cfg = project_config::load(ls_path, names);
+    cfg.apply_views(views);
     if (!has_sidecar)
         for (auto& lc : cfg.layers)
             if (!lv[lc.name].is_number()) lc.mode = layer_mode::color;
+    // @view=tiles with no tileset picked yet: drawn as fill (spec B.8)
+    for (auto& lc : cfg.layers)
+        if (lc.mode == layer_mode::tile && lc.tileset.empty()) lc.mode = layer_mode::color;
 
     // Tilesets the visible tile layers use, loaded once, relative to the script
     auto dir = std::filesystem::path(ls_path).parent_path();

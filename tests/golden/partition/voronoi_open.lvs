@@ -1,4 +1,4 @@
-// Showcase (v0.11): `voronoi` under the default `metric=euclidean` (section 6.12).
+// Showcase (v0.11): 'voronoi' under the default 'metric=euclidean' (section 6.12).
 //
 // On open ground the zones are the Euclidean Voronoi diagram of the sites:
 // straight borders on the perpendicular bisectors, at any angle - not the

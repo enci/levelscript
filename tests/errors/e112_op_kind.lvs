@@ -1,4 +1,4 @@
-// E112 (0.9.2, check 21): an `int` argument is a statement-scope expression;
+// E112 (0.9.2, check 21): an 'int' argument is a statement-scope expression;
 // it reads params and width/height, never a grid.
 // @expect error
 // @expect stderr-contains cannot be read here

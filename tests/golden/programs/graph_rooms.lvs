@@ -1,9 +1,9 @@
 // Showcase (v0.10.0, nodes as values since v0.14.0): a graph layer reads the
 // room structure out of a grid.
 //
-// A lattice of 3x3 rooms gets random halls between neighbours. `map` sees
+// A lattice of 3x3 rooms gets random halls between neighbours. 'map' sees
 // each room as a node and each hall as an edge (section 4.3), so graph
-// patterns (section 5.12) bind each cell's room as `?n`, and rule guards
+// patterns (section 5.12) bind each cell's room as '?n', and rule guards
 // label whole rooms by their place in the dungeon: dead ends, one of them
 // the start, the rooms next to it, and the hubs. A room the start cannot
 // reach is far (2^30), never at distance 0.

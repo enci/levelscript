@@ -1,8 +1,8 @@
 // @seed=42
-// Showcase (v0.3): the `where` pseudo-layer + a runtime `params` input.
+// Showcase (v0.3): the 'where' pseudo-layer + a runtime 'params' input.
 //
-// `sea_level` is a number supplied at runtime (like the seed). The `flood`
-// rule uses a `where` position guard to turn the top `sea_level` rows into
+// 'sea_level' is a number supplied at runtime (like the seed). The 'flood'
+// rule uses a 'where' position guard to turn the top 'sea_level' rows into
 // water; everything else becomes grass. Raising sea_level floods more of the
 // map from the top.
 //

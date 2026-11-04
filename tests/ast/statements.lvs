@@ -1,5 +1,5 @@
 // Statements: operation calls and rule applications with a mode, a count
-// (an expression; '%' binds to an atom), a target, and a `when` guard.
+// (an expression; '%' binds to an atom), a target, and a 'when' guard.
 sequence modes {
     everywhere fill
     settle smooth

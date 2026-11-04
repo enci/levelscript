@@ -1,0 +1,129 @@
+// Step 4 - multiple layers, named tags and more complex rules.
+// The walk now only sketches the cave in an 'algo' grid
+// A second grid, 'level', holds the result.
+// A rule can match in one grid and write another.
+// Named tags can be combined with '|' to match multiple values in one rule.
+// The 'any' statement lets us have multiple possible outputs for a rule, with weights
+
+// Only what is needed for carving
+// Short names makes it easier to read bigger patterns
+tag algo {							
+	F								// @name=floor
+    H								// @name=head
+    //								   ^- names for the visualizer
+}
+
+// Geometry as a separate tag
+tag geometry {
+    floor
+    wall
+    rock
+    solid = wall | rock
+    // With the | operator we can combine tags, we can use this for comparison
+    // Reads as wall or rock
+}
+
+tag entities {
+    player
+    bat
+    rat
+    spider
+    enemy = bat | rat | spider    
+    // Named tags can also written to the grid as well
+}
+
+// Two different grid defined on different tags
+layers {
+	algo: grid of algo				// @view=corner
+    level: grid of geometry			// @view=fill
+    entities: grid of entities      // @view=shape
+    //                                 ^- This is a directive
+    // "Directives" and not part of the language, only tooling uses them 
+}
+
+// Reminder
+// '.' is empty tile
+// '*' will match any tile when used for matching (before the '=>')
+// '*' will leave the old value of the tile when used for writing (after the '=>')
+rule place_head {
+    algo[ 	. . . 
+    		. . . 
+        	. . . ]
+    =>
+    algo[	* * * 
+			* H * 
+            * * * ]
+}
+
+rule walk(rotation=all) {
+    algo[H * *] => algo[F H * ]
+}
+
+rule fill_level {
+// You can combine tags in rules with '|' a well
+	algo[F|H] => level[floor]
+//  ^-reading algo       ^-writing into level
+}
+
+// Rule can also have multiple possible outputs, with weights.
+// The weights are relative to each other
+rule wall_side(rotation=all) {
+    level[floor . ]
+    =>
+    { any                           // 'any' means any of the following
+        (weight=3) level[* wall]    // 3/4 chance to place a wall
+        (weight=1) level[* rock]    // 1/4 chance to place a rock
+    }
+}
+
+// We are using the named tag 'solid' here, which is a combination of wall and rock.
+// This is a good way to avoid repeating the same pattern in multiple rules.
+rule wall_corner(rotation=all) {
+    level[
+        floor solid 
+        solid .     ]
+    =>
+    level[
+    	* * 
+    	* wall ]
+}
+
+// Rules can match across multiple layers, and write to multiple layers as well
+rule place_enemies {     
+    level[floor]    // Match a floor tile in the level layer
+    entities[.]     // and an empty tile in the entities layer (player may already be there)
+    =>
+    entities[enemy] // We haven't decided which enemy to spawn, so we use the 'enemy' tag
+}
+
+// Enemies next to walls are spiders
+// This rule matches a floor tile next to a wall, and an empty tile in the entities layer
+rule spawn_spiders(rotation=all) {
+    level[solid *]     
+    entities[* enemy]
+    =>
+    entities[* spider]
+}
+
+rule spawn_other_enemies(rotation=all) {    
+    entities[enemy]
+    =>
+    { any // Spawn any of the other enemies, with equal chance
+        entities[bat]
+        entities[rat]
+    }
+}
+
+sequence main {
+    resize(32, 24)
+    once place_head
+    grow(200) walk                  // @play=8 @hold=10
+    everywhere fill_level	        // Bridge the layers with this rule
+    everywhere wall_side            // @hold=10
+    everywhere wall_corner          // @hold=10
+    
+    once { level[floor] => entities[player] } // spawn player on the floor
+    scatter(10) place_enemies       // @hold=10
+    scatter(3) spawn_spiders        // @hold=10
+    everywhere spawn_other_enemies  // @hold=10
+}

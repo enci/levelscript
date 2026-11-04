@@ -1,4 +1,4 @@
-// E-rand-2: `random` bounds must be numbers.
+// E-rand-2: 'random' bounds must be numbers.
 // @expect error
 // @expect stderr-contains 'random' requires number arguments
 tag t { a }
