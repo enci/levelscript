@@ -1,5 +1,5 @@
 // @seed=10
-// Step 10 - choice and weights. A write side '{ any ... }' picks one of its
+// Step 7 - choice and weights. A write side '{ any ... }' picks one of its
 // alternatives, by weight; '{ all ... }' writes all of them; the two nest.
 // Every room gets a role - hub, reward or challenge - and its contents are
 // drawn by role.

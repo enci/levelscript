@@ -1,5 +1,5 @@
 // @seed=12
-// Step 12 - priority. An 'ordered' rule body tries its sub-rules in order: a
+// Step 9 - priority. An 'ordered' rule body tries its sub-rules in order: a
 // later one is used only where no earlier one applies. The dungeon gets a
 // few wide double doors first, and plain doors after that.
 // @expect grid level count(door) >= 16

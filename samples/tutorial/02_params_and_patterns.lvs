@@ -1,7 +1,15 @@
-// Step 2 - random walks. A walker steps into a random neighbouring cell and
-// leaves floor behind; 'grow(N)' repeats that N times, each step woking on the
+// Parameters and patterns. A walker steps into a random neighboring cell and
+// leaves floor behind; 'grow(N)' repeats that N times, each step working on the
 // grid of the previous application and 'rotation=all' lets one rule walk in
 // all four directions.
+
+// Parameters let you change the walker's length from the UI and more importantly
+// from the game API as well. You can adjust these values on a compiled generator
+// and to get different results. 
+// Adjust the 'walker_length' parameter to see how it affects the generated level.
+params {
+    walker_length:number = 200
+}
 
 tag algo {
     F	// @name=floor
@@ -52,7 +60,7 @@ rule walk(rotation=all) {
 sequence main {
     resize(40, 30)
     once place_head
-    grow(200) walk      // @play=4
+    grow(walker_length) walk
 }
 
 // Try this: change the rotation to 'rotation=180' (right and left only) and

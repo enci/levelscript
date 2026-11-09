@@ -1,5 +1,5 @@
 // @seed=14
-// Step 14 - paths and terrain. 'noise' writes a smooth random elevation
+// Step 11 - paths and terrain. 'noise' writes a smooth random elevation
 // field, a rule turns it into terrain, and 'path' carves the cheapest road
 // from the start on the left edge to the exit on the right, around the hills.
 // @expect grid land count(road) >= 40

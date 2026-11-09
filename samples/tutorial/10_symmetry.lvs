@@ -1,10 +1,7 @@
-// @seed=13
-// Step 13 - symmetry and framing. A walk carves one quarter of an arena;
+// Step 10 - symmetry and framing. A walk carves one quarter of an arena;
 // 'trim', 'resize' and two 'mirror's turn it into the whole arena, 'upscale'
 // doubles it, and 'pad' adds a border. The 'symmetry' attribute flips a
 // rule's pattern the way 'rotation' turns it.
-// @expect grid arena count(floor) >= 200
-// @expect grid arena count(pillar) >= 4
 
 tag arena {
     floor

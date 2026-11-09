@@ -1,5 +1,5 @@
 // @seed=11
-// Step 11 - cellular automata. 'settle' repeats a batch until a pass changes
+// Step 8 - cellular automata. 'settle' repeats a batch until a pass changes
 // nothing, and a 'sequence' groups statements so they can be repeated
 // together. A cave room is filled with noise and smoothed by two rules taking
 // turns until the shapes stop changing.

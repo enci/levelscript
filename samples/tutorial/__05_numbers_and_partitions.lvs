@@ -1,0 +1,59 @@
+// Step 6 - partitions and numbers.
+// A 'grid of number' holds integers instead of tag values. 
+// LevelScript provides builtin functions that write into regions (partitions)
+// of the level.
+// - 'bsp' recursively splits the level into rectangles
+// - 'noise' assigns numeric values using Perlin noise
+// - 'voronoi' assigns equidistant regions to a set of tags
+// You can build your levels on top of these partitions, as rules
+// match those numbers like any other cell value.
+
+tag geometry { wall floor }
+
+tag sites { site }                  
+
+// A number grid starts empty like any other, and empty is not '0': '0' is a
+// value a cell may store. '.' still matches an empty cell.
+layers {
+    bsp_zones: grid of number       // @view=fill
+    noise_zones : grid of number    // @view=fill
+    voronoi_zones: grid of number   // @view=fill
+    voronoi_sites: grid of sites    // @view=shape
+    level: grid of geometry         // @view=fill
+}
+
+// A number in a pattern matches a cell storing that number. 'bsp' numbers its
+// rectangles from 0 in reading order, so zone 0 is always the top-left one.
+rule open_zone_zero {
+    bsp_zones[0] => level[floor]
+}
+
+// '!.' matches any stored number, '0' included.
+rule fill_rest {
+    bsp_zones[!.]
+    level[.]
+    =>
+    level[wall]
+}
+
+// Operations are the built-in statements that are not rules. 'bsp' takes
+// named arguments: the grid to write into, and the smallest and largest side
+// a rectangle may have. Every cell of 'zones' gets the id of its rectangle.
+sequence main {
+    resize(40, 30)                                          // @hold=30
+
+    // BSP partition needs min and max rectangle size, every cells gets an id
+    bsp(into=bsp_zones, min=8, max=14)                      // @hold=30
+
+    // Voronoi partitions needs a grid with tags to start from,
+    // every cells gets an id 
+    scatter(8) { voronoi_sites[.] => voronoi_sites[site] }
+    voronoi(sites=site, into=voronoi_zones)                 // @hold=30
+
+    // Noise 
+    noise(into=noise_zones, lo=1, hi=10, scale=10)           // @hold=30
+
+
+    // everywhere open_zone_zero           // @hold=10    
+    // everywhere fill_rest
+}

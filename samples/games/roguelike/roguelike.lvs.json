@@ -1,45 +1,16 @@
 {
-  "cell_zoom": 1.0,
   "graphs": [
     "connect",
     "map"
   ],
-  "grid_bg_color": "282828",
   "layers": [
     {
-      "corner": "normal",
-      "mode": "color",
-      "name": "level",
-      "opacity": 1.0,
-      "tileset": "",
-      "visible": true
-    },
-    {
-      "corner": "normal",
-      "mode": "color",
+      "mode": "text",
       "name": "zones",
-      "opacity": 1.0,
-      "tileset": "",
-      "visible": false
-    },
-    {
-      "corner": "normal",
-      "mode": "corner",
-      "name": "rooms",
-      "opacity": 1.0,
-      "tileset": "",
-      "visible": true
-    },
-    {
-      "corner": "normal",
-      "mode": "shape",
-      "name": "entities",
-      "opacity": 1.0,
-      "tileset": "",
+      "view": "border",
       "visible": true
     }
   ],
-  "mini_px": 24.0,
   "tag_colors": {
     "entities": {
       "0": "00ff2d",
@@ -47,7 +18,6 @@
       "2": "00ff2d",
       "3": "ffadad"
     },
-    "level": null,
     "room": {
       "0": "00ff2d",
       "1": "ff00e6"

@@ -1,0 +1,71 @@
+// Step 5 - conditions.
+// Using the 'where' meta grid we can use expressions that evaluate to true
+// or false. If the expression in the 'where' grid is true for all the cells,
+// the rule applies.
+// We start an expression with '(' and end it with ')'. Expressions can be used
+// wherever we would like to evaluate a value at runtime. Since the 'where'
+// meta grid matches per cell, we can use the names for the layers to get the
+// value of the cell at the same position in that layer. We can also use the
+// coordinates 'x' and 'y', the grid's 'width' and 'height', and built-in
+// functions such as 'mod' and 'abs'.
+
+tag geometry { wall floor }
+
+layers {
+    zones: grid of number     // @view=text
+    level: grid of geometry   // @view=fill
+}
+
+// 'where' is not a grid you declare: its cells are conditions. A rule with a
+// 'where' pattern matches only where every condition holds. Here: zones whose
+// id leaves a remainder when divided by 3 ('mod' is the remainder), and never
+// on the outermost ring of the map.
+rule carve_zones {
+    level[.]
+    where[ (mod(zones, 3) != 0 && x > 0 && y > 0 && x < width - 1 && y < height - 1) ]
+    =>
+    level[floor]
+}
+
+// A diamond-shaped hall in the middle of the map. 'abs(x - width / 2)' is how
+// far a cell is from the middle column; numbers are integers, and '/' drops
+// the remainder.
+rule carve_hall {
+    level[.]
+    where[ (abs(x - width / 2) + abs(y - height / 2) < height / 3) ]
+    =>
+    level[floor]
+}
+
+// 'where' is a grid like any other layer: it can be as big as the rule's
+// pattern, with one condition per cell. Each condition reads the layers at
+// its own cell, so this rule compares two neighboring cells: the left one
+// in an even zone, the right one in an odd zone. Where they meet, the even
+// side gets a wall. 'rotation=all' tries the pattern in all four directions.
+// '*' in a 'where' cell places no condition on that cell.
+rule seam(rotation=all) {
+    level[floor floor]
+    where[ (mod(zones, 2) == 0) (mod(zones, 2) == 1) ]
+    =>
+    level[wall *]
+}
+
+// Zones that touch merge into larger rooms here; step 6 puts walls between
+// all of them.
+rule fill_rest {
+    level[.]
+    =>
+    level[wall]
+}
+
+sequence main {
+    resize(40, 30)
+    bsp(into=zones, min=2, max=4)       // @hold=10
+    everywhere carve_zones              // @hold=10
+    everywhere carve_hall               // @hold=10
+    everywhere seam                     // @hold=10
+    //everywhere fill_rest
+}
+
+// Exercise: make 'seam' three cells wide, with a '*' in the middle of the
+// 'where' pattern, so walls go up only between zones one cell apart.

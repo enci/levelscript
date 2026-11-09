@@ -3,34 +3,14 @@
   "grid_bg_color": "aeacf3",
   "layers": [
     {
-      "corner": "normal",
-      "mode": "color",
-      "name": "algo",
-      "opacity": 1.0,
-      "tileset": "",
-      "visible": true
-    },
-    {
-      "corner": "normal",
-      "mode": "tile",
       "name": "tiles",
-      "opacity": 1.0,
-      "tileset": "Desert",
-      "visible": true
+      "tileset": "Desert"
     },
     {
-      "corner": "normal",
-      "mode": "tile",
       "name": "props",
-      "opacity": 1.0,
-      "tileset": "Desert",
-      "visible": true
+      "tileset": "Desert"
     }
   ],
-  "mini_px": 24.0,
-  "tag_colors": {
-    "algo": null
-  },
   "tilesets": [
     {
       "name": "Desert",
