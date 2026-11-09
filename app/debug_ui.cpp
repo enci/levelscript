@@ -278,6 +278,26 @@ static std::vector<layer_view> layer_views(script const& sc) {
 
 // ── entry point ───────────────────────────────────────────────────────────────
 
+// The sidecar keeps param overrides as a diff against the script's @param
+// directives, so an edited @param still takes effect where it wasn't changed.
+static void apply_params(project_config const& cfg, script& sc) {
+    for (auto const& [n, v] : cfg.params) {
+        if (v) sc.param_overrides[n] = *v;
+        else   sc.param_overrides.erase(n);
+    }
+}
+static void store_params(project_config& cfg, script const& sc) {
+    cfg.params.clear();
+    auto const seeded = sc.dirs.params();
+    for (auto const& [n, v] : sc.param_overrides) {
+        auto it = std::find_if(seeded.begin(), seeded.end(),
+                               [&](auto const& s) { return s.first == n; });
+        if (it == seeded.end() || it->second != v) cfg.params[n] = v;
+    }
+    for (auto const& [n, v] : seeded)
+        if (!sc.param_overrides.count(n)) cfg.params[n] = std::nullopt;
+}
+
 int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_seed,
                  std::string const& entry) {
     // The open script; empty until one is opened. Open (button, Ctrl/Cmd+O,
@@ -294,6 +314,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
     project_config cfg = path.empty() ? project_config{}
                                       : project_config::load(path, sc.layer_names());
     cfg.apply_views(layer_views(sc));
+    apply_params(cfg, sc);
     auto window_title = [&] {
         return path.empty() ? std::string("LevelScript") : "LevelScript - " + path;
     };
@@ -529,6 +550,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
     // Restart reloads it once it is fixed.
     auto open_script = [&](std::string const& next) {
         thumbs.reset(cfg);                 // ends a solo before the save below
+        store_params(cfg, sc);
         if (!path.empty()) cfg.save(path);
         path = next;
         sc = script{};
@@ -537,6 +559,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
         load_script(sc);
         cfg = project_config::load(path, sc.layer_names());
         cfg.apply_views(layer_views(sc));
+        apply_params(cfg, sc);
         if (!seed_locked) seed = make_seed();
         run.restart(sc.gen, sc.entry, seed, sc.run_params());
         playing = false;
@@ -743,12 +766,14 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
                 ImGui::DockBuilderSplitNode(left,  ImGuiDir_Down, 0.40f, &left_bottom,  &left);
                 ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.45f, &right_bottom, &right);
                 ImGuiID bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.18f, nullptr, &center);
-                ImGui::DockBuilderDockWindow("Sequence",   left);
-                ImGui::DockBuilderDockWindow("Layers",     left_bottom);
-                ImGui::DockBuilderDockWindow("Viewport", center);
-                ImGui::DockBuilderDockWindow("Rule",         right);
-                ImGui::DockBuilderDockWindow("Tags",         right_bottom);
-                ImGui::DockBuilderDockWindow("Settings", right_bottom);
+                // Names must use the "###ID" part of each begin_pane() title --
+                // that's what the window ID hashes, not the visible label.
+                ImGui::DockBuilderDockWindow("###PROGRAM",  left);
+                ImGui::DockBuilderDockWindow("###LAYERS",   left_bottom);
+                ImGui::DockBuilderDockWindow("###VIEWPORT", center);
+                ImGui::DockBuilderDockWindow("###RULE",     right);
+                ImGui::DockBuilderDockWindow("###TAGS",     right_bottom);
+                ImGui::DockBuilderDockWindow("###SETTINGS", right_bottom);
                 ImGui::DockBuilderDockWindow("###PARAMS",   right_bottom);
                 ImGui::DockBuilderDockWindow("###PROFILER", bottom);
                 ImGui::DockBuilderFinish(dock_id);
@@ -1004,6 +1029,15 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
         // without the reload), so the viewport follows the value.
         begin_pane("Params###PARAMS");
         if (loaded && draw_params_window(sc)) {
+            // saved at once; a copy, so a layer solo stays live but isn't saved
+            store_params(cfg, sc);
+            if (!path.empty()) {
+                project_config out = cfg;
+                if (thumbs.solo >= 0)
+                    for (size_t k = 0; k < out.layers.size() && k < thumbs.saved_visible.size(); ++k)
+                        out.layers[k].visible = thumbs.saved_visible[k] != 0;
+                out.save(path);
+            }
             run.restart(sc.gen, sc.entry, seed, sc.run_params());
             if (!run.done) action_continue();
         }
@@ -1182,6 +1216,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
 
     // ── save config + cleanup ─────────────────────────────────────────────────
     thumbs.reset(cfg);   // a solo's hidden layers are not saved as hidden
+    store_params(cfg, sc);
     if (!path.empty()) cfg.save(path);
     save_prefs();
 

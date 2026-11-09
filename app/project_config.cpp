@@ -245,6 +245,12 @@ project_config project_config::load(std::string const& ls_path,
                     }
                 }
             }
+            if (j.contains("params") && j["params"].is_object()) {
+                for (auto const& [pname, jv] : j["params"].items()) {
+                    if (jv.is_null())                cfg.params[pname] = std::nullopt;
+                    else if (jv.is_number_integer()) cfg.params[pname] = jv.get<int>();
+                }
+            }
             if (j.contains("tag_shapes") && j["tag_shapes"].is_object()) {
                 for (auto const& [tname, jvs] : j["tag_shapes"].items()) {
                     if (!jvs.is_object()) continue;
@@ -301,6 +307,8 @@ void project_config::save(std::string const& ls_path) const {
         j["layers"].push_back(jl);
     }
     if (!shown_graphs.empty()) j["graphs"] = shown_graphs;
+    for (auto const& [pname, v] : params)
+        j["params"][pname] = v ? json(*v) : json(nullptr);
     for (auto const& [tname, vmap] : tag_colors)
         for (auto const& [vid, col] : vmap)
             j["tag_colors"][tname][std::to_string(vid)] = color_to_hex(col);

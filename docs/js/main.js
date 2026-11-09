@@ -398,6 +398,14 @@
 
     const $ = s => host.querySelector(s);
     const canvas = $('canvas'), status = $('.status'), errBox = $('.error');
+    // the chip on the canvas; errors (compile error, stopped, ...) are red like the error messages
+    function setStatus(text, isError) {
+      status.textContent = text;
+      status.classList.toggle('bad', !!isError);
+    }
+    // a run's time, like the native debugger's status bar. Browsers coarsen the clock (Safari and
+    // Firefox to 1 ms), so whole milliseconds; a run under the clock's grain reads "< 1 ms".
+    function fmtMs(ms) { return ms < 1 ? '< 1 ms' : Math.round(ms) + ' ms'; }
     const diagBox = $('.diag-list');
     if (opts.editor !== false && !window.LVS_CM) {
       // a local checkout without the bundle: say how to build it instead of failing silently
@@ -531,7 +539,8 @@
       });
     }
 
-    function render(state) {
+    // ms: how long a whole run took (Run, or an edit), shown once it is done
+    function render(state, ms) {
       last = state;
       const lvl = state.level;
       widenRanges(lvl);
@@ -543,8 +552,9 @@
       $('.legend').innerHTML = legendFor(lvl, look)
         .map(([n, color]) => '<span><i style="background:' + color + '"></i>' + esc(n) +
           (displayNames[n] ? ' <em>' + esc(displayNames[n]) + '</em>' : '') + '</span>').join('');
-      status.textContent = (state.done ? 'done' : 'statement ' + Math.min(state.statementIndex + 1, state.statementCount) +
-        ' / ' + state.statementCount) + ' · ' + lvl.width + '×' + lvl.height;
+      setStatus((state.done ? 'done' : 'statement ' + Math.min(state.statementIndex + 1, state.statementCount) +
+        ' / ' + state.statementCount) + ' · ' + lvl.width + '×' + lvl.height +
+        (state.done && ms !== undefined ? ' · ' + fmtMs(ms) : ''));
     }
 
     // ---- cell inspector: every layer's value at the cell under the pointer, with @name names ----
@@ -696,7 +706,7 @@
       endSession();
       if (worker) stopWorker();
       showError('');
-      status.textContent = 'compile error';
+      setStatus('compile error', true);
       return true;
     }
     function sync(typing) {
@@ -748,7 +758,7 @@
       if (blocked()) return false;
       rampRange = {};
       const id = mod.run_begin(source(), fileName, seed >>> 0, 'main', resolver(fileName), params);
-      if (id < 0) { showError(mod.run_last_error()); status.textContent = 'compile error'; return false; }
+      if (id < 0) { showError(mod.run_last_error()); setStatus('compile error', true); return false; }
       sessionId = id;
       return true;
     }
@@ -756,7 +766,9 @@
     function runAll() {
       if (opts.worker && window.Worker) { runInWorker(); return; }
       if (!begin()) return;
-      render(JSON.parse(mod.run_finish(sessionId)));
+      const t0 = performance.now();
+      const out = mod.run_finish(sessionId);
+      render(JSON.parse(out), performance.now() - t0);
     }
 
     // The lab runs programs in a worker. A program that never reaches its fixpoint
@@ -780,21 +792,21 @@
       }
       const token = ++runToken;
       pending = true;
-      status.textContent = 'running…';
+      setStatus('running…');
       worker.onmessage = e => {
         if (e.data.token !== token) return;
         clearTimeout(runTimer);
         pending = false;
-        if (e.data.error) { showError(e.data.error); status.textContent = 'compile error'; return; }
+        if (e.data.error) { showError(e.data.error); setStatus('compile error', true); return; }
         rampRange = {};
-        render(JSON.parse(e.data.state));
+        render(JSON.parse(e.data.state), e.data.ms);
       };
-      worker.onerror = () => { stopWorker(); showError('The run worker failed to start.'); status.textContent = 'runtime unavailable'; };
+      worker.onerror = () => { stopWorker(); showError('The run worker failed to start.'); setStatus('runtime unavailable', true); };
       runTimer = setTimeout(() => {
         stopWorker();
         showError('Stopped: the run took longer than ' + RUN_LIMIT_MS / 1000 + ' s. A grow or settle without a count ' +
           'may never reach its fixpoint.');
-        status.textContent = 'stopped';
+        setStatus('stopped', true);
       }, RUN_LIMIT_MS);
       worker.postMessage({ token, source: source(), name: fileName, seed, params: Object.assign({}, params),
         files: window.LVS_FILES || {} });
@@ -883,7 +895,7 @@
     opts.onApi && opts.onApi(api);
     if (opts.dynamicParams) {
       host.querySelectorAll('.controls button').forEach(b => { b.disabled = true; });
-      status.textContent = 'loading…';
+      setStatus('loading…');
     }
 
     return loadRuntime().then(m => {
@@ -894,7 +906,7 @@
       return api;
     }).catch(err => {
       showError(String(err.message || err));
-      status.textContent = 'runtime unavailable';
+      setStatus('runtime unavailable', true);
     });
   }
 
@@ -980,7 +992,6 @@
       '<div class="lab-bar">' +
         '<div class="lab-group" role="group" aria-label="Your script">' +
           '<span class="lab-label"><i class="ph ph-file-code"></i> script</span>' +
-          '<select id="lab-script" aria-label="Your scripts" title="Your scripts, kept in this browser as you type (Ctrl/Cmd+S saves at once)"></select>' +
           '<button type="button" id="lab-new" title="Start a new script"><i class="ph ph-plus"></i> New</button>' +
           '<button type="button" id="lab-rename" title="Rename this script"><i class="ph ph-pencil-simple"></i> Rename</button>' +
           '<button type="button" id="lab-download" title="Save this script as a .lvs file (Ctrl/Cmd+Shift+S)"><i class="ph ph-download-simple"></i> Download</button>' +
@@ -1143,21 +1154,78 @@
       onChange, onApi: api => { widget = api; window.LVS_lab = api; }
     });
 
-    // toolbar: the script picker, newest edit first
-    const picker = document.getElementById('lab-script');
+    // tabs over the editor: one per script, in the order they were made (so they do not jump
+    // around while you type). Click to open, double-click to rename, x to delete, + for a new one.
+    const picker = document.createElement('div');
+    picker.className = 'lab-tabs';
+    picker.setAttribute('role', 'tablist');
+    picker.setAttribute('aria-label', 'Your scripts');
+    (labEl.querySelector('.edit-col') || labEl).prepend(picker);
     function fillPicker() {
-      if (!picker) return;
       picker.innerHTML = '';
-      lib.scripts.slice().sort((a, b) => b.updated - a.updated).forEach(x => {
-        const o = document.createElement('option');
-        o.value = x.id;
-        o.textContent = x.name;
-        picker.appendChild(o);
+      lib.scripts.forEach(x => {
+        const on = x.id === lib.current;
+        const t = document.createElement('div');
+        t.className = 'lab-tab' + (on ? ' on' : '');
+        t.setAttribute('role', 'tab');
+        t.setAttribute('aria-selected', on ? 'true' : 'false');
+        t.tabIndex = on ? 0 : -1;
+        t.dataset.id = x.id;
+        t.title = x.name + ' (double-click to rename)';
+        t.innerHTML = '<span class="lab-tab-name"></span>' +
+          '<button type="button" class="lab-tab-close" tabindex="-1" aria-label="Delete script" title="Delete this script">&times;</button>';
+        t.firstChild.textContent = x.name;
+        picker.appendChild(t);
       });
-      picker.value = lib.current;
+      const plus = document.createElement('button');
+      plus.type = 'button';
+      plus.className = 'lab-tab-new';
+      plus.title = 'Start a new script';
+      plus.setAttribute('aria-label', 'New script');
+      plus.innerHTML = '<i class="ph ph-plus"></i>';
+      picker.appendChild(plus);
+      // keep the open tab in view when it changes (not on every save, so the page stays put)
+      const cur = picker.querySelector('.lab-tab.on');
+      if (cur && shownTab !== lib.current) {
+        shownTab = lib.current;
+        picker.scrollLeft = Math.max(0, Math.min(picker.scrollLeft, cur.offsetLeft - 8),
+          cur.offsetLeft + cur.offsetWidth + 40 - picker.clientWidth);
+      }
     }
+    let shownTab = null;
     fillPicker();
-    picker.addEventListener('change', () => open(picker.value));
+    picker.addEventListener('click', e => {
+      if (e.target.closest('.lab-tab-new')) { document.getElementById('lab-new').click(); return; }
+      const t = e.target.closest('.lab-tab');
+      if (!t) return;
+      if (e.target.closest('.lab-tab-close')) { removeScript(t.dataset.id); return; }
+      if (t.dataset.id !== lib.current) open(t.dataset.id);
+    });
+    picker.addEventListener('dblclick', e => {
+      const t = e.target.closest('.lab-tab');
+      if (t && !e.target.closest('.lab-tab-close')) document.getElementById('lab-rename').click();
+    });
+    // a mouse wheel scrolls the tabs sideways (they have no scrollbar)
+    picker.addEventListener('wheel', e => {
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX) || picker.scrollWidth <= picker.clientWidth) return;
+      e.preventDefault();
+      picker.scrollLeft += e.deltaY;
+    }, { passive: false });
+    // middle click closes, like browser tabs
+    picker.addEventListener('auxclick', e => {
+      const t = e.button === 1 && e.target.closest('.lab-tab');
+      if (t) { e.preventDefault(); removeScript(t.dataset.id); }
+    });
+    picker.addEventListener('keydown', e => {
+      const tabs = [...picker.querySelectorAll('.lab-tab')];
+      const i = tabs.findIndex(t => t.dataset.id === lib.current);
+      const j = e.key === 'ArrowRight' ? i + 1 : e.key === 'ArrowLeft' ? i - 1 : e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : -2;
+      if (j === -2 || !tabs[j]) return;
+      e.preventDefault();
+      open(tabs[j].dataset.id);
+      const t = picker.querySelector('.lab-tab.on');
+      if (t) t.focus();
+    });
     // another tab changed the library: refresh the list (the open script stays as it is here)
     window.addEventListener('storage', e => {
       if (e.key !== LIB) return;
@@ -1181,15 +1249,18 @@
       const next = uniqueName(name);
       change(l => { const y = l.scripts.find(z => z.id === x.id); if (y) y.name = next; });
     });
-    document.getElementById('lab-delete').addEventListener('click', () => {
-      const x = byId(lib.current);
+    // delete a script; if it was the open one, its neighbour tab opens
+    function removeScript(id) {
+      const x = byId(id);
       if (!x || !window.confirm('Delete "' + x.name + '"? This cannot be undone.')) return;
-      dirty = null;
-      clearTimeout(timer);
-      change(l => { l.scripts = l.scripts.filter(y => y.id !== x.id); });
+      const wasOpen = id === lib.current;
+      if (wasOpen) { dirty = null; clearTimeout(timer); } else flush();
+      const at = lib.scripts.findIndex(y => y.id === id);
+      change(l => { l.scripts = l.scripts.filter(y => y.id !== id); });
       if (!lib.scripts.length) { add('untitled', { source: STARTER, seed: 1 }); return; }
-      open(lib.scripts.slice().sort((a, b) => b.updated - a.updated)[0].id);
-    });
+      if (wasOpen) open(lib.scripts[Math.min(at, lib.scripts.length - 1)].id);
+    }
+    document.getElementById('lab-delete').addEventListener('click', () => removeScript(lib.current));
 
     // a sample or a file always opens as a new script: nothing is overwritten
     const pick = document.getElementById('lab-sample');
@@ -1264,7 +1335,7 @@
       const chips = document.getElementById('ref-kinds');
       const out = document.getElementById('ref-results');
       let kind = 'all';
-      ['all', 'function', 'operation', 'mode', 'keyword'].forEach(k => {
+      ['all', 'function', 'operation', 'mode', 'keyword', 'attribute'].forEach(k => {
         const c = document.createElement('span');
         c.className = 'chip' + (k === 'all' ? ' on' : '');
         c.textContent = k;
@@ -1275,12 +1346,56 @@
         };
         chips.appendChild(c);
       });
+      // The inline markdown of docs/reference.md: `code`, **bold**, *italic* (escaped first).
+      function inline(s) {
+        return esc(s).split(/(`[^`]*`)/).map(part => part.startsWith('`') && part.length > 1
+          ? '<code>' + part.slice(1, -1) + '</code>'
+          : part.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/\*([^*\s][^*]*)\*/g, '<em>$1</em>')
+        ).join('');
+      }
+      // The detail of an entry: its blocks, then the related entries as links into the search.
+      function detail(e) {
+        let html = (e.doc || []).map(b =>
+          b.p ? '<p>' + inline(b.p) + '</p>' :
+          b.ul ? '<ul>' + b.ul.map(li => '<li>' + inline(li) + '</li>').join('') + '</ul>' :
+          '<pre><code>' + highlight(b.code) + '</code></pre>').join('');
+        if (e.related && e.related.length) {
+          html += '<p class="ref-related">See also: ' + e.related.map(r =>
+            '<a href="#" data-ref="' + esc(r) + '">' + esc(r) + '</a>').join(', ') + '</p>';
+        }
+        return html;
+      }
+      const open = new Set();   // names of the expanded entries, kept across searches
       function row(e) {
         const el = document.createElement('div');
-        el.className = 'ref-row';
-        el.innerHTML = '<code>' + esc(e.signature) + '</code><span class="ref-sum">' + esc(e.summary) + '</span>' +
-          '<button type="button">insert</button>';
+        el.className = 'ref-row' + (open.has(e.name) ? ' open' : '');
+        el.innerHTML = '<div class="ref-head" role="button" tabindex="0" aria-expanded="' + open.has(e.name) + '">' +
+            '<code>' + esc(e.signature) + '</code><span class="ref-sum">' + inline(e.summary) + '</span>' +
+            '<button type="button" title="Insert at the cursor">insert</button>' +
+          '</div>' +
+          '<div class="ref-detail">' + detail(e) + '</div>';
+        const head = el.querySelector('.ref-head');
+        const toggle = () => {
+          const on = el.classList.toggle('open');
+          head.setAttribute('aria-expanded', on);
+          if (on) open.add(e.name); else open.delete(e.name);
+        };
+        head.onclick = ev => { if (!ev.target.closest('button')) toggle(); };
+        head.onkeydown = ev => {
+          if ((ev.key === 'Enter' || ev.key === ' ') && ev.target === head) { ev.preventDefault(); toggle(); }
+        };
         el.querySelector('button').onclick = () => widget && widget.insert(e.insert);
+        el.querySelectorAll('[data-ref]').forEach(a => a.onclick = ev => {
+          ev.preventDefault();
+          const name = a.dataset.ref;
+          q.value = name;
+          open.add(name);
+          kind = 'all';   // the related entry may be of another kind than the filter
+          chips.querySelectorAll('.chip').forEach(c => c.classList.toggle('on', c.textContent === 'all'));
+          show();
+          const hit = out.querySelector('.ref-row.open');
+          if (hit) hit.scrollIntoView({ block: 'nearest' });
+        });
         return el;
       }
       function show() {

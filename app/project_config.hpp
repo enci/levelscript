@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -80,6 +81,10 @@ struct project_config {
     std::unordered_map<std::string, std::unordered_map<int, uint32_t>> tag_colors;
     // tag_name -> value_id -> shape; absent means tag_shape::none
     std::unordered_map<std::string, std::unordered_map<int, tag_shape>> tag_shapes;
+
+    // Input param overrides that differ from the script's @param directives:
+    // a value, or nullopt for "use the declared default" (a @param unset).
+    std::map<std::string, std::optional<int>> params;
 
     // Load from <ls_path>.json; builds defaults from layer_names if absent.
     static project_config load(std::string const& ls_path,

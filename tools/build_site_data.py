@@ -6,7 +6,9 @@ the pages show wherever an element has data-ls-version (see docs/js/main.js).
 
 The site runs every program live through the WASM build, so this only needs the
 sources: each sample's text, pinned seed, one-line description and declared
-params, from samples/{tutorial,techniques,games}/. Every sample file also goes
+params, from samples/{tutorial,techniques,games}/.
+It also carries the lab's Reference: names and signatures from the spec's tables,
+the user-facing text from docs/reference.md (see that file's header). Every sample file also goes
 into LVS_FILES under its folder path, so `use "other.lvs"` resolves next to it.
 
     python tools/build_site_data.py
@@ -52,11 +54,6 @@ def params(src: str) -> list:
             for p in re.finditer(r"(\w+)\s*:\s*number\s*=\s*(-?\d+)", m.group(1))]
 
 
-def slug(heading: str) -> str:
-    """The id the spec viewer gives a heading (docs/js/main.js, spec viewer)."""
-    return re.sub(r"^-|-$", "", re.sub(r"[^\w]+", "-", heading.lower())) or "section"
-
-
 def table(md: str, heading: str) -> list:
     """Rows of the first pipe table after `heading`, as lists of cell text."""
     start = md.find(heading)
@@ -78,28 +75,18 @@ def plain(text: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[`*]", "", text)).strip()
 
 
-def section_of(md: str, ref: str, default: str) -> str:
-    """Anchor of the spec section a table row cites, e.g. 'section 6.6' -> 6-6-...."""
-    m = re.search(r"section (\d+\.\d+)", ref)
-    if not m:
-        return default
-    h = re.search(rf"^#+ {re.escape(m.group(1))} .*$", md, re.M)
-    return slug(h.group(0).lstrip("# ")) if h else default
-
-
 def api_entries(md: str) -> list:
-    """Searchable language reference, distilled from the spec's own tables.
+    """The names, kinds and signatures of the language reference, from the spec's own tables.
 
     One entry per function (5.10), operation (6.0), mode (6) and keyword (2.4):
-    {name, kind, signature, summary, anchor}. Fails if a table moves or empties.
+    {name, kind, signature, insert, summary}. The summary here is the spec's terse one;
+    with_docs() replaces it with the user-facing text. Fails if a table moves or empties.
     """
     out = []
-    fn_anchor = slug("5.10 Built-in functions")
     for call, sig, result in table(md, "### 5.10 Built-in functions"):
         name = re.match(r"`(\w+)", call).group(1)
         out.append({"name": name, "kind": "function", "signature": plain(call),
-                    "summary": plain(result).split(". ")[0].rstrip("."), "anchor": fn_anchor,
-                    "detail": plain(sig)})
+                    "summary": plain(result).split(". ")[0].rstrip("."), "detail": plain(sig)})
     for op, params, effect in table(md, "**Operation table.**"):
         name = plain(op)
         items = re.findall(r"`([^`]+)`", params)
@@ -109,46 +96,116 @@ def api_entries(md: str) -> list:
         req = [i.split(":")[0].strip() for i in items if ":" in i and "?" not in i]
         insert = name + "(" + ", ".join(f"{r}={r}" if named else r for r in req) + ")"
         out.append({"name": name, "kind": "operation", "signature": sig, "insert": insert,
-                    "summary": re.sub(r"\s*\(section [^)]*\)", "", plain(effect)),
-                    "anchor": section_of(md, effect, slug("6.0 Built-in operations"))})
-    mode_anchor = slug("6.7 Rule application semantics")
+                    "summary": re.sub(r"\s*\(section [^)]*\)", "", plain(effect))})
     for mode, over_rule, _ in table(md, "**Modes.**"):
         for form in re.findall(r"`([^`]+)`", mode):
             out.append({"name": re.match(r"\w+", form).group(0), "kind": "mode", "signature": form,
-                        "summary": plain(over_rule), "anchor": mode_anchor})
+                        "summary": plain(over_rule)})
     kw = re.search(r"### 2\.4 Reserved keywords\s+```\n(.*?)```", md, re.S)
     declared = {e["name"] for e in out}
     for word in kw.group(1).split() if kw else []:
         if word not in declared:
-            out.append({"name": word, "kind": "keyword", "signature": word, "summary": KEYWORDS.get(word, ""),
-                        "anchor": slug("2.4 Reserved keywords")})
-    missing = [e["name"] for e in out if e["kind"] == "keyword" and not e["summary"]]
-    if missing or not any(e["kind"] == "function" for e in out):
-        raise SystemExit(f"API extraction incomplete; add KEYWORDS entries for: {missing}")
+            out.append({"name": word, "kind": "keyword", "signature": word, "summary": ""})
+    if not any(e["kind"] == "function" for e in out) or not any(e["kind"] == "keyword" for e in out):
+        raise SystemExit("spec.md: API extraction incomplete (a table or the keyword list moved)")
     for e in out:
         e.setdefault("insert", e["signature"])
-    # dedupe: a mode keyword listed twice (scatter(N) / scatter(P%)) keeps the first
-    seen, uniq = set(), []
+    # merge the forms of one name (scatter(N) / scatter(P%), count(n, s) / count(s)) into one
+    # entry that lists every signature and inserts the first
+    uniq = {}
     for e in out:
         k = (e["name"], e["kind"])
-        if k not in seen:
-            seen.add(k)
-            uniq.append(e)
-    return sorted(uniq, key=lambda e: (e["kind"], e["name"]))
+        if k in uniq:
+            uniq[k]["signature"] += ", " + e["signature"]
+        else:
+            uniq[k] = e
+    return sorted(uniq.values(), key=lambda e: (e["kind"], e["name"]))
 
 
-# One-line meaning for keywords, which the spec lists but does not tabulate.
-KEYWORDS = {
-    "tag": "declare a tagset: named cell values and named masks", "layers": "declare the grids a generator works on",
-    "grid": "a layer of cells", "graph": "a graph layer: regions as nodes, adjacency as edges",
-    "of": "binds a grid to its tagset (grid of tagset)", "number": "numeric cell type",
-    "rule": "a pattern => pattern rewrite", "sequence": "a named, reusable list of statements",
-    "params": "inputs and derived values of a generator", "where": "pseudo-layer matching on a boolean expression",
-    "when": "guard: run the statement only if the param expression holds", "use": "import another module",
-    "any": "pick one alternative at random", "all": "every sub-rule must match",
-    "ordered": "sub-rules tried in priority order", "weight": "relative chance of an alternative",
-    "is": "mask match: a is m holds when a overlaps the mask m, as a pattern cell matches",
-}
+def reference_sections(md: str) -> dict:
+    """The sections of docs/reference.md: name -> {summary, doc, related[, kind, signature]}.
+
+    doc is a list of blocks, {"p": text}, {"ul": [text]} or {"code": text}, whose text keeps
+    its inline markdown (`code`, **bold**, *italic*) for the page to render.
+    """
+    body = md.split("<!-- entries -->", 1)
+    if len(body) != 2:
+        raise SystemExit("reference.md: the '<!-- entries -->' marker is missing")
+    sections = {}
+    for chunk in re.split(r"^## ", body[1], flags=re.M)[1:]:
+        head, _, text = chunk.partition("\n")
+        m = re.fullmatch(r"(\w+)(?: \((\w+): (.+)\))?", head.strip())
+        if not m:
+            raise SystemExit(f"reference.md: bad heading: '## {head.strip()}'")
+        name = m.group(1)
+        if name in sections:
+            raise SystemExit(f"reference.md: '{name}' is described twice")
+        # blank lines separate blocks, except inside a fenced example
+        raw, cur, fenced = [], [], False
+        for ln in text.strip().splitlines():
+            if ln.startswith("```"):
+                fenced = not fenced
+            if not ln.strip() and not fenced:
+                if cur:
+                    raw.append("\n".join(cur))
+                cur = []
+            else:
+                cur.append(ln)
+        if fenced:
+            raise SystemExit(f"reference.md: unclosed example in '{name}'")
+        if cur:
+            raw.append("\n".join(cur))
+        blocks, related = [], []
+        for block in raw:
+            if block.startswith("```"):
+                blocks.append({"code": re.sub(r"^```\w*\n|\n```$", "", block)})
+            elif block.startswith("See also:"):
+                related = [r.strip() for r in block[len("See also:"):].split(",") if r.strip()]
+            elif block.startswith("- "):
+                blocks.append({"ul": [re.sub(r"\s+", " ", item).strip()
+                                      for item in re.split(r"^- ", block, flags=re.M) if item.strip()]})
+            else:
+                blocks.append({"p": re.sub(r"\s+", " ", block)})
+        if not blocks or "p" not in blocks[0]:
+            raise SystemExit(f"reference.md: '{name}' must start with a one-paragraph summary")
+        sec = {"summary": blocks[0]["p"], "doc": blocks[1:], "related": related}
+        if m.group(2):
+            sec.update(kind=m.group(2), signature=m.group(3))
+        sections[name] = sec
+    return sections
+
+
+def with_docs(entries: list, sections: dict) -> list:
+    """Merge the user-facing reference into the spec's entries; fail on any gap or stray name."""
+    names = {e["name"] for e in entries}
+    missing = sorted(names - sections.keys())
+    if missing:
+        raise SystemExit(f"reference.md: no section for: {', '.join(missing)}")
+    for name, sec in sections.items():
+        if name not in names and "kind" not in sec:
+            raise SystemExit(f"reference.md: '{name}' is not in the spec; declare it as "
+                             f"'## {name} (kind: signature)' to add it")
+        if name in names and "kind" in sec:
+            raise SystemExit(f"reference.md: '{name}' is in the spec; drop the (kind: signature)")
+    out = []
+    for e in entries:
+        sec = sections[e["name"]]
+        e = {**e, "summary": sec["summary"], "doc": sec["doc"], "related": sec["related"]}
+        e.pop("detail", None)
+        out.append(e)
+    for name, sec in sections.items():
+        if name not in names:
+            out.append({"name": name, "kind": sec["kind"], "signature": sec["signature"],
+                        # an attribute inserts its `all` form where it has one: the usual choice
+                        "insert": re.sub(r"=.*", "=all", sec["signature"]) if "|all" in sec["signature"]
+                        else sec["signature"].split("|")[0],
+                        "summary": sec["summary"], "doc": sec["doc"], "related": sec["related"]})
+    known = {e["name"] for e in out}
+    for e in out:
+        stray = [r for r in e["related"] if r not in known]
+        if stray:
+            raise SystemExit(f"reference.md: '{e['name']}' sees also unknown: {', '.join(stray)}")
+    return sorted(out, key=lambda e: (e["kind"], e["name"]))
 
 
 def editor_data() -> dict:
@@ -212,7 +269,8 @@ def main() -> None:
         raise SystemExit(f"sample names must be unique across folders: {', '.join(dupes)}")
 
     editor = editor_data()
-    api = api_entries((ROOT / "docs" / "spec.md").read_text(encoding="utf-8"))
+    api = with_docs(api_entries((ROOT / "docs" / "spec.md").read_text(encoding="utf-8")),
+                    reference_sections((ROOT / "docs" / "reference.md").read_text(encoding="utf-8")))
 
     out = ROOT / "docs" / "js" / "samples-data.js"
     out.parent.mkdir(parents=True, exist_ok=True)

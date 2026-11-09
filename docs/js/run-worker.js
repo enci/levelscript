@@ -25,9 +25,11 @@ self.onmessage = async e => {
     const mod = await ready;
     const id = mod.run_begin(source, name, seed >>> 0, 'main', resolver(files, name), params);
     if (id < 0) { self.postMessage({ token, error: mod.run_last_error() }); return; }
+    const t0 = performance.now();
     const state = mod.run_finish(id);
+    const ms = performance.now() - t0;   // the run (and its state as JSON), for the status chip
     mod.run_end(id);
-    self.postMessage({ token, state });
+    self.postMessage({ token, state, ms });
   } catch (err) {
     self.postMessage({ token, error: String(err && err.message || err) });
   }
