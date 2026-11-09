@@ -1,0 +1,52 @@
+// Step 8 - cellular automata.
+
+// 'settle' repeats a batch until a pass changes
+// nothing, and a 'sequence' groups statements so they can be repeated
+// together. A cave room is filled with noise and smoothed by two rules taking
+// turns until the shapes stop changing.
+
+tag fill {
+    left
+    right
+}
+
+tag terrain {
+    rock
+    river    
+    marsh
+    grass
+    tree
+    flower
+}
+
+layers {
+    fill: grid of fill          // @view=fill
+    terrain: grid of terrain    // @view=fill
+}
+
+
+sequence fill_lr {
+    once(rotation=all) { fill[left . ]  => fill[left left] }
+    once(rotation=all) { fill[right . ] => fill[right right] }    
+}
+
+sequence place_river {
+    settle (rotation=all) { fill[left right] => terrain[river river] }
+}
+
+rule place_marsh (rotation=all) { ordered
+    terrain[river .] => terrain[river marsh]
+    terrain[marsh .] => terrain[marsh marsh]
+}
+
+sequence main {    
+    resize(40, 30)
+    once { fill[.] where[(x < 20 )] => fill[left] }     // @hold=20
+    once { fill[.] where[(x >= 20)] => fill[right] }    // @hold=20
+    settle fill_lr
+    settle place_river
+    grow((width*height)/4) place_marsh
+    everywhere { terrain[.] => terrain[grass] }
+    scatter((width*height)/12) { terrain[grass] => terrain[tree] }
+    scatter(5%) { terrain[marsh] => terrain[flower] }
+}

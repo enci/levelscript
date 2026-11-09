@@ -668,15 +668,24 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
                 hold_ticks = play_hold(sc, run.left, run.entered);
             return hold_ticks > 0;
         };
+        // Whether a play_fps tick is due. Ticks keep to their own grid rather
+        // than to the frame that noticed them: restarting from `now` would
+        // round every period up to whole vsync frames (30 fps on a 60 Hz
+        // display came out at ~24). After a stall, restart instead of catching up.
+        auto tick_due = [&] {
+            auto now    = clock::now();
+            auto period = std::chrono::duration_cast<clock::duration>(
+                std::chrono::duration<float>(1.f / play_fps));
+            if (now - last_advance < period) return false;
+            last_advance += period;
+            if (now - last_advance >= period) last_advance = now;
+            return true;
+        };
         size_t pace_depth = 0;
         auto   pace_stack = run.gen.stmt_stack();
         int    pace = playing ? play_pace(sc, pace_stack, pace_depth) : -1;
         if (playing && !run.busy() && hold_ticks > 0) {
-            auto now = clock::now();
-            if (std::chrono::duration<float>(now - last_advance).count() >= 1.f / play_fps) {
-                hold_ticks--;
-                last_advance = now;
-            }
+            if (tick_due()) hold_ticks--;
         } else if (playing && !run.busy() && pace >= 0) {
             // @play=N: N steps this frame; @play=0: the whole statement (in
             // slices of a few frames' time, so the window stays live). Stops
@@ -692,18 +701,23 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
             run.refresh();
             if (!run.paused_at.empty()) playing = false;
             last_advance = clock::now();
-        } else if (playing && !run.busy()) {
-            {
-                auto now = clock::now();
-                float elapsed = std::chrono::duration<float>(now - last_advance).count();
-                if (elapsed >= 1.f / play_fps) {
-                    run.advance_cmd(sc.breakpoints);
-                    held();
-                    run.refresh();
-                    if (!run.paused_at.empty()) playing = false;
-                    last_advance = now;
-                }
+        } else if (playing && !run.busy() && tick_due()) {
+            // One visible change per tick. A statement's begin, and the end
+            // of one that applied something, change nothing on screen, so they
+            // pass with the next event instead of taking ticks of their own
+            // (a `once` would otherwise spend three ticks on one application).
+            // An end with no applications still takes a tick: an operation
+            // (resize, ...) changes the grid only there.
+            for (;;) {
+                run.advance_cmd(sc.breakpoints);
+                if (run.done || !run.paused_at.empty()) break;
+                if (held()) break;
+                if (run.gen.at_statement_begin()) continue;
+                if (run.gen.at_statement_boundary() && run.apps_in_stmt > 0) continue;
+                break;
             }
+            run.refresh();
+            if (!run.paused_at.empty()) playing = false;
         }
 
         // Sync tileset textures if a path changed via UI.
