@@ -112,7 +112,7 @@ jobs:
 
   macos:
     needs: version
-    timeout-minutes: 180   # macOS runners build the dependencies slowly; no rush
+    timeout-minutes: 90    # macOS bills at 10x; ccache keeps warm builds far shorter
     runs-on: macos-latest
     env:
       VERSION: ${{ needs.version.outputs.version }}
@@ -126,6 +126,17 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+
+      # SDL3 and FreeType dominate build time; ccache reuses their objects between runs.
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: macos-release
+          max-size: 500M
+
+      - name: Use ccache
+        run: |
+          foreach ($l in 'C','CXX','OBJC','OBJCXX') { "CMAKE_${l}_COMPILER_LAUNCHER=ccache" >> $env:GITHUB_ENV }
 
       # Apple Silicon binaries that run on macOS 11 and later;
       # left at its default, the deployment target would be the runner's own macOS.

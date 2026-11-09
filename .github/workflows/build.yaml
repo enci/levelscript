@@ -26,17 +26,26 @@ defaults:
   run:
     shell: pwsh
 
+# Cancel superseded runs of the same branch/PR instead of paying for both.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: ${{ matrix.os }} (${{ matrix.Configuration }})
-    # SDL3, FreeType, ImGui and Catch2 are fetched and built from source on every run.
-    # macOS runners are slow at that, so they get 3 hours; the rest keep 30 minutes.
-    timeout-minutes: ${{ matrix.os == 'macos-latest' && 180 || 30 }}
+    # macOS minutes bill at 10x, Windows at 2x (private repos), so cap them tightly.
+    timeout-minutes: ${{ matrix.os == 'macos-latest' && 60 || 30 }}
     strategy:
       fail-fast: false
       matrix:
-        os: ["windows-latest", "ubuntu-latest", "macos-latest"]
+        # macOS only on manual runs (and on tags, via release.yml): it bills at 10x.
+        os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && '["windows-latest","ubuntu-latest","macos-latest"]' || '["windows-latest","ubuntu-latest"]') }}
         Configuration: ["Debug", "Release"]
+        exclude:
+          # When run by hand, Release alone covers macOS.
+          - os: macos-latest
+            Configuration: Debug
     runs-on: ${{ matrix.os }}
     env:
       # Visual Studio is multi-config (build/app/Debug/...); Makefiles are single-config (build/app/...).
@@ -62,6 +71,20 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+
+      # SDL3 and FreeType dominate build time; ccache reuses their objects between runs.
+      # (Skipped on Windows: the Visual Studio generator ignores compiler launchers.)
+      - name: Set up ccache
+        if: runner.os != 'Windows'
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ matrix.os }}-${{ matrix.Configuration }}
+          max-size: 500M
+
+      - name: Use ccache
+        if: runner.os != 'Windows'
+        run: |
+          foreach ($l in 'C','CXX','OBJC','OBJCXX') { "CMAKE_${l}_COMPILER_LAUNCHER=ccache" >> $env:GITHUB_ENV }
 
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.Configuration }}
