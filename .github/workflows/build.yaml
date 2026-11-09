@@ -74,16 +74,24 @@ jobs:
 
       # SDL3 and FreeType dominate build time; ccache reuses their objects between runs.
       # (Skipped on Windows: the Visual Studio generator ignores compiler launchers.)
-      - name: Set up ccache
+      - name: Install ccache
         if: runner.os != 'Windows'
-        uses: hendrikmuhs/ccache-action@v1.2
+        run: |
+          if ($IsMacOS) { brew install ccache } else { sudo apt-get install -y --no-install-recommends ccache }
+
+      - name: Restore ccache
+        if: runner.os != 'Windows'
+        uses: actions/cache@v6
         with:
-          key: ${{ matrix.os }}-${{ matrix.Configuration }}
-          max-size: 500M
+          path: .ccache
+          key: ccache-${{ matrix.os }}-${{ matrix.Configuration }}-${{ github.run_id }}
+          restore-keys: ccache-${{ matrix.os }}-${{ matrix.Configuration }}-
 
       - name: Use ccache
         if: runner.os != 'Windows'
         run: |
+          "CCACHE_DIR=${{ github.workspace }}/.ccache" >> $env:GITHUB_ENV
+          "CCACHE_MAXSIZE=500M" >> $env:GITHUB_ENV
           foreach ($l in 'C','CXX','OBJC','OBJCXX') { "CMAKE_${l}_COMPILER_LAUNCHER=ccache" >> $env:GITHUB_ENV }
 
       - name: Configure

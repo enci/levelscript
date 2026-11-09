@@ -128,14 +128,20 @@ jobs:
           python-version: "3.12"
 
       # SDL3 and FreeType dominate build time; ccache reuses their objects between runs.
-      - name: Set up ccache
-        uses: hendrikmuhs/ccache-action@v1.2
+      - name: Install ccache
+        run: brew install ccache
+
+      - name: Restore ccache
+        uses: actions/cache@v6
         with:
-          key: macos-release
-          max-size: 500M
+          path: .ccache
+          key: ccache-macos-latest-Release-${{ github.run_id }}
+          restore-keys: ccache-macos-latest-Release-
 
       - name: Use ccache
         run: |
+          "CCACHE_DIR=${{ github.workspace }}/.ccache" >> $env:GITHUB_ENV
+          "CCACHE_MAXSIZE=500M" >> $env:GITHUB_ENV
           foreach ($l in 'C','CXX','OBJC','OBJCXX') { "CMAKE_${l}_COMPILER_LAUNCHER=ccache" >> $env:GITHUB_ENV }
 
       # Apple Silicon binaries that run on macOS 11 and later;
