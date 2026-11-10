@@ -229,6 +229,11 @@ struct compiled_rule {
     bool                       is_inline{false};   // written in a statement
     body_combinator            body{body_combinator::none};   // `ordered` matters at runtime
     std::vector<compiled_pair> pairs;   // all symmetry/rotation variants, deduped
+    std::vector<int>           sub_weights;   // by sub_rule_idx; read only under an `any` body
+    // An `any` sub-rule of weight 0 is never tested, as if absent.
+    bool tested(int sub_rule) const {
+        return body != body_combinator::any || sub_weights[(size_t)sub_rule] > 0;
+    }
 };
 
 // ── operations ───────────────────────────────────────────────────────────────

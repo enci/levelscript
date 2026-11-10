@@ -11,7 +11,7 @@ bool ident_start(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z
 bool digit(char c) { return c >= '0' && c <= '9'; }
 bool ident_cont(char c) { return ident_start(c) || digit(c); }
 
-enum class value_kind { ident, integer, signed_integer, text };   // text: `@key <text>`, for the test keys
+enum class value_kind { ident, integer, signed_integer, color, text };   // text: `@key <text>`, for the test keys
 
 struct key_spec {
     std::string_view key;
@@ -24,6 +24,7 @@ struct key_spec {
 key_spec const keys[] = {
     {"seed",    directive_target::file,      value_kind::integer, "the file", ""},
     {"name",    directive_target::tag_value, value_kind::ident,   "tag value", "tag values"},
+    {"color",   directive_target::tag_value, value_kind::color,   "tag value", "tag values"},
     {"speed",   directive_target::statement, value_kind::signed_integer, "statement", "statements"},
     {"hold",    directive_target::statement, value_kind::integer, "statement", "statements"},
     {"view",    directive_target::layer,     value_kind::ident,   "grid", "grids"},
@@ -84,7 +85,10 @@ std::optional<std::vector<raw_directive>> split(directive_comment const& c) {
         }
         if (i >= n || t[i] != '=') return std::nullopt;
         size_t v = ++i;
-        if (i < n && ident_start(t[i])) {
+        if (i < n && t[i] == '#') {   // '#' HEXDIGITS; the value is checked later (@color)
+            ++i;
+            while (i < n && ident_cont(t[i])) ++i;
+        } else if (i < n && ident_start(t[i])) {
             while (i < n && ident_cont(t[i])) ++i;
         } else {   // '-'? INTEGER
             if (i < n && t[i] == '-') ++i;
@@ -278,6 +282,17 @@ directive_set read_directives(module_closure const& mods) {
                     warn(at + " " + problem + ", got '" + r.value + "'; ignored");
                     continue;
                 }
+            } else if (spec->value == value_kind::color) {
+                bool ok = r.value.size() == 7 && r.value[0] == '#';
+                for (size_t k = 1; ok && k < r.value.size(); ++k) {
+                    char ch = r.value[k];
+                    ok = digit(ch) || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F');
+                }
+                if (!ok) {
+                    warn(at + " takes a color like #ff8800, got '" + r.value + "'; ignored");
+                    continue;
+                }
+                d.number = std::stoul(r.value.substr(1), nullptr, 16);   // 0xRRGGBB
             } else if (spec->value == value_kind::ident) {
                 if (!ident_start(r.value[0])) {
                     warn(at + " takes a name, got '" + r.value + "'; ignored");
@@ -298,7 +313,7 @@ directive_set read_directives(module_closure const& mods) {
                 }
                 auto v = integer(r.value.substr(negative ? 1 : 0), max);
                 if (!v) {
-                    warn(at + (!ident_start(r.value[0]) ? " value '" + r.value + "' is out of range"
+                    warn(at + (digit(r.value[negative ? 1 : 0]) ? " value '" + r.value + "' is out of range"
                                                  : " takes a number, got '" + r.value + "'") +
                          "; ignored");
                     continue;

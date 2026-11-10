@@ -839,22 +839,28 @@ struct parser {
         return true;
     }
 
+    // optional (weight=N) prefix - legal only on the items of an `any`: a
+    // `{ any }` write item or a sub-rule of an `any` body. False on a syntax error.
+    bool parse_weight(int& weight, bool allowed) {
+        if (!(at(token_type::lparen) && peek(1).is(token_type::kw_weight))) return true;
+        source_loc wl = loc();
+        eat(); eat();   // '(' 'weight'
+        if (!expect(token_type::equals, "'='")) return false;
+        if (!expect(token_type::integer, "a weight")) return false;
+        weight = (int)toks[pos - 1].int_val;
+        if (!expect(token_type::rparen, "')'")) return false;
+        if (!allowed)
+            diags.error(file, wl.line, wl.col, wl.end_line, wl.end_col,
+                        "(weight=N) is only allowed on the items of an 'any': "
+                        "a '{ any }' item or a sub-rule of an 'any' body");
+        return true;
+    }
+
     bool parse_write_term(write_term& t, bool weight_allowed) {
         t.loc = loc();
         closing closer{*this, t.loc};
 
-        // optional (weight=N) prefix — legal only as an { any } item
-        if (at(token_type::lparen) && peek(1).is(token_type::kw_weight)) {
-            source_loc wl = loc();
-            eat(); eat();   // '(' 'weight'
-            if (!expect(token_type::equals, "'='")) return false;
-            if (!expect(token_type::integer, "a weight")) return false;
-            t.weight = (int)toks[pos - 1].int_val;
-            if (!expect(token_type::rparen, "')'")) return false;
-            if (!weight_allowed)
-                diags.error(file, wl.line, wl.col, wl.end_line, wl.end_col,
-                            "(weight=N) is only allowed on '{ any }' items");
-        }
+        if (!parse_weight(t.weight, weight_allowed)) return false;
 
         if (!at(token_type::lbrace)) {   // leaf
             t.what = write_term::kind::leaf;
@@ -893,9 +899,10 @@ struct parser {
         return !t.items.empty();
     }
 
-    bool parse_pair(rule_pair& pr) {
+    bool parse_pair(rule_pair& pr, bool weight_allowed = false) {
         pr.loc = loc();
         closing closer{*this, pr.loc};
+        if (!parse_weight(pr.weight, weight_allowed)) return false;
         if (!parse_match_side(pr)) return false;
         if (!expect(token_type::arrow, "'=>'")) return false;
         if (!parse_write_term(pr.rhs, /*weight_allowed=*/false)) return false;
@@ -935,7 +942,10 @@ struct parser {
             eat();
             while (!at(token_type::rbrace) && !at_end()) {
                 rule_pair pr;
-                if (!parse_pair(pr)) { recover_to(token_type::rbrace); break; }
+                if (!parse_pair(pr, r.body == body_combinator::any)) {
+                    recover_to(token_type::rbrace);
+                    break;
+                }
                 r.pairs.push_back(std::move(pr));
                 list_sep();   // optional comma between pairs
             }

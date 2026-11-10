@@ -977,6 +977,50 @@ TEST_CASE("sema: an { any } needs a positive weight") {
         for (int x = 0; x < 8; ++x) CHECK(g.at(x, y) == b);
 }
 
+TEST_CASE("sema: sub-rule weights are for an `any` body only") {
+    std::string decls = "tag t { a, b }\nlayers { g: grid of t }\n";
+    CHECK(compile_result(decls + "rule r { any (weight=3) g[a] => g[b]  (weight=1) g[b] => g[a] }").ok);
+    CHECK(compile_result(decls + "rule r { all (weight=3) g[a] => g[b] }").has_error("only allowed"));
+    CHECK(compile_result(decls + "rule r { ordered (weight=3) g[a] => g[b] }").has_error("only allowed"));
+    // check 54
+    CHECK(compile_result(decls + "rule r { any (weight=0) g[a] => g[b]  (weight=0) g[b] => g[a] }")
+              .has_error("weight 0"));
+    CHECK(compile_result(decls + "rule r { any (weight=0) g[a] => g[b]  g[b] => g[a] }").ok);
+}
+
+TEST_CASE("sema: an `any` body picks a sub-rule by weight, then a candidate") {
+    // 9 `p` cells and one `q` cell: by candidate count `q` would be hit 1 time in
+    // 10; weighted 1:1 over sub-rules, about 1 time in 2.
+    std::string src = "tag t { p, q, a, b }\nlayers { g: grid of t }\n"
+        "rule fill { g[.] => g[p] }\n"
+        "rule one  { g[p] => g[q] }\n"
+        "rule r { any %s g[p] => g[a]  %s g[q] => g[b] }\n"
+        "sequence main {\n    resize(10, 1)\n    everywhere fill\n    once one\n    once r\n}\n";
+    auto make_src = [&](char const* w1, char const* w2) {
+        std::string s = src;
+        s.replace(s.find("%s"), 2, w1);
+        s.replace(s.find("%s"), 2, w2);
+        return s;
+    };
+    auto count_b = [&](std::string const& s) {
+        auto gen = ts::make(s);
+        REQUIRE(static_cast<bool>(gen));
+        int b = gen.tag("t.b"), hits = 0;
+        for (uint64_t seed = 1; seed <= 200; ++seed) {
+            auto g = gen.generate(gen.sequence("main"), seed)["g"];
+            for (int x = 0; x < 10; ++x) hits += g.at(x, 0) == b;
+        }
+        return hits;
+    };
+    int even = count_b(make_src("", ""));
+    CHECK(even > 60);
+    CHECK(even < 140);
+    int heavy = count_b(make_src("(weight=9)", "(weight=1)"));   // `p` first: `q` rarely
+    CHECK(heavy < 40);
+    // a weight-0 sub-rule is never tested, so never applied
+    CHECK(count_b(make_src("", "(weight=0)")) == 0);
+}
+
 TEST_CASE("sema: a combinator block needs an item") {
     // check 4
     std::string decls = "tag t { a }\nlayers { g: grid of t }\n";

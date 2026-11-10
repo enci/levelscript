@@ -163,6 +163,7 @@ struct graph_block {
 // every guard's `after` is 0), and its write leaves are graph writes.
 struct rule_pair {
     source_loc              loc;
+    int                     weight{1};   // `(weight=N)`: only in an `any` body
     std::vector<pattern>    lhs;
     bool                    is_graph{false};
     graph_block             block;    // is_graph only

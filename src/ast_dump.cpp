@@ -109,6 +109,7 @@ struct printer {
         if (r.body != body_combinator::none) line(std::string("(body ") + bodies[(int)r.body] + ")");
         for (auto const& pr : r.pairs) {
             open("pair", &pr.loc);
+            if (pr.weight != 1) line("(weight " + std::to_string(pr.weight) + ")");
             open("match");
             if (pr.is_graph) {
                 open("graph " + pr.block.graph.text, &pr.block.loc);

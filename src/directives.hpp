@@ -14,6 +14,7 @@
 //
 //   @seed=N        the file        default invocation seed (root file only)
 //   @name=ID       a tag value     display name
+//   @color=#RRGGBB a tag value     default color (`number` holds 0xRRGGBB)
 //   @speed=N       a statement     steps per frame while the debugger plays;
 //                                  @speed=-N: one step every N play ticks
 //   @hold=N        a statement     play frames its result stays on screen
@@ -29,7 +30,7 @@ enum class directive_target { file, tag_value, statement, layer };
 struct directive {
     std::string      key;      // without the '@'
     std::string      value;    // as written
-    uint64_t         number{0};   // the value, for the integer keys (its magnitude)
+    uint64_t         number{0};   // the value, for the integer keys (its magnitude), and @color (0xRRGGBB)
     bool             negative{false};   // written with a '-' (@speed only); never for 0
     directive_target target{directive_target::file};
     source_loc       loc;          // the `@key=value` text

@@ -1918,6 +1918,12 @@ struct analyzer {
 
         compiled_rule cr;
         cr.body = r.body;
+        for (auto const& pr : r.pairs) cr.sub_weights.push_back(pr.weight);
+        if (r.body == body_combinator::any && !r.pairs.empty() &&   // check 54
+            std::all_of(r.pairs.begin(), r.pairs.end(),
+                        [](rule_pair const& p) { return p.weight <= 0; }))
+            error(r.loc, "every sub-rule of this 'any' body has weight 0; at least one "
+                  "needs a positive weight to be picked");
         // A graph rule has no shape to transform, and its candidates are
         // assignments, not anchors: its body is graph pairs only. Its one
         // attribute is `symmetry=none`, which drops duplicate assignments.

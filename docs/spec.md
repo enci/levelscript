@@ -1,6 +1,6 @@
 # LevelScript
 
-**Status**: Draft 0.17.1
+**Status**: Draft 0.17.2
 **File extension**: `.lvs`
 **CLI**: `levelscript [--seed N] [--entry name] [--param name=value ...] <file.lvs>` (`--entry` defaults to `main` and `--seed` to the root file's `@seed` directive, both tool conventions; section 6, Appendix B)
 **Embedding**: namespace `ls::` (see Appendix A)
@@ -343,8 +343,11 @@ attr_list         ::= attr (',' attr)*
 attr              ::= IDENT '=' attr_value
 attr_value        ::= IDENT | INTEGER | 'all' | '{' INTEGER (',' INTEGER)* '}'
 rule_body         ::= pattern_pair
-                    | combinator pattern_pair_list
+                    | 'any' weighted_list
+                    | ('all' | 'ordered') pattern_pair_list
 pattern_pair_list ::= pattern_pair (list_sep? pattern_pair)* list_sep?
+weighted_list     ::= weighted_pair (list_sep? weighted_pair)* list_sep?
+weighted_pair     ::= weight? pattern_pair      (* weight - section 5.2 *)
 pattern_pair      ::= match_side '=>' write_side
 ```
 
@@ -397,14 +400,13 @@ write_term      ::= pattern
 all_item_list   ::= write_term (list_sep? write_term)* list_sep?
 any_item_list   ::= any_item (list_sep? any_item)* list_sep?
 any_item        ::= weight? write_term
-combinator      ::= 'any' | 'all' | 'ordered'
 weight          ::= '(' 'weight' '=' INTEGER ')'
 ```
 All item lists are one-or-more. A match side is one or more patterns, each optionally followed by rule guards (section 5.9.1), the whole optionally grouped in braces; a write side is a bare pattern or a braced combinator block:
 - A **match side** conjoins its patterns across grids: every pattern before `=>` must match at the anchor. There is no match-side combinator; disjunctive matching would change the candidate model, read footprints, and conflict semantics, and is out of scope. Line breaks between the patterns are ordinary whitespace (section 2). Braces around a match side group it for the reader and change nothing: `{ level[floor] loot[.] } => loot[chest]` is `level[floor] loot[.] => loot[chest]`. A group holds one or more patterns, takes no combinator keyword, and does not nest. A match side may also carry rule guards, `when (expr)` items that condition the candidate as a whole (section 5.9.1); it begins with a pattern, so a `when` directly after a write side is a parse error rather than a guard on the next sub-rule. A match side may instead be a **graph block** followed by rule guards, which makes the pair a graph pair (section 5.13).
 - A **write side** is a recursive `write_term`: a `{ any ... }` (pick one alternative) or `{ all ... }` (write every item simultaneously), whose items may themselves be blocks to any depth.
 
-`weight` attaches only to the items of an `{ any ... }` write block. It is not part of the grammar for `{ all ... }` blocks or bare patterns, so `(weight=N)` inside `{ all ... }` is rejected at parse time. A weight on a nested block (an `{ all }` option inside an `{ any }`) weights the choice of that whole sub-tree.
+`weight` attaches only to the items of an `any`: a `{ any ... }` write block, or an `any` rule body (section 5.5). It is not part of the grammar for `{ all ... }` blocks, bare patterns, or `all` and `ordered` bodies, so `(weight=N)` there is rejected at parse time. A weight on a nested block (an `{ all }` option inside an `{ any }`) weights the choice of that whole sub-tree.
 
 **Nested write blocks.** Because a write item may itself be a block, two composite shapes are available at one matched position:
 
@@ -433,7 +435,7 @@ An `{ all }` writes every item; an `{ any }` picks exactly one item (weighted), 
 - Under the **step modes** (`once`, `grow`): re-collect each step and take the highest-priority available match - s1 keeps firing while it can; when a lower rule fires and reopens an s1 match, the next step prefers s1 again. This is **preemptive priority** (the ordered-rule / MarkovJunior loop), the behaviour statement-sequencing cannot express.
 - Under **`settle`**: priority-ordered sweeps to fixpoint.
 
-`any` stays a weighted random pick (order carries no meaning); `all` collects every matching sub-rule's candidates together (uniform priority). Because `ordered` is body-level only, using it as a write-side combinator is a compile error (section 7.3, check 29).
+`any` chooses among its matching sub-rules by weight, then uniformly among the chosen sub-rule's candidates (section 5.5); `all` collects every matching sub-rule's candidates together and treats them alike, whichever sub-rule they belong to (uniform priority). The three body combinators thus order candidates by **strict priority** (`ordered`), **weighted share** (`any`), or not at all (`all`). Because `ordered` is body-level only, using it as a write-side combinator is a compile error (section 7.3, check 29).
 
 ### 5.3 Pattern bodies
 
@@ -522,6 +524,19 @@ Within an `{ any }` block, options may carry a weight:
 ```
 
 Weight is per-option, prefixed before the option. Omitted weight defaults to `1`. Weights bias random selection proportionally. A weight is an integer literal, so it is known at compile time; an item of weight `0` is never picked, and a block whose weights are all `0` is a compile error (check 54).
+
+**Sub-rule weights.** The sub-rules of an `any` body may carry weights in the same way, with the same default (`1`) and the same literal rule:
+
+```ls
+rule decorate { any
+    (weight=3) level[floor] items[.] => items[plant]
+    (weight=1) level[wall]  items[.] => items[torch]
+}
+```
+
+An `any` body chooses in two stages: first a **sub-rule**, among those that have at least one candidate, in proportion to its weight; then one of that sub-rule's candidates, uniformly. A sub-rule's share therefore does not depend on how many candidates it has: under `once`, `decorate` places plants and torches 3:1 whether the grid holds ten floor cells or a thousand. Variants are candidates of their sub-rule (section 6.7), so `rotation` or `symmetry` does not raise a sub-rule's share. A sub-rule of weight `0` is never tested, as if absent; a body whose weights are all `0` is a compile error (check 54).
+
+What the choice decides follows the mode (section 6.7). A step mode makes the two-stage choice once per step. A batch mode orders its candidates by making it repeatedly - the weighted shuffle of section 10.6 - so weights decide which sub-rule claims contested cells first under the write mask, and which applications a `scatter` cap keeps. Where no candidates compete, as under `everywhere` without overlaps, every candidate applies and the weights change nothing. Weights are a soft priority: `ordered` makes a lower sub-rule wait until no higher one can apply, while a weighted `any` only makes it less likely to go first.
 
 **Union writes.** A RHS tag cell may be a union mask, e.g. `level[wall|floor]`, written via `|` (section 5.8). The cell then stores a multi-bit mask. Single-bit writes are **not** required. The meaning of a multi-valued cell under later matching is the any-overlap rule `(stored & mask) != 0` (section 4.1).
 
@@ -1226,14 +1241,14 @@ All modes share **candidate collection**: for each anchor position in row-major 
 
 **Batch modes** (`scatter`, `everywhere`) - one frozen snapshot, one pass:
 1. Snapshot the grid stack (section 7.1); collect all candidates against it.
-2. Shuffle the candidates (seeded). Empty the write-protection mask (section 6.8).
+2. Shuffle the candidates (seeded; in an `any` body, the weighted shuffle of sections 5.5 and 10.6). Empty the write-protection mask (section 6.8).
 3. In shuffled order, for each candidate: if its **write** footprint intersects a marked (grid, cell), skip; else apply the write and mark its write footprint. Count one application.
 4. Stop at the cap (`scatter(N)` = N; `everywhere` = the whole set). For `scatter(P%)`, the cap is floor(P * A / 100) where **A is the number of applications a full pass would make** - the non-conflicting applied set, *not* the raw candidate count (raw candidates would let redundant variants and skipped conflicts inflate the denominator, so `50%` could cover far more than half the grid). Concretely: the pass first determines the non-conflicting sequence the batch would apply, then applies its first floor(P * A / 100) entries.
 
 Because all candidates saw one snapshot, earlier writes are invisible to later applications; the mask alone prevents two applications writing the same cell. Only `scatter` takes a percentage, because a percentage needs one batch's applied set as its denominator.
 
 **Step modes** (`once`, `grow`) - each application re-snapshots and therefore sees prior writes:
-1. Snapshot; collect; pick one candidate uniformly (a single draw; under `ordered`, uniformly within the highest-priority group, section 10.4). Apply and commit; the `{ any }` alternatives on its write tree are drawn at application, weighted per section 5.5.
+1. Snapshot; collect; pick one candidate - uniformly (a single draw); under `ordered`, uniformly within the highest-priority group (section 10.4); in an `any` body, a sub-rule by weight and then one of its candidates uniformly (two draws, section 5.5). Apply and commit; the `{ any }` alternatives on its write tree are drawn at application, weighted per section 5.5.
 2. Repeat. Each step re-snapshots, so the next pick sees the last write.
 
 One application per step means no intra-step conflict, so **step modes use no mask**. `once` stops after one application and `grow(N)` after N; `grow` without a count runs until a step finds no candidate (**fixpoint**, section 6.9). Over a rule, `once` and `grow(1)` make the same application.
@@ -1244,7 +1259,7 @@ One application per step means no intra-step conflict, so **step modes use no ma
 
 Each sweep is internally a batch (mask per sweep); between sweeps the grid re-snapshots, so a later sweep sees the previous sweep's result. This is the cellular-automaton case (smooth until stable). For `settle` the count unit is a **sweep**: `settle` = sweeps to fixpoint; `settle(N)` = at most N sweeps, stopping early after a sweep that changes nothing.
 
-**Variants and alternatives.** Each matching variant is a **separate candidate**, so shuffling treats variants with equal priority - no top-left/first-declared bias; when several variants match one anchor, the one applied is whichever the shuffle selects. At application the runtime walks the resolved write tree and draws once per `{ any }` node on the resolved path (section 5.2), each weighted per section 5.5 and reproducible per seed (section 10.6).
+**Variants and alternatives.** Each matching variant is a **separate candidate**, so shuffling treats variants with equal priority (in an `any` body, the variants of one sub-rule) - no top-left/first-declared bias; when several variants match one anchor, the one applied is whichever the shuffle selects. At application the runtime walks the resolved write tree and draws once per `{ any }` node on the resolved path (section 5.2), each weighted per section 5.5 and reproducible per seed (section 10.6).
 
 All random choices are deterministic per (seed, params) and per implementation version (section 7.2).
 
@@ -1528,7 +1543,7 @@ The compiler must reject:
 51. **Graph misuse.** A graph name used other than to head a match-side graph pattern of a grid rule, name a graph block, head an attribute read at a cell, be the argument of `nodes` or `edges`, or be the `over` argument of `path`: as the head of a write-side pattern or of a pattern in a graph pair, as a value in an expression, as a selector's grid, or passed to an operation's `grid` parameter (also check 35) (sections 4.3 and 5.12).
 52. **Graph-pattern cell.** A graph-pattern cell other than `*` or a binding variable (section 5.12).
 53. **Graph function arguments.** A call to `distance`, `neighbors`, `adjacent`, `reachable`, `farthest`, `some`, or two-argument `count` whose first argument is not a node; a target that is neither a node nor a selector; a selector argument of `some` or of `count` (either form) that is not a selector; an argument of `nodes` or `edges` that is not a graph name; a node target, or a `==`/`!=` operand, that is a node of a different graph; a selector anywhere but as a target or the selector argument of `some` or `count`; or a selector cell that does not fit its grid (a tag mask on a number grid other than `.` or `!.`, or an integer on a tag grid) (section 5.12).
-54. **Zero-weight `{ any }`.** An `{ any }` block whose items all have weight `0` (section 5.5).
+54. **Zero-weight `any`.** An `{ any }` block, or an `any` rule body, whose items all have weight `0` (section 5.5).
 55. **Sized pattern.** Retired in 0.17.0: sized patterns were removed; a 1x1 pattern is uplifted to its pair's size (section 5.4).
 56. **Rule-guard scope.** A rule guard that reads a grid at a position (a bare grid name, or an attribute at a cell) or `x`/`y`; or whose expression is not boolean (section 5.9.1). Global queries and the graph reads of node variables are allowed (section 5.12).
 57. **Graph write.** A graph write `n.g = c` outside the write side of a graph pair; whose `n` is not a variable of that pair's graph block; or whose `g` is not a grid (a graph, or a node attribute: attributes are read-only); or, in a graph pair, a write-side leaf that is not a graph write (section 5.13). The value `c` is checked as a write-side cell of `g` (checks 14, 15, and 47).
@@ -1719,8 +1734,8 @@ All modes build from one structure: a vector of **candidate slots**, each a smal
 **Eager collection.** The reference implementation collects and matches the whole candidate vector per pass (row-major anchors; per candidate, bare cells and then expression cells, with short-circuit (section 5.11); `where`/expression cells and rule guards - including `random` draws - evaluate during this scan). A semi-lazy split (enumerate slots cheaply, match only when pulled, so `once`/`scatter`/`grow` never match the whole grid) is an available optimization - note that it would move match-side `random` draw sites, which the per-implementation-version determinism claim (section 7.2) permits but a golden-output corpus will notice.
 
 **Selection per mode:**
-- Batch modes, and each `settle` sweep: collect, seeded-shuffle, pull in shuffle order under the (grid, cell) write mask, stop at count. Shuffling is what gives variants equal priority.
-- Step modes (`once`, `grow`): collect, pick **one** uniformly (a single draw; under `ordered`, uniformly within the highest-priority group), apply, **re-collect** (the write changed the match set); repeat.
+- Batch modes, and each `settle` sweep: collect, seeded-shuffle, pull in shuffle order under the (grid, cell) write mask, stop at count. Shuffling is what gives variants equal priority. In an `any` body, the shuffle is the weighted shuffle of section 10.6: a merge of the sub-rules' shuffled groups, not a permutation of the whole vector.
+- Step modes (`once`, `grow`): collect, pick **one** uniformly (a single draw; under `ordered`, uniformly within the highest-priority group; in an `any` body, by the weighted pick of section 10.6), apply, **re-collect** (the write changed the match set); repeat.
 - `ordered` is a **sort of the vector**, not a per-anchor short-circuit: the whole vector is shuffled (one Fisher-Yates pass, section 10.6), then **stably** sorted by sub-rule priority - so each priority group keeps its shuffled order - then consumed exactly as the shuffled vector would be by the active mode.
 
 **Parallelism (future).** The split makes the parallelizable phase explicit - independent match-testing over the candidate vector: batch matching is embarrassingly parallel (all vs one snapshot) except when the match side draws (`random` shares the one stream and serializes; a position-keyed PRNG would lift this, section 9); `settle` is parallel within a sweep, serial across sweeps; step modes are inherently sequential.
@@ -1738,7 +1753,7 @@ A single PRNG stream (`mt19937_64` in the reference implementation), seeded from
 1. **Param expressions** (section 4.2) evaluate once at startup, in canonical declaration order (section 2.6), an input's default only when the param was not supplied - their draws come first.
 2. A statement **`when` guard** (section 6) evaluates once when its statement is reached, in statement order; if it passes, the statement's **count** (section 6), if any, evaluates next, or, for an operation call, its `int` arguments (section 6.0), in written order. All of these evaluate before the statement runs.
 3. **Match-cell, `where`-cell, and rule-guard** expressions evaluate during the collection scan, in row-major anchor order and, within an anchor, in sub-rule/variant declaration order (for a graph rule, in assignment order, section 5.13). For each candidate, bare cells are tested first and draw nothing; only if all of them match do expression cells and rule guards evaluate, item by item in match-side order and row-major within each pattern as the variant lays it out, short-circuiting on the first that fails (section 5.11) - a `random` in a cell not reached does not draw.
-4. **Candidate ordering** draws next: the pass's seeded shuffle (batch modes and `settle` sweeps) or the single uniform pick (step modes), per section 10.4.
+4. **Candidate ordering** draws next: the pass's seeded shuffle (batch modes and `settle` sweeps) or the single uniform pick (step modes), per section 10.4; in an `any` body, the weighted shuffle or the weighted pick (below).
 5. **At application**: one draw per `{ any }` node on the resolved write path, outer before inner, earlier sibling first (a single-item `{ any }` still draws, section 5.2); then write-cell expressions, row-major per resolved leaf (over the region, for a graph write).
 6. **`path` statements** follow the section 6.6 draw contract: predicate passes (`from`, `to`, `passable`), per-cell `cost` (grid routes only), exactly one tie-key draw, then the start-to-goal `write` stamps.
 7. **`bsp`, `voronoi`, and `noise` statements** follow their draw contracts (sections 6.11-6.13): `bsp`'s per-node draws in pre-order; `voronoi`'s predicate passes (`sites`, `within`), per-cell `cost` under a step metric, then one tie-key draw; `noise`'s one raw draw.
@@ -1752,6 +1767,8 @@ A sequence application (section 6.10) adds no draw sites: its body statements dr
 - **`uniform(n)`**, an integer in `[0, n)` for `n >= 1`, without bias: let `t = (2^64 - n) mod n` (in 64-bit arithmetic, `(0 - n) % n`); take raw draws until one, `x`, satisfies `x >= t`; the result is `x mod n`. It may consume more than one raw draw, but it counts as one draw for the order above.
 - **Shuffle** of a vector of `k` candidates (Fisher-Yates): for `i` from `k - 1` down to `1`, swap the items at `i` and `uniform(i + 1)`.
 - **Uniform pick** of one of `k` candidates (step modes): the item at `uniform(k)`.
+- **Weighted pick** (step modes, `any` body): over the sub-rules that have candidates, in declaration order, with weights `w1..wm` and total `W`, `r = uniform(W)` chooses a sub-rule as a weighted `{ any }` does; then the candidate at `uniform(k)` among that sub-rule's `k` candidates, in collection order. Two draws, also when one sub-rule has candidates.
+- **Weighted shuffle** (batch modes, `any` body): partition the candidate vector by sub-rule, keeping collection order within each group; shuffle each group (Fisher-Yates, above), in sub-rule declaration order; then build the output one position at a time: over the groups not yet exhausted, in declaration order, `r = uniform(W)` with `W` their total weight chooses a group as a weighted `{ any }` does, and that group's next item is appended. One draw per position, the last included.
 - **Weighted `{ any }`** over items with integer weights `w1..wm` and total `W > 0`: `r = uniform(W)`; the chosen item is the first whose running weight sum exceeds `r`.
 - **`random(lo, hi)`**: `lo + uniform(hi - lo + 1)`. An empty range (`hi < lo`) still draws once, as `uniform(1)`, and yields `lo`.
 
@@ -1902,7 +1919,7 @@ A comment is a **directive comment** iff the first non-space character after `//
 ```
 directive_comment ::= '//' SPACE* (directive (SPACE+ directive)* | text_directive) SPACE*
 directive         ::= '@' IDENT '=' directive_value
-directive_value   ::= IDENT | '-'? INTEGER
+directive_value   ::= IDENT | '-'? INTEGER | '#' (IDENT | INTEGER)
 text_directive    ::= '@' IDENT SPACE+ TEXT
 SPACE             ::= ' ' | '\t'
 ```
@@ -1931,6 +1948,7 @@ The same key twice on one target is a warning, and the last one applies. `@expec
 |---|---|---|---|
 | `@seed` | the file | `INTEGER`, 64-bit unsigned | default invocation seed (B.3) |
 | `@name` | a `tag_value` | `IDENT` | display name (B.4) |
+| `@color` | a `tag_value` | `'#' HEXDIGIT{6}` | default colour (B.9) |
 | `@speed` | a `statement` | `'-'? INTEGER` | steps per frame while playing, or frames per step (B.5) |
 | `@hold` | a `statement` | `INTEGER` | frames its result stays on screen while playing (B.6) |
 | `@view` | a grid `layer_entry` | `IDENT` | how the tools first draw the grid (B.8) |
@@ -2073,3 +2091,17 @@ layers {
 ```
 
 Here the dungeon is drawn in tiles with the room borders on top, each cell's role as a corner mark and the items as markers. The working grid `algo` stays hidden until the user shows it.
+
+### B.9 `@color`
+
+`@color` sets the colour the tools draw a tag value in, in every grid of that tagset, as `@view` sets how a grid is drawn. The value is `#` and six hexadecimal digits, `#RRGGBB`, in either case.
+
+```ls
+tag terrain {
+    floor   // @color=#8a7f6a
+    water   // @color=#2e6fd8
+    lava    // @color=#e8501a
+}
+```
+
+Without `@color`, a tool picks the colour of a value itself. A tool that lets the user choose colours keeps the user's choice over `@color`; the directive sets only the starting colour. A colour is not part of the program, and nothing in a run reads it. Two values of one tagset with the same colour are not a warning. A named mask has no colour of its own to set.

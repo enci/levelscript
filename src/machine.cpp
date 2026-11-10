@@ -574,7 +574,42 @@ bool machine::unchanged_since(stack_state const& s) const {
     return true;
 }
 
+// The group a weighted draw lands in: `r = uniform(W)` over the live groups'
+// weights, in order, as a weighted `{ any }` does. `live` lists the group ids.
+static size_t weighted_group(uint64_t r, std::vector<int> const& weights,
+                             std::vector<int> const& live) {
+    uint64_t acc = 0;
+    for (size_t i = 0; i < live.size(); ++i) {
+        acc += (uint64_t)weights[(size_t)live[i]];
+        if (r < acc) return i;
+    }
+    return live.size() - 1;
+}
+
 void machine::order_candidates(compiled_rule const& rule, std::vector<match>& ms) {
+    if (rule.body == body_combinator::any) {   // the weighted shuffle (spec 10.6)
+        size_t n = rule.sub_weights.size();
+        std::vector<std::vector<match>> groups(n);
+        for (auto const& m : ms) groups[(size_t)rule.pairs[m.pair].sub_rule_idx].push_back(m);
+        for (auto& g : groups) shuffle(g);   // in declaration order
+        std::vector<size_t> next(n, 0);
+        std::vector<match> out;
+        out.reserve(ms.size());
+        for (size_t placed = 0; placed < ms.size(); ++placed) {
+            std::vector<int> live;
+            uint64_t total = 0;
+            for (size_t g = 0; g < n; ++g)
+                if (next[g] < groups[g].size()) {
+                    live.push_back((int)g);
+                    total += (uint64_t)rule.sub_weights[g];
+                }
+            size_t pick = weighted_group(uniform(total), rule.sub_weights, live);
+            size_t g = (size_t)live[pick];
+            out.push_back(groups[g][next[g]++]);
+        }
+        ms = std::move(out);
+        return;
+    }
     shuffle(ms);
     if (rule.body == body_combinator::ordered)
         std::stable_sort(ms.begin(), ms.end(), [&rule](match const& a, match const& b) {
@@ -584,6 +619,20 @@ void machine::order_candidates(compiled_rule const& rule, std::vector<match>& ms
 
 machine::match machine::pick_candidate(compiled_rule const& rule,
                                        std::vector<match> const& ms) {
+    if (rule.body == body_combinator::any) {   // the weighted pick (spec 10.6): two draws
+        size_t n = rule.sub_weights.size();
+        std::vector<std::vector<match const*>> groups(n);
+        for (auto const& m : ms) groups[(size_t)rule.pairs[m.pair].sub_rule_idx].push_back(&m);
+        std::vector<int> live;
+        uint64_t total = 0;
+        for (size_t g = 0; g < n; ++g)
+            if (!groups[g].empty()) {
+                live.push_back((int)g);
+                total += (uint64_t)rule.sub_weights[g];
+            }
+        size_t g = (size_t)live[weighted_group(uniform(total), rule.sub_weights, live)];
+        return *groups[g][(size_t)uniform(groups[g].size())];
+    }
     if (rule.body == body_combinator::ordered) {
         int best = rule.pairs[ms[0].pair].sub_rule_idx;
         for (auto const& m : ms)
@@ -1365,7 +1414,7 @@ std::vector<machine::match> machine::collect(compiled_rule const& rule) {
         for (int c = 0; c < cols_; ++c)
             for (int pi = 0; pi < (int)rule.pairs.size(); ++pi) {
                 auto const& pair = rule.pairs[pi];
-                if (pair.lhs.empty()) continue;
+                if (pair.lhs.empty() || !rule.tested(pair.sub_rule_idx)) continue;
                 if (r + pair.lhs[0].rows > rows_ || c + pair.lhs[0].cols > cols_) continue;
                 if (match_at(pair, r, c)) out.push_back({pi, r, c});
             }
@@ -1380,7 +1429,7 @@ std::vector<machine::match> machine::collect(compiled_rule const& rule) {
 void machine::collect_assignments(compiled_rule const& rule, std::vector<match>& out) {
     for (int pi = 0; pi < (int)rule.pairs.size(); ++pi) {
         auto const& pair = rule.pairs[pi];
-        if (pair.graph < 0) continue;
+        if (pair.graph < 0 || !rule.tested(pair.sub_rule_idx)) continue;
         graph_data const& g = graph(pair.graph);
         int k = (int)pair.var_names.size();
         if (k == 0 || g.node_count() < k) continue;
