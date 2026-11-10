@@ -66,7 +66,7 @@ rule frame { arena[.] => arena[wall] }
 sequence main {
     resize(24, 18)
     once place_head
-    grow(160) walk                      // @play=4
+    grow(160) walk                      // @speed=4
     everywhere { arena[head] => arena[floor] }
     trim()                              // @hold=10
     resize(width * 2, height * 2)       // @hold=10

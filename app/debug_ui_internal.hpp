@@ -12,7 +12,7 @@
 #include "ls.hpp"           // execution: compile/run/step/snapshot/highlights
 #include "ast.hpp"          // metadata: statement + rule attribute display
 #include "sema.hpp"         // metadata: compiled patterns / tag + layer tables
-#include "directives.hpp"   // metadata: tool directives (@seed, @name, @play, @hold, ...)
+#include "directives.hpp"   // metadata: tool directives (@seed, @name, @speed, @hold, ...)
 #include "project_config.hpp"
 
 #include <imgui.h>

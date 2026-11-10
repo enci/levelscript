@@ -339,14 +339,14 @@ sequence main {
     everywhere fine_room_templates
     everywhere fine_connect_rooms
     grow(40) fine_erode
-    everywhere { fine[B] => fine[S] } // @play=10
+    everywhere { fine[B] => fine[S] } // @speed=10
 
     // Tiles
     pad(1)
-    everywhere { fine[.] => fine[S] } // @play=100
-    everywhere paint_back   // @play=100
-    everywhere paint_fill   // @play=100
-    everywhere paint_walls  // @play=2
+    everywhere { fine[.] => fine[S] } // @speed=100
+    everywhere paint_back   // @speed=100
+    everywhere paint_fill   // @speed=100
+    everywhere paint_walls  // @speed=2
     scatter(15) paint_ore
     once paint_start
     once paint_exit

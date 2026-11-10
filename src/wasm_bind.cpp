@@ -53,7 +53,7 @@ struct session {
     std::vector<ls::stmt_frame> entered, left;
     // Display metadata for the statement stack: the entry's name, and each
     // sequence's statements' target names (a sequence frame's body is the
-    // one the frame before applied) - what the editor matches @play against.
+    // one the frame before applied) - what the editor matches @speed against.
     std::string   entry_name;
     std::unordered_map<std::string, std::vector<std::string>> targets;
 };

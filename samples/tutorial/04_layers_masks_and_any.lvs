@@ -117,8 +117,8 @@ rule spawn_other_enemies(rotation=all) {
 sequence main {
     resize(32, 24)
     once place_head
-    grow(200) walk                  // @play=8 @hold=10
-                                    // ^-play and hold are directives too (not part of the language)
+    grow(200) walk                  // @speed=8 @hold=10
+                                    // ^-speed and hold are directives too (not part of the language)
     everywhere fill_level	        // Bridge the layers with this rule
     everywhere wall_side            // @hold=10
     everywhere wall_corner          // @hold=10

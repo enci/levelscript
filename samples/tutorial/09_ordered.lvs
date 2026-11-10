@@ -78,7 +78,7 @@ sequence main {
     everywhere fill_floor
     pad(1)
     everywhere fill_wall            // @hold=10
-    grow(16) doorway                // @play=1
+    grow(16) doorway                // @speed=1
 }
 
 // Exercise: swap the two sub-rules and run again: the single door is always

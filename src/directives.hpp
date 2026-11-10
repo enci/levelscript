@@ -14,8 +14,8 @@
 //
 //   @seed=N        the file        default invocation seed (root file only)
 //   @name=ID       a tag value     display name
-//   @play=N        a statement     steps per frame while the debugger plays;
-//                                  @play=-N: one step every N play ticks
+//   @speed=N       a statement     steps per frame while the debugger plays;
+//                                  @speed=-N: one step every N play ticks
 //   @hold=N        a statement     play frames its result stays on screen
 //   @view=ID       a grid          how the tools first draw it
 //   @tileset=ID    a grid          the named tileset its `tiles` view draws from
@@ -30,7 +30,7 @@ struct directive {
     std::string      key;      // without the '@'
     std::string      value;    // as written
     uint64_t         number{0};   // the value, for the integer keys (its magnitude)
-    bool             negative{false};   // written with a '-' (@play only); never for 0
+    bool             negative{false};   // written with a '-' (@speed only); never for 0
     directive_target target{directive_target::file};
     source_loc       loc;          // the `@key=value` text
     source_loc       target_loc;   // the target's range; the file: none

@@ -69,8 +69,8 @@ rule clear_walls (rotation=all) { level[. W|D . ] => level[. . . ] }
 
 sequence remove_edge_room {
     once (rotation=all) { map[* ?n] level[. F ] when (n.degree == 1) => level[. O] }
-    settle (rotation=all) { level[O F ] => level[O O] }     // @play=3
-    settle (rotation=all) { level[O ] => level[.] }         // @play=3
+    settle (rotation=all) { level[O F ] => level[O O] }     // @speed=3
+    settle (rotation=all) { level[O ] => level[.] }         // @speed=3
     settle clear_walls
 }
 
@@ -220,15 +220,15 @@ sequence main {
     resize(24, 16)
     bsp(into=zones, min=min_room_size, max=max_room_size)
 
-    everywhere border       // @play=2
-    settle connect_rooms    // @play=5
+    everywhere border       // @speed=2
+    settle connect_rooms    // @speed=5
     
     pad(1)
     settle(2) remove_edge_room
     settle(2) merge_rooms
 
     pad(5)
-    settle add_walls            // @play=3
+    settle add_walls            // @speed=3
     everywhere (rotation=all) { level[. D ] => level[. W ] }
 
     once add_start              // @hold=10
@@ -243,5 +243,5 @@ sequence main {
     once place_pillars          // @hold=10
     scatter(15%) place_items        
     scatter(12%) place_enemies
-    scatter(20%) place_vegetation   // @play=20
+    scatter(20%) place_vegetation   // @speed=20
 }

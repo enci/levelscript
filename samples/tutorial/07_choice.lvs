@@ -124,7 +124,7 @@ sequence main {
     pad(1)
     everywhere fill_wall            // @hold=10
     everywhere pick_role            // @hold=10
-    grow spread_role                // @play=40 @hold=10
+    grow spread_role                // @speed=40 @hold=10
     everywhere contents             // @hold=10
     scatter(16) door
 }

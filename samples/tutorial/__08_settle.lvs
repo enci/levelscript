@@ -132,9 +132,9 @@ sequence main {
     pad(1)
     everywhere fill_wall
     everywhere pick_role
-    grow spread_role                // @play=40 @hold=10
+    grow spread_role                // @speed=40 @hold=10
     everywhere noise                // @hold=10
-    settle(12) smooth               // @play=1 @hold=10
+    settle(12) smooth               // @speed=1 @hold=10
     scatter(16) door
 }
 

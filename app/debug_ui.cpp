@@ -222,18 +222,18 @@ static void set_style_metrics();
 static void set_light_theme();
 static void set_dark_theme();
 
-// ── @play pacing ─────────────────────────────────────────────────────────────
+// ── @speed pacing ─────────────────────────────────────────────────────────────
 
-// The @play pace at the run's position (spec B.5): the innermost statement on
+// The @speed pace at the run's position (spec B.5): the innermost statement on
 // the stack with one - a sequence application's covers its body. `depth` is
 // that statement's frame. Empty: none; the fps timer paces. Negative: -N, one
 // visible change every N play ticks.
-static std::optional<int> play_pace(script const& sc, std::vector<stmt_frame> const& st,
+static std::optional<int> speed_pace(script const& sc, std::vector<stmt_frame> const& st,
                                     size_t& depth) {
     std::string seq = sc.entry_name;   // the sequence frame k is in
     std::optional<int> pace;
     for (size_t k = 0; k < st.size(); ++k) {
-        if (auto d = sc.dirs.find("play", directive_target::statement, seq, "", st[k].index)) {
+        if (auto d = sc.dirs.find("speed", directive_target::statement, seq, "", st[k].index)) {
             pace  = d->negative ? -(int)d->number : (int)d->number;
             depth = k;
         }
@@ -544,7 +544,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
     bool running = true;
     bool playing = false;
     int  hold_ticks = 0;   // play ticks left showing a finished statement (@hold)
-    int  slow_ticks = 0;   // play ticks since the last change, for @play=-N
+    int  slow_ticks = 0;   // play ticks since the last change, for @speed=-N
     using clock = std::chrono::steady_clock;
     auto last_advance = clock::now();
 
@@ -660,7 +660,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
         }
 
         // Timed playback -- advance one application per tick at play_fps,
-        // or at the statement's @play pace; a breakpoint stops it like any
+        // or at the statement's @speed pace; a breakpoint stops it like any
         // other command. A finished statement's @hold keeps its result for
         // that many ticks first.
         if (playing && run.done) playing = false;
@@ -686,11 +686,11 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
         };
         size_t pace_depth = 0;
         auto   pace_stack = run.gen.stmt_stack();
-        auto   pace = playing ? play_pace(sc, pace_stack, pace_depth) : std::nullopt;
+        auto   pace = playing ? speed_pace(sc, pace_stack, pace_depth) : std::nullopt;
         if (playing && !run.busy() && hold_ticks > 0) {
             if (tick_due()) hold_ticks--;
         } else if (playing && !run.busy() && pace && *pace >= 0) {
-            // @play=N: N steps this frame; @play=0: the whole statement (in
+            // @speed=N: N steps this frame; @speed=0: the whole statement (in
             // slices of a few frames' time, so the window stays live). Stops
             // early once the run leaves the statement that set the pace.
             auto t0 = clock::now();
@@ -705,7 +705,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
             if (!run.paused_at.empty()) playing = false;
             last_advance = clock::now();
         } else if (playing && !run.busy() && tick_due() && ++slow_ticks >= (pace ? -*pace : 1)) {
-            // One visible change per tick, or per N ticks under @play=-N. A statement's begin, and the end
+            // One visible change per tick, or per N ticks under @speed=-N. A statement's begin, and the end
             // of one that applied something, change nothing on screen, so they
             // pass with the next event instead of taking ticks of their own
             // (a `once` would otherwise spend three ticks on one application).

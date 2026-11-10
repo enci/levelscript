@@ -603,8 +603,8 @@
     // The playback clock that @hold counts in (spec B.6): ticks per second.
     const PLAY_FPS = 30;
     // From the tool directives (spec Appendix B): value -> its @name, and
-    // "sequence#index" -> the statement's @play and @hold.
-    let displayNames = {}, plays = {}, holds = {};
+    // "sequence#index" -> the statement's @speed and @hold.
+    let displayNames = {}, speeds = {}, holds = {};
     // the editor's tag-value backgrounds come from the map
     function editorColor(info) {
       if (info.number !== undefined) return editorTint(numberColor(info.number));
@@ -615,7 +615,7 @@
       if (!mod) return;
       try { insp = JSON.parse(mod.inspect_json(source(), fileName, resolver(fileName))); } catch (e) { insp = null; }
       displayNames = {};
-      plays = {};
+      speeds = {};
       holds = {};
       const prevViews = dirViews;
       colorKey = {};
@@ -626,7 +626,7 @@
           displayNames[d.target.name] = d.value;
           (colorKey[d.target.owner] || (colorKey[d.target.owner] = {}))[d.target.name] = d.value;
         }
-        if (d.key === 'play') plays[d.target.owner + '#' + d.target.index] = +d.value;
+        if (d.key === 'speed') speeds[d.target.owner + '#' + d.target.index] = +d.value;
         if (d.key === 'hold') holds[d.target.owner + '#' + d.target.index] = +d.value;
         if (d.key === 'view') dirViews[d.target.name] = d.value;
         if (d.key === 'tileset') tilesets[d.target.name] = d.value;
@@ -658,11 +658,11 @@
         });
       }
     }
-    // The @play pace at a run state: the innermost statement on its stack with one (a sequence
+    // The @speed pace at a run state: the innermost statement on its stack with one (a sequence
     // application's covers its body). undefined: none; negative: -N, one step every N ticks.
     function paceOf(state) {
       let pace;
-      (state.stack || []).forEach(f => { const p = plays[f.sequence + '#' + f.index]; if (p !== undefined) pace = p; });
+      (state.stack || []).forEach(f => { const p = speeds[f.sequence + '#' + f.index]; if (p !== undefined) pace = p; });
       return pace;
     }
     // The @hold at a statement's begin: the largest of the statements that finished since the last
@@ -847,13 +847,13 @@
     // Animate: steps per frame accelerate so long generations still finish in a few seconds.
     // A finished statement's @hold keeps its result for that many ticks of the playback clock
     // first (spec B.6), PLAY_FPS ticks a second; the hold does not count toward the speed-up.
-    // @play=-N waits N ticks before each step (spec B.5); neither does that wait.
+    // @speed=-N waits N ticks before each step (spec B.5); neither does that wait.
     function play() {
       let t0 = performance.now(), holdUntil = 0;
       const frame = () => {
         if (performance.now() < holdUntil) { playTimer = requestAnimationFrame(frame); return; }
         let hold = 0;
-        // the statement's @play steps per frame (0: all of it; -N: one), else a pace that speeds up
+        // the statement's @speed steps per frame (0: all of it; -N: one), else a pace that speeds up
         const pace = last ? paceOf(last) : undefined;
         const perFrame = pace !== undefined ? (pace < 0 ? 1 : pace || Infinity)
           : 1 + Math.floor(Math.pow(Math.max(0, performance.now() - t0) / 700, 2.2));
@@ -868,7 +868,7 @@
         }
         render(state);
         if (state.done) { playTimer = null; stopPlay(); opts.onFinish && opts.onFinish(); return; }
-        // the wait after this step: its statement's hold, then a slow @play's ticks (a begin
+        // the wait after this step: its statement's hold, then a slow @speed's ticks (a begin
         // shows nothing new, so it does not wait)
         const slow = state.atStatementBegin ? undefined : paceOf(state);
         const ticks = hold + (slow < 0 ? -slow : 0);

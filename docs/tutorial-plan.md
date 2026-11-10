@@ -7,7 +7,7 @@ The tutorial lives in `samples/tutorial/` and is listed in the website lab next 
 - **Names carry the step.** Files are named `NN_<topic>.lvs` with a two-digit step (`01_first_grid.lvs`), so a file listing and the site both show them in order; the `tutorial/` folder already says what they are. Two digits keep the sort correct past step 9. Inserting a step means renumbering the files after it, which also changes their `#sample=` links.
 - **Header comment.** The leading `//` lines are the step's description on the site (`tools/build_site_data.py` takes them as `about`). One or two sentences: what the step builds and what it introduces.
 - **Seed and checks.** Every step pins `// @seed=N` and carries at least one `// @expect` (Appendix B.7). The golden runner does not run the samples for now; `levelscript --check <file>` verifies a step by hand.
-- **Pacing.** Use `@play` and `@hold` (B.5, B.6) so the step reads well when played in the lab: instant fills, visible walks, a hold on the result the step is about.
+- **Pacing.** Use `@speed` and `@hold` (B.5, B.6) so the step reads well when played in the lab: instant fills, visible walks, a hold on the result the step is about.
 - **Exercise.** Each step ends with a commented exercise: a small change the reader makes in the lab.
 
 ## Arc

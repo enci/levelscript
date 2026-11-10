@@ -229,15 +229,15 @@ sequence main {
     settle(10) carve
     trim()
     pad(2)    
-    everywhere walls // @play=5
+    everywhere walls // @speed=5
     once { algo[E] => algo[S] }
-    everywhere { algo[.] => algo[N] } // @play=10
+    everywhere { algo[.] => algo[N] } // @speed=10
 
     // Painting
     upscale(2, 2)
     everywhere pick_spot
-    everywhere paint_ground     // @play=10
-    everywhere paint_rock       // @play=5
+    everywhere paint_ground     // @speed=10
+    everywhere paint_rock       // @speed=5
     everywhere paint_props
     scatter(12%) sand_scenery
     scatter(3%) rock_scenery

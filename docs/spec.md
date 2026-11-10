@@ -1931,7 +1931,7 @@ The same key twice on one target is a warning, and the last one applies. `@expec
 |---|---|---|---|
 | `@seed` | the file | `INTEGER`, 64-bit unsigned | default invocation seed (B.3) |
 | `@name` | a `tag_value` | `IDENT` | display name (B.4) |
-| `@play` | a `statement` | `'-'? INTEGER` | steps per frame while playing, or frames per step (B.5) |
+| `@speed` | a `statement` | `'-'? INTEGER` | steps per frame while playing, or frames per step (B.5) |
 | `@hold` | a `statement` | `INTEGER` | frames its result stays on screen while playing (B.6) |
 | `@view` | a grid `layer_entry` | `IDENT` | how the tools first draw the grid (B.8) |
 | `@tileset` | a grid `layer_entry` | `IDENT` | the tileset its `tiles` view draws from (B.8) |
@@ -1966,26 +1966,26 @@ tag algo {
 }
 ```
 
-### B.5 `@play`
+### B.5 `@speed`
 
-`@play` sets how fast the debugger animates a statement while it **plays**. The value is a count of steps per frame, where a step is one `step()` in `step_mode::application` (Appendix A); operations and atomic batches advance whole.
+`@speed` sets how fast the debugger animates a statement while it **plays**. The value is a count of steps per frame, where a step is one `step()` in `step_mode::application` (Appendix A); operations and atomic batches advance whole.
 
-- **`@play=N`, N ≥ 1:** N steps per rendered frame.
-- **`@play=0`:** the statement completes within one frame, without animation.
-- **`@play=-N`, N ≥ 1:** one step every N frames of the playback clock, the clock `@hold` counts in (B.6). This slows a statement below the default pace and scales with the playback speed. `@play=-1` is a steady one step per frame of that clock, for example on a body statement of a sequence whose application sets a faster pace.
-- **No `@play`:** the tool's default pacing.
+- **`@speed=N`, N ≥ 1:** N steps per rendered frame.
+- **`@speed=0`:** the statement completes within one frame, without animation.
+- **`@speed=-N`, N ≥ 1:** one step every N frames of the playback clock, the clock `@hold` counts in (B.6). This slows a statement below the default pace and scales with the playback speed. `@speed=-1` is a steady one step per frame of that clock, for example on a body statement of a sequence whose application sets a faster pace.
+- **No `@speed`:** the tool's default pacing.
 
-On a sequence application, `@play` also applies to the body statements of the applied sequence that have no `@play` of their own; the nearest `@play` wins. Stepping by hand ignores `@play`.
+On a sequence application, `@speed` also applies to the body statements of the applied sequence that have no `@speed` of their own; the nearest `@speed` wins. Stepping by hand ignores `@speed`.
 
 ```ls
 sequence main {
     resize(60, 40)
-    everywhere { algo[.] => algo[W] }   // @play=0
+    everywhere { algo[.] => algo[W] }   // @speed=0
     scatter(5) { algo[W] => algo[S] }
-    grow(100)  rwalk                    // @play=1
-    grow(12)   carve_room               // @play=-6
+    grow(100)  rwalk                    // @speed=1
+    grow(12)   carve_room               // @speed=-6
     upscale(2, 2)
-    // @play=100
+    // @speed=100
     everywhere reduce
     everywhere reward
 }
@@ -2000,12 +2000,12 @@ Here the fill appears at once, the walk is shown one application per frame, each
 - **`@hold=N`, N ≥ 1:** the result stays for N frames.
 - **`@hold=0`, or no `@hold`:** playback goes straight on.
 
-A statement completes once, when the run leaves it: a sequence application after its last iteration, and a body statement of an applied sequence once in each iteration. Unlike `@play`, `@hold` on a sequence application does not apply to its body. When several statements complete together, the largest hold applies. A statement skipped by its `when` guard does not complete, so it does not hold. The final statement needs no hold, since its result stays on screen when the run ends. Stepping by hand ignores `@hold`, and stopping playback ends a hold.
+A statement completes once, when the run leaves it: a sequence application after its last iteration, and a body statement of an applied sequence once in each iteration. Unlike `@speed`, `@hold` on a sequence application does not apply to its body. When several statements complete together, the largest hold applies. A statement skipped by its `when` guard does not complete, so it does not hold. The final statement needs no hold, since its result stays on screen when the run ends. Stepping by hand ignores `@hold`, and stopping playback ends a hold.
 
 ```ls
 sequence main {
     resize(60, 40)
-    everywhere { algo[.] => algo[W] }   // @play=0 @hold=12
+    everywhere { algo[.] => algo[W] }   // @speed=0 @hold=12
     settle carve_rooms                  // @hold=8
     everywhere decorate
 }

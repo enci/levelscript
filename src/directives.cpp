@@ -24,7 +24,7 @@ struct key_spec {
 key_spec const keys[] = {
     {"seed",    directive_target::file,      value_kind::integer, "the file", ""},
     {"name",    directive_target::tag_value, value_kind::ident,   "tag value", "tag values"},
-    {"play",    directive_target::statement, value_kind::signed_integer, "statement", "statements"},
+    {"speed",   directive_target::statement, value_kind::signed_integer, "statement", "statements"},
     {"hold",    directive_target::statement, value_kind::integer, "statement", "statements"},
     {"view",    directive_target::layer,     value_kind::ident,   "grid", "grids"},
     {"tileset", directive_target::layer,     value_kind::ident,   "grid", "grids"},
@@ -93,7 +93,7 @@ std::optional<std::vector<raw_directive>> split(directive_comment const& c) {
             if (i == d) return std::nullopt;
         }
         if (i == v) return std::nullopt;
-        if (i < n && !space(i)) return std::nullopt;   // `@play=12x`
+        if (i < n && !space(i)) return std::nullopt;   // `@speed=12x`
         out.push_back({std::move(key), std::string(t.substr(v, i - v)),
                        base + (int)s, base + (int)i});
     }

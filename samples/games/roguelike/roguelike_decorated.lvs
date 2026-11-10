@@ -218,9 +218,9 @@ sequence main_decorated {
     once main
 
     once add_graves
-    everywhere paint_outside        // @play=20
-    everywhere paint_floor          // @play=15
-    everywhere paint_walls          // @play=10
+    everywhere paint_outside        // @speed=20
+    everywhere paint_floor          // @speed=15
+    everywhere paint_walls          // @speed=10
     everywhere paint_doors          
     everywhere paint_entities       
     scatter(50%) paint_boss_room

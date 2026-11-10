@@ -56,7 +56,7 @@ rule grow_moss(rotation=270) {
 sequence main {
     resize(40, 30)
     once place_head
-    grow(200) walk          // @play=8 @hold=10
+    grow(200) walk          // @speed=8 @hold=10
     once { algo[head] => algo[floor] }	// we can also inline rules
     everywhere wall_side    // @hold=10
     everywhere wall_corner  // @hold=10

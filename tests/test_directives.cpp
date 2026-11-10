@@ -18,7 +18,7 @@ static bool warns(directive_set const& d, std::string const& needle) {
 TEST_CASE("directives: the lexer keeps directive comments only") {
     diagnostics diags;
     std::vector<directive_comment> dc;
-    auto toks = lex("// plain\n// @seed=4\na // @play=1\n\n// see @seed\nb", "t", diags, &dc);
+    auto toks = lex("// plain\n// @seed=4\na // @speed=1\n\n// see @seed\nb", "t", diags, &dc);
     REQUIRE(dc.size() == 2);
     CHECK(dc[0].line == 2);
     CHECK(dc[0].leading);
@@ -26,7 +26,7 @@ TEST_CASE("directives: the lexer keeps directive comments only") {
     CHECK(dc[0].code_line == 3);
     CHECK(dc[1].trailing);
     CHECK(dc[1].code_line == 3);
-    CHECK(dc[1].text == " @play=1");
+    CHECK(dc[1].text == " @speed=1");
     CHECK(toks.size() == 8);   // \n \n a \n \n \n b <end> - comments stay out of the stream
 }
 
@@ -43,8 +43,8 @@ layers {
 }
 sequence main {
     resize(60, 40)
-    everywhere { level[.] => level[W] }   // @play=0
-    // @play=100
+    everywhere { level[.] => level[W] }   // @speed=0
+    // @speed=100
 
     // a note
     everywhere { level[W] => level[F] }
@@ -55,42 +55,42 @@ sequence main {
     REQUIRE(d.find("name", directive_target::tag_value, "algo", "F"));
     CHECK(d.find("name", directive_target::tag_value, "algo", "F")->value == "floor");
     CHECK(d.find("name", directive_target::tag_value, "algo", "W")->value == "wall");
-    CHECK(d.find("play", directive_target::statement, "main", "", 1)->number == 0);
-    CHECK(d.find("play", directive_target::statement, "main", "", 2)->number == 100);   // stacked past a comment
+    CHECK(d.find("speed", directive_target::statement, "main", "", 1)->number == 0);
+    CHECK(d.find("speed", directive_target::statement, "main", "", 2)->number == 100);   // stacked past a comment
 }
 
-TEST_CASE("directives: @hold attaches to statements, beside @play") {
+TEST_CASE("directives: @hold attaches to statements, beside @speed") {
     auto d = read("tag t { a }\nlayers {\n g: grid of t\n}\nsequence main {\n"
-                  "    resize(4, 4)   // @play=0 @hold=12\n"
+                  "    resize(4, 4)   // @speed=0 @hold=12\n"
                   "    // @hold=3\n"
                   "    everywhere { g[.] => g[a] }\n"
                   "}\n");
     CHECK(d.warnings.all.empty());
-    CHECK(d.find("play", directive_target::statement, "main", "", 0)->number == 0);
+    CHECK(d.find("speed", directive_target::statement, "main", "", 0)->number == 0);
     CHECK(d.find("hold", directive_target::statement, "main", "", 0)->number == 12);
     CHECK(d.find("hold", directive_target::statement, "main", "", 1)->number == 3);
     CHECK(warns(read("tag t { a }\nlayers {\n g: grid of t // @hold=1\n}\n"), "needs a statement"));
     CHECK(warns(read("tag t {\n a // @hold=x\n}\n"), "'@hold' takes a number, got 'x'"));
 }
 
-TEST_CASE("directives: a negative @play slows a statement; other keys stay unsigned") {
+TEST_CASE("directives: a negative @speed slows a statement; other keys stay unsigned") {
     auto d = read("tag t { a }\nlayers {\n g: grid of t\n}\nsequence main {\n"
-                  "    resize(4, 4)   // @play=-6\n"
-                  "    everywhere { g[.] => g[a] }   // @play=-0\n"
+                  "    resize(4, 4)   // @speed=-6\n"
+                  "    everywhere { g[.] => g[a] }   // @speed=-0\n"
                   "}\n");
     CHECK(d.warnings.all.empty());
-    auto const* p = d.find("play", directive_target::statement, "main", "", 0);
+    auto const* p = d.find("speed", directive_target::statement, "main", "", 0);
     REQUIRE(p);
     CHECK(p->number == 6);
     CHECK(p->negative);
     CHECK(p->value == "-6");
-    CHECK(!d.find("play", directive_target::statement, "main", "", 1)->negative);   // -0 is 0
+    CHECK(!d.find("speed", directive_target::statement, "main", "", 1)->negative);   // -0 is 0
     CHECK(warns(read("tag t { a }\nsequence main {\n resize(4, 4) // @hold=-1\n}\n"),
                 "'@hold' cannot be negative, got '-1'"));
     CHECK(warns(read("// @seed=-1\ntag t { a }\n"), "cannot be negative"));
-    CHECK(warns(read("tag t { a }\nsequence main {\n resize(4, 4) // @play=-\n}\n"),
+    CHECK(warns(read("tag t { a }\nsequence main {\n resize(4, 4) // @speed=-\n}\n"),
                 "malformed directive comment"));
-    CHECK(warns(read("tag t { a }\nsequence main {\n resize(4, 4) // @play=-99999999999\n}\n"),
+    CHECK(warns(read("tag t { a }\nsequence main {\n resize(4, 4) // @speed=-99999999999\n}\n"),
                 "out of range"));
     CHECK(warns(read("tag t {\n a // @name=-1\n}\n"), "takes a name"));
 }
@@ -117,7 +117,7 @@ TEST_CASE("directives: no target, or an ambiguous one") {
     CHECK(warns(read("tag t { a, b } // @name=x\n"), "ambiguous: 2 tag values"));
     CHECK(warns(read("// @name=x\ntag t {\n a\n}\n"), "none starts on line 2"));
     CHECK(warns(read("tag t {\n a\n}\n// @name=x\n"), "none starts after it"));
-    CHECK(warns(read("tag t { a }\nlayers {\n g: grid of t // @play=1\n}\n"), "needs a statement"));
+    CHECK(warns(read("tag t { a }\nlayers {\n g: grid of t // @speed=1\n}\n"), "needs a statement"));
     // a tile index belongs to the tileset, not to the script
     CHECK(warns(read("tag t {\n a // @tile=3\n}\n"), "unknown directive '@tile'"));
 }
