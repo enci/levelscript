@@ -226,13 +226,15 @@ static void set_dark_theme();
 
 // The @play pace at the run's position (spec B.5): the innermost statement on
 // the stack with one - a sequence application's covers its body. `depth` is
-// that statement's frame. -1: none; the fps timer paces.
-static int play_pace(script const& sc, std::vector<stmt_frame> const& st, size_t& depth) {
+// that statement's frame. Empty: none; the fps timer paces. Negative: -N, one
+// visible change every N play ticks.
+static std::optional<int> play_pace(script const& sc, std::vector<stmt_frame> const& st,
+                                    size_t& depth) {
     std::string seq = sc.entry_name;   // the sequence frame k is in
-    int pace = -1;
+    std::optional<int> pace;
     for (size_t k = 0; k < st.size(); ++k) {
         if (auto d = sc.dirs.find("play", directive_target::statement, seq, "", st[k].index)) {
-            pace  = (int)d->number;
+            pace  = d->negative ? -(int)d->number : (int)d->number;
             depth = k;
         }
         auto const* sq = lookup(sc.ast.sequences, seq);
@@ -542,6 +544,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
     bool running = true;
     bool playing = false;
     int  hold_ticks = 0;   // play ticks left showing a finished statement (@hold)
+    int  slow_ticks = 0;   // play ticks since the last change, for @play=-N
     using clock = std::chrono::steady_clock;
     auto last_advance = clock::now();
 
@@ -622,7 +625,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
                 case SDL_SCANCODE_Q:   running = false;    break;
                 case SDL_SCANCODE_SPACE:
                     playing = !playing;
-                    hold_ticks = 0;
+                    hold_ticks = slow_ticks = 0;
                     last_advance = clock::now();
                     break;
                 default: break;
@@ -661,7 +664,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
         // other command. A finished statement's @hold keeps its result for
         // that many ticks first.
         if (playing && run.done) playing = false;
-        if (!playing) hold_ticks = 0;
+        if (!playing) hold_ticks = slow_ticks = 0;
         // After an advance: at a begin, the hold of the statements it ended.
         auto held = [&] {
             if (run.gen.at_statement_begin())
@@ -683,15 +686,15 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
         };
         size_t pace_depth = 0;
         auto   pace_stack = run.gen.stmt_stack();
-        int    pace = playing ? play_pace(sc, pace_stack, pace_depth) : -1;
+        auto   pace = playing ? play_pace(sc, pace_stack, pace_depth) : std::nullopt;
         if (playing && !run.busy() && hold_ticks > 0) {
             if (tick_due()) hold_ticks--;
-        } else if (playing && !run.busy() && pace >= 0) {
+        } else if (playing && !run.busy() && pace && *pace >= 0) {
             // @play=N: N steps this frame; @play=0: the whole statement (in
             // slices of a few frames' time, so the window stays live). Stops
             // early once the run leaves the statement that set the pace.
             auto t0 = clock::now();
-            for (int i = 0; pace == 0 || i < pace; ++i) {
+            for (int i = 0; *pace == 0 || i < *pace; ++i) {
                 run.advance_cmd(sc.breakpoints);
                 if (run.done || !run.paused_at.empty()) break;
                 if (held()) break;
@@ -701,13 +704,14 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
             run.refresh();
             if (!run.paused_at.empty()) playing = false;
             last_advance = clock::now();
-        } else if (playing && !run.busy() && tick_due()) {
-            // One visible change per tick. A statement's begin, and the end
+        } else if (playing && !run.busy() && tick_due() && ++slow_ticks >= (pace ? -*pace : 1)) {
+            // One visible change per tick, or per N ticks under @play=-N. A statement's begin, and the end
             // of one that applied something, change nothing on screen, so they
             // pass with the next event instead of taking ticks of their own
             // (a `once` would otherwise spend three ticks on one application).
             // An end with no applications still takes a tick: an operation
             // (resize, ...) changes the grid only there.
+            slow_ticks = 0;
             for (;;) {
                 run.advance_cmd(sc.breakpoints);
                 if (run.done || !run.paused_at.empty()) break;
@@ -933,7 +937,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
                                 : "Animate (Space) - one application per tick", playing,
                         &anim_col)) {
                 playing = !playing;
-                hold_ticks = 0;
+                hold_ticks = slow_ticks = 0;
                 last_advance = clock::now();
             }
             ImGui::SameLine();

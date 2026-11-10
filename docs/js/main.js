@@ -659,7 +659,7 @@
       }
     }
     // The @play pace at a run state: the innermost statement on its stack with one (a sequence
-    // application's covers its body). undefined: none.
+    // application's covers its body). undefined: none; negative: -N, one step every N ticks.
     function paceOf(state) {
       let pace;
       (state.stack || []).forEach(f => { const p = plays[f.sequence + '#' + f.index]; if (p !== undefined) pace = p; });
@@ -847,14 +847,15 @@
     // Animate: steps per frame accelerate so long generations still finish in a few seconds.
     // A finished statement's @hold keeps its result for that many ticks of the playback clock
     // first (spec B.6), PLAY_FPS ticks a second; the hold does not count toward the speed-up.
+    // @play=-N waits N ticks before each step (spec B.5); neither does that wait.
     function play() {
       let t0 = performance.now(), holdUntil = 0;
       const frame = () => {
         if (performance.now() < holdUntil) { playTimer = requestAnimationFrame(frame); return; }
         let hold = 0;
-        // the statement's @play steps per frame (0: all of it), else a pace that speeds up
+        // the statement's @play steps per frame (0: all of it; -N: one), else a pace that speeds up
         const pace = last ? paceOf(last) : undefined;
-        const perFrame = pace !== undefined ? (pace || Infinity)
+        const perFrame = pace !== undefined ? (pace < 0 ? 1 : pace || Infinity)
           : 1 + Math.floor(Math.pow(Math.max(0, performance.now() - t0) / 700, 2.2));
         const at = JSON.stringify(last && last.stack), f0 = performance.now();
         let state;
@@ -867,7 +868,11 @@
         }
         render(state);
         if (state.done) { playTimer = null; stopPlay(); opts.onFinish && opts.onFinish(); return; }
-        if (hold > 0) { const ms = hold * 1000 / PLAY_FPS; holdUntil = performance.now() + ms; t0 += ms; }
+        // the wait after this step: its statement's hold, then a slow @play's ticks (a begin
+        // shows nothing new, so it does not wait)
+        const slow = state.atStatementBegin ? undefined : paceOf(state);
+        const ticks = hold + (slow < 0 ? -slow : 0);
+        if (ticks > 0) { const ms = ticks * 1000 / PLAY_FPS; holdUntil = performance.now() + ms; t0 += ms; }
         playTimer = requestAnimationFrame(frame);
       };
       playTimer = requestAnimationFrame(frame);

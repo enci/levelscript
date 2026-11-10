@@ -11,7 +11,7 @@ bool ident_start(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z
 bool digit(char c) { return c >= '0' && c <= '9'; }
 bool ident_cont(char c) { return ident_start(c) || digit(c); }
 
-enum class value_kind { ident, integer, text };   // text: `@key <text>`, for the test keys
+enum class value_kind { ident, integer, signed_integer, text };   // text: `@key <text>`, for the test keys
 
 struct key_spec {
     std::string_view key;
@@ -24,7 +24,7 @@ struct key_spec {
 key_spec const keys[] = {
     {"seed",    directive_target::file,      value_kind::integer, "the file", ""},
     {"name",    directive_target::tag_value, value_kind::ident,   "tag value", "tag values"},
-    {"play",    directive_target::statement, value_kind::integer, "statement", "statements"},
+    {"play",    directive_target::statement, value_kind::signed_integer, "statement", "statements"},
     {"hold",    directive_target::statement, value_kind::integer, "statement", "statements"},
     {"view",    directive_target::layer,     value_kind::ident,   "grid", "grids"},
     {"tileset", directive_target::layer,     value_kind::ident,   "grid", "grids"},
@@ -84,10 +84,14 @@ std::optional<std::vector<raw_directive>> split(directive_comment const& c) {
         }
         if (i >= n || t[i] != '=') return std::nullopt;
         size_t v = ++i;
-        if (i < n && ident_start(t[i]))
+        if (i < n && ident_start(t[i])) {
             while (i < n && ident_cont(t[i])) ++i;
-        else
+        } else {   // '-'? INTEGER
+            if (i < n && t[i] == '-') ++i;
+            size_t d = i;
             while (i < n && digit(t[i])) ++i;
+            if (i == d) return std::nullopt;
+        }
         if (i == v) return std::nullopt;
         if (i < n && !space(i)) return std::nullopt;   // `@play=12x`
         out.push_back({std::move(key), std::string(t.substr(v, i - v)),
@@ -287,14 +291,20 @@ directive_set read_directives(module_closure const& mods) {
                 }
             } else {
                 uint64_t max = spec->target == directive_target::file ? UINT64_MAX : INT32_MAX;
-                auto v = integer(r.value, max);
+                bool negative = r.value[0] == '-';
+                if (negative && spec->value != value_kind::signed_integer) {
+                    warn(at + " cannot be negative, got '" + r.value + "'; ignored");
+                    continue;
+                }
+                auto v = integer(r.value.substr(negative ? 1 : 0), max);
                 if (!v) {
-                    warn(at + (digit(r.value[0]) ? " value '" + r.value + "' is out of range"
+                    warn(at + (!ident_start(r.value[0]) ? " value '" + r.value + "' is out of range"
                                                  : " takes a number, got '" + r.value + "'") +
                          "; ignored");
                     continue;
                 }
-                d.number = *v;
+                d.number   = *v;
+                d.negative = negative && *v > 0;
             }
 
             if (spec->target == directive_target::file) {

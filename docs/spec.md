@@ -1902,7 +1902,7 @@ A comment is a **directive comment** iff the first non-space character after `//
 ```
 directive_comment ::= '//' SPACE* (directive (SPACE+ directive)* | text_directive) SPACE*
 directive         ::= '@' IDENT '=' directive_value
-directive_value   ::= IDENT | INTEGER
+directive_value   ::= IDENT | '-'? INTEGER
 text_directive    ::= '@' IDENT SPACE+ TEXT
 SPACE             ::= ' ' | '\t'
 ```
@@ -1931,7 +1931,7 @@ The same key twice on one target is a warning, and the last one applies. `@expec
 |---|---|---|---|
 | `@seed` | the file | `INTEGER`, 64-bit unsigned | default invocation seed (B.3) |
 | `@name` | a `tag_value` | `IDENT` | display name (B.4) |
-| `@play` | a `statement` | `INTEGER` | steps per frame while playing (B.5) |
+| `@play` | a `statement` | `'-'? INTEGER` | steps per frame while playing, or frames per step (B.5) |
 | `@hold` | a `statement` | `INTEGER` | frames its result stays on screen while playing (B.6) |
 | `@view` | a grid `layer_entry` | `IDENT` | how the tools first draw the grid (B.8) |
 | `@tileset` | a grid `layer_entry` | `IDENT` | the tileset its `tiles` view draws from (B.8) |
@@ -1972,6 +1972,7 @@ tag algo {
 
 - **`@play=N`, N ≥ 1:** N steps per rendered frame.
 - **`@play=0`:** the statement completes within one frame, without animation.
+- **`@play=-N`, N ≥ 1:** one step every N frames of the playback clock, the clock `@hold` counts in (B.6). This slows a statement below the default pace and scales with the playback speed. `@play=-1` is a steady one step per frame of that clock, for example on a body statement of a sequence whose application sets a faster pace.
 - **No `@play`:** the tool's default pacing.
 
 On a sequence application, `@play` also applies to the body statements of the applied sequence that have no `@play` of their own; the nearest `@play` wins. Stepping by hand ignores `@play`.
@@ -1982,6 +1983,7 @@ sequence main {
     everywhere { algo[.] => algo[W] }   // @play=0
     scatter(5) { algo[W] => algo[S] }
     grow(100)  rwalk                    // @play=1
+    grow(12)   carve_room               // @play=-6
     upscale(2, 2)
     // @play=100
     everywhere reduce
@@ -1989,7 +1991,7 @@ sequence main {
 }
 ```
 
-Here the fill appears at once, the walk is shown one application per frame, and `reduce` runs 100 steps per frame. The other statements use the tool's default pacing.
+Here the fill appears at once, the walk is shown one application per frame, each room is carved 6 frames of the playback clock after the last, and `reduce` runs 100 steps per frame. The other statements use the tool's default pacing.
 
 ### B.6 `@hold`
 

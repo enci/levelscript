@@ -8,15 +8,16 @@
 tag fill {
     left
     right
+    block
 }
 
-tag terrain {
-    rock
+tag terrain {    
     river    
     marsh
     grass
     tree
     flower
+    rock
 }
 
 layers {
@@ -24,14 +25,34 @@ layers {
     terrain: grid of terrain    // @view=fill
 }
 
-
 sequence fill_lr {
     once(rotation=all) { fill[left . ]  => fill[left left] }
-    once(rotation=all) { fill[right . ] => fill[right right] }    
+    once(rotation=all) { fill[right . ] => fill[right right] }
+}
+
+rule block {
+    fill[. ]
+    => fill[
+    .     block block. 
+    block block block block
+    block block block block
+    .     block block.]
+
 }
 
 sequence place_river {
     settle (rotation=all) { fill[left right] => terrain[river river] }
+    settle (rotation=all) { terrain[river river rock] => terrain[river river river] }
+    // settle (rotation=all, symmetry=all) {
+    //     terrain[
+    //         river .
+    //         !rock rock]
+    //     =>
+    //     terrain[
+    //         river river
+    //         river rock
+    //     ]
+    // }
 }
 
 rule place_marsh (rotation=all) { ordered
@@ -41,10 +62,13 @@ rule place_marsh (rotation=all) { ordered
 
 sequence main {    
     resize(40, 30)
+    scatter(4) block
     once { fill[.] where[(x < 20 )] => fill[left] }     // @hold=20
     once { fill[.] where[(x >= 20)] => fill[right] }    // @hold=20
     settle fill_lr
+    everywhere { fill[block] => terrain[rock] }
     settle place_river
+    //settle (rotation=all) { terrain[river river rock] => terrain[river river rock] }
     grow((width*height)/4) place_marsh
     everywhere { terrain[.] => terrain[grass] }
     scatter((width*height)/12) { terrain[grass] => terrain[tree] }

@@ -73,6 +73,28 @@ TEST_CASE("directives: @hold attaches to statements, beside @play") {
     CHECK(warns(read("tag t {\n a // @hold=x\n}\n"), "'@hold' takes a number, got 'x'"));
 }
 
+TEST_CASE("directives: a negative @play slows a statement; other keys stay unsigned") {
+    auto d = read("tag t { a }\nlayers {\n g: grid of t\n}\nsequence main {\n"
+                  "    resize(4, 4)   // @play=-6\n"
+                  "    everywhere { g[.] => g[a] }   // @play=-0\n"
+                  "}\n");
+    CHECK(d.warnings.all.empty());
+    auto const* p = d.find("play", directive_target::statement, "main", "", 0);
+    REQUIRE(p);
+    CHECK(p->number == 6);
+    CHECK(p->negative);
+    CHECK(p->value == "-6");
+    CHECK(!d.find("play", directive_target::statement, "main", "", 1)->negative);   // -0 is 0
+    CHECK(warns(read("tag t { a }\nsequence main {\n resize(4, 4) // @hold=-1\n}\n"),
+                "'@hold' cannot be negative, got '-1'"));
+    CHECK(warns(read("// @seed=-1\ntag t { a }\n"), "cannot be negative"));
+    CHECK(warns(read("tag t { a }\nsequence main {\n resize(4, 4) // @play=-\n}\n"),
+                "malformed directive comment"));
+    CHECK(warns(read("tag t { a }\nsequence main {\n resize(4, 4) // @play=-99999999999\n}\n"),
+                "out of range"));
+    CHECK(warns(read("tag t {\n a // @name=-1\n}\n"), "takes a name"));
+}
+
 TEST_CASE("directives: malformed comments, unknown keys and bad values warn") {
     auto d = read("// @seed 42\n// @seed=4 see notes\n// @frob=1 @seed=x\ntag t { a }\n");
     CHECK(d.all.empty());
