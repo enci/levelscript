@@ -18,6 +18,27 @@ export function numberCellColor(n: number, dark: boolean): string {
     return tagColor(((n % 12) + 12) % 12, dark);
 }
 
+// A `@color` as an editor background. Colors are chosen with the picker, and may be
+// loud: keep the hue, and pull saturation and lightness into the band the palette
+// above lives in, so text on top stays readable. Anything that is not #rrggbb is
+// returned as is.
+export function limitColor(hex: string, dark: boolean): string {
+    const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+    if (!m) return hex;
+    const [r, g, b] = [m[1], m[2], m[3]].map(x => parseInt(x, 16) / 255);
+    const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+    const l = (max + min) / 2;
+    const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+    const h = d === 0 ? 0
+            : max === r ? (((g - b) / d) % 6) * 60
+            : max === g ? ((b - r) / d + 2) * 60
+            : ((r - g) / d + 4) * 60;
+    const [lo, hi] = dark ? [0.24, 0.38] : [0.84, 0.93];   // lightness band, order kept
+    const sat = Math.min(s, dark ? 0.40 : 1);
+    const light = lo + (hi - lo) * l;
+    return `hsl(${((h + 360) % 360).toFixed(0)}, ${(sat * 100).toFixed(0)}%, ${(light * 100).toFixed(1)}%)`;
+}
+
 export function emptyColor(dark: boolean): string {
     return dark ? '#3a3a46' : '#e4e4ea';   // slate blue-gray
 }

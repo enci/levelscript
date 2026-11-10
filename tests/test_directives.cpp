@@ -106,6 +106,26 @@ TEST_CASE("directives: malformed comments, unknown keys and bad values warn") {
     CHECK(warns(read("tag t {\n a // @name=1\n}\n"), "takes a name"));
 }
 
+TEST_CASE("directives: @color gives a tag value a default color") {
+    auto d = read("tag t {\n"
+                  "    a   // @color=#ff8800\n"
+                  "    b   // @name=bee @color=#0A0b0C\n"
+                  "    c\n"
+                  "}\n");
+    CHECK(d.warnings.all.empty());
+    CHECK(d.find("color", directive_target::tag_value, "t", "a")->number == 0xff8800);
+    CHECK(d.find("color", directive_target::tag_value, "t", "b")->number == 0x0a0b0c);
+    CHECK(d.find("color", directive_target::tag_value, "t", "c") == nullptr);
+    CHECK(warns(read("tag t {\n a // @color=red\n}\n"), "takes a color like #ff8800, got 'red'"));
+    CHECK(warns(read("tag t {\n a // @color=#fff\n}\n"), "takes a color"));
+    CHECK(warns(read("tag t {\n a // @color=#gg0000\n}\n"), "takes a color"));
+    CHECK(warns(read("tag t {\n a // @color=12\n}\n"), "takes a color"));
+    CHECK(warns(read("tag t { a }\nsequence main {\n resize(4, 4) // @color=#ffffff\n}\n"),
+                "needs a tag value"));
+    CHECK(warns(read("tag t { a }\nsequence main {\n resize(4, 4) // @speed=#fff\n}\n"),
+                "takes a number"));
+}
+
 TEST_CASE("directives: @seed only before the first declaration") {
     auto d = read("tag t { a }\n// @seed=4\n");
     CHECK(!d.seed());

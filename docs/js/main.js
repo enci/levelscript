@@ -481,11 +481,13 @@
       if (v === 'ramp' && !layer.isNumber) v = 'fill';
       return v === 'tiles' ? 'fill' : v;
     }
-    // A tag value's colour comes from its @name, else its own name: the NAMED colour of that
+    // A tag value's colour is its @color, else comes from its @name, else its own name: the NAMED colour of that
     // name, else the palette slot its hash picks, moved on to the next free one if an earlier
     // value of the tagset has it. So a name looks the same in every file, and two values of
     // one tagset never share a colour.
     function tagColor(tagset, name) {
+      const given = (dirColors[tagset] || {})[name];   // @color wins over every default
+      if (given) return given;
       const key = (colorKey[tagset] || {})[name] || name;
       const slot = (slots[tagset] || {})[name];
       return named(key) || (slot !== undefined ? paletteAt(slot) : hashColor(key));
@@ -604,7 +606,7 @@
     const PLAY_FPS = 30;
     // From the tool directives (spec Appendix B): value -> its @name, and
     // "sequence#index" -> the statement's @speed and @hold.
-    let displayNames = {}, speeds = {}, holds = {};
+    let displayNames = {}, speeds = {}, holds = {}, dirColors = {};   // dirColors: tagset -> value -> @color
     // the editor's tag-value backgrounds come from the map
     function editorColor(info) {
       if (info.number !== undefined) return editorTint(numberColor(info.number));
@@ -617,6 +619,7 @@
       displayNames = {};
       speeds = {};
       holds = {};
+      dirColors = {};
       const prevViews = dirViews;
       colorKey = {};
       dirViews = {};
@@ -626,6 +629,7 @@
           displayNames[d.target.name] = d.value;
           (colorKey[d.target.owner] || (colorKey[d.target.owner] = {}))[d.target.name] = d.value;
         }
+        if (d.key === 'color') (dirColors[d.target.owner] || (dirColors[d.target.owner] = {}))[d.target.name] = d.value;
         if (d.key === 'speed') speeds[d.target.owner + '#' + d.target.index] = +d.value;
         if (d.key === 'hold') holds[d.target.owner + '#' + d.target.index] = +d.value;
         if (d.key === 'view') dirViews[d.target.name] = d.value;

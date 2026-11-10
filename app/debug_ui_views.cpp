@@ -59,10 +59,12 @@ static ImU32 contrast_text_color(ImU32 bg) {
 }
 
 ImU32 tag_color(int tag_id, int value_id,
-                std::unordered_map<int, uint32_t> const* colors) {
-    if (colors) {
-        auto it = colors->find(value_id);
-        if (it != colors->end()) return it->second;
+                std::unordered_map<int, uint32_t> const* colors,
+                std::unordered_map<int, uint32_t> const* defaults) {
+    for (auto const* m : {colors, defaults}) {
+        if (!m) continue;
+        auto it = m->find(value_id);
+        if (it != m->end()) return it->second;
     }
     if (tag_id >= 0 && value_id >= 0) {
         auto const& pal = is_dark_theme() ? k_palette_dark : k_palette_light;
@@ -129,6 +131,8 @@ palette layer_palette(compiled const& meta, project_config const& cfg, int grid_
     if (p.tag_id >= 0 && p.tag_id < (int)meta.tag_names.size()) {
         auto it = cfg.tag_colors.find(meta.tag_names[p.tag_id]);
         if (it != cfg.tag_colors.end()) p.colors = &it->second;
+        auto df = cfg.tag_default_colors.find(meta.tag_names[p.tag_id]);
+        if (df != cfg.tag_default_colors.end()) p.defaults = &df->second;
     }
     return p;
 }
@@ -365,7 +369,7 @@ static cell_view pattern_cell_view(compiled const& meta, compiled_pattern const&
     int  n      = known ? (int)meta.tag_values[pal.tag_id].size() : 0;
     bool single = (vals & (vals - 1)) == 0;
     if (single || !known || slot >= n)
-        return { tag_color(pal.tag_id, slot, pal.colors),
+        return { tag_color(pal.tag_id, slot, pal.colors, pal.defaults),
                  cell_glyph(meta, pal.tag_id, slot) + dot };
     int all  = ((1 << n) - 1) << 1;
     int rest = all & ~vals;
@@ -1191,6 +1195,8 @@ void draw_tags_window(script const& sc, project_config& cfg) {
     for (int ti = 0; ti < (int)meta.tag_names.size(); ++ti) {
         auto& vmap = cfg.tag_colors[meta.tag_names[(size_t)ti]];
         auto& smap = cfg.tag_shapes[meta.tag_names[(size_t)ti]];
+        auto  df   = cfg.tag_default_colors.find(meta.tag_names[(size_t)ti]);   // @color
+        auto const* defaults = df == cfg.tag_default_colors.end() ? nullptr : &df->second;
         // Shape row helper: preview uses the value's current color.
         auto shape_cell = [&](int slot, ImU32 col) {
             tag_shape sh = smap.count(slot) ? smap.at(slot) : tag_shape::none;
@@ -1206,7 +1212,7 @@ void draw_tags_window(script const& sc, project_config& cfg) {
             for (int vi = 0; vi < (int)vals.size(); ++vi) {
                 ImGui::PushID(vi);
 
-                ImU32 cur = vmap.count(vi) ? vmap.at(vi) : tag_color(ti, vi);
+                ImU32 cur = vmap.count(vi) ? vmap.at(vi) : tag_color(ti, vi, nullptr, defaults);
                 float col[3];
                 col3_from_u32(cur, col);
                 if (ImGui::ColorEdit3("##vc", col,
@@ -1232,7 +1238,7 @@ void draw_tags_window(script const& sc, project_config& cfg) {
                     int slot = (int)vals.size() + ui;
                     ImGui::PushID(slot);
 
-                    ImU32 cur = vmap.count(slot) ? vmap.at(slot) : tag_color(ti, slot);
+                    ImU32 cur = vmap.count(slot) ? vmap.at(slot) : tag_color(ti, slot, nullptr, defaults);
                     float col[3];
                     col3_from_u32(cur, col);
                     if (ImGui::ColorEdit3("##vc", col,
@@ -1316,7 +1322,7 @@ static void rebuild_thumbs(script const& sc, debug_run const& run,
                 if (g.is_number())
                     c = heatmap_color(hi > lo ? (float)(v - lo) / (float)(hi - lo) : 0.5f, 1.f);
                 else
-                    c = tag_color(pal.tag_id, mask_to_slot(sc.meta, pal.tag_id, v), pal.colors) |
+                    c = tag_color(pal.tag_id, mask_to_slot(sc.meta, pal.tag_id, v), pal.colors, pal.defaults) |
                         IM_COL32(0, 0, 0, 255);
             }
         SDL_Texture*& t = th.tex[(size_t)li];
@@ -1742,7 +1748,7 @@ void draw_grid_composite(script const& sc, debug_run const& run,
                         }
                         draw_shape(dl, { (p0.x + p1.x) * 0.5f, (p0.y + p1.y) * 0.5f },
                                    cell_px * 0.36f, sh,
-                                   with_alpha(tag_color(pal.tag_id, vid, pal.colors),
+                                   with_alpha(tag_color(pal.tag_id, vid, pal.colors, pal.defaults),
                                               lc.opacity));
                         break;
                     }
@@ -1751,7 +1757,7 @@ void draw_grid_composite(script const& sc, debug_run const& run,
                         float  s   = cell_px * (lc.corner == corner_size::tiny  ? 0.18f
                                                : lc.corner == corner_size::small ? 0.28f
                                                                                  : 0.40f);
-                        ImU32  col = with_alpha(tag_color(pal.tag_id, vid, pal.colors),
+                        ImU32  col = with_alpha(tag_color(pal.tag_id, vid, pal.colors, pal.defaults),
                                                 lc.opacity);
                         switch (corner_slot[li]) {
                             case 0: dl->AddTriangleFilled(p0, { p0.x + s, p0.y },
@@ -1768,14 +1774,14 @@ void draw_grid_composite(script const& sc, debug_run const& run,
 
                     case layer_mode::color:
                         dl->AddRectFilled(p0, p1,
-                            with_alpha(tag_color(pal.tag_id, vid, pal.colors), lc.opacity));
+                            with_alpha(tag_color(pal.tag_id, vid, pal.colors, pal.defaults), lc.opacity));
                         break;
 
                     case layer_mode::text:
                     default:
                         if (show_glyph)
                             draw_centered_text(dl, p0, cell_px,
-                                with_alpha(tag_color(pal.tag_id, vid, pal.colors), lc.opacity),
+                                with_alpha(tag_color(pal.tag_id, vid, pal.colors, pal.defaults), lc.opacity),
                                 cell_label(sc, pal.tag_id, vid).c_str());
                         break;
                 }
@@ -1840,7 +1846,7 @@ void draw_grid_composite(script const& sc, debug_run const& run,
                     palette pal = layer_palette(sc.meta, cfg, sc.meta.layer_id(lc.name));
                     int vid = g.is_number() ? v : mask_to_slot(sc.meta, pal.tag_id, v);
                     ImVec4 colf = ImGui::ColorConvertU32ToFloat4(
-                        tag_color(pal.tag_id, vid, pal.colors));
+                        tag_color(pal.tag_id, vid, pal.colors, pal.defaults));
                     ImGui::ColorButton("##s", colf,
                         ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoPicker,
                         {10.f, 10.f});

@@ -8,6 +8,7 @@ import * as path from 'path';
 import { registerDebugger } from './debugger';
 import { registerAstView } from './ast_view';
 import { registerTilesetView } from './tileset_view';
+import { colorProvider } from './colors';
 import { documentSymbolProvider, foldingRangeProvider, selectionRangeProvider } from './structure';
 
 const LS_LANG = 'levelscript';
@@ -50,6 +51,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
     vscode.languages.registerDocumentSymbolProvider({ language: LS_LANG }, documentSymbolProvider),
     vscode.languages.registerFoldingRangeProvider({ language: LS_LANG }, foldingRangeProvider),
     vscode.languages.registerSelectionRangeProvider({ language: LS_LANG }, selectionRangeProvider),
+    vscode.languages.registerColorProvider({ language: LS_LANG }, colorProvider),
   );
 
   registerDebugger(ctx);
@@ -107,7 +109,7 @@ function analyse(doc: vscode.TextDocument) {
     if (editor?.document.uri.toString() === doc.uri.toString()) {
       const hasTagDecls = result.symbols.tags.some(t => t.values.some(v => v.loc));
       if ((result.tokens && result.tokens.length > 0) || hasTagDecls)
-        applyDecorations(editor, result.tokens, result.symbols.tags);
+        applyDecorations(editor, result.tokens, result.symbols.tags, result.directives);
       else
         clearAll(editor);
     }

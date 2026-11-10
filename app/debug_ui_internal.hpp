@@ -37,10 +37,12 @@ namespace ls {
 // matched to the same 12-color cycle the VS Code extension's decorations.ts
 // paints that value with in the editor (light/dark chosen from the current
 // ImGui style). Falls back to a hash-based color for non-tag cells (number
-// grids, tag_id < 0). An explicit user color from the sidecar config wins
-// over either when present.
+// grids, tag_id < 0). A color from the script's @color (`defaults`) replaces
+// the palette, and an explicit user color from the sidecar config (`colors`)
+// wins over both when present.
 ImU32 tag_color(int tag_id, int value_id,
-                std::unordered_map<int, uint32_t> const* colors = nullptr);
+                std::unordered_map<int, uint32_t> const* colors = nullptr,
+                std::unordered_map<int, uint32_t> const* defaults = nullptr);
 ImU32 with_alpha(ImU32 col, float opacity);
 ImU32 heatmap_color(float t, float opacity);
 
@@ -48,11 +50,12 @@ ImU32 heatmap_color(float t, float opacity);
 void     col3_from_u32(uint32_t c, float out[3]);
 uint32_t u32_from_col3(float const c[3]);
 
-// A layer's display palette: its tagset id (-1 = number layer) and the user
-// color overrides for that tagset, if any.
+// A layer's display palette: its tagset id (-1 = number layer), the user
+// color overrides for that tagset, if any, and the script's @color defaults.
 struct palette {
     int                                      tag_id{-1};
     std::unordered_map<int, uint32_t> const* colors{nullptr};
+    std::unordered_map<int, uint32_t> const* defaults{nullptr};
 };
 palette layer_palette(compiled const& meta, project_config const& cfg, int grid_id);
 

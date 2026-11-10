@@ -79,6 +79,9 @@ struct project_config {
     }
     // tag_name -> value_id -> 0xAABBGGRR
     std::unordered_map<std::string, std::unordered_map<int, uint32_t>> tag_colors;
+    // tag_name -> value_id -> 0xAABBGGRR: the script's @color directives. Defaults
+    // under tag_colors (the user's own picks); set by the tool on each load, never saved.
+    std::unordered_map<std::string, std::unordered_map<int, uint32_t>> tag_default_colors;
     // tag_name -> value_id -> shape; absent means tag_shape::none
     std::unordered_map<std::string, std::unordered_map<int, tag_shape>> tag_shapes;
 
