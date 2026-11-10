@@ -1,0 +1,28 @@
+// Sub-rule weights (v0.17.2, sections 5.5 and 10.6): the weighted pick.
+//
+// An `any` body picks a sub-rule by weight, then one of its candidates
+// uniformly. Here the grid holds 24 `f` cells and 1 `w` cell: by candidate count
+// a torch would be rare; by sub-rule weight, plants and torches go 3:1 over the
+// grid whatever the counts. grow(8) makes eight picks, two draws each.
+//
+// @seed=7
+// @expect run-ok
+// @expect grid g count(p) >= 5
+
+tag t { f, w, p, t }
+layers { g: grid of t }
+
+rule fill { g[.] => g[f] }
+rule wall { g[f] => g[w] }
+
+rule decorate { any
+    (weight=3) g[f] => g[p]
+    (weight=1) g[w] => g[t]
+}
+
+sequence main {
+    resize(5, 5)
+    everywhere fill
+    once wall
+    grow(8) decorate
+}

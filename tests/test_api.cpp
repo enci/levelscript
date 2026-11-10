@@ -1098,6 +1098,35 @@ sequence main {
     CHECK(render(42) == "74 406 309 392 358 609 425 392 210 662 659 351 | bcmcbcbcccbc");
 }
 
+// The weighted pick (step modes) and the weighted shuffle (batch modes) of an
+// `any` body, section 10.6. Like the test above, these outputs are the draw
+// contract: two draws per pick, one draw per output position in the merge.
+TEST_CASE("api: pinned draws of a weighted any body give the same level on every platform") {
+    auto gen = make(R"(
+tag t { f, a, b, c, d }
+layers { g: grid of t }
+rule fill { g[.] => g[f] }
+rule step  { any (weight=3) g[f] => g[a]  (weight=1) g[f] => g[b] }
+rule claim { any (weight=1) g[f] => g[c]  (weight=2) g[f] => g[d] }
+sequence main {
+    resize(4, 3)
+    everywhere fill
+    grow(3) step
+    scatter(4) claim
+}
+)");
+    REQUIRE(static_cast<bool>(gen));
+    auto render = [&](uint64_t seed) {
+        auto lv = gen.generate(gen.sequence("main"), seed);
+        std::string out;
+        for (int y = 0; y < 3; ++y)
+            for (int x = 0; x < 4; ++x) out += lv["g"].valueName(lv["g"].at(x, y));
+        return out;
+    };
+    CHECK(render(1)  == "fcfbfbddcffa");
+    CHECK(render(42) == "acfafffdddaf");
+}
+
 // ── pattern variables ────────────────────────────────────────────────────────
 
 TEST_CASE("api: variables relate cells - a wall between different regions") {

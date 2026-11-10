@@ -1,0 +1,26 @@
+// Draw site (v0.17.2, section 10.6 item 4): the weighted shuffle.
+//
+// An `any` body in a batch mode shuffles each sub-rule's candidates, then merges
+// the groups by weighted draws: one draw per output position, the last included.
+// The `(weight=4)` sub-rule claims contested cells ahead of the `(weight=1)` one
+// under the write mask, so `a` should dominate `b`. scatter(5) keeps the first
+// five applications that do not conflict.
+//
+// @seed=11
+// @expect run-ok
+
+tag t { f, a, b }
+layers { g: grid of t }
+
+rule fill { g[.] => g[f] }
+
+rule claim { any
+    (weight=4) g[f] => g[a]
+    (weight=1) g[f] => g[b]
+}
+
+sequence main {
+    resize(6, 3)
+    everywhere fill
+    scatter(5) claim
+}

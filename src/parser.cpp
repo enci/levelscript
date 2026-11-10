@@ -851,8 +851,8 @@ struct parser {
         if (!expect(token_type::rparen, "')'")) return false;
         if (!allowed)
             diags.error(file, wl.line, wl.col, wl.end_line, wl.end_col,
-                        "(weight=N) is only allowed on the items of an 'any': "
-                        "a '{ any }' item or a sub-rule of an 'any' body");
+                        "(weight=N) is only allowed on '{ any }' items and on the "
+                        "sub-rules of an 'any' body");
         return true;
     }
 

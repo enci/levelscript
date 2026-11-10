@@ -1,0 +1,25 @@
+// Sub-rule weights (v0.17.2, section 5.5): a weight-0 sub-rule is never tested.
+//
+// It behaves as if absent: it is never picked, and it draws nothing, even
+// though its match cells hold a `random`. No `c` can appear.
+//
+// @seed=5
+// @expect run-ok
+// @expect grid g count(c) == 0
+
+tag t { f, a, b, c }
+layers { g: grid of t }
+
+rule fill { g[.] => g[f] }
+
+rule choose { any
+    (weight=0) g[f] => g[c]
+    (weight=2) g[f] => g[a]
+    (weight=1) g[f] => g[b]
+}
+
+sequence main {
+    resize(4, 4)
+    everywhere fill
+    grow(6) choose
+}
