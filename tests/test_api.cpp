@@ -721,7 +721,7 @@ rule where_gate { where[ (random(0, 1) == 0) ] level[wall] => level[.] }
     CHECK(gated == plain);
 }
 
-TEST_CASE("api: totality — division by zero yields zero") {
+TEST_CASE("api: totality - division by zero yields zero") {
     auto gen = make(R"(
 layers { tiles: grid of number }
 params { n: number = 0 }

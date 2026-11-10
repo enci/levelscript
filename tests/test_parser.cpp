@@ -235,7 +235,7 @@ TEST_CASE("parser: an unclosed pattern reports the missing bracket once") {
     CHECK(diags.all[0].message.find("expected ']'") != std::string::npos);
 }
 
-TEST_CASE("parser: an unknown attribute is parsed whole — one diagnostic") {
+TEST_CASE("parser: an unknown attribute is parsed whole - one diagnostic") {
     // check 7
     for (char const* attrs : {"colour=red", "colour=3", "colour=all", "colour={90, 180}"}) {
         diagnostics diags;
