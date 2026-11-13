@@ -129,8 +129,8 @@ palette layer_palette(compiled const& meta, project_config const& cfg, int grid_
     if (grid_id >= 0 && grid_id < (int)meta.layers.size())
         p.tag_id = meta.layers[grid_id].tag_id;
     if (p.tag_id >= 0 && p.tag_id < (int)meta.tag_names.size()) {
-        auto it = cfg.tag_colors.find(meta.tag_names[p.tag_id]);
-        if (it != cfg.tag_colors.end()) p.colors = &it->second;
+        auto it = cfg.tag_color_slots.find(meta.tag_names[p.tag_id]);
+        if (it != cfg.tag_color_slots.end()) p.colors = &it->second;
         auto df = cfg.tag_default_colors.find(meta.tag_names[p.tag_id]);
         if (df != cfg.tag_default_colors.end()) p.defaults = &df->second;
     }
@@ -1193,7 +1193,8 @@ void draw_tags_window(script const& sc, project_config& cfg) {
     }
 
     for (int ti = 0; ti < (int)meta.tag_names.size(); ++ti) {
-        auto& vmap = cfg.tag_colors[meta.tag_names[(size_t)ti]];
+        auto& names = cfg.tag_colors[meta.tag_names[(size_t)ti]];        // saved, by name
+        auto& vmap  = cfg.tag_color_slots[meta.tag_names[(size_t)ti]];   // drawn, by slot
         auto& smap = cfg.tag_shapes[meta.tag_names[(size_t)ti]];
         auto  df   = cfg.tag_default_colors.find(meta.tag_names[(size_t)ti]);   // @color
         auto const* defaults = df == cfg.tag_default_colors.end() ? nullptr : &df->second;
@@ -1217,7 +1218,7 @@ void draw_tags_window(script const& sc, project_config& cfg) {
                 col3_from_u32(cur, col);
                 if (ImGui::ColorEdit3("##vc", col,
                         ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel))
-                    vmap[vi] = u32_from_col3(col);
+                    names[vals[(size_t)vi]] = vmap[vi] = u32_from_col3(col);
                 ImGui::SameLine();
                 shape_cell(vi, cur);
 
@@ -1243,7 +1244,7 @@ void draw_tags_window(script const& sc, project_config& cfg) {
                     col3_from_u32(cur, col);
                     if (ImGui::ColorEdit3("##vc", col,
                             ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel))
-                        vmap[slot] = u32_from_col3(col);
+                        names[us[(size_t)ui].name] = vmap[slot] = u32_from_col3(col);
                     ImGui::SameLine();
                     shape_cell(slot, cur);
 

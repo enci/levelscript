@@ -1,26 +1,23 @@
 {
   "cell_px": 16.0,
   "grid_bg_color": "282828",
-  "layers": [
-    {
+  "layers": {
+    "algo": {
       "mode": "text",
-      "name": "algo",
       "opacity": 1.0,
       "visible": true
     },
-    {
+    "level": {
       "mode": "text",
-      "name": "level",
       "opacity": 1.0,
       "visible": true
     },
-    {
+    "loot": {
       "mode": "text",
-      "name": "loot",
       "opacity": 1.0,
       "visible": true
     }
-  ],
+  },
   "mini_px": 24.0,
   "tag_colors": {
     "algo": null,

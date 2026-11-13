@@ -77,8 +77,14 @@ struct project_config {
         for (auto const& g : shown_graphs) if (g == name) return true;
         return false;
     }
-    // tag_name -> value_id -> 0xAABBGGRR
-    std::unordered_map<std::string, std::unordered_map<int, uint32_t>> tag_colors;
+    // tag_name -> value or named-mask name -> 0xAABBGGRR: the user's picks, saved
+    // by name so they follow a value when the tag's values are reordered. Old
+    // sidecars keyed by slot index ("0", "1", ...) load as-is and are renamed by
+    // resolve_tag_colors.
+    std::unordered_map<std::string, std::unordered_map<std::string, uint32_t>> tag_colors;
+    // tag_name -> display slot (value id, then named masks) -> 0xAABBGGRR: tag_colors
+    // resolved against the compiled script for drawing; rebuilt on each load, never saved.
+    std::unordered_map<std::string, std::unordered_map<int, uint32_t>> tag_color_slots;
     // tag_name -> value_id -> 0xAABBGGRR: the script's @color directives. Defaults
     // under tag_colors (the user's own picks); set by the tool on each load, never saved.
     std::unordered_map<std::string, std::unordered_map<int, uint32_t>> tag_default_colors;
@@ -101,6 +107,12 @@ struct project_config {
     // Record each layer's starting view; a layer whose mode and visibility
     // were chosen under another @view (or never) takes it.
     void apply_views(std::vector<layer_view> const& views);
+
+    // Rebuild tag_color_slots from tag_colors. slot_names: tag_name -> the name of
+    // each display slot in order. A legacy index key ("3") is renamed to the name
+    // that slot has now; keys matching no slot are kept for when the name returns.
+    void resolve_tag_colors(
+        std::unordered_map<std::string, std::vector<std::string>> const& slot_names);
 
     // Each grid's starting view from the script's directives: its @view, else
     // fill for the first grid and shape for the rest. `grids`: name and

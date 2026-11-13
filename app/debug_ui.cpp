@@ -67,6 +67,21 @@ static std::unordered_map<std::string, std::unordered_map<int, uint32_t>> defaul
     return out;
 }
 
+// Point the config's tag colors at this compile: the @color defaults, and the
+// user's picks (saved by value name) resolved to display slots - each tag's
+// values, then its named masks (see mask_to_slot).
+static void apply_tag_colors(project_config& cfg, script const& sc) {
+    cfg.tag_default_colors = default_colors(sc);
+    std::unordered_map<std::string, std::vector<std::string>> slots;
+    for (size_t t = 0; t < sc.meta.tag_names.size(); ++t) {
+        auto& names = slots[sc.meta.tag_names[t]];
+        names = sc.meta.tag_values[t];
+        if (t < sc.meta.named_masks.size())
+            for (auto const& m : sc.meta.named_masks[t]) names.push_back(m.name);
+    }
+    cfg.resolve_tag_colors(slots);
+}
+
 bool load_script(script& sc) {
     sc.loaded_at = std::chrono::steady_clock::now();
     std::string name = canonical_module_name(sc.path);
@@ -331,7 +346,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
     project_config cfg = path.empty() ? project_config{}
                                       : project_config::load(path, sc.layer_names());
     cfg.apply_views(layer_views(sc));
-    cfg.tag_default_colors = default_colors(sc);
+    apply_tag_colors(cfg, sc);
     apply_params(cfg, sc);
     auto window_title = [&] {
         return path.empty() ? std::string("LevelScript") : "LevelScript - " + path;
@@ -541,7 +556,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
         if (load_script(sc)) {   // an edited @view resets that grid's view
             cfg.sync_layers(sc.layer_names());
             cfg.apply_views(layer_views(sc));
-            cfg.tag_default_colors = default_colors(sc);
+            apply_tag_colors(cfg, sc);
         }
         if (!seed_locked) seed = make_seed();   // after the reload: an edited @seed
         run.restart(sc.gen, sc.entry, seed, sc.run_params());
@@ -579,7 +594,7 @@ int run_debug_ui(std::string const& start_path, std::optional<uint64_t> fixed_se
         load_script(sc);
         cfg = project_config::load(path, sc.layer_names());
         cfg.apply_views(layer_views(sc));
-        cfg.tag_default_colors = default_colors(sc);
+        apply_tag_colors(cfg, sc);
         apply_params(cfg, sc);
         if (!seed_locked) seed = make_seed();
         run.restart(sc.gen, sc.entry, seed, sc.run_params());

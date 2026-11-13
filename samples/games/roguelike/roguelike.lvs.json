@@ -3,24 +3,23 @@
     "connect",
     "map"
   ],
-  "layers": [
-    {
+  "layers": {
+    "zones": {
       "mode": "text",
-      "name": "zones",
       "view": "border",
       "visible": true
     }
-  ],
+  },
   "tag_colors": {
     "entities": {
-      "0": "00ff2d",
-      "1": "ff00e6",
-      "2": "00ff2d",
-      "3": "ffadad"
+      "E": "ff00e6",
+      "N": "ffadad",
+      "P": "00ff2d",
+      "S": "00ff2d"
     },
     "room": {
-      "0": "00ff2d",
-      "1": "ff00e6"
+      "exit": "ff00e6",
+      "start": "00ff2d"
     }
   },
   "tag_shapes": {

@@ -166,6 +166,36 @@ void project_config::apply_views(std::vector<layer_view> const& views) {
         }
 }
 
+void project_config::resolve_tag_colors(
+        std::unordered_map<std::string, std::vector<std::string>> const& slot_names) {
+    tag_color_slots.clear();
+    for (auto& [tname, vmap] : tag_colors) {
+        auto sn = slot_names.find(tname);
+        if (sn == slot_names.end()) continue;   // tag not in this script: kept, unused
+        auto const& names = sn->second;
+        auto slot_of = [&](std::string const& n) {
+            for (size_t i = 0; i < names.size(); ++i) if (names[i] == n) return (int)i;
+            return -1;
+        };
+        // Legacy index keys -> names. A name already set wins over its old index.
+        std::vector<std::pair<std::string, uint32_t>> renamed;
+        for (auto it = vmap.begin(); it != vmap.end();) {
+            auto const& key = it->first;
+            bool digits = key.find_first_not_of("0123456789") == std::string::npos;
+            size_t idx = digits && key.size() < 9 ? std::stoul(key) : names.size();
+            if (slot_of(key) < 0 && idx < names.size()) {
+                renamed.emplace_back(names[idx], it->second);
+                it = vmap.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        for (auto const& [n, col] : renamed) vmap.emplace(n, col);
+        for (auto const& [n, col] : vmap)
+            if (int s = slot_of(n); s >= 0) tag_color_slots[tname][s] = col;
+    }
+}
+
 project_config project_config::load(std::string const& ls_path,
                                     std::vector<std::string> const& layer_names) {
     project_config cfg;
@@ -212,20 +242,27 @@ project_config project_config::load(std::string const& ls_path,
                 });
                 migrate_tile_layers = true;
             }
-            if (j.contains("layers") && j["layers"].is_array()) {
-                for (auto const& jl : j["layers"]) {
-                    if (!jl.is_object()) continue;
-                    layer_config lc;
-                    lc.name    = jget(jl, "name", std::string{});
-                    lc.visible = jget(jl, "visible", true);
-                    lc.opacity = jget(jl, "opacity", 1.0f);
-                    lc.mode    = mode_from_str(jget(jl, "mode", std::string{"text"}));
-                    lc.tileset = jget(jl, "tileset", std::string{});
-                    lc.corner  = corner_from_str(jget(jl, "corner", std::string{"normal"}));
-                    if (auto it = jl.find("view"); it != jl.end() && it->is_string())
-                        lc.view = it->get<std::string>();
-                    cfg.layers.push_back(std::move(lc));
-                }
+            // "layers": {"<name>": {...}}; older sidecars wrote an array of
+            // objects each carrying its "name". Order comes from the script.
+            auto read_layer = [&](std::string name, json const& jl) {
+                if (!jl.is_object() || name.empty()) return;
+                layer_config lc;
+                lc.name    = std::move(name);
+                lc.visible = jget(jl, "visible", true);
+                lc.opacity = jget(jl, "opacity", 1.0f);
+                lc.mode    = mode_from_str(jget(jl, "mode", std::string{"text"}));
+                lc.tileset = jget(jl, "tileset", std::string{});
+                lc.corner  = corner_from_str(jget(jl, "corner", std::string{"normal"}));
+                if (auto it = jl.find("view"); it != jl.end() && it->is_string())
+                    lc.view = it->get<std::string>();
+                cfg.layers.push_back(std::move(lc));
+            };
+            if (auto it = j.find("layers"); it != j.end()) {
+                if (it->is_object())
+                    for (auto const& [name, jl] : it->items()) read_layer(name, jl);
+                else if (it->is_array())
+                    for (auto const& jl : *it)
+                        if (jl.is_object()) read_layer(jget(jl, "name", std::string{}), jl);
             }
             if (migrate_tile_layers) {
                 for (auto& lc : cfg.layers)
@@ -236,12 +273,10 @@ project_config project_config::load(std::string const& ls_path,
                 for (auto const& [tname, jvc] : j["tag_colors"].items()) {
                     if (!jvc.is_object()) continue;
                     for (auto const& [key, val] : jvc.items()) {
-                        char* end = nullptr;
-                        long vid = std::strtol(key.c_str(), &end, 10);
                         uint32_t col;
-                        if (end != key.c_str() && val.is_string() &&
+                        if (!key.empty() && val.is_string() &&
                             hex_to_color(val.get<std::string>(), col))
-                            cfg.tag_colors[tname][(int)vid] = col;
+                            cfg.tag_colors[tname][key] = col;
                     }
                 }
             }
@@ -302,16 +337,14 @@ void project_config::save(std::string const& ls_path) const {
         if (lc.opacity != def_layer.opacity) jl["opacity"] = lc.opacity;
         if (lc.tileset != def_layer.tileset) jl["tileset"] = lc.tileset;
         if (lc.corner  != def_layer.corner)  jl["corner"]  = corner_str(lc.corner);
-        if (jl.empty()) continue;
-        jl["name"] = lc.name;
-        j["layers"].push_back(jl);
+        if (!jl.empty()) j["layers"][lc.name] = jl;
     }
     if (!shown_graphs.empty()) j["graphs"] = shown_graphs;
     for (auto const& [pname, v] : params)
         j["params"][pname] = v ? json(*v) : json(nullptr);
     for (auto const& [tname, vmap] : tag_colors)
-        for (auto const& [vid, col] : vmap)
-            j["tag_colors"][tname][std::to_string(vid)] = color_to_hex(col);
+        for (auto const& [vname, col] : vmap)
+            j["tag_colors"][tname][vname] = color_to_hex(col);
     for (auto const& [tname, vmap] : tag_shapes)
         for (auto const& [vid, sh] : vmap)
             if (sh != tag_shape::none) j["tag_shapes"][tname][std::to_string(vid)] = shape_name(sh);

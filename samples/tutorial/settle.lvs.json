@@ -1,20 +1,19 @@
 {
-  "layers": [
-    {
+  "layers": {
+    "fill": {
       "mode": "corner",
-      "name": "fill",
       "view": "fill",
       "visible": true
     }
-  ],
+  },
   "tag_colors": {
     "terrain": {
-      "0": "3579ff",
-      "1": "00b525",
-      "2": "008310",
-      "3": "00590b",
-      "4": "c000ff",
-      "5": "a55c00"
+      "flower": "c000ff",
+      "grass": "008310",
+      "marsh": "00b525",
+      "river": "3579ff",
+      "rock": "a55c00",
+      "tree": "00590b"
     }
   }
 }

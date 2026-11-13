@@ -1,21 +1,18 @@
 {
   "cell_zoom": 1.5,
-  "layers": [
-    {
+  "layers": {
+    "back": {
+      "tileset": "Platformer"
+    },
+    "room_id": {
       "mode": "color",
-      "name": "room_id",
       "view": "border",
       "visible": true
     },
-    {
-      "name": "back",
-      "tileset": "Platformer"
-    },
-    {
-      "name": "tiles",
+    "tiles": {
       "tileset": "Platformer"
     }
-  ],
+  },
   "tilesets": [
     {
       "name": "Platformer",

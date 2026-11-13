@@ -1,16 +1,14 @@
 {
   "cell_zoom": 1.9500000476837158,
   "grid_bg_color": "aeacf3",
-  "layers": [
-    {
-      "name": "tiles",
+  "layers": {
+    "props": {
       "tileset": "Desert"
     },
-    {
-      "name": "props",
+    "tiles": {
       "tileset": "Desert"
     }
-  ],
+  },
   "tilesets": [
     {
       "name": "Desert",
