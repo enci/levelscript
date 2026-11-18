@@ -11,11 +11,12 @@ tag fill {
 }
 
 tag terrain {    
-    river    // @color=#0000ff
-    marsh    // @color=#008000
-    grass    // @color=#00ff00
-    tree     // @color=#0097a2
-    flower   // @color=#ff00ff
+    river    // @color=#3579ff
+    marsh    // @color=#00b525
+    grass    // @color=#008310
+    tree     // @color=#00590b
+    flower   // @color=#cf51fa
+// color is directive  ^- the extension should place a color picker here
 }
 
 layers {
@@ -23,19 +24,40 @@ layers {
     terrain: grid of terrain    // @view=fill
 }
 
+// When this sequence is run, it will fill the left and right halves of the
+// map with, taking turns until the rule can not longer be applied.
 sequence fill_lr {
     once(rotation=all) { fill[left . ]  => fill[left left] }
     once(rotation=all) { fill[right . ] => fill[right right] }
 }
 
+
+// Where the left and right halves meet, a river is placed.
+// "Statistically" in the middle-ish of the screen :)
 rule place_river (rotation=all) {
     fill[left right] => terrain[river river]
 }
 
+// We will grow marsh around the river
 rule place_marsh (rotation=all) { ordered
     terrain[river .] => terrain[river marsh]
     terrain[marsh .] => terrain[marsh marsh]
 }
+
+// This rule places flowers, with a higher chance (3:1) of placing on marsh.
+// This is different from the examples where different weights were given
+// to different writes for the same match.
+rule place_flower { any
+    (weight=3) terrain[marsh] => terrain[flower]
+    (weight=1) terrain[grass] => terrain[flower]
+}
+
+rule place_tree { any
+    (weight=3) terrain[grass] => terrain[tree]
+    terrain[marsh] => terrain[tree]
+//  ^- the (weight=1) is implicit here
+}
+
 
 sequence main {    
     resize(40, 30)
@@ -45,6 +67,6 @@ sequence main {
     settle place_river
     grow((width*height)/4) place_marsh                  // @speed=2
     everywhere { terrain[.] => terrain[grass] }
-    scatter((width*height)/12) { terrain[grass] => terrain[tree] }
-    scatter(5%) { terrain[marsh] => terrain[flower] }
+    scatter(5%) place_tree
+    scatter(5%) place_flower
 }
